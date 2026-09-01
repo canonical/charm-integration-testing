@@ -115,6 +115,9 @@ class JubilantBackend(JujuCmdBackend):
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
+    # Grace period after migrate_model() during which CLIErrors for that model are
+    # treated as migration-related transient noise.
+    migration_grace_period = timedelta(minutes=20)
 
     def __init__(
         self,
@@ -125,6 +128,7 @@ class JubilantBackend(JujuCmdBackend):
         self.client = client or JubilantClient()
         self._cloud_kubeconfigs: dict[str, pathlib.Path] = cloud_kubeconfigs or {}
         self._kubernetes_clients: dict[str, KubernetesClient] = {}
+        self._migration_started_at: dict[tuple[str, str], datetime] = {}
 
     def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
         """Return a KubernetesClient for the given cloud, constructing and caching it on first use."""
@@ -135,12 +139,25 @@ class JubilantBackend(JujuCmdBackend):
             self._kubernetes_clients[cloud] = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path))
         return self._kubernetes_clients[cloud]
 
+    def _note_migration(self, controller: str, model_name: str) -> None:
+        self._migration_started_at[(controller, model_name)] = datetime.now()
+
+    def _migration_deadline(self, model: JujuModelHandle) -> datetime | None:
+        """End of the retry grace period for `model`, or None if not migrating."""
+        started = self._migration_started_at.get((model.controller, model.model))
+        if started is None:
+            return None
+        deadline = started + self.migration_grace_period
+        return deadline if deadline > datetime.now() else None
+
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         try:
             return self.client.model(model).status()
         except jubilant.CLIError as e:
-            if _is_transient_model_unavailability_error(e, model):
+            # Juju's post-migration error wording varies (see #874, #931); also
+            # retry if we recently migrated this model, regardless of message.
+            if _is_transient_model_unavailability_error(e, model) or self._migration_deadline(model) is not None:
                 raise TransientModelUnavailabilityError(e.returncode, e.cmd, e.output, e.stderr) from e
             raise
 
@@ -767,6 +784,10 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        # Grace window covers both ends: source (migrating away) and target
+        # (still importing).
+        self._note_migration(source_controller, model_name)
+        self._note_migration(target_controller, model_name)
         self.client.model(JujuModelHandle(controller=source_controller, model=model_name)).cli(
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
