@@ -712,6 +712,33 @@ class TestCrossModelHostQualification:
         called_url = mock_open.call_args[0][0]
         assert called_url == "http://target-0.target-endpoints:9216/metrics"
 
+    def test_namespace_qualified_host_not_double_qualified(self) -> None:
+        # GIVEN a target already qualified with the remote namespace but not the
+        # full ".svc.cluster.local" suffix (e.g. "<pod>.<svc>.<namespace>")
+        jobs = json.dumps(
+            [
+                {
+                    "metrics_path": "/metrics",
+                    "static_configs": [{"targets": ["target-0.target-endpoints.target-model:9216"]}],
+                    "scheme": "http",
+                }
+            ]
+        )
+        databag = {"scrape_metadata": CMR_SCRAPE_METADATA, "scrape_jobs": jobs}
+        validator = _make_cmr_validator(databag, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: it is left untouched, not re-qualified into
+        # "...target-model.target-model.svc.cluster.local"
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints.target-model:9216/metrics"
+
     def test_already_fully_qualified_host_not_double_qualified(self) -> None:
         # GIVEN a target already using the full svc.cluster.local form
         validator = _make_cmr_validator(VALID_DATABAG, local_model_name="neighbor-model")

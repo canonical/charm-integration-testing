@@ -233,9 +233,13 @@ def _qualify_cross_model_host(host: str, *, remote_model: str | None, local_mode
     elsewhere in this codebase (see ``validators.cross_model_mesh``):
     ``<host>.<model>.svc.cluster.local``.
 
-    IP addresses and already-fully-qualified hosts are returned unchanged.
+    IP addresses and hosts already qualified with the remote namespace
+    (``.<remote_model>`` or ``.<remote_model>.svc.cluster.local``) are
+    returned unchanged.
     """
-    if not remote_model or remote_model == local_model or host.endswith(".svc.cluster.local"):
+    if not remote_model or remote_model == local_model:
+        return host
+    if host.endswith(".svc.cluster.local") or host.endswith(f".{remote_model}"):
         return host
     try:
         ipaddress.ip_address(host)
@@ -248,8 +252,8 @@ def _extract_targets(
     scrape_jobs: list[dict[str, Any]],
     unit_addresses: list[str] | None = None,
     *,
+    local_model: str,
     remote_model: str | None = None,
-    local_model: str = "",
 ) -> tuple[list[_ScrapeTarget], list[str]]:
     """Return deduplicated scrape targets from all jobs and any parse errors.
 
