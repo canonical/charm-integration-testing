@@ -74,16 +74,6 @@ class KubernetesClient:
         )
         return list(pods.items)
 
-    def crd_exists(self, name: str) -> bool:
-        """Returns whether a CustomResourceDefinition named `name` (e.g. `gateways.gateway.networking.k8s.io`) is registered on the cluster."""
-        try:
-            self.backend.apiextensions_v1_api.read_custom_resource_definition(name)
-            return True
-        except ApiException as e:
-            if e.status == 404:
-                return False
-            raise
-
     def list_model_pvcs(self, model: str) -> list[K8sClient.V1PersistentVolumeClaim]:
         """
         Lists every PersistentVolumeClaim in the model's namespace.

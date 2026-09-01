@@ -11,23 +11,24 @@ from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandl
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
-# Gateway API CRD istio-k8s installs; dependents 404 on config-changed without it (root
-# cause of the istio-beacon-k8s rev 74, 1/stable hang -- reproduced against test_execution
-# 656938 -- and the same class of failure for istio-ingress-k8s).
-GATEWAY_CRD_NAME = "gateways.gateway.networking.k8s.io"
 
 DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
 
 class IstioMeshExtension(JujuExtension):
-    """Deploys istio-k8s when a mesh-dependent charm is present but its CRDs are missing.
+    """Deploys istio-k8s into a model when a mesh-dependent charm is present but has no
+    istio-k8s of its own to reconcile against.
 
     istio-beacon-k8s and istio-ingress-k8s each need a reconciling istio-k8s control plane
-    to reach "active", with no Juju relation to express the dependency. Checked directly
-    against cluster state (the Gateway API CRD istio-k8s installs) rather than inferred
-    from bundle content, so a cluster that already has a working mesh is left alone.
-    Deployment is idempotent: an already-deployed istio-k8s application is treated as
-    success, and is only ever attempted once even if multiple dependents are present.
+    in the *same model* to reach "active", with no Juju relation to express the dependency.
+    Checked via Juju application state rather than Kubernetes cluster state: the Gateway API
+    CRDs istio-k8s installs are cluster-scoped, so their presence says nothing about whether
+    *this* model has a working control plane -- a model on a cluster where istio-k8s happens
+    to be deployed elsewhere still hangs the same way (confirmed live: istio-ingress-k8s's
+    Gateway stayed unprogrammed even with the CRD already present cluster-wide from another
+    model's istio-k8s). Deployment is idempotent: an already-deployed istio-k8s application
+    in this model is treated as success, and is only ever attempted once even if multiple
+    dependents are present.
     """
 
     juju: JujuBackend
@@ -47,12 +48,13 @@ class IstioMeshExtension(JujuExtension):
         if kubernetes_client is None:
             return
 
-        if kubernetes_client.crd_exists(GATEWAY_CRD_NAME):
-            self.logger.info(f"Gateway API CRD '{GATEWAY_CRD_NAME}' already present; not deploying istio-k8s.")
+        existing = self._find_istio_application(applications)
+        if existing is not None:
+            self.juju.wait_application_settled(model, existing, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
             return
 
         self.logger.info(
-            f"{dependents} present in '{model.uri}' but '{GATEWAY_CRD_NAME}' CRD is missing; "
+            f"{dependents} present in '{model.uri}' with no '{ISTIO_CONTROL_PLANE_CHARM}' of its own; "
             f"deploying '{ISTIO_CONTROL_PLANE_CHARM}'."
         )
         application = self._ensure_istio_deployed(model)

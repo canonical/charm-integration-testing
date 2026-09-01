@@ -49,7 +49,6 @@ class KubernetesBackend:
     core_v1_api: client.CoreV1Api
     apps_v1_api: client.AppsV1Api
     networking_v1_api: client.NetworkingV1Api
-    apiextensions_v1_api: client.ApiextensionsV1Api
     api_client: client.ApiClient
 
     def __init__(self, api_client: client.ApiClient):
@@ -59,7 +58,6 @@ class KubernetesBackend:
         self.core_v1_api = client.CoreV1Api(api_client)
         self.apps_v1_api = client.AppsV1Api(api_client)
         self.networking_v1_api = client.NetworkingV1Api(api_client)
-        self.apiextensions_v1_api = client.ApiextensionsV1Api(api_client)
 
     @classmethod
     def k8s_client(

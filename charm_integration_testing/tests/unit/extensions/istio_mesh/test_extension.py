@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 from extensions.istio_mesh.extension import (
-    GATEWAY_CRD_NAME,
     ISTIO_CONTROL_PLANE_CHANNEL,
     ISTIO_CONTROL_PLANE_CHARM,
     ISTIO_MESH_DEPENDENT_CHARMS,
@@ -21,16 +20,6 @@ from ..shared import JujuStub as JujuStubBase
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
 ISTIO_BEACON_CHARM = "istio-beacon-k8s"
 ISTIO_INGRESS_CHARM = "istio-ingress-k8s"
-
-
-class KubernetesClientStub(KubernetesClient):
-    """Fake KubernetesClient that answers crd_exists() from a preset set, without a real cluster."""
-
-    def __init__(self, present_crds: set[str]) -> None:
-        self._present_crds = present_crds
-
-    def crd_exists(self, name: str) -> bool:
-        return name in self._present_crds
 
 
 @dataclass
@@ -55,6 +44,11 @@ class JujuStub(JujuStubBase):
         super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
 
 
+# A stand-in Kubernetes client marker: only ever checked for None-ness (machine controller vs.
+# k8s controller) by this extension, never actually called into.
+A_KUBERNETES_CLIENT = object()
+
+
 class TestIstioMeshExtension:
     @pytest.fixture
     def logger(self) -> logging.Logger:
@@ -66,43 +60,25 @@ class TestIstioMeshExtension:
         assert ISTIO_MESH_DEPENDENT_CHARMS == frozenset({ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM})
 
     class TestPostDeploy:
-        @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
-        def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger, dependent_charm: str) -> None:
+        def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:
             # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s
-            juju = JujuStub(applications={"other-app": "other-charm"})
+            juju = JujuStub(applications={"other-app": "other-charm"}, kubernetes_client=A_KUBERNETES_CLIENT)  # type: ignore[arg-type]
             extension = IstioMeshExtension(juju, logger)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
 
-            # THEN nothing is deployed and the cluster is never queried
+            # THEN nothing is deployed
             assert juju.deployed == []
 
         @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
-        def test_skips_deploy_when_gateway_crd_already_present(
+        def test_deploys_istio_when_dependent_present_and_istio_not_yet_in_model(
             self, logger: logging.Logger, dependent_charm: str
         ) -> None:
-            # GIVEN a dependent charm is present and the Gateway API CRD already exists
+            # GIVEN a dependent charm is present with no istio-k8s of its own in the model
             juju = JujuStub(
                 applications={"dependent": dependent_charm},
-                kubernetes_client=KubernetesClientStub({GATEWAY_CRD_NAME}),
-            )
-            extension = IstioMeshExtension(juju, logger)
-
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
-
-            # THEN istio-k8s is not deployed
-            assert juju.deployed == []
-
-        @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
-        def test_deploys_istio_when_dependent_present_and_crd_missing(
-            self, logger: logging.Logger, dependent_charm: str
-        ) -> None:
-            # GIVEN a dependent charm is present and the Gateway API CRD is missing
-            juju = JujuStub(
-                applications={"dependent": dependent_charm},
-                kubernetes_client=KubernetesClientStub(set()),
+                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -116,11 +92,29 @@ class TestIstioMeshExtension:
             ]
             assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
 
+        @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
+        def test_skips_deploy_when_istio_already_deployed_in_the_same_model(
+            self, logger: logging.Logger, dependent_charm: str
+        ) -> None:
+            # GIVEN the dependent charm and istio-k8s are already both in the model
+            juju = JujuStub(
+                applications={"dependent": dependent_charm, ISTIO_CONTROL_PLANE_CHARM: ISTIO_CONTROL_PLANE_CHARM},
+                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
+            )
+            extension = IstioMeshExtension(juju, logger)
+
+            # WHEN post_deploy is called
+            extension.post_deploy(TEST_MODEL)
+
+            # THEN no new deploy happens, but the extension still waits for it to settle
+            assert juju.deployed == []
+            assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
+
         def test_deploys_istio_only_once_when_both_dependents_present(self, logger: logging.Logger) -> None:
-            # GIVEN both istio-beacon-k8s and istio-ingress-k8s are present and the CRD is missing
+            # GIVEN both istio-beacon-k8s and istio-ingress-k8s are present with no istio-k8s yet
             juju = JujuStub(
                 applications={"beacon": ISTIO_BEACON_CHARM, "ingress": ISTIO_INGRESS_CHARM},
-                kubernetes_client=KubernetesClientStub(set()),
+                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -133,14 +127,14 @@ class TestIstioMeshExtension:
         def test_skips_deploy_when_istio_already_deployed_under_a_different_application_name(
             self, logger: logging.Logger
         ) -> None:
-            # GIVEN istio-beacon-k8s is present, the CRD is missing, but istio-k8s is already
-            # deployed under a custom application name
+            # GIVEN istio-beacon-k8s is present and istio-k8s is already deployed under a
+            # custom application name
             juju = JujuStub(
                 applications={
                     "istio-beacon-k8s": ISTIO_BEACON_CHARM,
                     "my-istio": ISTIO_CONTROL_PLANE_CHARM,
                 },
-                kubernetes_client=KubernetesClientStub(set()),
+                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
