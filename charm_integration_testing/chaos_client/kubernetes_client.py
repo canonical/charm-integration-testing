@@ -24,6 +24,17 @@ class KubernetesChaosClient(ChaosClient):
     def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
         raise NotImplementedError
 
+    def io_latency(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        volume_path: str,
+        delay: timedelta,
+        percent: int,
+        duration: timedelta,
+    ) -> None:
+        raise NotImplementedError
+
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         raise NotImplementedError
 
