@@ -81,8 +81,10 @@ def _extract_single_model(
                     continue
             raw = model.evaluate(cfg.var, model_completion=True)
             if cfg.bool_as_int and z3.is_int_value(raw):
-                # See DomainCharmConfig.bool_as_int.
-                val: object = bool(raw.as_long())
+                # See DomainCharmConfig.bool_as_int. Exact match against the 1
+                # encoding (not a truthy int coercion), so an unexpected value
+                # can't be silently read as True.
+                val: object = raw.as_long() == 1
             elif z3.is_string_value(raw):
                 val = raw.as_string()
             elif z3.is_int_value(raw):
