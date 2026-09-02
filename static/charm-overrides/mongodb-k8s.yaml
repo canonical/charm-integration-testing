@@ -6,6 +6,8 @@
 # role (config): replication/config-server/shard are the only source-supported modes; config.yaml defaults to replication.
 # ldap-certificate-transfer (requires): REQUIRED iff ldap is related - metadata.yaml exposes both relations independently, but LDAP TLS needs both.
 # sharding/config-server: Meaning-2 endpoints - role-specific integration that must match the selected role, not unconditional dependencies.
+# sharding/config-server revision match: VersionChecker.get_cluster_mismatched_revision_status in
+# mongo-charms-single-kernel blocks the shard on any revision mismatch, not just track/risk.
 overrides:
   - configs:
       role: [replication, config-server, shard, null]
@@ -19,8 +21,10 @@ overrides:
       # role must match the integrated endpoint
       - 'bool(endpoint[config-server]) == (config[role] == "config-server")'
       - 'bool(endpoint[sharding]) == (config[role] == "shard")'
-      # sharding relations must stay on the same channel generation
+      # sharding relations must stay on the exact same charm revision, not just channel
       - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
-        and risks(charms(endpoint[sharding])) == risks({self})'
+        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
+        == revisions({self})'
       - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
-        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})'
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
+        and revisions(charms(endpoint[config-server])) == revisions({self})'
