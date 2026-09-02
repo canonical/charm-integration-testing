@@ -100,12 +100,21 @@ class TransientModelUnavailabilityError(jubilant.CLIError):
 
 
 def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: JujuModelHandle) -> bool:
-    """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
+    """Detect CLIErrors that mean "model temporarily unreachable due to migration".
+
+    Juju's wording for this varies by subsystem; new variants are added here as
+    they're discovered (see #874, #931).
+    """
     err_msg = error.stderr.lower()
     # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
     controller_matches = model.controller.lower() in err_msg
     is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
-    is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+    is_migrating = (
+        "has been migrated to controller" in err_msg
+        or "migration in progress" in err_msg
+        # e.stderr: 'ERROR model cache: model "<uuid>" did not appear in cache timeout\n'
+        or "did not appear in cache timeout" in err_msg
+    )
     return is_missing or is_migrating
 
 
