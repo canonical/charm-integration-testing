@@ -28,7 +28,6 @@
 #                              inside the VM.
 
 set -euo pipefail
-# set -x
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
