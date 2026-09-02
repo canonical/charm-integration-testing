@@ -197,6 +197,20 @@ class TestTrinoClientValidatorSimple:
         mock_auth.assert_called_once_with("alice", "s3cr3t")
         assert mock_connect.call_args.kwargs["auth"] is auth_sentinel
 
+    def test_ignores_plaintext_databag_credentials_without_secret_id(self) -> None:
+        # GIVEN a databag that contains plaintext credentials but no user-secret-id
+        validator = _make_validator({**VALID_DATABAG, "username": "alice", "password": "s3cr3t"})
+        conn = ConnStub()
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn) as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        assert mock_connect.call_args.kwargs["user"] == "charm-integration-testing-validator"
+        assert "auth" not in mock_connect.call_args.kwargs
+
     def test_fails_connect_check_when_only_username_present(self) -> None:
         # GIVEN a secret with a username but no password
         databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
