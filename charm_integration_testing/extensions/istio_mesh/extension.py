@@ -7,7 +7,7 @@ from datetime import timedelta
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
 
 # Charms that need a reconciling istio-k8s control plane to reach "active", with no Juju
-# relation to express the dependency -- both query the Gateway API CRDs directly.
+# relation to express the dependency.
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
