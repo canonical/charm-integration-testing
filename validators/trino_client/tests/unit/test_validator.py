@@ -246,6 +246,38 @@ class TestTrinoClientValidatorSimple:
         assert "Incomplete credentials" in connect_check.message
         mock_connect.assert_not_called()
 
+    def test_fails_connect_check_when_secret_has_no_credential_fields(self) -> None:
+        # GIVEN a user-secret-id configured but the secret has neither field
+        databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
+        validator = _make_validator(databag, secrets={"secret:abc": {}})
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect") as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Incomplete credentials" in connect_check.message
+        mock_connect.assert_not_called()
+
+    def test_fails_connect_check_when_secret_has_empty_credential_fields(self) -> None:
+        # GIVEN a user-secret-id configured but the secret has empty-string values
+        databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
+        validator = _make_validator(databag, secrets={"secret:abc": {"username": "", "password": ""}})
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect") as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Incomplete credentials" in connect_check.message
+        mock_connect.assert_not_called()
+
     def test_respects_https_scheme_from_discovery_uri(self) -> None:
         # GIVEN a valid https discovery URI and credentials
         databag = {

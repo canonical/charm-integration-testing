@@ -124,11 +124,25 @@ class TrinoClientValidator(BaseValidator):
         return None
 
     def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve optional credentials from the `user-secret-id` Juju secret."""
+        """Resolve optional credentials from the `user-secret-id` Juju secret.
+
+        Raises if `user-secret-id` is configured but the secret is missing or empty for
+        either `username` or `password`, so a misconfigured secret fails fast instead of
+        silently falling back to anonymous auth.
+        """
         secret_uri = self.databag.get("user-secret-id")
         if not secret_uri:
             return {}
-        return self.resolve_secret("user-secret-id", "username", "password")
+        creds = self.resolve_secret("user-secret-id", "username", "password")
+        username = creds.get("username")
+        password = creds.get("password")
+        if not username or not password:
+            missing = [f for f, v in (("username", username), ("password", password)) if not v]
+            raise ValueError(
+                f"Incomplete credentials: 'user-secret-id' is configured but the secret is "
+                f"missing/empty for: {', '.join(missing)}."
+            )
+        return creds
 
     def _parse_discovery_uri(self, uri: str) -> tuple[str | None, int | None, str | None, ValidationCheck]:
         """Parse scheme/host/port from the coordinator's `discovery-uri` (e.g. `http://host:8080`)."""
