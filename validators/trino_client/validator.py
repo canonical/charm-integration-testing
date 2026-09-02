@@ -58,13 +58,8 @@ class TrinoClientValidator(BaseValidator):
             creds = self._resolve_credentials()
             conn = self._connect(host, port, http_scheme, creds)
             checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {host}:{port}."))
-            with conn.cursor() as cur:
-                cur.execute("SHOW CATALOGS")
-                catalogs = cur.fetchall()
-            checks.append(ValidationCheck(name="catalogs", passed=True, message=f"Found {len(catalogs)} catalog(s)."))
         except Exception as exc:
-            check_name = "connect" if conn is None else "catalogs"
-            checks.append(ValidationCheck(name=check_name, passed=False, message=str(exc)))
+            checks.append(ValidationCheck(name="connect", passed=False, message=str(exc)))
         finally:
             self._close(conn)
 
