@@ -1,0 +1,168 @@
+---
+name: file-issue
+description: File a GitHub issue (bug report or enhancement proposal) on any repository, not just canonical/charm-integration-testing. Use when asked to open, file, or create an issue for a bug, failure, or enhancement idea, whether in this repo or another one (e.g. an upstream charm repo).
+---
+
+# Task: file a GitHub issue
+
+## Goal
+
+Produce a concise, evidence-based issue that matches the target repository's
+issue template (if it has one), and file it via `gh`. The audience is a
+human maintainer who will triage it, not a chat transcript, so the issue
+must read as something a person would write.
+
+This applies to **any repository**: the current one
+(`canonical/charm-integration-testing`), another Canonical repo, an
+upstream charm repo, or any other `owner/repo` the user names. Never assume
+the target repo defaults to the current checkout — confirm which repo the
+issue belongs in (e.g. a bug in a charm itself usually belongs in that
+charm's own repo, not here).
+
+---
+
+## Step 0 — Confirm the target repository
+
+Determine `owner/repo` explicitly before doing anything else:
+
+- If the user named a repo, use it.
+- If ambiguous (e.g. the bug is in a charm or a dependency, not in this
+  test framework), ask which repo it should be filed against rather than
+  guessing.
+- Only default to the current repo (check via `git remote get-url origin`)
+  when the issue is clearly about this codebase.
+
+All subsequent commands use `--repo <owner/repo>` with that confirmed value.
+
+---
+
+## Step 1 — Check for duplicates first
+
+Before writing anything, search existing issues for the same failure or idea:
+
+```bash
+gh issue list --repo <owner/repo> --search "<key terms>" --state all --limit 20
+```
+
+**If a possible match is found, stop and tell the user before doing anything
+else** — surface the candidate issue's title, number, and URL, and ask
+whether to comment on the existing issue, file a new one anyway, or skip.
+Do not comment on or close anything, and do not file a new issue, until the
+user has confirmed how they want to proceed. Only proceed to file a new
+issue directly, without asking, if the search turns up no plausible match.
+
+---
+
+## Step 2 — Pick and read the matching template, if one exists
+
+Templates, if the target repo has them, usually live in `.github/ISSUE_TEMPLATE/`,
+but some repos instead use `docs/ISSUE_TEMPLATE/`, or a single Markdown file
+(`.github/ISSUE_TEMPLATE.md` or `ISSUE_TEMPLATE.md` at the repo root) rather
+than a directory of form templates. Check all of these before concluding a
+repo has no templates. For `canonical/charm-integration-testing` specifically:
+
+- `bug_report.yml` — fields: Bug Description, To Reproduce, Relevant log
+  output, Additional context.
+- `enhancement_proposal.yml` — fields: Problem statement, Enhancement
+  Proposal, What needs to get done?
+
+For any other repo, fetch its templates first instead of assuming the same
+structure:
+
+```bash
+gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE 2>/dev/null
+gh api repos/<owner/repo>/contents/docs/ISSUE_TEMPLATE 2>/dev/null
+gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE.md 2>/dev/null
+gh api repos/<owner/repo>/contents/ISSUE_TEMPLATE.md 2>/dev/null
+# then fetch and read each template file found, e.g.:
+gh api repos/<owner/repo>/contents/.github/ISSUE_TEMPLATE/<name> --jq .content | base64 -d
+```
+
+If the repo has no issue templates, use a plain, minimal structure instead
+(short description, reproduction/context, evidence).
+
+**Always use the target repo's own template fields, verbatim, when a template
+exists.** Never substitute this skill's own default structure (or another
+repo's template) in its place — read the actual file each time, since
+templates can change and differ repo to repo.
+
+---
+
+## Step 3 — Write the issue body
+
+**Be concise and evidence-based:**
+
+- State only what was directly observed: the error, the log excerpt, the
+  command that failed, the workflow run or Test Observer link. Quote real
+  output, don't paraphrase from memory.
+- Do **not** speculate about root cause or lay out a detailed fix plan.
+  A one-line "possible direction" is fine if you have real signal for it;
+  do not enumerate specific code changes, file names, or a step-by-step fix
+  you have not verified. Speculative fixes belong in a PR after
+  investigation, not in the issue that starts that investigation.
+- Keep it short. A maintainer should be able to read the whole issue in
+  under a minute. Prefer a tight paragraph plus a log block over long
+  prose. Omit sections that don't apply rather than padding them.
+- Use exact reproduction steps (commands, versions, channels, substrate)
+  when filing a bug — vague repro steps are the single biggest cause of
+  issues going stale.
+- Link, don't dump: if there's a Test Observer artefact, CI run, or PR
+  discussion behind this, link it instead of copy-pasting everything.
+
+**AI disclaimer:** start the issue body with, on its own line:
+
+```
+_Generated by an AI assistant on behalf of @<user>._
+```
+
+Replace `<user>` with the GitHub login associated with the `GH_TOKEN` in use
+(check with `gh api user --jq .login`, or fall back to plain `gh api user`
+piped to `python3 -c "import sys,json;print(json.load(sys.stdin)['login'])"`
+if `--jq` misbehaves in this environment).
+
+---
+
+## Step 4 — File it
+
+Build the body from the field labels read in Step 2 (this repo's example
+below is illustrative only — swap in whatever the target repo's own
+template actually defines, or the plain minimal structure if it has none):
+
+```bash
+gh issue create --repo <owner/repo> \
+  --title "<short, specific title>" \
+  --label bug \
+  --body "$(cat <<'EOF'
+_Generated by an AI assistant on behalf of @<user>._
+
+### <field label from the repo's own template>
+...
+
+### <field label from the repo's own template>
+...
+EOF
+)"
+```
+
+Use `--label enhancement` for enhancement proposals instead, or drop `--label`
+entirely if the target repo doesn't use that convention (check
+`gh label list --repo <owner/repo>` if unsure — an invalid label makes the
+whole command fail). Confirm the returned issue URL and report it back;
+don't assume success from exit code alone if the command produced no URL.
+
+---
+
+## Other best practices
+
+- **Title:** short and specific (e.g. "postgresql-k8s validator times out
+  waiting for TLS relation on juju 3.6"), not a restatement of the whole
+  body.
+- **One issue, one problem.** Don't bundle an unrelated second bug or idea
+  into the same issue.
+- **Attach real artifacts** (log excerpts via the template's `render: shell`
+  block, links to Test Observer/Actions runs) rather than describing them.
+- **Don't over-claim severity or impact** — describe what broke and where,
+  and let the maintainer judge priority.
+- If asked to file the issue but the underlying claim hasn't actually been
+  reproduced or checked, say so plainly in the issue (e.g. "observed once,
+  not yet reproduced locally") rather than presenting it as confirmed.
