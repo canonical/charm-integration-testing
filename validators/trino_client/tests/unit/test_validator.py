@@ -196,9 +196,15 @@ class TestTrinoClientValidatorSimple:
         mock_auth.assert_called_once_with("alice", "s3cr3t")
         assert mock_connect.call_args.kwargs["auth"] is auth_sentinel
 
-    def test_ignores_plaintext_databag_credentials_without_secret_id(self) -> None:
-        # GIVEN a databag that contains plaintext credentials but no user-secret-id
-        validator = _make_validator({**VALID_DATABAG, "username": "alice", "password": "s3cr3t"})
+    @pytest.mark.parametrize("secret_id", [None, ""])
+    def test_ignores_plaintext_databag_credentials_without_secret_id(
+        self, secret_id: str | None
+    ) -> None:
+        # GIVEN a databag that contains plaintext credentials but no usable user-secret-id
+        databag = {**VALID_DATABAG, "username": "alice", "password": "s3cr3t"}
+        if secret_id is not None:
+            databag["user-secret-id"] = secret_id
+        validator = _make_validator(databag)
         conn = ConnStub()
 
         with patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn) as mock_connect:
