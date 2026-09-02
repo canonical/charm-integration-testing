@@ -20,7 +20,7 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.version import JujuVersion
-from juju_jubilant.backend import JubilantBackend
+from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from pydantic.dataclasses import dataclass
@@ -146,7 +146,7 @@ class JubilantCliStub:
     results: dict[tuple[str, ...], str] = field(default_factory=dict)
     executions: list[tuple[str, ...]] = field(default_factory=list)
 
-    def cli(self, *args: str) -> str:
+    def cli(self, *args: str, **kwargs: Any) -> str:
         self.executions.append(tuple(args))
         return self.results.get(tuple(args), "")
 
@@ -290,6 +290,10 @@ class ModelExistsStub:
             machines={},
             apps={},
         )
+
+    def cli(self, *args: str, **kwargs: Any) -> str:
+        # For tests that also call migrate_model() on this stub
+        return ""
 
 
 class TestJubilantBackend:
@@ -2548,3 +2552,54 @@ class TestJubilantBackendCreateOffer:
         # THEN the CLIError is re-raised
         with pytest.raises(jubilant.CLIError):
             backend.create_offer(MY_MODEL, "myapp", ["endpoint1"], "my-offer")
+
+
+class TestMigrationTolerance:
+    """Tests for status()'s string-matched tolerance of known post-migration transient
+    errors (see #874, #931). New Juju wording variants are added to the match list in
+    `_is_transient_model_unavailability_error` as they're discovered."""
+
+    def test_status_tolerates_migrated_to_controller_error(self) -> None:
+        stub = ModelExistsStub(
+            error_stderr='ERROR Model "my-model" has been migrated to controller "dst-ctrl".\n',
+            max_errors=1,
+        )
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(JujuModelHandle(controller="src-ctrl", model="my-model"))
+
+    def test_status_tolerates_migration_in_progress_error(self) -> None:
+        stub = ModelExistsStub(error_stderr="ERROR model migration in progress\n", max_errors=1)
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(JujuModelHandle(controller="src-ctrl", model="my-model"))
+
+    def test_status_tolerates_model_cache_timeout_error(self) -> None:
+        # GIVEN status() raises the "model cache" variant (see #931)
+        stub = ModelExistsStub(
+            error_stderr='ERROR model cache: model "<uuid>" did not appear in cache timeout\n',
+            max_errors=1,
+        )
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+        model = JujuModelHandle(controller="dst-ctrl", model="my-model")
+
+        # WHEN/THEN status() converts it to TransientModelUnavailabilityError
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(model)
+
+        # AND wait_for_model_to_exist retries on that and succeeds
+        with patch("juju_jubilant.backend.time.sleep"):
+            backend.wait_for_model_to_exist(model, timeout=timedelta(seconds=10))
+        assert stub.call_count == 2  # direct call + wait_for_model_to_exist
+
+    def test_status_does_not_tolerate_unrecognized_cli_error(self) -> None:
+        # GIVEN status() raises an error that doesn't match any known transient pattern
+        stub = ModelExistsStub(error_stderr="ERROR something unrelated\n", max_errors=1)
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN/THEN the unrecognized CLIError propagates unconverted
+        with pytest.raises(jubilant.CLIError) as exc_info:
+            backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
+        assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
