@@ -125,7 +125,8 @@ class TrinoClientValidator(BaseValidator):
 
     def _resolve_credentials(self) -> dict[str, str]:
         """Resolve optional credentials from the `user-secret-id` Juju secret."""
-        if "user-secret-id" not in self.databag:
+        secret_uri = self.databag.get("user-secret-id")
+        if not secret_uri:
             return {}
         return self.resolve_secret("user-secret-id", "username", "password")
 
