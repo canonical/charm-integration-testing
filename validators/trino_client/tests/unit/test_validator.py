@@ -169,7 +169,9 @@ class TestTrinoClientValidatorSimple:
         assert result.status == "PASS"
         connect_check = next(c for c in result.checks if c.name == "connect")
         assert connect_check.passed
-        assert "2 catalog(s)" in connect_check.message
+        catalogs_check = next(c for c in result.checks if c.name == "catalogs")
+        assert catalogs_check.passed
+        assert "2 catalog(s)" in catalogs_check.message
         assert mock_connect.call_args.kwargs["user"] == "charm-integration-testing-validator"
         assert "auth" not in mock_connect.call_args.kwargs
         assert conn.closed
@@ -290,6 +292,24 @@ class TestTrinoClientValidatorSimple:
         connect_check = next(c for c in result.checks if c.name == "connect")
         assert not connect_check.passed
         assert "Connection refused" in connect_check.message
+
+    def test_fails_catalogs_check_when_query_raises(self) -> None:
+        # GIVEN a connection that succeeds but SHOW CATALOGS fails
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(execute_error=RuntimeError("query error")))
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+        catalogs_check = next(c for c in result.checks if c.name == "catalogs")
+        assert not catalogs_check.passed
+        assert "query error" in catalogs_check.message
+        assert conn.closed
 
     def test_sets_endpoint_and_interface_on_result(self) -> None:
         # GIVEN
