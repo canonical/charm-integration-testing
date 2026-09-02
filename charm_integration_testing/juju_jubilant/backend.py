@@ -464,6 +464,7 @@ class JubilantBackend(JujuCmdBackend):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
@@ -471,6 +472,7 @@ class JubilantBackend(JujuCmdBackend):
             config=config,
             trust=trust,
             force=force,
+            channel=channel,
         )
 
     def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
