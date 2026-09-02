@@ -212,16 +212,26 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
         for cid, var in domain_app.charm_ids.items()
     }
 
-    # Ensure both charms exist if integration exists (local and cross-model)
+    # Ensure both charms exist if integration exists (local and cross-model).
+    # Two distinct DomainCharmIntegration entries can (in principle) describe the
+    # same (requires_charm_id, requires_endpoint, provides_charm_id, provides_endpoint)
+    # 4-tuple, which would otherwise emit an identical assertion tag twice and crash
+    # z3 with "named assertion defined twice". Track tags we've already asserted and
+    # skip re-adding them, the same way the DSL custom-constraints loop below does.
+    seen_integration_tags: set[str] = set()
     for integration in domain.charm_integrations:
         for charm_id in [integration.requires_charm_id, integration.provides_charm_id]:
             charm_var = domain.charms[charm_id].exists
+            tag = CharmExistsFromIntegrationTag(
+                charm=_charm_payload(domain.charms[charm_id], charm_id),
+                integration=_charm_endpoints_from_integration(integration),
+            ).encode()
+            if tag in seen_integration_tags:
+                continue
+            seen_integration_tags.add(tag)
             solver.assert_and_track(
                 z3.Implies(integration.exists, charm_var),
-                CharmExistsFromIntegrationTag(
-                    charm=_charm_payload(domain.charms[charm_id], charm_id),
-                    integration=_charm_endpoints_from_integration(integration),
-                ).encode(),
+                tag,
             )
 
     # Build a lookup of cross-model integration counts per (application, endpoint).

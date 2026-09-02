@@ -7,10 +7,11 @@ import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.assertion_tags import AssertionTag, SubordinateBaseMismatchTag
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
-from bundle_builder_x.constraints import add_subordinate_constraints
+from bundle_builder_x.constraints import add_charm_constraints, add_subordinate_constraints
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
+    DomainCharmIntegration,
     DomainModel,
     ModelRef,
     add_charm_to_domain,
@@ -135,3 +136,71 @@ class TestAddSubordinateConstraints:
         solver = z3.Solver()
         add_subordinate_constraints(solver, domain)
         assert len(solver.assertions()) == 0
+
+
+def _domain_with_pair(interface: str = "data") -> tuple[Domain, int, int]:
+    domain = Domain()
+    domain.models[ModelRef(name="m")] = DomainModel(
+        arch="amd64",
+        platform="kubernetes",
+        juju_version=_JUJU,
+        applications={
+            "app": DomainApplication(charm="app"),
+            "svc": DomainApplication(charm="svc"),
+        },
+    )
+    app_id = add_charm_to_domain(
+        _make_charm("app", {"data": CharmEndpoint(type=EndpointType.REQUIRES, interface=interface)}),
+        domain,
+        ModelRef(name="m"),
+    )
+    svc_id = add_charm_to_domain(
+        _make_charm("svc", {"data": CharmEndpoint(type=EndpointType.PROVIDES, interface=interface)}),
+        domain,
+        ModelRef(name="m"),
+    )
+    return domain, app_id, svc_id
+
+
+class TestAddCharmConstraintsDuplicateIntegrations:
+    """Regression test for the "named assertion defined twice" Z3 crash observed in CI
+    (e.g. test_result 13011538 / test_execution 890021 against grafana-agent-k8s), where
+    add_charm_constraints emitted the same CharmExistsFromIntegrationTag twice for two
+    DomainCharmIntegration entries sharing an identical
+    (requires_charm_id, requires_endpoint, provides_charm_id, provides_endpoint) key.
+    pair_charms_in_domain() itself de-duplicates on this same key, so this test appends
+    a duplicate entry directly to domain.charm_integrations to reproduce the crash
+    mechanism at the add_charm_constraints call site regardless of how the duplicate
+    entry came to exist upstream.
+    """
+
+    def test_duplicate_integration_entries_do_not_crash_the_solver(self) -> None:
+        domain, app_id, svc_id = _domain_with_pair()
+        pair_charms_in_domain(domain, app_id, svc_id)
+        assert len(domain.charm_integrations) == 1
+
+        # Manually append a duplicate entry with the exact same key, simulating the
+        # scenario observed in production where a second, otherwise-identical
+        # DomainCharmIntegration ends up in the domain.
+        original = domain.charm_integrations[0]
+        domain.charm_integrations.append(
+            DomainCharmIntegration(
+                exists=z3.Bool("duplicate_exists"),
+                requires_charm_id=original.requires_charm_id,
+                requires_endpoint=original.requires_endpoint,
+                provides_charm_id=original.provides_charm_id,
+                provides_endpoint=original.provides_endpoint,
+            )
+        )
+        assert len(domain.charm_integrations) == 2
+
+        solver = z3.Solver()
+        solver.set("unsat_core", True)
+        # Before the fix, this raised z3.z3types.Z3Exception: b'named assertion defined twice'.
+        add_charm_constraints(solver, domain)
+
+        # Only one assertion should be tracked per unique tag, even though two
+        # DomainCharmIntegration entries produced the same tag.
+        tags = [AssertionTag.decode(str(a.arg(0))) for a in solver.assertions()]
+        encoded_tags = {t.encode() for t in tags}
+        assert len(encoded_tags) == len(tags), "expected no duplicate assertion tags"
