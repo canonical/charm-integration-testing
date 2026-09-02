@@ -169,6 +169,12 @@ class TrinoClientValidator(BaseValidator):
         """Open a trino-python-client connection, authenticated if credentials are present."""
         username = creds.get("username")
         password = creds.get("password")
+        if bool(username) != bool(password):
+            raise ValueError(
+                "Incomplete credentials in 'user-secret-id' secret: both 'username' and 'password' "
+                "must be present to authenticate, got only "
+                f"{'username' if username else 'password'!r}."
+            )
         kwargs: dict[str, Any] = {
             "host": host,
             "port": port,

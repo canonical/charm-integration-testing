@@ -179,8 +179,14 @@ class TestTrinoClientValidatorSimple:
         databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
         validator = _make_validator(databag, secrets={"secret:abc": {"username": "alice", "password": "s3cr3t"}})
         conn = ConnStub()
+        auth_sentinel = object()
 
-        with patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn) as mock_connect:
+        with (
+            patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn) as mock_connect,
+            patch(
+                "validators.trino_client.validator.trino.auth.BasicAuthentication", return_value=auth_sentinel
+            ) as mock_auth,
+        ):
             # WHEN
             result = validator.validate(level="simple")
 
@@ -188,6 +194,40 @@ class TestTrinoClientValidatorSimple:
         assert result.status == "PASS"
         assert mock_connect.call_args.kwargs["user"] == "alice"
         assert mock_connect.call_args.kwargs["http_scheme"] == "http"
+        mock_auth.assert_called_once_with("alice", "s3cr3t")
+        assert mock_connect.call_args.kwargs["auth"] is auth_sentinel
+
+    def test_fails_connect_check_when_only_username_present(self) -> None:
+        # GIVEN a secret with a username but no password
+        databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
+        validator = _make_validator(databag, secrets={"secret:abc": {"username": "alice"}})
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect") as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Incomplete credentials" in connect_check.message
+        mock_connect.assert_not_called()
+
+    def test_fails_connect_check_when_only_password_present(self) -> None:
+        # GIVEN a secret with a password but no username
+        databag = {**VALID_DATABAG, "user-secret-id": "secret:abc"}
+        validator = _make_validator(databag, secrets={"secret:abc": {"password": "s3cr3t"}})
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect") as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Incomplete credentials" in connect_check.message
+        mock_connect.assert_not_called()
 
     def test_respects_https_scheme_from_discovery_uri(self) -> None:
         # GIVEN a valid https discovery URI and credentials
