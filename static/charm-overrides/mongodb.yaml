@@ -3,6 +3,8 @@
 #
 # Tracks 6 and 8-transition use certificates; track 8 splits TLS into peer/client certificates.
 #
+# sharding/config-server revision match: VersionChecker.get_cluster_mismatched_revision_status in
+# mongo-charms-single-kernel blocks the shard on any revision mismatch, not just track/risk.
 overrides:
   # Track 8 edge adds gcs-credentials, etcd, and vault-kv.
   - criteria:
@@ -30,6 +32,12 @@ overrides:
       - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
       - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
         >= charms(endpoint[ldap])'
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
+        == revisions({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
+        and revisions(charms(endpoint[config-server])) == revisions({self})'
   # Track 8-transition adds gcs-credentials.
   - criteria:
       - track: '8-transition'
@@ -53,6 +61,12 @@ overrides:
       - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
       - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
         >= charms(endpoint[ldap])'
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
+        == revisions({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
+        and revisions(charms(endpoint[config-server])) == revisions({self})'
   # Track 8 stable/candidate/beta share the modern endpoint generation without edge-only integrations.
   - criteria:
       - track: '8'
@@ -72,6 +86,12 @@ overrides:
       - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
       - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
         >= charms(endpoint[ldap])'
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
+        == revisions({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
+        and revisions(charms(endpoint[config-server])) == revisions({self})'
   # Track 6 uses the older endpoint generation.
   - requires:
       certificates:
@@ -91,3 +111,9 @@ overrides:
       - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
       - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
         >= charms(endpoint[ldap])'
+      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
+        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
+        == revisions({self})'
+      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+        == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
+        and revisions(charms(endpoint[config-server])) == revisions({self})'
