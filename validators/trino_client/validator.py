@@ -91,6 +91,7 @@ class TrinoClientValidator(BaseValidator):
         try:
             creds = self._resolve_credentials()
             conn = self._connect(host, port, http_scheme, creds)
+            checks.append(ValidationCheck(name="connect", passed=True, message=f"Connected to {host}:{port}."))
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 row = cur.fetchone()
@@ -99,7 +100,8 @@ class TrinoClientValidator(BaseValidator):
             else:
                 checks.append(ValidationCheck(name="query", passed=False, message=f"Unexpected result: {row!r}."))
         except Exception as exc:
-            checks.append(ValidationCheck(name="query", passed=False, message=str(exc)))
+            check_name = "connect" if conn is None else "query"
+            checks.append(ValidationCheck(name=check_name, passed=False, message=str(exc)))
         finally:
             self._close(conn)
 
@@ -144,7 +146,7 @@ class TrinoClientValidator(BaseValidator):
             host = parsed.hostname
             if not host:
                 raise ValueError("discovery-uri has no hostname")
-            port = parsed.port or _DEFAULT_PORT
+            port = parsed.port or (443 if scheme == "https" else _DEFAULT_PORT)
         except Exception as exc:
             return (
                 None,

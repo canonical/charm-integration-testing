@@ -295,7 +295,7 @@ class TestTrinoClientValidatorDeep:
         assert not query_check.passed
         assert "query error" in query_check.message
 
-    def test_fails_query_check_when_secret_resolution_raises(self) -> None:
+    def test_fails_connect_check_when_secret_resolution_raises(self) -> None:
         # GIVEN credential resolution that fails
         validator = _make_validator({**VALID_DATABAG, "user-secret-id": "secret:missing"})
 
@@ -305,9 +305,9 @@ class TestTrinoClientValidatorDeep:
 
         # THEN
         assert result.status == "FAIL"
-        query_check = next(c for c in result.checks if c.name == "query")
-        assert not query_check.passed
-        assert "secret error" in query_check.message
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "secret error" in connect_check.message
 
     def test_fails_schema_check_when_discovery_uri_missing(self) -> None:
         # GIVEN a databag missing the required discovery-uri field
