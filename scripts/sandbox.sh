@@ -734,7 +734,11 @@ EOF
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'" < "$SANDBOX_MCP_CONFIG_FILE"
+        # Install a preliminary trap for the MCP file in case PROMPT_FILE creation fails.
+        # shellcheck disable=SC2064
+        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
+        # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
+        cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
 
     if [ "$WITH_TEST_OBSERVER_MCP" = "true" ]; then

@@ -21,6 +21,18 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def io_latency(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        volume_path: str,
+        delay: timedelta,
+        percent: int,
+        duration: timedelta,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         raise NotImplementedError
 

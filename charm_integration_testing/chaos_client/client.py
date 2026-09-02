@@ -24,6 +24,17 @@ class NativeChaosClient(ChaosClient):
         seconds = int(duration.total_seconds())
         self._juju.exec_unit(model, unit, f"stress-ng --vm {workers} --vm-bytes {size_mb}M --timeout {seconds}s")
 
+    def io_latency(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        volume_path: str,
+        delay: timedelta,
+        percent: int,
+        duration: timedelta,
+    ) -> None:
+        raise NotImplementedError
+
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         self._juju.exec_unit(model, unit, f"rm -f -- {shlex.quote(path)}")
         self._juju.exec_unit(model, unit, "pkill -f stress-ng || true")
