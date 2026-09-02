@@ -18,6 +18,7 @@ from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import UnparsableCharmException
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.release_errors import ReleaseUnavailableError
 
 
 def test_charm_override_yaml_is_valid(
@@ -30,16 +31,22 @@ def test_charm_override_yaml_is_valid(
 
 
 def test_charm_override_file_is_valid(
-    charm_channel: tuple[str, CharmChannel],
+    charm_channel: tuple[str, CharmChannel, str | None],
     overrides_charmhub_client: CharmhubClient,
 ) -> None:
-    charm_name, channel = charm_channel
+    charm_name, channel, ubuntu_version = charm_channel
     try:
         overrides_charmhub_client.charm_from_store(
             charm_name=charm_name,
             ubuntu_arch="amd64",
             charm_track=channel.track,
             charm_risk=channel.risk,
+            ubuntu_version=ubuntu_version,
         )
     except UnparsableCharmException as exc:
         pytest.fail(str(exc))
+    except ReleaseUnavailableError:
+        # This (channel, ubuntu_version) combination isn't actually published for this
+        # charm (e.g. an old track never released a revision for a newer base, or vice
+        # versa) - unrelated to whether the override's declared endpoints are stale.
+        pytest.skip(f"no release published for {charm_name} at {channel} / ubuntu {ubuntu_version}")

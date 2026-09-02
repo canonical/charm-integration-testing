@@ -19,15 +19,25 @@ class CharmOverridesCriteria(BaseModel):
     none_of: list["CharmOverridesCriteria"] | None = None
     track: str | None = None
     risk: str | None = None
+    # Some charms (e.g. kubernetes-worker) publish substantially different metadata
+    # (different provides/requires endpoints) for the *same* track depending on the
+    # Ubuntu base - typically because an older charm generation is still served on
+    # legacy bases under a track that has since moved to a rewritten charm for newer
+    # bases. track/risk alone cannot express that split, so ubuntu_version lets an
+    # override block additionally require an exact base match (e.g. '22.04').
+    ubuntu_version: str | None = None
 
-    def meets(self, channel: CharmChannel) -> bool:
+    def meets(self, channel: CharmChannel, ubuntu_version: str | None = None) -> bool:
         return all(
             (
-                all(criterion.meets(channel) for criterion in self.all_of) if self.all_of else True,
-                not any(criterion.meets(channel) for criterion in self.none_of) if self.none_of else True,
-                any(criterion.meets(channel) for criterion in self.any_of) if self.any_of else True,
+                all(criterion.meets(channel, ubuntu_version) for criterion in self.all_of) if self.all_of else True,
+                not any(criterion.meets(channel, ubuntu_version) for criterion in self.none_of)
+                if self.none_of
+                else True,
+                any(criterion.meets(channel, ubuntu_version) for criterion in self.any_of) if self.any_of else True,
                 channel.explicit_track == self.track if self.track else True,
                 channel.risk == self.risk if self.risk else True,
+                ubuntu_version == self.ubuntu_version if self.ubuntu_version else True,
             )
         )
 
@@ -57,8 +67,8 @@ class CharmOverrides(BaseModel):
     assumes: list[str | dict[str, Any]] | None = None
     resource_tracking: CharmResourceTrackingOverrides = Field(default_factory=CharmResourceTrackingOverrides)
 
-    def meets(self, channel: CharmChannel) -> bool:
-        return all(criterion.meets(channel) for criterion in self.criteria)
+    def meets(self, channel: CharmChannel, ubuntu_version: str | None = None) -> bool:
+        return all(criterion.meets(channel, ubuntu_version) for criterion in self.criteria)
 
 
 class CharmGlobalOverrides(BaseModel):
@@ -116,38 +126,50 @@ class OverridesClient:
         self.timeline.off(token)
         return overrides
 
-    def _get_charm_overrides(self, charm: str, channel: CharmChannel) -> CharmOverrides:
+    def _get_charm_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> CharmOverrides:
         for entry in self._get_charm_global_overrides(charm).overrides:
-            if entry.meets(channel):
+            if entry.meets(channel, ubuntu_version):
                 return entry
         return CharmOverrides()
 
     def get_charm_endpoint_overrides(
-        self, charm: str, channel: CharmChannel
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
     ) -> dict[EndpointType, dict[str, CharmEndpointOverrides]]:
-        overrides = self._get_charm_overrides(charm, channel)
+        overrides = self._get_charm_overrides(charm, channel, ubuntu_version)
         return {
             EndpointType.REQUIRES: overrides.requires,
             EndpointType.PROVIDES: overrides.provides,
         }
 
-    def get_charm_proxy_overrides(self, charm: str, channel: CharmChannel) -> list[CharmEndpointProxy]:
-        return self._get_charm_overrides(charm, channel).proxies
+    def get_charm_proxy_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> list[CharmEndpointProxy]:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).proxies
 
-    def get_charm_config_overrides(self, charm: str, channel: CharmChannel) -> dict[str, list[CharmConfigValue]]:
-        return self._get_charm_overrides(charm, channel).configs
+    def get_charm_config_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> dict[str, list[CharmConfigValue]]:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).configs
 
-    def get_charm_resource_overrides(self, charm: str, channel: CharmChannel) -> dict[str, list[CharmResourceValue]]:
-        return self._get_charm_overrides(charm, channel).resources
+    def get_charm_resource_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> dict[str, list[CharmResourceValue]]:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).resources
 
-    def get_charm_constraints_overrides(self, charm: str, channel: CharmChannel) -> list[str]:
-        return self._get_charm_overrides(charm, channel).constraints
+    def get_charm_constraints_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> list[str]:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).constraints
 
     def get_charm_resource_tracking_skips(self, charm: str, channel: CharmChannel) -> frozenset[str]:
         return frozenset(self._get_charm_overrides(charm, channel).resource_tracking.skip)
 
-    def get_charm_assumes_overrides(self, charm: str, channel: CharmChannel) -> list[str | dict[str, Any]] | None:
-        return self._get_charm_overrides(charm, channel).assumes
+    def get_charm_assumes_overrides(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> list[str | dict[str, Any]] | None:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).assumes
 
     def get_charm_platform_overrides(self, charm: str) -> list[str] | None:
         return self._get_charm_global_overrides(charm).platforms

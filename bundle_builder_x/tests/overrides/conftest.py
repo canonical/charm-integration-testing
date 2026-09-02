@@ -20,7 +20,16 @@ from pydantic import ValidationError
 
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.overrides import CharmGlobalOverrides, CharmOverridesCriteria, OverridesClient
+
+
+def _referenced_ubuntu_versions(criteria: CharmOverridesCriteria) -> set[str]:
+    """Recursively collect every explicit ubuntu_version referenced by a criteria block."""
+    versions = {criteria.ubuntu_version} if criteria.ubuntu_version else set()
+    for group in (criteria.all_of, criteria.any_of, criteria.none_of):
+        for nested in group or []:
+            versions |= _referenced_ubuntu_versions(nested)
+    return versions
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -75,7 +84,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
     all_channels = bool(metafunc.config.getoption("--all-channels"))
     client = CharmhubClient()
-    params: list[tuple[str, CharmChannel]] = []
+    params: list[tuple[str, CharmChannel, str | None]] = []
     ids: list[str] = []
     unmatched: list[str] = []
     for f in _get_override_files(overrides_dir, modified_since):
@@ -84,20 +93,31 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             global_overrides = CharmGlobalOverrides.model_validate(yaml.safe_load(f.read_text()))
         except (yaml.YAMLError, ValidationError):
             continue  # YAML layer will catch this
-        remaining = client.get_charm_channels(charm_name)
+
+        # Some overrides only apply to a specific Ubuntu base (e.g. kubernetes-worker's
+        # legacy-charm blocks), so channel alone isn't enough to determine first-met
+        # coverage. Exercise every base referenced anywhere in this charm's overrides,
+        # plus `None` for base-agnostic matching, against every published channel.
+        ubuntu_versions: set[str | None] = {None}
+        for entry in global_overrides.overrides:
+            for criterion in entry.criteria:
+                ubuntu_versions |= _referenced_ubuntu_versions(criterion)
+
+        remaining = {(c, v) for c in client.get_charm_channels(charm_name) for v in ubuntu_versions}
         for override in global_overrides.overrides:
-            matched = [c for c in remaining if override.meets(c)]
-            remaining = [c for c in remaining if not override.meets(c)]
+            matched = [(c, v) for c, v in remaining if override.meets(c, v)]
+            remaining = {cv for cv in remaining if cv not in matched}
             if not matched:
                 criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]
                 unmatched.append(f"{charm_name}: override with criteria={criteria_repr} matches no published channels")
                 continue
-            for channel in matched if all_channels else matched[:1]:
-                params.append((charm_name, channel))
-                ids.append(f"{charm_name}[{channel}]")
+            for channel, ubuntu_version in matched if all_channels else matched[:1]:
+                params.append((charm_name, channel, ubuntu_version))
+                ids.append(f"{charm_name}[{channel}][{ubuntu_version}]")
 
     if unmatched:
         pytest.fail("One or more overrides match no published channels:\n" + "\n".join(f"  - {m}" for m in unmatched))
+
 
     metafunc.parametrize("charm_channel", params, ids=ids)
 
