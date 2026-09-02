@@ -130,6 +130,27 @@ class TestIsolateNetwork:
             client.isolate_network(model="test-model", unit="postgresql/0")
 
 
+class TestIoLatency:
+    """Test suite for io_latency method."""
+
+    def test_raises_not_implemented(self) -> None:
+        # GIVEN a client wrapping a juju backend stub
+        stub = JujuStub()
+        client = NativeChaosClient(juju_backend=stub)
+
+        # WHEN injecting I/O latency on a unit
+        # THEN it is unsupported for this backend
+        with pytest.raises(NotImplementedError):
+            client.io_latency(
+                model=TEST_MODEL,
+                unit="postgresql/0",
+                volume_path="/tmp/fill",
+                delay=timedelta(seconds=5),
+                percent=100,
+                duration=timedelta(seconds=30),
+            )
+
+
 class TestRemoveNetworkIsolation:
     """Test suite for remove_network_isolation method."""
 

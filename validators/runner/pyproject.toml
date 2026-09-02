@@ -39,7 +39,9 @@ dependencies = [
     "validators-ingress",
     "validators-ingress-auth",
     "validators-prometheus-remote-write",
+    "validators-alertmanager-dispatch",
     "validators-certificate-transfer",
+    "validators-trino-client",
     "validators-cross-model-mesh",
 ]
 
