@@ -88,12 +88,20 @@ jobs:
           fi
           if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
-            # Extract environment variables from RC file (handles both "export VAR=..." and "VAR=..." formats)
-            # Mask each secret value to prevent exposure in logs
-            echo "${!NOVARC_SECRET_NAME}" | grep -E '^(export )?OS_' | sed 's/^export //' | while IFS='=' read -r key value; do
-              echo "::add-mask::$value"
-              echo "$key=$value" >> $GITHUB_ENV
-            done
+            # Extract environment variables from the RC file
+            while IFS= read -r line; do
+              # Only process lines that look like they set OpenStack variables
+              # This beast of a regex matches an optional leading 'export' with whitespace,
+              # followed by an OS_ variable name, an equals sign, and a value that may be
+              # unquoted, single-quoted, or double-quoted.
+              # Only one of the unquoted, single-quoted, or double-quoted groups will match
+              if [[ "$line" =~ ^(export[[:space:]]+)?(OS_[A-Z_]+)=(\"([^\"]*)\"|\'([^\']*)\'|([^[:space:]]*))$ ]]; then
+                  key="${BASH_REMATCH[2]}"
+                  value="${BASH_REMATCH[4]}${BASH_REMATCH[5]}${BASH_REMATCH[6]}"
+                  echo "::add-mask::$value"
+                  echo "$key=$value" >> $GITHUB_ENV
+                fi
+            done <<< "${!NOVARC_SECRET_NAME}"
           fi
 
       ##################################################################################
