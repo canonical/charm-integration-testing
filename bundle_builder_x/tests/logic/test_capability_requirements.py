@@ -467,3 +467,117 @@ class TestFeatureMismatchDiagnostics:
             and m.feature == "tag"
             for m in mismatches
         )
+
+
+class TestSelfChainingProviderRejected:
+    """Regression for #937: a proxy charm must not satisfy its own backend endpoint.
+
+    mysql-router-k8s both provides and requires ``mysql_client``, so plain
+    interface matching happily chains one router's ``backend-database`` to
+    another router's ``database``. That topology can never reach active, because
+    the requires side always asks for ``extra_user_roles`` and only a real MySQL
+    server grants them. Tagging server endpoints with a ``mysql-server`` feature
+    and requiring it on ``backend-database`` keeps the router out of its own
+    candidate set.
+    """
+
+    @staticmethod
+    def _make_charms() -> tuple[Charm, Charm, Charm]:
+        router = make_charm(
+            "mysql-router-k8s",
+            endpoints={
+                "backend-database": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="mysql_client",
+                    optional=False,
+                    features=frozenset({"mysql-server"}),
+                ),
+                "database": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="mysql_client",
+                    optional=False,
+                ),
+            },
+            constraint_strs=['"mysql-server" in features(endpoint[backend-database])'],
+        )
+        server = make_charm(
+            "mysql-k8s",
+            endpoints={
+                "database": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="mysql_client",
+                    optional=True,
+                    features=frozenset({"mysql-server"}),
+                ),
+            },
+        )
+        consumer = make_charm(
+            "data-integrator",
+            endpoints={
+                "mysql": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="mysql_client",
+                    optional=True,
+                ),
+            },
+        )
+        return router, server, consumer
+
+    def test_backend_database_resolves_to_the_server_charm(self) -> None:
+        # GIVEN a router whose backend-database requires the "mysql-server" feature
+        router, server, consumer = self._make_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(router, server, consumer))
+
+        # WHEN building a bundle for the router alone
+        bundle = build_single_model(builder, applications={"target": AppSpec(charm="mysql-router-k8s")})
+
+        # THEN backend-database is satisfied by the server, not by another router
+        backend_integration = next(i for i in bundle.integrations if any(ep.endpoint == "backend-database" for ep in i))
+        provider_app = next(ep.application for ep in backend_integration if ep.endpoint != "backend-database")
+        assert bundle.applications[provider_app].charm.name == "mysql-k8s"
+
+    def test_router_to_router_chain_is_rejected(self) -> None:
+        # GIVEN a spec that explicitly chains two routers over a cross-model relation
+        router, server, consumer = self._make_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(router, server, consumer))
+
+        # WHEN building, the pairing violates the "mysql-server" feature requirement
+        with pytest.raises(UncompletableBundleError) as exc_info:
+            build_multi_model(
+                builder,
+                models=[
+                    ModelSpec(
+                        name="target",
+                        controller="c1",
+                        juju=JUJU_VERSION,
+                        applications={"target": AppSpec(charm="mysql-router-k8s")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="target",
+                                endpoint="database",
+                                remote_application="neighbor",
+                                remote_endpoint="backend-database",
+                                remote_model="neighbor",
+                                remote_controller="c2",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(
+                        name="neighbor",
+                        controller="c2",
+                        juju=JUJU_VERSION,
+                        applications={"neighbor": AppSpec(charm="mysql-router-k8s")},
+                    ),
+                ],
+            )
+
+        # THEN the diagnostic names the two router endpoints and the missing feature
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
+        assert any(
+            m.requires.endpoint == "backend-database"
+            and m.provides.endpoint == "database"
+            and m.feature == "mysql-server"
+            for m in mismatches
+        )

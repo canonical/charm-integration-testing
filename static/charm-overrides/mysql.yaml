@@ -11,6 +11,7 @@ overrides:
         optional: true
       database:
         optional: true
+        features: [mysql-server]
       db-router:
         optional: true
       mysql:
@@ -31,6 +32,7 @@ overrides:
   - provides:
       database:
         optional: true
+        features: [mysql-server]
     constraints:
       - len(endpoint[database]) == 1
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
