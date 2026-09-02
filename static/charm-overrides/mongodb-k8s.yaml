@@ -1,30 +1,83 @@
 ---
 # Source: https://github.com/canonical/mongodb-k8s-operator
 #
-# One block covers all published tracks; the endpoint names used in the constraints exist in every live channel generation.
+# The default (last, no-criteria) block below reflects the current 8/edge generation
+# (gcs-credentials + vault-kv + enable-encryption-at-rest). Two historical exceptions
+# are carved out first: pre-gcs channels (track 6, 8/stable, 8/candidate, 8/beta) and
+# 8-transition/edge (has gcs-credentials but predates vault-kv). As those channels get
+# promoted to the current generation, drop them from the exception list below so they
+# fall through to the default block automatically - do not add new per-risk blocks.
 #
 # role (config): replication/config-server/shard are the only source-supported modes; config.yaml defaults to replication.
 # ldap-certificate-transfer (requires): REQUIRED iff ldap is related - metadata.yaml exposes both relations independently, but LDAP TLS needs both.
 # sharding/config-server: Meaning-2 endpoints - role-specific integration that must match the selected role, not unconditional dependencies.
 # sharding/config-server revision match: VersionChecker.get_cluster_mismatched_revision_status in
 # mongo-charms-single-kernel blocks the shard on any revision mismatch, not just track/risk.
+# gcs-credentials (requires): optional - metadata.yaml omits optional:true (unlike sibling s3-credentials); backups.py treats both identically.
 overrides:
-  - configs:
-      role: [replication, config-server, shard, null]
+  # Pre-gcs channels: track 6 (all risks) and 8/stable, 8/candidate, 8/beta.
+  - criteria:
+      - any_of:
+          - track: '6'
+          - track: '8'
+            risk: stable
+          - track: '8'
+            risk: candidate
+          - track: '8'
+            risk: beta
+    configs:
+      role: &role_values [replication, config-server, shard, null]
     constraints:
       # config-server and sharding are mutually exclusive roles
-      - 'not (bool(endpoint[sharding]) and bool(endpoint[config-server]))'
+      - &mutually_exclusive_roles 'not (bool(endpoint[sharding]) and bool(endpoint[config-server]))'
       # if ldap is integrated, certificate transfer is required and must reach all ldap charms
-      - 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
-      - 'bool(endpoint[ldap-certificate-transfer]) => reachable(endpoint[ldap-certificate-transfer])
-        >= charms(endpoint[ldap])'
+      - &ldap_requires_cert_transfer 'bool(endpoint[ldap]) == bool(endpoint[ldap-certificate-transfer])'
+      - &ldap_cert_transfer_reachable 'bool(endpoint[ldap-certificate-transfer]) =>
+        reachable(endpoint[ldap-certificate-transfer]) >= charms(endpoint[ldap])'
       # role must match the integrated endpoint
-      - 'bool(endpoint[config-server]) == (config[role] == "config-server")'
-      - 'bool(endpoint[sharding]) == (config[role] == "shard")'
+      - &config_server_role_match 'bool(endpoint[config-server]) == (config[role]
+        == "config-server")'
+      - &sharding_role_match 'bool(endpoint[sharding]) == (config[role] == "shard")'
       # sharding relations must stay on the exact same charm revision, not just channel
-      - 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding])) == tracks({self})
-        and risks(charms(endpoint[sharding])) == risks({self}) and revisions(charms(endpoint[sharding]))
-        == revisions({self})'
-      - 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
+      - &sharding_revision_match 'bool(endpoint[sharding]) => tracks(charms(endpoint[sharding]))
+        == tracks({self}) and risks(charms(endpoint[sharding])) == risks({self}) and
+        revisions(charms(endpoint[sharding])) == revisions({self})'
+      - &config_server_revision_match 'bool(endpoint[config-server]) => tracks(charms(endpoint[config-server]))
         == tracks({self}) and risks(charms(endpoint[config-server])) == risks({self})
         and revisions(charms(endpoint[config-server])) == revisions({self})'
+  # 8-transition/edge: has gcs-credentials but predates vault-kv/enable-encryption-at-rest.
+  - criteria:
+      - track: 8-transition
+        risk: edge
+    configs:
+      role: *role_values
+    requires:
+      gcs-credentials:
+        optional: true  # upstream metadata bug: missing optional:true, see header comment
+    constraints:
+      # gcs and s3 backups are mutually exclusive (BackupStatuses.MUTUALLY_EXCLUSIVE in backups.py)
+      - &gcs_s3_mutually_exclusive 'not (bool(endpoint[s3-credentials]) and bool(endpoint[gcs-credentials]))'
+      - *mutually_exclusive_roles
+      - *ldap_requires_cert_transfer
+      - *ldap_cert_transfer_reachable
+      - *config_server_role_match
+      - *sharding_role_match
+      - *sharding_revision_match
+      - *config_server_revision_match
+  # Default: current 8/edge generation, and any future channel not in the exceptions above.
+  - configs:
+      role: *role_values
+    requires:
+      gcs-credentials:
+        optional: true  # upstream metadata bug: missing optional:true, see header comment
+    constraints:
+      - *gcs_s3_mutually_exclusive
+      # encryption-at-rest requires vault-kv, and vice versa (VaultStatuses.VAULT_NOT_INTEGRATED/VAULT_INTEGRATED in vault.py)
+      - 'config[enable-encryption-at-rest] == bool(endpoint[vault-kv])'
+      - *mutually_exclusive_roles
+      - *ldap_requires_cert_transfer
+      - *ldap_cert_transfer_reachable
+      - *config_server_role_match
+      - *sharding_role_match
+      - *sharding_revision_match
+      - *config_server_revision_match
