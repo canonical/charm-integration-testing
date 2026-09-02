@@ -187,7 +187,38 @@ class TestTrinoClientValidatorSimple:
         # THEN
         assert result.status == "PASS"
         assert mock_connect.call_args.kwargs["user"] == "alice"
+        assert mock_connect.call_args.kwargs["http_scheme"] == "http"
+
+    def test_respects_https_scheme_from_discovery_uri(self) -> None:
+        # GIVEN a valid https discovery URI and credentials
+        databag = {
+            "discovery-uri": "https://trino-coordinator.testing.svc.cluster.local:8443",
+            "user-secret-id": "secret:abc",
+        }
+        validator = _make_validator(databag, secrets={"secret:abc": {"username": "alice", "password": "s3cr3t"}})
+        conn = ConnStub()
+
+        with patch("validators.trino_client.validator.trino.dbapi.connect", return_value=conn) as mock_connect:
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
         assert mock_connect.call_args.kwargs["http_scheme"] == "https"
+
+    def test_fails_connect_check_when_secret_resolution_raises(self) -> None:
+        # GIVEN credential resolution that fails
+        validator = _make_validator({**VALID_DATABAG, "user-secret-id": "secret:missing"})
+
+        with patch.object(TrinoClientValidator, "_resolve_credentials", side_effect=RuntimeError("secret error")):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "secret error" in connect_check.message
 
     def test_fails_connect_check_when_cluster_unreachable(self) -> None:
         # GIVEN a valid databag but a coordinator that refuses connections
@@ -263,6 +294,20 @@ class TestTrinoClientValidatorDeep:
         query_check = next(c for c in result.checks if c.name == "query")
         assert not query_check.passed
         assert "query error" in query_check.message
+
+    def test_fails_query_check_when_secret_resolution_raises(self) -> None:
+        # GIVEN credential resolution that fails
+        validator = _make_validator({**VALID_DATABAG, "user-secret-id": "secret:missing"})
+
+        with patch.object(TrinoClientValidator, "_resolve_credentials", side_effect=RuntimeError("secret error")):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        query_check = next(c for c in result.checks if c.name == "query")
+        assert not query_check.passed
+        assert "secret error" in query_check.message
 
     def test_fails_schema_check_when_discovery_uri_missing(self) -> None:
         # GIVEN a databag missing the required discovery-uri field

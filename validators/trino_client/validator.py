@@ -51,12 +51,12 @@ class TrinoClientValidator(BaseValidator):
         connection_info = self._prepare_connection(checks)
         if connection_info is None:
             return self._make_result(level="simple", checks=checks)
-        host, port = connection_info
+        host, port, http_scheme = connection_info
 
-        creds = self._resolve_credentials()
         conn = None
         try:
-            conn = self._connect(host, port, creds)
+            creds = self._resolve_credentials()
+            conn = self._connect(host, port, http_scheme, creds)
             with conn.cursor() as cur:
                 cur.execute("SHOW CATALOGS")
                 catalogs = cur.fetchall()
@@ -85,12 +85,12 @@ class TrinoClientValidator(BaseValidator):
         connection_info = self._prepare_connection(checks)
         if connection_info is None:
             return self._make_result(level="deep", checks=checks)
-        host, port = connection_info
+        host, port, http_scheme = connection_info
 
-        creds = self._resolve_credentials()
         conn = None
         try:
-            conn = self._connect(host, port, creds)
+            creds = self._resolve_credentials()
+            conn = self._connect(host, port, http_scheme, creds)
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 row = cur.fetchone()
@@ -105,10 +105,10 @@ class TrinoClientValidator(BaseValidator):
 
         return self._make_result(level="deep", checks=checks)
 
-    def _prepare_connection(self, checks: list[ValidationCheck]) -> tuple[str, int] | None:
+    def _prepare_connection(self, checks: list[ValidationCheck]) -> tuple[str, int, str] | None:
         """Run schema and discovery-uri parsing shared by both levels.
 
-        Appends checks to *checks* in place. Returns (host, port) on success, or
+        Appends checks to *checks* in place. Returns (host, port, http_scheme) on success, or
         None if either check failed, signalling the caller to stop and return
         immediately.
         """
@@ -117,31 +117,30 @@ class TrinoClientValidator(BaseValidator):
         if not schema_check.passed:
             return None
 
-        host, port, uri_check = self._parse_discovery_uri(self.databag["discovery-uri"])
+        host, port, http_scheme, uri_check = self._parse_discovery_uri(self.databag["discovery-uri"])
         checks.append(uri_check)
-        if not uri_check.passed or host is None or port is None:
+        if not uri_check.passed or host is None or port is None or http_scheme is None:
             return None
 
-        return host, port
+        return host, port, http_scheme
 
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""
         if not self.relation_exists():
-            return self._make_result(
-                status="ERROR",
-                level=level,
-                error=f"No remote application on relation '{self.endpoint}'.",
-            )
+            return self._error_result(level=level, error=f"No remote application on relation '{self.endpoint}'.")
         return None
 
     def _resolve_credentials(self) -> dict[str, str]:
         """Resolve optional credentials from the `user-secret-id` Juju secret."""
         return self.resolve_secret("user-secret-id", "username", "password")
 
-    def _parse_discovery_uri(self, uri: str) -> tuple[str | None, int | None, ValidationCheck]:
-        """Parse host/port from the coordinator's `discovery-uri` (e.g. `http://host:8080`)."""
+    def _parse_discovery_uri(self, uri: str) -> tuple[str | None, int | None, str | None, ValidationCheck]:
+        """Parse scheme/host/port from the coordinator's `discovery-uri` (e.g. `http://host:8080`)."""
         try:
             parsed = urllib.parse.urlsplit(uri)
+            scheme = parsed.scheme.lower()
+            if scheme not in {"http", "https"}:
+                raise ValueError(f"unsupported scheme '{scheme or '<missing>'}'")
             host = parsed.hostname
             if not host:
                 raise ValueError("discovery-uri has no hostname")
@@ -150,26 +149,32 @@ class TrinoClientValidator(BaseValidator):
             return (
                 None,
                 None,
+                None,
                 ValidationCheck(name="discovery_uri", passed=False, message=f"Could not parse discovery-uri: {exc}"),
             )
         return (
             host,
             port,
-            ValidationCheck(name="discovery_uri", passed=True, message=f"Parsed host='{host}', port={port}."),
+            scheme,
+            ValidationCheck(
+                name="discovery_uri",
+                passed=True,
+                message=f"Parsed scheme='{scheme}', host='{host}', port={port}.",
+            ),
         )
 
-    def _connect(self, host: str, port: int, creds: dict[str, str]) -> "trino.dbapi.Connection":
+    def _connect(self, host: str, port: int, http_scheme: str, creds: dict[str, str]) -> "trino.dbapi.Connection":
         """Open a trino-python-client connection, authenticated if credentials are present."""
         username = creds.get("username")
         password = creds.get("password")
         kwargs: dict[str, Any] = {
             "host": host,
             "port": port,
+            "http_scheme": http_scheme,
             "user": username or _ANONYMOUS_USER,
             "request_timeout": _CONNECT_TIMEOUT_S,
         }
         if username and password:
-            kwargs["http_scheme"] = "https"
             kwargs["auth"] = trino.auth.BasicAuthentication(username, password)
         return trino.dbapi.connect(**kwargs)  # type: ignore[no-any-return,no-untyped-call]
 
