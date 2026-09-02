@@ -4,6 +4,7 @@
 import ipaddress
 import json
 import re
+import ssl
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +21,23 @@ _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
 _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
+
+# The prometheus_scrape interface deliberately never carries a `tls_config`: per the
+# upstream charm library, certs for `https` scrape targets are expected to be trusted via
+# `update-ca-certificates` on the machine actually running Prometheus, not via relation
+# data. This validator has no such trust path to a per-model self-signed CA, so it cannot
+# verify these certs; skip verification for the reachability/scrape probes below, the same
+# way a basic health check (e.g. `curl -k`) would.
+_INSECURE_HTTPS_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_INSECURE_HTTPS_CONTEXT.check_hostname = False
+_INSECURE_HTTPS_CONTEXT.verify_mode = ssl.CERT_NONE
+
+
+def _urlopen_kwargs(url: str) -> dict[str, Any]:
+    """Return urlopen kwargs to skip TLS verification for https:// URLs."""
+    if url.startswith("https://"):
+        return {"context": _INSECURE_HTTPS_CONTEXT}
+    return {}
 
 
 @dataclass
@@ -312,7 +330,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
     for t in targets:
         url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
         try:
-            with urlopen(url, timeout=5) as resp:  # nosec B310
+            with urlopen(url, timeout=5, **_urlopen_kwargs(url)) as resp:  # nosec B310
                 if resp.status != 200:
                     errors.append(f"{url}: HTTP {resp.status}")
         except Exception as exc:
@@ -344,7 +362,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
         url = f"{t.scheme}://{target_id}{t.metrics_path}"
         check_name = f"scrape[{target_id}]"
         try:
-            with urlopen(url, timeout=10) as resp:  # nosec B310
+            with urlopen(url, timeout=10, **_urlopen_kwargs(url)) as resp:  # nosec B310
                 body = resp.read().decode("utf-8", errors="replace")
             if resp.status != 200:
                 checks.append(
