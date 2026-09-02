@@ -197,9 +197,7 @@ class TestTrinoClientValidatorSimple:
         assert mock_connect.call_args.kwargs["auth"] is auth_sentinel
 
     @pytest.mark.parametrize("secret_id", [None, ""])
-    def test_ignores_plaintext_databag_credentials_without_secret_id(
-        self, secret_id: str | None
-    ) -> None:
+    def test_ignores_plaintext_databag_credentials_without_secret_id(self, secret_id: str | None) -> None:
         # GIVEN a databag that contains plaintext credentials but no usable user-secret-id
         databag = {**VALID_DATABAG, "username": "alice", "password": "s3cr3t"}
         if secret_id is not None:
