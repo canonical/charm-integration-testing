@@ -15,7 +15,7 @@ overrides:
       # always asks for extra_user_roles="charmed_router", and any mysql_client
       # provider that isn't a server (another router) rejects extra-user-roles and
       # blocks. See https://github.com/canonical/charm-integration-testing/issues/937
-      - '"mysql-server" in features(endpoint[backend-database])'
+      - 'bool(endpoint[backend-database]) => "mysql-server" in features(endpoint[backend-database])'
       # Backend database must have the same track/risk
       - 'tracks(charms(endpoint[backend-database])) == tracks({self})'
       - 'risks(charms(endpoint[backend-database])) == risks({self})'
