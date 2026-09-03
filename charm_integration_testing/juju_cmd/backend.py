@@ -3,6 +3,7 @@
 
 
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,9 +21,19 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.backend import JujuStatusPerformanceWarning, warn_performance
+from tenacity import retry, retry_if_exception, stop_after_delay, wait_fixed
 
 from .cmd import CmdArg, CmdClient, CmdError
 from .structures import JujuModel, JujuSecretInfo, JujuStatus
+
+# Even after a caller has explicitly torn down a CMR relation (see test_teardown.py), the offering
+# and consuming controllers can take a short time to propagate that the consumer has dropped out of
+# scope. Until they do, Juju rejects removal of the offering application with this transient error.
+_APPLICATION_USED_BY_CONSUMER_RE = re.compile(r"is used by \d+ consumer")
+
+
+def _is_transient_removal_error(exception: BaseException) -> bool:
+    return isinstance(exception, CmdError) and bool(_APPLICATION_USED_BY_CONSUMER_RE.search(exception.stderr or ""))
 
 
 class JujuCmdBackend(JujuBackend):
@@ -244,6 +255,12 @@ class JujuCmdBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    @retry(
+        retry=retry_if_exception(_is_transient_removal_error),
+        stop=stop_after_delay(timedelta(minutes=10).total_seconds()),
+        wait=wait_fixed(5),
+        reraise=True,
+    )
     def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         self._call_juju(
             CmdArg(value="remove-application"),

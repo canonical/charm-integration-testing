@@ -20,6 +20,7 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.version import JujuVersion
+from juju_cmd.cmd import CmdArg, CmdClient, CmdError
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
@@ -938,6 +939,69 @@ class TestJubilantBackend:
                 backend.wait_for_removal_of_integration(
                     TEST_MODEL, endpoint_1, endpoint_2, timeout=timedelta(milliseconds=100)
                 )
+
+    class TestRemoveConsumedOffer:
+        class Client(JubilantClientStub):
+            def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
+                self.app_endpoint_names = app_endpoint_names
+                self.cli_calls: list[tuple[str, ...]] = []
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    name: jubilant.statustypes.RemoteAppStatus(
+                        url=f"neighbor-controller:admin/neighbor-model.{name}",
+                        endpoints={"database": jubilant.statustypes.RemoteEndpoint(interface="db", role="provider")},
+                    )
+                    for name in self.app_endpoint_names
+                }
+
+            def cli(self, *args: str, **kwargs: Any) -> str:
+                self.cli_calls.append(args)
+                return ""
+
+        def test_removes_saas_proxy_when_endpoint_1_is_the_alias(self) -> None:
+            # GIVEN a SAAS proxy exists for endpoint_1's application name
+            client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
+            backend = JubilantBackend(client)
+            endpoint_1 = JujuIntegrationApplication("neighbor-offer", "database")
+            endpoint_2 = JujuIntegrationApplication("neighbor", "database")
+
+            # WHEN
+            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
+
+            # THEN remove-saas was called for the SAAS proxy only
+            assert client.cli_calls == [("remove-saas", "neighbor-offer")]
+
+        def test_removes_saas_proxy_when_endpoint_2_is_the_alias(self) -> None:
+            # GIVEN a SAAS proxy exists for endpoint_2's application name
+            client = self.Client(app_endpoint_names=frozenset({"target-offer"}))
+            backend = JubilantBackend(client)
+            endpoint_1 = JujuIntegrationApplication("target", "database")
+            endpoint_2 = JujuIntegrationApplication("target-offer", "database")
+
+            # WHEN
+            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
+
+            # THEN remove-saas was called for the SAAS proxy only
+            assert client.cli_calls == [("remove-saas", "target-offer")]
+
+        def test_no_op_when_neither_endpoint_is_a_saas_proxy(self) -> None:
+            # GIVEN no SAAS proxies exist (e.g. same-model integration)
+            client = self.Client(app_endpoint_names=frozenset())
+            backend = JubilantBackend(client)
+            endpoint_1 = JujuIntegrationApplication("database", "db")
+            endpoint_2 = JujuIntegrationApplication("webapp", "db")
+
+            # WHEN
+            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
+
+            # THEN no CLI call was made
+            assert client.cli_calls == []
 
     class TestWaitForRemovalOfUnits:
         def test_removal_of_units(self) -> None:
@@ -2266,6 +2330,63 @@ class TestJubilantBackend:
 
             assert stub.add_model_calls == 3
             assert stub.switch_calls == 0
+
+    class TestRemoveApplicationsRetries:
+        """Regression tests for https://github.com/canonical/charm-integration-testing/issues/939.
+
+        `juju remove-application` on a CMR offering application fails with "used by N consumer(s)"
+        until the two controllers finish propagating that the consumer has dropped out of scope.
+        This is a short backstop for that residual propagation lag after the caller (test_teardown)
+        has already explicitly removed the relation; remove_applications should retry through the
+        transient window instead of failing on the first attempt.
+        """
+
+        @dataclass
+        class RemoveApplicationCmdClientStub(CmdClient):
+            failures_remaining: int = 0
+            calls: int = 0
+
+            def call(self, *args: CmdArg) -> str:
+                self.calls += 1
+                arg_values = [arg.value for arg in args]
+                if "remove-application" in arg_values and self.failures_remaining > 0:
+                    self.failures_remaining -= 1
+                    raise CmdError(
+                        " ".join(str(v) for v in arg_values),
+                        1,
+                        stdout="",
+                        stderr="ERROR removing application target failed: cannot destroy application "
+                        '"target": application is used by 1 consumer',
+                    )
+                return ""
+
+        def test_retries_transient_consumer_error_then_succeeds(self) -> None:
+            stub = self.RemoveApplicationCmdClientStub(failures_remaining=2)
+            backend = JubilantBackend()
+            backend.cmd_client = stub
+
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend.remove_applications(TEST_MODEL, "target")
+
+            assert stub.calls == 3
+
+        def test_reraises_unrelated_cmd_error_immediately(self) -> None:
+            @dataclass
+            class UnrelatedErrorCmdClientStub(CmdClient):
+                calls: int = 0
+
+                def call(self, *args: CmdArg) -> str:
+                    self.calls += 1
+                    raise CmdError("juju remove-application ...", 1, stdout="", stderr="ERROR some other failure")
+
+            stub = UnrelatedErrorCmdClientStub()
+            backend = JubilantBackend()
+            backend.cmd_client = stub
+
+            with pytest.raises(CmdError, match="some other failure"):
+                backend.remove_applications(TEST_MODEL, "target")
+
+            assert stub.calls == 1
 
 
 class TestParseBundleFile:

@@ -135,6 +135,14 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def remove_consumed_offer(
+        self,
+        model: JujuModelHandle,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+    ) -> None:
+        raise NotImplementedError
+
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
     ) -> None:

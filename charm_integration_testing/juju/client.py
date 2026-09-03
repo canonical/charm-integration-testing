@@ -274,6 +274,15 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
 
+    def remove_consumed_offer(
+        self,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        model: JujuModelHandle,
+    ) -> None:
+        self.logger.info(f"Removing consumed offer proxy (if any) for {endpoint_1} or {endpoint_2}.")
+        self.backend.remove_consumed_offer(model, endpoint_1, endpoint_2)
+
     def wait_for_removal_of_units(
         self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:

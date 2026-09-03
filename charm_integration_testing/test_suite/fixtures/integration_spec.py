@@ -72,6 +72,12 @@ def _integration_consuming_side(
 
 
 @pytest.fixture
+def is_cmr_integration(_integration_consuming_side: Literal["target", "neighbor", "same"]) -> bool:
+    """Whether the integration crosses models (cross-model relation) rather than being same-model."""
+    return _integration_consuming_side != "same"
+
+
+@pytest.fixture
 def integration_controller(
     _integration_consuming_side: Literal["target", "neighbor", "same"],
     target_controller: str,
