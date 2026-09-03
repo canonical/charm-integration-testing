@@ -965,8 +965,9 @@ class CharmhubClient:
     def _get_charm_platforms(self, charm_name: str, channel: CharmChannel, metadata: CharmMetadata) -> list[str]:
         """Return the platform(s) this charm may be deployed to.
 
-        Platform overrides win when present. Otherwise, fall back to the charm's own
-        metadata (mirrors ``_get_charm_assumes``). Three independent metadata.yaml
+        Platform overrides win when present. Otherwise, infer platforms from metadata
+        plus the same override-aware assumes expression used by
+        ``_get_charm_assumes(...)``. Three independent metadata.yaml
         conventions identify a Kubernetes (sidecar) charm: a non-empty ``containers``
         block (current Charmcraft charms), a legacy ``series: [kubernetes]`` entry
         (pre-Charmcraft "reactive"/podspec charms, which predate ``containers``), or an
