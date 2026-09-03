@@ -18,10 +18,13 @@ overrides:
         optional: true
       upstream-ingress:
         optional: true
+        # IngressPerAppRequirer (v2.ingress) only ever negotiates with another
+        # traefik-k8s's ingress provider (traefik-k8s-operator#501 - chaining use case).
+        features: [traefik-chain]
     provides:
       ingress:
         optional: true
-        features: [tls]
+        features: [tls, traefik-chain]
       ingress-per-unit:
         optional: true
         features: [tls]
@@ -40,3 +43,6 @@ overrides:
       # certificates is required if any downstream endpoint negotiates tls
       - '"tls" in features(endpoint[traefik-route] | endpoint[ingress] | endpoint[ingress-per-unit])
         => bool(endpoint[certificates])'
+      # upstream-ingress (v2 ingress) only chains to another traefik-k8s instance;
+      # see charm-integration-testing#954 for the istio-pilot (SDI) incompatibility.
+      - 'bool(endpoint[upstream-ingress]) => "traefik-chain" in features(endpoint[upstream-ingress])'
