@@ -1,12 +1,12 @@
 ---
 # Charmhub-published charm; no public source repository found (checked
 # canonical/anbox-cloud-charms, canonical/ams-old, canonical/ams-operator -
-# none host this subordinate charm's actual source).
+# none of which host this subordinate charm's actual source).
 #
 # `ams-node-controller` (subordinate; requires only `lxd`) published
 # nrpe-external-master in `provides` through track 1.24 and 'latest', but
 # Charmhub `refresh` confirms it is entirely absent from `provides` (empty)
-# from track 1.25 onward (verified across 1.25-1.28 and 1.27, bases
+# from track 1.25 onward (verified across tracks 1.25-1.28, bases
 # 22.04/24.04) - applying the override unconditionally raised
 # UnparsableCharmException for 1.25+ channels.
 #
