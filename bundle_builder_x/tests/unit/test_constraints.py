@@ -183,15 +183,14 @@ class TestAddCharmConstraintsDuplicateIntegrations:
         # scenario observed in production where a second, otherwise-identical
         # DomainCharmIntegration ends up in the domain.
         original = domain.charm_integrations[0]
-        domain.charm_integrations.append(
-            DomainCharmIntegration(
-                exists=z3.Bool("duplicate_exists"),
-                requires_charm_id=original.requires_charm_id,
-                requires_endpoint=original.requires_endpoint,
-                provides_charm_id=original.provides_charm_id,
-                provides_endpoint=original.provides_endpoint,
-            )
+        duplicate = DomainCharmIntegration(
+            exists=z3.Bool("duplicate_exists"),
+            requires_charm_id=original.requires_charm_id,
+            requires_endpoint=original.requires_endpoint,
+            provides_charm_id=original.provides_charm_id,
+            provides_endpoint=original.provides_endpoint,
         )
+        domain.charm_integrations.append(duplicate)
         assert len(domain.charm_integrations) == 2
 
         solver = z3.Solver()
@@ -209,7 +208,7 @@ class TestAddCharmConstraintsDuplicateIntegrations:
         # still imply the charm exists, not just the one that happened to win the dedup.
         # A naive dedup keyed only on the tag (dropping the duplicate's `exists` var
         # entirely) would leave this unconstrained and these checks would come back SAT.
-        for exists_var in (original.exists, z3.Bool("duplicate_exists")):
+        for exists_var in (original.exists, duplicate.exists):
             for charm_id in (app_id, svc_id):
                 solver.push()
                 solver.add(exists_var, z3.Not(domain.charms[charm_id].exists))
