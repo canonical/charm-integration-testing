@@ -632,3 +632,153 @@ class TestWildcardHostResolution:
         assert result.status == "PASS"
         called_url = mock_open.call_args[0][0]
         assert called_url == "http://[::ffff:10.0.0.1]:9104/metrics"
+
+
+# ---------------------------------------------------------------------------
+# Tests: cross-model (CMR) target qualification
+#
+# Regression test for test execution 919150: mongodb-k8s (provider, model
+# "target-model") is consumed over a cross-model offer by grafana-agent-k8s
+# (requirer, model "neighbor-model"). The provider publishes a bare per-unit
+# Kubernetes DNS host (e.g. "target-0.target-endpoints"), which only resolves
+# within its own namespace. Across a CMR boundary this must be qualified with
+# the provider's namespace, matching the convention already used elsewhere in
+# this codebase (see validators.cross_model_mesh._cross_model_dns_name).
+# ---------------------------------------------------------------------------
+
+CMR_SCRAPE_METADATA = json.dumps(
+    {
+        "model": "target-model",
+        "model_uuid": "abc-123",
+        "application": "target",
+        "unit": "target/0",
+    }
+)
+
+CMR_SCRAPE_JOBS = json.dumps(
+    [
+        {
+            "metrics_path": "/metrics",
+            "static_configs": [{"targets": ["target-0.target-endpoints:9216"]}],
+            "scheme": "http",
+        }
+    ]
+)
+
+CMR_DATABAG: dict[str, str] = {
+    "scrape_metadata": CMR_SCRAPE_METADATA,
+    "scrape_jobs": CMR_SCRAPE_JOBS,
+}
+
+
+def _make_cmr_validator(databag: dict[str, str], local_model_name: str) -> PrometheusScrapeValidator:
+    app = ApplicationStub()
+    relation = RelationStub(name="metrics-endpoint", id=0, app=app, data={app: databag})
+    charm = cast(
+        ops.CharmBase,
+        make_charm_from_relation(relation, interface_name="prometheus_scrape", local_model_name=local_model_name),
+    )
+    return PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
+
+
+class TestCrossModelHostQualification:
+    def test_bare_host_qualified_with_remote_model_across_cmr(self) -> None:
+        # GIVEN the requirer lives in a different model than the target ("target-model")
+        validator = _make_cmr_validator(CMR_DATABAG, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the bare pod-DNS host is qualified with the remote model's namespace
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints.target-model.svc.cluster.local:9216/metrics"
+
+    def test_bare_host_not_qualified_within_same_model(self) -> None:
+        # GIVEN the requirer is in the same model as the target (not a CMR relation)
+        validator = _make_cmr_validator(CMR_DATABAG, local_model_name="target-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the host is used as-is; same-namespace pod DNS already resolves
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints:9216/metrics"
+
+    def test_namespace_qualified_host_not_double_qualified(self) -> None:
+        # GIVEN a target already qualified with the remote namespace but not the
+        # full ".svc.cluster.local" suffix (e.g. "<pod>.<svc>.<namespace>")
+        jobs = json.dumps(
+            [
+                {
+                    "metrics_path": "/metrics",
+                    "static_configs": [{"targets": ["target-0.target-endpoints.target-model:9216"]}],
+                    "scheme": "http",
+                }
+            ]
+        )
+        databag = {"scrape_metadata": CMR_SCRAPE_METADATA, "scrape_jobs": jobs}
+        validator = _make_cmr_validator(databag, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: it is left untouched, not re-qualified into
+        # "...target-model.target-model.svc.cluster.local"
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints.target-model:9216/metrics"
+
+    def test_already_fully_qualified_host_not_double_qualified(self) -> None:
+        # GIVEN a target already using the full svc.cluster.local form
+        validator = _make_cmr_validator(VALID_DATABAG, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: it is left untouched
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://my-app-0.my-app.svc.cluster.local:8080/metrics"
+
+    def test_ip_address_target_not_qualified_across_cmr(self) -> None:
+        # GIVEN a wildcard target expanded to a concrete unit IP address
+        databag = {"scrape_metadata": CMR_SCRAPE_METADATA, "scrape_jobs": WILDCARD_SCRAPE_JOBS}
+        app = ApplicationStub()
+        unit = UnitStub("provider/0")
+        relation = RelationStub(
+            name="metrics-endpoint",
+            id=0,
+            app=app,
+            data={app: databag, unit: {"prometheus_scrape_unit_address": "10.1.0.50"}},
+            units=frozenset({unit}),
+        )
+        charm = cast(
+            ops.CharmBase,
+            make_charm_from_relation(relation, interface_name="prometheus_scrape", local_model_name="neighbor-model"),
+        )
+        validator = PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: an IP address is never namespace-qualified
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://10.1.0.50:9104/metrics"
