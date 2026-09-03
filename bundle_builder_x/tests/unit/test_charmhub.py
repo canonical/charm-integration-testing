@@ -230,9 +230,11 @@ class TestCharmhubClient:
             assert charm.platforms == ["kubernetes"]
 
         def test_build_charm_uses_assumes_overrides_for_platform_inference(self) -> None:
-            # GIVEN metadata with no kubernetes hints, plus a channel override that requires
-            # k8s-api unconditionally
-            client = _client({"overrides": [{"channel": "latest/stable", "assumes": ["k8s-api"]}]})
+            # GIVEN metadata with no kubernetes hints, plus a channel-scoped override that
+            # requires k8s-api unconditionally
+            client = _client(
+                {"overrides": [{"criteria": [{"track": "latest", "risk": "stable"}], "assumes": ["k8s-api"]}]}
+            )
 
             # WHEN building a Charm from store metadata
             charm = client._build_charm(
