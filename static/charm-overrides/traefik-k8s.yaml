@@ -60,6 +60,6 @@ overrides:
         => bool(endpoint[certificates])'
       # upstream-ingress (v2 ingress) is wire-incompatible with legacy SDI providers
       # (e.g. istio-pilot); see charm-integration-testing#954. This rejects only
-      # providers that declare sdi-legacy (currently just istio-pilot), not
-      # non-SDI providers such as ingress-configurator or other future charms.
+      # providers that integrate over sdi-legacy (currently just istio-pilot), not
+      # non-SDI providers.
       - 'bool(endpoint[upstream-ingress]) => not ("sdi-legacy" in features(endpoint[upstream-ingress]))'
