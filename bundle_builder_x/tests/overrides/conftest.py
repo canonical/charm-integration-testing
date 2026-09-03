@@ -105,7 +105,10 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
         remaining = {(c, v) for c in client.get_charm_channels(charm_name) for v in ubuntu_versions}
         for override in global_overrides.overrides:
-            matched = [(c, v) for c, v in remaining if override.meets(c, v)]
+            matched = sorted(
+                (cv for cv in remaining if override.meets(*cv)),
+                key=lambda cv: (str(cv[0]), cv[1] or ""),
+            )
             remaining = {cv for cv in remaining if cv not in matched}
             if not matched:
                 criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]
@@ -117,7 +120,6 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
     if unmatched:
         pytest.fail("One or more overrides match no published channels:\n" + "\n".join(f"  - {m}" for m in unmatched))
-
 
     metafunc.parametrize("charm_channel", params, ids=ids)
 
