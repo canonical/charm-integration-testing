@@ -204,3 +204,14 @@ class TestAddCharmConstraintsDuplicateIntegrations:
         tags = [AssertionTag.decode(str(a.arg(0))) for a in solver.assertions()]
         encoded_tags = {t.encode() for t in tags}
         assert len(encoded_tags) == len(tags), "expected no duplicate assertion tags"
+
+        # Both DomainCharmIntegration.exists vars (the original and the duplicate) must
+        # still imply the charm exists, not just the one that happened to win the dedup.
+        # A naive dedup keyed only on the tag (dropping the duplicate's `exists` var
+        # entirely) would leave this unconstrained and these checks would come back SAT.
+        for exists_var in (original.exists, z3.Bool("duplicate_exists")):
+            for charm_id in (app_id, svc_id):
+                solver.push()
+                solver.add(exists_var, z3.Not(domain.charms[charm_id].exists))
+                assert solver.check() == z3.unsat, f"expected {exists_var} to imply charm {charm_id} exists"
+                solver.pop()
