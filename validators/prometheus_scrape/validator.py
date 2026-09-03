@@ -28,7 +28,7 @@ _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
 # data. This validator has no such trust path to a per-model self-signed CA, so it cannot
 # verify these certs; skip verification for the reachability/scrape probes below, the same
 # way a basic health check (e.g. `curl -k`) would.
-_INSECURE_HTTPS_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_INSECURE_HTTPS_CONTEXT = ssl.create_default_context()
 _INSECURE_HTTPS_CONTEXT.check_hostname = False
 _INSECURE_HTTPS_CONTEXT.verify_mode = ssl.CERT_NONE
 

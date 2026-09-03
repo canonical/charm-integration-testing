@@ -20,7 +20,7 @@ validators-mongodb-client = { path = "./validators/mongodb_client", develop = tr
 validators-mysql-client = { path = "./validators/mysql_client", develop = true, extras = ["dev"] }
 validators-mysql = { path = "./validators/mysql", develop = true, extras = ["dev"] }
 validators-tracing = { path = "./validators/tracing", develop = true, extras = ["dev", "deep", "uat"] }
-validators-prometheus-scrape = { path = "./validators/prometheus_scrape", develop = true }
+validators-prometheus-scrape = { path = "./validators/prometheus_scrape", develop = true, extras = ["dev"] }
 validators-s3 = { path = "./validators/s3", develop = true }
 validators-loki-push-api = { path = "./validators/loki_push_api", develop = true }
 validators-temporal-host-info = { path = "./validators/temporal_host_info", develop = true }

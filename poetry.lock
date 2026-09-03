@@ -3125,7 +3125,12 @@ files = []
 develop = true
 
 [package.dependencies]
+cryptography = {version = ">=42.0.0", optional = true}
 validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["cryptography (>=42.0.0)", "validators-test-utils"]
 
 [package.source]
 type = "directory"
@@ -3465,4 +3470,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "cae3a82ee39121a6fbf98a5fbed7714ac2142e309eb417dcb081c8a6a7052729"
+content-hash = "b5b25b04eb76a5fa3724310f078df6127dbc29c78d90bd20971bbbff829bd891"
