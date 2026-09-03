@@ -1,16 +1,16 @@
 ---
 # Source: https://github.com/canonical/hockeypuck-k8s-operator
 #
-# go-framework extension injects ingress/logging/metrics-endpoint/grafana-dashboard
-# without optional:true; paas_charm.charm.Charm.is_ready() never blocks on them.
+# charmcraft's go-framework extension (extensions/app.py::_AppBase) omits optional:true here;
+# PyPI pkg paas-charm's paas_charm/charm.py::Charm.is_ready() never gates on any of them.
 overrides:
   - requires:
       ingress:
-        optional: true  # not in is_ready()'s _missing_required_integrations; only gates OAuth flows (unused here)
+        optional: true  # paas_charm/charm.py Charm._base_url: falls back to plain K8s service URL when unset
       logging:
-        optional: true  # not in is_ready()'s _missing_required_integrations
+        optional: true  # paas_charm/charm.py Charm._missing_required_integrations(): omitted
     provides:
       grafana-dashboard:
-        optional: true  # observability hook, not primary purpose
+        optional: true  # COS hook; paas_charm/charm.py never gates on it, charm has no dashboard logic of its own
       metrics-endpoint:
-        optional: true  # observability hook, not primary purpose
+        optional: true  # COS hook; paas_charm/charm.py never gates on it, charm has no metrics logic of its own
