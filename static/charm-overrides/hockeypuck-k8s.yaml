@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/hockeypuck-k8s-operator
+#
+# go-framework extension injects ingress/logging/metrics-endpoint/grafana-dashboard
+# without optional:true; paas_charm.charm.Charm.is_ready() never blocks on them.
+overrides:
+  - requires:
+      ingress:
+        optional: true  # not in is_ready()'s _missing_required_integrations; only gates OAuth flows (unused here)
+      logging:
+        optional: true  # not in is_ready()'s _missing_required_integrations
+    provides:
+      grafana-dashboard:
+        optional: true  # observability hook, not primary purpose
+      metrics-endpoint:
+        optional: true  # observability hook, not primary purpose
