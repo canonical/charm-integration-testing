@@ -1,13 +1,29 @@
 ---
 # https://github.com/canonical/istio-operators/issues/672
+#
+# ingress (provides) - istio-pilot only ever speaks the legacy serialized_data_interface
+# (SDI) wire protocol on this endpoint (schema versions v1/v2 above are SDI-style
+# request/response databags; the charm never negotiates via the newer
+# charms.traefik_k8s.v2.ingress library). traefik-k8s's upstream-ingress requires
+# endpoint uses IngressPerAppRequirer (v2.ingress), which never publishes the
+# _supported_versions key SDI providers wait on, so a traefik-k8s <-> istio-pilot
+# integration hangs at deploy for the full idle timeout without ever failing loudly.
+# See traefik-k8s-operator#501 and charm-integration-testing#954. The sdi-legacy
+# feature below is an unconditional, protocol-level fact about this endpoint (not a
+# traefik-specific carve-out): any future consumer that does not also declare
+# sdi-legacy on its own requires-side override is likewise correctly rejected as
+# incompatible with istio-pilot's ingress, mirroring the real-world wire protocol.
 platforms: [kubernetes]
 overrides:
   - provides:
       istio-pilot:
         features: [istio-pilot]
+      ingress:
+        features: [sdi-legacy]
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
     constraints:
       - '"istio-pilot" in features(endpoint[istio-pilot])'
+      - '"sdi-legacy" in features(endpoint[ingress])'

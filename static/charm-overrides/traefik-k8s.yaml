@@ -26,13 +26,20 @@ overrides:
         optional: true
       upstream-ingress:
         optional: true
-        # IngressPerAppRequirer (v2.ingress) only ever negotiates with another
-        # traefik-k8s's ingress provider (traefik-k8s-operator#501 - chaining use case).
-        features: [traefik-chain]
+        # IngressPerAppRequirer (v2.ingress) never publishes _supported_versions, so it
+        # cannot negotiate with a legacy serialized_data_interface (SDI) provider such as
+        # istio-pilot's ingress endpoint (traefik-k8s-operator#501,
+        # charm-integration-testing#954/#955 review). sdi-legacy is declared here (not
+        # forced) purely so coherence binds this endpoint's copy of the feature to any
+        # provider that itself unconditionally declares it (see istio-pilot.yaml); every
+        # other provider that doesn't know about sdi-legacy is unaffected - this is a
+        # deny-list on the one known-incompatible protocol, not an allow-list of
+        # traefik-specific providers.
+        features: [sdi-legacy]
     provides:
       ingress:
         optional: true
-        features: [tls, traefik-chain]
+        features: [tls]
       ingress-per-unit:
         optional: true
         features: [tls]
@@ -51,6 +58,8 @@ overrides:
       # certificates is required if any downstream endpoint negotiates tls
       - '"tls" in features(endpoint[traefik-route] | endpoint[ingress] | endpoint[ingress-per-unit])
         => bool(endpoint[certificates])'
-      # upstream-ingress (v2 ingress) only chains to another traefik-k8s instance;
-      # see charm-integration-testing#954 for the istio-pilot (SDI) incompatibility.
-      - 'bool(endpoint[upstream-ingress]) => "traefik-chain" in features(endpoint[upstream-ingress])'
+      # upstream-ingress (v2 ingress) is wire-incompatible with legacy SDI providers
+      # (e.g. istio-pilot); see charm-integration-testing#954. This rejects only
+      # providers that declare sdi-legacy (currently just istio-pilot), not
+      # non-SDI providers such as ingress-configurator or other future charms.
+      - 'bool(endpoint[upstream-ingress]) => not ("sdi-legacy" in features(endpoint[upstream-ingress]))'
