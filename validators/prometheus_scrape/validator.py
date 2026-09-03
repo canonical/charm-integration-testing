@@ -84,7 +84,13 @@ class PrometheusScrapeValidator(BaseValidator):
             for unit in self.relation.units
             if (addr := self.relation.data[unit].get("prometheus_scrape_unit_address", "").strip())
         )
-        targets, parse_errors = _extract_targets(scrape_jobs, unit_addresses=unit_addresses)
+        metadata = json.loads(self.databag["scrape_metadata"])
+        targets, parse_errors = _extract_targets(
+            scrape_jobs,
+            unit_addresses=unit_addresses,
+            remote_model=metadata.get("model"),
+            local_model=self.charm.model.name,
+        )
 
         # Report any target parsing errors
         if parse_errors:
@@ -238,8 +244,40 @@ def _host_for_url(host: str) -> str:
     return host
 
 
+def _qualify_cross_model_host(host: str, *, remote_model: str | None, local_model: str) -> str:
+    """Qualify a bare per-unit Kubernetes DNS host for cross-model (CMR) relations.
+
+    Charms commonly publish per-unit scrape targets as short pod-DNS names
+    (e.g. ``<unit>.<endpoints-service>``). Such names resolve via the pod's
+    default search domain, which only covers its own Kubernetes namespace.
+    When the scrape target's owning application lives in a different Juju
+    model than this charm (i.e. the relation crosses a cross-model offer),
+    that bare name is not resolvable and must be qualified with the remote
+    application's namespace, matching the CMR DNS convention already used
+    elsewhere in this codebase (see ``validators.cross_model_mesh``):
+    ``<host>.<model>.svc.cluster.local``.
+
+    IP addresses and hosts already qualified with the remote namespace
+    (``.<remote_model>`` or ``.<remote_model>.svc.cluster.local``) are
+    returned unchanged.
+    """
+    if not remote_model or remote_model == local_model:
+        return host
+    if host.endswith(".svc.cluster.local") or host.endswith(f".{remote_model}"):
+        return host
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return f"{host}.{remote_model}.svc.cluster.local"
+    return host
+
+
 def _extract_targets(
-    scrape_jobs: list[dict[str, Any]], unit_addresses: list[str] | None = None
+    scrape_jobs: list[dict[str, Any]],
+    unit_addresses: list[str] | None = None,
+    *,
+    local_model: str,
+    remote_model: str | None = None,
 ) -> tuple[list[_ScrapeTarget], list[str]]:
     """Return deduplicated scrape targets from all jobs and any parse errors.
 
@@ -249,6 +287,10 @@ def _extract_targets(
     When a target uses a wildcard bind-all host (``*`` or ``0.0.0.0``), it is expanded
     into one concrete target per entry in *unit_addresses*, using the per-unit
     ``prometheus_scrape_unit_address`` values from the relation databag.
+
+    Bare per-unit Kubernetes DNS hosts are qualified with the remote application's
+    namespace when *remote_model* differs from *local_model* (a cross-model relation);
+    see ``_qualify_cross_model_host``.
 
     Returns:
         tuple: (targets, parse_errors) where parse_errors is a list of error messages.
@@ -280,7 +322,10 @@ def _extract_targets(
                     else:
                         resolved_hosts = [host]
 
-                    for resolved_host in resolved_hosts:
+                    for unqualified_host in resolved_hosts:
+                        resolved_host = _qualify_cross_model_host(
+                            unqualified_host, remote_model=remote_model, local_model=local_model
+                        )
                         # Deduplicate on the full scrape URL
                         scrape_url = f"{effective_scheme}://{_host_for_url(resolved_host)}:{port}{metrics_path}"
                         if scrape_url in seen:

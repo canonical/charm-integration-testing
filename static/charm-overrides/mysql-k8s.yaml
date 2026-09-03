@@ -6,6 +6,7 @@ overrides:
     provides:
       database:
         optional: true
+        features: [mysql-server]
       mysql:
         optional: true
       mysql-root:
@@ -25,7 +26,10 @@ overrides:
         and tracks(charms(endpoint[replication])) == tracks({self})'
 
   # Track 8.4 has correct endpoint optionality, but we still need to enforce the replication constraint
-  - constraints:
+  - provides:
+      database:
+        features: [mysql-server]
+    constraints:
       # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
