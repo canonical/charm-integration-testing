@@ -112,14 +112,20 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             remaining = {cv for cv in remaining if cv not in matched}
             if not matched:
                 criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]
-                unmatched.append(f"{charm_name}: override with criteria={criteria_repr} matches no published channels")
+                unmatched.append(
+                    f"{charm_name}: override with criteria={criteria_repr} matches no published "
+                    "(channel, ubuntu_version) combination"
+                )
                 continue
             for channel, ubuntu_version in matched if all_channels else matched[:1]:
                 params.append((charm_name, channel, ubuntu_version))
                 ids.append(f"{charm_name}[{channel}][{ubuntu_version}]")
 
     if unmatched:
-        pytest.fail("One or more overrides match no published channels:\n" + "\n".join(f"  - {m}" for m in unmatched))
+        pytest.fail(
+            "One or more overrides match no published (channel, ubuntu_version) combination:\n"
+            + "\n".join(f"  - {m}" for m in unmatched)
+        )
 
     metafunc.parametrize("charm_channel", params, ids=ids)
 
