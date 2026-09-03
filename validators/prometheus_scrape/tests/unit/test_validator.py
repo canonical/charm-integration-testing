@@ -579,8 +579,42 @@ class TestHttpsScrapeTargets:
         http_check = next(c for c in result.checks if c.name == "http_probe")
         assert http_check.passed, http_check.message
 
+    def test_scrape_check_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test for the L2 `scrape[...]` check: it also passes the
+        # insecure SSL context (via _scrape_and_parse_checks), not just `http_probe`.
+        server, port, thread = _start_self_signed_https_server(response_body=PROMETHEUS_TEXT_BODY)
+        try:
+            validator = _make_validator(
+                {
+                    "scrape_metadata": VALID_SCRAPE_METADATA,
+                    "scrape_jobs": json.dumps(
+                        [
+                            {
+                                "metrics_path": "/metrics",
+                                "static_configs": [{"targets": [f"127.0.0.1:{port}"]}],
+                                "scheme": "https",
+                            }
+                        ]
+                    ),
+                }
+            )
 
-def _start_self_signed_https_server() -> tuple[HTTPServer, int, threading.Thread]:
+            # WHEN
+            result = validator.validate(level="deep")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        scrape_check = next(c for c in result.checks if c.name.startswith("scrape["))
+        assert scrape_check.passed, scrape_check.message
+
+
+def _start_self_signed_https_server(
+    response_body: bytes = b"# HELP up 1\nup 1\n",
+) -> tuple[HTTPServer, int, threading.Thread]:
     """Start a background HTTPS server on 127.0.0.1 backed by a self-signed cert."""
 
     class _MetricsHandler(BaseHTTPRequestHandler):
@@ -588,7 +622,7 @@ def _start_self_signed_https_server() -> tuple[HTTPServer, int, threading.Thread
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            self.wfile.write(b"# HELP up 1\nup 1\n")
+            self.wfile.write(response_body)
 
         def log_message(self, *args: object) -> None:  # silence default request logging
             pass
