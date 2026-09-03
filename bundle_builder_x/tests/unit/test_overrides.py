@@ -4,11 +4,44 @@
 from pathlib import Path
 
 from bundle_builder_x.charm import CharmChannel
-from bundle_builder_x.overrides import OverridesClient
+from bundle_builder_x.overrides import CharmOverridesCriteria, OverridesClient
 
 
 def _ch(track: str, risk: str = "stable") -> CharmChannel:
     return CharmChannel(track=track, risk=risk, branch="")
+
+
+class TestCharmOverridesCriteriaUbuntuVersion:
+    def test_criteria_with_no_ubuntu_version_matches_any_base(self) -> None:
+        criteria = CharmOverridesCriteria(track="latest")
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version=None) is True
+
+    def test_criteria_with_ubuntu_version_matches_only_that_base(self) -> None:
+        criteria = CharmOverridesCriteria(ubuntu_version="16.04")
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is False
+        assert criteria.meets(_ch("latest"), ubuntu_version=None) is False
+
+    def test_track_and_ubuntu_version_are_and_ed(self) -> None:
+        criteria = CharmOverridesCriteria(track="1.32", ubuntu_version="16.04")
+        assert criteria.meets(_ch("1.32"), ubuntu_version="16.04") is True
+        # Track matches but base doesn't.
+        assert criteria.meets(_ch("1.32"), ubuntu_version="22.04") is False
+        # Base matches but track doesn't.
+        assert criteria.meets(_ch("1.31"), ubuntu_version="16.04") is False
+
+    def test_ubuntu_version_threaded_through_any_of(self) -> None:
+        criteria = CharmOverridesCriteria(
+            any_of=[
+                CharmOverridesCriteria(ubuntu_version="16.04"),
+                CharmOverridesCriteria(ubuntu_version="18.04"),
+            ]
+        )
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="18.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is False
 
 
 class TestResourceTrackingOverrides:
