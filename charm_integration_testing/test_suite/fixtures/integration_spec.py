@@ -1,12 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from pathlib import Path
 from typing import Literal
 
 import pytest
 import yaml
-from juju import JujuIntegrationApplication, JujuModelHandle
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
+
+from bundle_builder_x import CharmChannel, OverridesClient
 
 
 def _find_saas_alias(bundle_path: Path, local_app: str, local_ep: str, remote_ep: str) -> str | None:
@@ -146,3 +149,36 @@ def integration_endpoint_2(
         assert saas_alias is not None
         return JujuIntegrationApplication(saas_alias, neighbor_endpoint)
     return JujuIntegrationApplication(neighbor_application, neighbor_endpoint)
+
+
+@pytest.fixture
+def integration_endpoints_removable(
+    charm_overrides: Path,
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
+    target_application: str,
+    target_endpoint: str,
+    neighbor_application: str,
+    neighbor_endpoint: str,
+    logger: logging.Logger,
+) -> bool:
+    """Whether both sides of the tested integration allow remove-and-restore testing.
+
+    Resolved from the live models so it reflects whichever charm/channel is actually deployed.
+    """
+    overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
+    for model_ref, application, endpoint in (
+        (target_model_ref, target_application, target_endpoint),
+        (neighbor_model_ref, neighbor_application, neighbor_endpoint),
+    ):
+        if model_ref is None:
+            continue
+        applications = juju_client.list_applications(model=model_ref)
+        info = applications.get(application)
+        if info is None or info.channel is None:
+            continue
+        channel = CharmChannel.model_validate(str(info.channel))
+        if not overrides_client.get_charm_endpoint_removable(info.charm, channel, endpoint):
+            return False
+    return True
