@@ -22,21 +22,27 @@ _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
 _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
 
-# The prometheus_scrape interface deliberately never carries a `tls_config`: per the
-# upstream charm library, certs for `https` scrape targets are expected to be trusted via
-# `update-ca-certificates` on the machine actually running Prometheus, not via relation
-# data. This validator has no such trust path to a per-model self-signed CA, so it cannot
-# verify these certs; skip verification for the reachability/scrape probes below, the same
-# way a basic health check (e.g. `curl -k`) would.
-_INSECURE_HTTPS_CONTEXT = ssl.create_default_context()
-_INSECURE_HTTPS_CONTEXT.check_hostname = False
-_INSECURE_HTTPS_CONTEXT.verify_mode = ssl.CERT_NONE
+
+def _insecure_https_context() -> ssl.SSLContext:
+    """Build a TLS context that skips certificate verification for https:// probes.
+
+    The prometheus_scrape interface deliberately never carries a `tls_config`: per the
+    upstream charm library, certs for `https` scrape targets are expected to be trusted via
+    `update-ca-certificates` on the machine actually running Prometheus, not via relation
+    data. This validator has no such trust path to a per-model self-signed CA, so it cannot
+    verify these certs; skip verification for the reachability/scrape probes below, the same
+    way a basic health check (e.g. `curl -k`) would.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def _urlopen_kwargs(url: str) -> dict[str, Any]:
     """Return urlopen kwargs to skip TLS verification for https:// URLs."""
     if url.startswith("https://"):
-        return {"context": _INSECURE_HTTPS_CONTEXT}
+        return {"context": _insecure_https_context()}
     return {}
 
 

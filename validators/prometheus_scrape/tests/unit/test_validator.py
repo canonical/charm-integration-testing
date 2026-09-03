@@ -550,7 +550,7 @@ class TestHttpsScrapeTargets:
         # End-to-end regression test using a real TLS socket with a self-signed cert,
         # reproducing the exact CI failure this fix addresses:
         # "CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate".
-        server, port = _start_self_signed_https_server()
+        server, port, thread = _start_self_signed_https_server()
         try:
             validator = _make_validator(
                 {
@@ -572,6 +572,7 @@ class TestHttpsScrapeTargets:
         finally:
             server.shutdown()
             server.server_close()
+            thread.join(timeout=5)
 
         # THEN
         assert result.status == "PASS"
@@ -579,7 +580,7 @@ class TestHttpsScrapeTargets:
         assert http_check.passed, http_check.message
 
 
-def _start_self_signed_https_server() -> tuple[HTTPServer, int]:
+def _start_self_signed_https_server() -> tuple[HTTPServer, int, threading.Thread]:
     """Start a background HTTPS server on 127.0.0.1 backed by a self-signed cert."""
 
     class _MetricsHandler(BaseHTTPRequestHandler):
@@ -628,7 +629,7 @@ def _start_self_signed_https_server() -> tuple[HTTPServer, int]:
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    return server, port
+    return server, port, thread
 
 
 # ---------------------------------------------------------------------------
