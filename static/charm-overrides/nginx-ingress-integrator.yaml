@@ -1,0 +1,20 @@
+---
+# Source: https://github.com/canonical/nginx-ingress-integrator-operator
+overrides:
+  - requires:
+      certificates:
+        optional: true  # _get_tls_relation() returns early without it; charm.py:350-351
+    provides:
+      ingress:
+        optional: true  # exactly one of ingress/nginx-route required; see constraint below
+      nginx-route:
+        optional: true  # exactly one of ingress/nginx-route required; see constraint below
+    configs:
+      service-hostname: ['nginx-ingress-integrator.test', null]
+    constraints:
+      # charm.py::_check_precondition raises InvalidIngressError if both are connected, and
+      # _update_ingress sets WaitingStatus forever if neither is - exactly one is required.
+      - 'len(endpoint[ingress]) + len(endpoint[nginx-route]) == 1'
+      # ingress-per-app data has no hostname field; nginx-route relation data does.
+      # ingress_definition.py::service_hostname raises InvalidIngressError otherwise.
+      - 'bool(endpoint[ingress]) => set(config[service-hostname])'
