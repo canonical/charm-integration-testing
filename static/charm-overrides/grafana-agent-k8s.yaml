@@ -12,7 +12,14 @@
 #    - tracing-provider        => tracing OR grafana-cloud-config
 #    - grafana-dashboards-consumer => grafana-dashboards-provider OR grafana-cloud-config
 overrides:
-  - provides:
+    # `data` storage (charmcraft.yaml) is backed by a Juju/K8s PVC, which is retained
+    # across application removal/redeploy just like postgresql-k8s's pgdata (see
+    # static/charm-overrides/postgresql-k8s.yaml); a leftover or re-created PVC is
+    # expected, not a defect.
+  - resource_tracking:
+      skip:
+        - pvc
+    provides:
       grafana-dashboards-provider:
         optional: true
       logging-provider:
