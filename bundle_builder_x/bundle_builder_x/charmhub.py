@@ -966,17 +966,38 @@ class CharmhubClient:
         """Return the platform(s) this charm may be deployed to.
 
         Platform overrides win when present. Otherwise, fall back to the charm's own
-        metadata (mirrors ``_get_charm_assumes``). Two independent metadata.yaml
+        metadata (mirrors ``_get_charm_assumes``). Three independent metadata.yaml
         conventions identify a Kubernetes (sidecar) charm: a non-empty ``containers``
-        block (current Charmcraft charms), or a legacy ``series: [kubernetes]`` entry
-        (pre-Charmcraft "reactive"/podspec charms, which predate ``containers``). The
-        absence of both identifies a machine charm.
+        block (current Charmcraft charms), a legacy ``series: [kubernetes]`` entry
+        (pre-Charmcraft "reactive"/podspec charms, which predate ``containers``), or an
+        unconditionally required ``k8s-api`` feature in ``assumes`` (charms that only
+        talk to the Kubernetes API and host no workload container of their own, e.g.
+        nginx-ingress-integrator - see _PLATFORM_FEATURES, which defines k8s-api as
+        kubernetes-only). The absence of all three identifies a machine charm.
         """
         platform_overrides = self.overrides_client.get_charm_platform_overrides(charm_name)
         if platform_overrides is not None:
             return platform_overrides or ["machine"]
-        is_kubernetes = bool(metadata.containers) or "kubernetes" in metadata.series
+        assumes_entries = [self._get_assumes_entry(e) for e in metadata.assumes]
+        is_kubernetes = (
+            bool(metadata.containers)
+            or "kubernetes" in metadata.series
+            or any(self._assumes_entry_requires_feature(e, "k8s-api") for e in assumes_entries)
+        )
         return ["kubernetes"] if is_kubernetes else ["machine"]
+
+    def _assumes_entry_requires_feature(self, entry: CharmAssumesEntry, feature: str) -> bool:
+        """Whether an ``assumes`` entry unconditionally requires the given feature.
+
+        Only follows ``all_of`` (AND) branches: a feature named inside an ``any_of``
+        (OR) branch is not unconditionally required, since another alternative in that
+        branch could satisfy it instead.
+        """
+        if entry.feature == feature:
+            return True
+        if entry.all_of:
+            return any(self._assumes_entry_requires_feature(e, feature) for e in entry.all_of)
+        return False
 
     def _get_assumes_entry(self, raw: str | dict[str, Any]) -> CharmAssumesEntry:
         """Translate a raw charmhub assumes entry (wire format) into a domain CharmAssumesEntry."""
