@@ -1,8 +1,8 @@
 ---
 # Source: https://github.com/canonical/alertmanager-k8s-operator
 #
-# Track 1 already has all optional: true flags set upstream, and no service-mesh / require-cmr-mesh interfaces
-# Tracks 2, dev and 0.31 add service-mesh, require-cmr-mesh (requires) and
+# Track 1 already has all optional: true flags set upstream, and does not define the service-mesh / require-cmr-mesh / provide-cmr-mesh endpoints.
+# Tracks 2, dev and 0.31 define service-mesh, require-cmr-mesh (requires) and
 # provide-cmr-mesh (provides) without optional: true.
 #
 # require-cmr-mesh (requires): optional - CMR mesh cross-model access, secondary to alertmanager's core alerting purpose
