@@ -170,10 +170,9 @@ def integration_endpoints_removable(
     overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
     for model_ref, application, endpoint in (
         (target_model_ref, target_application, target_endpoint),
-        (neighbor_model_ref, neighbor_application, neighbor_endpoint),
+        # Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
+        (neighbor_model_ref or target_model_ref, neighbor_application, neighbor_endpoint),
     ):
-        if model_ref is None:
-            continue
         applications = juju_client.list_applications(model=model_ref)
         info = applications.get(application)
         if info is None or info.channel is None:
