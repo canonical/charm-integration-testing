@@ -2336,9 +2336,9 @@ class TestJubilantBackend:
 
         `juju remove-application` on a CMR offering application fails with "used by N consumer(s)"
         until the two controllers finish propagating that the consumer has dropped out of scope.
-        This is a short backstop for that residual propagation lag after the caller (test_teardown)
-        has already explicitly removed the relation; remove_applications should retry through the
-        transient window instead of failing on the first attempt.
+        This is a short backstop for that residual propagation lag after a caller has already
+        explicitly removed the relation; remove_applications should retry through the transient
+        window instead of failing on the first attempt.
         """
 
         @dataclass
