@@ -34,9 +34,8 @@ from juju import (
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from juju_cmd.cmd import CmdError
 from kubernetes_client import KubernetesBackend, KubernetesClient
-from tenacity import retry, retry_if_exception, stop_after_attempt, stop_after_delay, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
 
@@ -117,16 +116,6 @@ def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: Ju
         or "did not appear in cache timeout" in err_msg
     )
     return is_missing or is_migrating
-
-
-# Even after a caller has explicitly torn down a CMR relation, the offering and consuming
-# controllers can take a short time to propagate that the consumer has dropped out of scope. Until
-# they do, Juju rejects removal of the offering application with this transient error.
-_APPLICATION_USED_BY_CONSUMER_RE = re.compile(r"is used by \d+ consumer")
-
-
-def _is_transient_removal_error(exception: BaseException) -> bool:
-    return isinstance(exception, CmdError) and bool(_APPLICATION_USED_BY_CONSUMER_RE.search(exception.stderr or ""))
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -344,15 +333,6 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)
-
-    @retry(
-        retry=retry_if_exception(_is_transient_removal_error),
-        stop=stop_after_delay(timedelta(minutes=10).total_seconds()),
-        wait=wait_fixed(5),
-        reraise=True,
-    )
-    def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
-        super().remove_applications(model, *applications)
 
     def wait_for_removal(self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_removed(status, *applications), timeout=timeout)

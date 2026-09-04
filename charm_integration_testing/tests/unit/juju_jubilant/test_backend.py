@@ -20,7 +20,6 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.version import JujuVersion
-from juju_cmd.cmd import CmdArg, CmdClient, CmdError
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
@@ -2313,63 +2312,6 @@ class TestJubilantBackend:
 
             assert stub.add_model_calls == 3
             assert stub.switch_calls == 0
-
-    class TestRemoveApplicationsRetries:
-        """Regression tests for https://github.com/canonical/charm-integration-testing/issues/939.
-
-        `juju remove-application` on a CMR offering application fails with "used by N consumer(s)"
-        until the two controllers finish propagating that the consumer has dropped out of scope.
-        This is a short backstop for that residual propagation lag after a caller has already
-        explicitly removed the relation; remove_applications should retry through the transient
-        window instead of failing on the first attempt.
-        """
-
-        @dataclass
-        class RemoveApplicationCmdClientStub(CmdClient):
-            failures_remaining: int = 0
-            calls: int = 0
-
-            def call(self, *args: CmdArg) -> str:
-                self.calls += 1
-                arg_values = [arg.value for arg in args]
-                if "remove-application" in arg_values and self.failures_remaining > 0:
-                    self.failures_remaining -= 1
-                    raise CmdError(
-                        " ".join(str(v) for v in arg_values),
-                        1,
-                        stdout="",
-                        stderr="ERROR removing application target failed: cannot destroy application "
-                        '"target": application is used by 1 consumer',
-                    )
-                return ""
-
-        def test_retries_transient_consumer_error_then_succeeds(self) -> None:
-            stub = self.RemoveApplicationCmdClientStub(failures_remaining=2)
-            backend = JubilantBackend()
-            backend.cmd_client = stub
-
-            with patch("tenacity.nap.sleep", return_value=None):
-                backend.remove_applications(TEST_MODEL, "target")
-
-            assert stub.calls == 3
-
-        def test_reraises_unrelated_cmd_error_immediately(self) -> None:
-            @dataclass
-            class UnrelatedErrorCmdClientStub(CmdClient):
-                calls: int = 0
-
-                def call(self, *args: CmdArg) -> str:
-                    self.calls += 1
-                    raise CmdError("juju remove-application ...", 1, stdout="", stderr="ERROR some other failure")
-
-            stub = UnrelatedErrorCmdClientStub()
-            backend = JubilantBackend()
-            backend.cmd_client = stub
-
-            with pytest.raises(CmdError, match="some other failure"):
-                backend.remove_applications(TEST_MODEL, "target")
-
-            assert stub.calls == 1
 
 
 class TestParseBundleFile:
