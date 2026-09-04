@@ -66,7 +66,7 @@ a status header and, in `<details>` blocks, comments it decided not to post inli
 `/pulls/<number>/comments` inline-comments list, so they are easy to miss.
 
 ```bash
-gh api "repos/canonical/charm-integration-testing/pulls/<number>/reviews?per_page=100" \
+gh api --paginate "repos/canonical/charm-integration-testing/pulls/<number>/reviews?per_page=100" \
   | python3 -c "
 import sys, json, re
 for r in json.load(sys.stdin):
@@ -85,7 +85,10 @@ for r in json.load(sys.stdin):
 
 Status headers seen in this repo (and their meaning):
 
-- **🟢 (or no header) Looks good** — no changes requested.
+- **🟢 (or no header) Looks good** — no changes requested. Note that the script above
+  prints its own literal `(no header)` when the `### ...` regex finds nothing; that is
+  the script's placeholder text, not a status Copilot itself emits — treat it the same
+  as "Looks good".
 - **🟡 Changes recommended** — Copilot posted at least one actionable inline comment;
   these show up in the normal `/comments` list from Step 1.
 - **🔵 Needs a closer look** — Copilot flagged a concern but suppressed the inline
