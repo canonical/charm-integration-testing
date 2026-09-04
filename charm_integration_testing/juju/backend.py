@@ -278,7 +278,6 @@ class JujuBackend(ABC):
     ) -> None:
         raise NotImplementedError
 
-    @abstractmethod
     def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
         """Actively remove the SAAS proxy named *alias* from *model*, if present.
 
@@ -288,8 +287,9 @@ class JujuBackend(ABC):
         "exists but is terminating". Explicitly removing the proxy (``juju remove-saas``) frees the
         alias immediately, rather than waiting on a status change that may never happen on its own.
         A no-op if *alias* isn't a SAAS proxy in this model.
+
+        The default implementation is a no-op; concrete backends that support CMR override this.
         """
-        raise NotImplementedError
 
     @abstractmethod
     def wait_for_removal_of_units(
