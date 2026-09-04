@@ -143,6 +143,9 @@ class CharmEndpoint(BaseModel):
     scope: EndpointScope | None = Field(default=None)
     cyclic: bool = Field(default=False)
     features: frozenset[str] = Field(default_factory=frozenset)
+    # Whether the remove-and-restore test may tear down this endpoint's integration. Charmhub has
+    # no native concept of this today, so it is always override-sourced (see CharmEndpointOverrides).
+    removable: bool = Field(default=True)
 
 
 class CharmEndpointProxy(BaseModel):

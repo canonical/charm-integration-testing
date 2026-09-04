@@ -886,6 +886,12 @@ class CharmhubClient:
                 # Calculate features
                 features = frozenset(endpoint_override.features)
 
+                # Calculate removable
+                if endpoint_override.removable is not None:
+                    removable = endpoint_override.removable
+                else:
+                    removable = True
+
                 # Add endpoint
                 endpoints[endpoint_name] = CharmEndpoint(
                     type=endpoint_type,
@@ -895,6 +901,7 @@ class CharmhubClient:
                     scope=endpoint.scope,
                     cyclic=cyclic,
                     features=features,
+                    removable=removable,
                 )
 
         # Inject implicit juju-info provides endpoint (mirrors Juju's state/application.go Endpoints()).
