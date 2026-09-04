@@ -286,9 +286,10 @@ class JujuBackend(ABC):
         "dead"/"terminated") indefinitely, which blocks re-consuming the same offer alias with
         "exists but is terminating". Explicitly removing the proxy (``juju remove-saas``) frees the
         alias immediately, rather than waiting on a status change that may never happen on its own.
-        A no-op if *alias* isn't a SAAS proxy in this model.
 
-        The default implementation is a no-op; concrete backends that support CMR override this.
+        The default implementation here is always a no-op. Concrete backends that support CMR
+        should override this to actually remove the proxy, additionally treating *alias* not being
+        a SAAS proxy in this model as a no-op.
         """
 
     @abstractmethod
