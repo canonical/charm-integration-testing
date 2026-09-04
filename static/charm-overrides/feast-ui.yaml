@@ -13,10 +13,17 @@ listed: true
 #
 # istio-ingress-route (requires): optional - Istio ambient mode alternative to
 #   ingress (traefik); IstioRelationsConflictDetectorComponent prevents both
-#   being connected simultaneously; charm uses ingress in non-Istio deployments
+#   being connected simultaneously.
 # service-mesh (requires): optional - Istio sidecar mode service mesh, secondary
 # require-cmr-mesh (requires): optional - CMR mesh cross-model access, secondary
 # provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary
+#
+# ingress (requires, all tracks): driven by legacy serialized_data_interface
+#   (SDI, SdiRelationBroadcasterComponent), NOT the modern
+#   charms.traefik_k8s.v2.ingress library. Tag it sdi-legacy so the solver
+#   doesn't pair it with a modern `ingress` provider like traefik-k8s, which
+#   would deadlock at deploy time.
+#   See: https://github.com/canonical/charm-integration-testing/issues/976
 overrides:
   - criteria:
       - track: latest
@@ -28,6 +35,17 @@ overrides:
         optional: true
       service-mesh:
         optional: true
+      ingress:
+        features: [sdi-legacy]
     provides:
       provide-cmr-mesh:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+  # All other tracks (e.g. 0.49/stable, 0.49/candidate, 0.49/beta): same
+  # sdi-legacy tagging, no other overrides needed.
+  - requires:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
