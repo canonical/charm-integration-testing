@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -9,7 +8,7 @@ import pytest
 import yaml
 from juju import JujuApplicationInfo, JujuClient, JujuIntegrationApplication, JujuModelHandle
 
-from bundle_builder_x import CharmChannel, OverridesClient
+from bundle_builder_x import Charm, CharmChannel, CharmhubClient
 
 
 def _find_saas_alias(bundle_path: Path, local_app: str, local_ep: str, remote_ep: str) -> str | None:
@@ -152,35 +151,86 @@ def integration_endpoint_2(
 
 
 @pytest.fixture
-def integration_endpoints_removable(
-    charm_overrides: Path,
+def _applications_cache() -> dict[JujuModelHandle, dict[str, JujuApplicationInfo]]:
+    """Per-test cache of ``list_applications`` results, keyed by model.
+
+    Shared by ``target_deployed_charm`` and ``neighbor_deployed_charm`` so a non-CMR test
+    (where both resolve to the same model) only queries that model once.
+    """
+    return {}
+
+
+def _resolve_deployed_charm(
+    charmhub_client: CharmhubClient,
+    juju_client: JujuClient,
+    model_ref: JujuModelHandle,
+    application: str,
+    cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    if model_ref not in cache:
+        cache[model_ref] = juju_client.list_applications(model=model_ref)
+    info = cache[model_ref].get(application)
+    if info is None or info.channel is None:
+        return None
+    channel = CharmChannel.model_validate(str(info.channel))
+    return charmhub_client.charm_from_store(
+        info.charm,
+        ubuntu_arch="amd64",
+        charm_track=channel.track or None,
+        charm_risk=channel.risk or None,
+        charm_revision=info.revision,
+    )
+
+
+@pytest.fixture
+def target_deployed_charm(
+    charmhub_client: CharmhubClient,
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    target_application: str,
+    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    """Canonical charm metadata (with overrides merged) for whatever is actually deployed as the
+    target application, or ``None`` if the application isn't found or has no resolvable channel.
+    """
+    return _resolve_deployed_charm(
+        charmhub_client, juju_client, target_model_ref, target_application, _applications_cache
+    )
+
+
+@pytest.fixture
+def neighbor_deployed_charm(
+    charmhub_client: CharmhubClient,
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
-    target_application: str,
-    target_endpoint: str,
     neighbor_application: str,
-    neighbor_endpoint: str,
-    logger: logging.Logger,
-) -> bool:
-    """Whether both sides of the tested integration allow remove-and-restore testing.
+    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    """Canonical charm metadata for whatever is actually deployed as the neighbor application, or
+    ``None`` if the application isn't found or has no resolvable channel.
 
-    Resolved from the live models so it reflects whichever charm/channel is actually deployed.
+    Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
     """
-    overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
-    # Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
-    # Cache by model so a non-CMR run only calls list_applications once for the shared model.
-    applications_by_model: dict[JujuModelHandle, dict[str, JujuApplicationInfo]] = {}
-    for model_ref, application, endpoint in (
-        (target_model_ref, target_application, target_endpoint),
-        (neighbor_model_ref or target_model_ref, neighbor_application, neighbor_endpoint),
+    model_ref = neighbor_model_ref or target_model_ref
+    return _resolve_deployed_charm(charmhub_client, juju_client, model_ref, neighbor_application, _applications_cache)
+
+
+@pytest.fixture
+def integration_endpoints_removable(
+    target_deployed_charm: Charm | None,
+    target_endpoint: str,
+    neighbor_deployed_charm: Charm | None,
+    neighbor_endpoint: str,
+) -> bool:
+    """Whether both sides of the tested integration allow remove-and-restore testing."""
+    for charm, endpoint in (
+        (target_deployed_charm, target_endpoint),
+        (neighbor_deployed_charm, neighbor_endpoint),
     ):
-        if model_ref not in applications_by_model:
-            applications_by_model[model_ref] = juju_client.list_applications(model=model_ref)
-        info = applications_by_model[model_ref].get(application)
-        if info is None or info.channel is None:
+        if charm is None:
             continue
-        channel = CharmChannel.model_validate(str(info.channel))
-        if not overrides_client.get_charm_endpoint_removable(info.charm, channel, endpoint):
+        endpoint_info = charm.endpoints.get(endpoint)
+        if endpoint_info is not None and not endpoint_info.removable:
             return False
     return True
