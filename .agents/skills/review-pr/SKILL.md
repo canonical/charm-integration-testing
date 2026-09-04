@@ -7,10 +7,10 @@ description: Review a pull request, address inline reviewer comments, post repli
 
 ## Goal
 
-Read all open reviewer comments on a pull request — including suppressed comments
-buried in Copilot review bodies (see Step 1a) — apply any necessary fixes to the code,
-post a reply to each comment explaining what was done, and resolve the threads where
-possible.
+Read all reviewer comments on a pull request — including resolved/outdated ones and
+suppressed comments buried in Copilot review bodies (see Step 1a) — apply any
+necessary fixes to the code, post a reply to each comment explaining what was done,
+and resolve the threads where possible.
 
 ## AI disclaimer
 
@@ -73,7 +73,7 @@ for r in json.load(sys.stdin):
     if r['user']['login'] != 'copilot-pull-request-reviewer[bot]':
         continue
     body = r['body'] or ''
-    header = re.match(r'###\s*(.+)', body)
+    header = re.search(r'^###\s*(.+)', body, re.M)
     print(f\"review id:{r['id']}  status: {header.group(1) if header else '(no header)'}\")
     m = re.search(r'Suppressed comments \((\d+)\)(.*?)(?:\n- \*\*Files reviewed|</details>|\Z)', body, re.S)
     if m and int(m.group(1)) > 0:
