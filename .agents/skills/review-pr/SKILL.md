@@ -7,9 +7,10 @@ description: Review a pull request, address inline reviewer comments, post repli
 
 ## Goal
 
-Read all open reviewer comments on a pull request, apply any necessary fixes to
-the code, post a reply to each comment explaining what was done, and resolve the
-threads where possible.
+Read all reviewer comments on a pull request — including resolved/outdated ones and
+suppressed comments buried in Copilot review bodies (see Step 1a) — apply any
+necessary fixes to the code, post a reply to each comment explaining what was done,
+and resolve the threads where possible.
 
 ## AI disclaimer
 
@@ -33,8 +34,8 @@ review submission bodies.
 gh api repos/canonical/charm-integration-testing/pulls/<number> \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Title: {d[\"title\"]}\nAuthor: {d[\"user\"][\"login\"]}\nBranch: {d[\"head\"][\"ref\"]}\n\nBody:\n{d[\"body\"]}')"
 
-# Read all inline review comments (per_page=100 avoids the default 30-result truncation)
-gh api "repos/canonical/charm-integration-testing/pulls/<number>/comments?per_page=100" \
+# Read all inline review comments (--paginate ensures more than 100 comments are read)
+gh api --paginate "repos/canonical/charm-integration-testing/pulls/<number>/comments?per_page=100" \
   | python3 -c "
 import sys, json
 for c in json.load(sys.stdin):
@@ -44,7 +45,7 @@ for c in json.load(sys.stdin):
 "
 
 # Read general (issue-style) comments
-gh api "repos/canonical/charm-integration-testing/issues/<number>/comments?per_page=100" \
+gh api --paginate "repos/canonical/charm-integration-testing/issues/<number>/comments?per_page=100" \
   | python3 -c "
 import sys, json
 for c in json.load(sys.stdin):
@@ -56,6 +57,48 @@ for c in json.load(sys.stdin):
 
 Read the review instructions file at `.github/instructions/python-pr-review.instructions.md`
 before evaluating any Python changes.
+
+### Step 1a — Read Copilot review bodies, including suppressed comments
+
+Copilot's automated reviews (`copilot-pull-request-reviewer[bot]`) post a review body with
+a status header and, in `<details>` blocks, comments it decided not to post inline
+("suppressed comments"). These are only visible in the review body, not in the
+`/pulls/<number>/comments` inline-comments list, so they are easy to miss.
+
+```bash
+gh api --paginate "repos/canonical/charm-integration-testing/pulls/<number>/reviews?per_page=100" \
+  | python3 -c "
+import sys, json, re
+for r in json.load(sys.stdin):
+    if r['user']['login'] != 'copilot-pull-request-reviewer[bot]':
+        continue
+    body = r['body'] or ''
+    header = re.search(r'^###\s*(.+)', body, re.M)
+    print(f\"review id:{r['id']}  status: {header.group(1) if header else '(no header)'}\")
+    m = re.search(r'Suppressed comments \((\d+)\)(.*?)(?:\n- \*\*Files reviewed|</details>|\Z)', body, re.S)
+    if m and int(m.group(1)) > 0:
+        print('  suppressed comments:')
+        print(m.group(2).strip())
+    print('---')
+"
+```
+
+Status headers seen in this repo (and their meaning):
+
+- **🟢 Approval recommended (or no header)** — no changes requested. Note that the
+  script above prints its own literal `(no header)` when the `### ...` regex finds
+  nothing; that is the script's placeholder text, not a status Copilot itself emits —
+  treat it the same as "Approval recommended".
+- **🟡 Changes recommended** — Copilot posted at least one actionable inline comment;
+  these show up in the normal `/comments` list from Step 1.
+- **🔵 Needs a closer look** — Copilot flagged a concern but suppressed the inline
+  comment (often because confidence was lower or it judged the point secondary).
+  The detail is only in the "Suppressed comments" block, not in `/comments`.
+
+**Treat suppressed comments as real feedback to triage**, not noise: read the quoted
+file/line and text, decide whether it's a valid issue, and if so fix it exactly as you
+would an inline comment. Do not skip a review just because its comments were suppressed
+or because the header is "Needs a closer look" rather than "Changes recommended".
 
 ---
 
@@ -125,6 +168,19 @@ curl -s -X POST \
   -d '{"body": "<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the pull request author.*"}'
 ```
 
+**Suppressed comments have no `comment_id`** (they were never posted as a standalone
+inline comment), so they cannot be replied to via the inline-replies endpoint. Address
+each one with a single general PR comment instead, quoting the file/line so the reviewer
+can match it to the review body:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: token ${GH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  "https://api.github.com/repos/canonical/charm-integration-testing/issues/<number>/comments" \
+  -d '{"body": "Re: suppressed comment on `<path>:<line>` (review <review_id>):\n\n<your reply>\n\n> *This comment was posted by an AI assistant (GitHub Copilot) on behalf of the pull request author.*"}'
+```
+
 ---
 
 ## Step 5 — Resolve threads (optional)
@@ -179,7 +235,8 @@ and report the commit SHA so a maintainer can cherry-pick or force-push.
 
 After completing all steps, report:
 
-- Which comments were addressed and how
+- Which comments were addressed and how, including any suppressed comments found in
+  Copilot review bodies (list the review status header, e.g. "Needs a closer look")
 - Which files were changed (with a one-line description per file)
 - Which threads were resolved vs. left open (and why)
 - The commit SHA (if a commit was made)
