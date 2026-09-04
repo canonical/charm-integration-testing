@@ -108,6 +108,11 @@ _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interf
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
 _METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
 _METADATA_WITH_LEGACY_KUBERNETES_SERIES = CharmMetadata(series=["kubernetes"])
+_METADATA_WITH_K8S_API_ASSUMES = CharmMetadata(assumes=["k8s-api"])
+_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES = CharmMetadata(assumes=[{"any-of": ["k8s-api", "juju >= 3.0"]}])
+_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF = CharmMetadata(
+    assumes=[{"any-of": ["k8s-api", {"all-of": ["k8s-api", "juju >= 3.0"]}]}]
+)
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
@@ -197,6 +202,85 @@ class TestCharmhubClient:
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
                 metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_unconditional_k8s_api_assumes(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block but an unconditional `assumes: [k8s-api]` (e.g.
+            # nginx-ingress-integrator, which only talks to the Kubernetes API and hosts no
+            # workload container of its own)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_uses_assumes_overrides_for_platform_inference(self) -> None:
+            # GIVEN metadata with no kubernetes hints, plus a channel-scoped override that
+            # requires k8s-api unconditionally
+            client = _client(
+                {"overrides": [{"criteria": [{"track": "latest", "risk": "stable"}], "assumes": ["k8s-api"]}]}
+            )
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the override-aware assumes also drive the inferred platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_ignores_k8s_api_named_only_in_an_any_of_assumes_branch(self) -> None:
+            # GIVEN metadata whose assumes only mentions k8s-api as one alternative inside an
+            # any-of branch (so it is not unconditionally required)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_treats_any_of_as_unconditional_when_every_branch_requires_k8s_api(self) -> None:
+            # GIVEN metadata whose any-of alternatives all still require k8s-api
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF,
                 config_schema=_EMPTY_CONFIG,
             )
 
