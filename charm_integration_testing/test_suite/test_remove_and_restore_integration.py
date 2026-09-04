@@ -3,6 +3,7 @@
 
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
@@ -17,11 +18,12 @@ def test_remove_and_restore_integration(
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
     integration_endpoints_removable: bool,
+    charm_overrides: Path,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
     if not integration_endpoints_removable:
-        pytest.skip("This integration is declared non-removable in static/charm-overrides/.")
+        pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
 
     # Break relation
     juju_client.remove_integration(

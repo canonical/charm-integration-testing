@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 import yaml
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
+from juju import JujuApplicationInfo, JujuClient, JujuIntegrationApplication, JujuModelHandle
 
 from bundle_builder_x import CharmChannel, OverridesClient
 
@@ -168,13 +168,16 @@ def integration_endpoints_removable(
     Resolved from the live models so it reflects whichever charm/channel is actually deployed.
     """
     overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
+    # Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
+    # Cache by model so a non-CMR run only calls list_applications once for the shared model.
+    applications_by_model: dict[JujuModelHandle, dict[str, JujuApplicationInfo]] = {}
     for model_ref, application, endpoint in (
         (target_model_ref, target_application, target_endpoint),
-        # Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
         (neighbor_model_ref or target_model_ref, neighbor_application, neighbor_endpoint),
     ):
-        applications = juju_client.list_applications(model=model_ref)
-        info = applications.get(application)
+        if model_ref not in applications_by_model:
+            applications_by_model[model_ref] = juju_client.list_applications(model=model_ref)
+        info = applications_by_model[model_ref].get(application)
         if info is None or info.channel is None:
             continue
         channel = CharmChannel.model_validate(str(info.channel))
