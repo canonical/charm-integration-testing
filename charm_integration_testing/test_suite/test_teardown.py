@@ -19,6 +19,7 @@ def test_teardown(
     integration_model_ref: JujuModelHandle,
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
+    consumed_offer_alias: str | None,
 ) -> None:
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations that consumer lives in the neighbor model, so
@@ -50,8 +51,5 @@ def test_teardown(
     # same SAAS alias (e.g. test_idempotent_redeploy) with "exists but is terminating". Remove it
     # explicitly rather than waiting for a status change that may never happen on its own.
     if is_cmr_integration:
-        juju_client.remove_consumed_offer(
-            model=integration_model_ref,
-            endpoint_1=integration_endpoint_1,
-            endpoint_2=integration_endpoint_2,
-        )
+        assert consumed_offer_alias is not None
+        juju_client.remove_saas(consumed_offer_alias, model=integration_model_ref)

@@ -366,16 +366,9 @@ class JubilantBackend(JujuCmdBackend):
     ) -> None:
         self.wait(model, lambda status: integrations_are_removed(status, (endpoint_1, endpoint_2)), timeout=timeout)
 
-    def remove_consumed_offer(
-        self,
-        model: JujuModelHandle,
-        endpoint_1: JujuIntegrationApplication,
-        endpoint_2: JujuIntegrationApplication,
-    ) -> None:
-        app_endpoints = self.status(model).app_endpoints
-        for endpoint in (endpoint_1, endpoint_2):
-            if endpoint.application in app_endpoints:
-                self.client.model(model).cli("remove-saas", endpoint.application)
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        if alias in self.status(model).app_endpoints:
+            self.client.model(model).cli("remove-saas", alias)
 
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None

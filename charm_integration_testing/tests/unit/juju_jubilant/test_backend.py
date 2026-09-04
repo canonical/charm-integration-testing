@@ -940,7 +940,7 @@ class TestJubilantBackend:
                     TEST_MODEL, endpoint_1, endpoint_2, timeout=timedelta(milliseconds=100)
                 )
 
-    class TestRemoveConsumedOffer:
+    class TestRemoveSaas:
         class Client(JubilantClientStub):
             def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
                 self.app_endpoint_names = app_endpoint_names
@@ -964,41 +964,24 @@ class TestJubilantBackend:
                 self.cli_calls.append(args)
                 return ""
 
-        def test_removes_saas_proxy_when_endpoint_1_is_the_alias(self) -> None:
-            # GIVEN a SAAS proxy exists for endpoint_1's application name
+        def test_removes_saas_proxy_when_present(self) -> None:
+            # GIVEN a SAAS proxy exists for the given alias
             client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
             backend = JubilantBackend(client)
-            endpoint_1 = JujuIntegrationApplication("neighbor-offer", "database")
-            endpoint_2 = JujuIntegrationApplication("neighbor", "database")
 
             # WHEN
-            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
+            backend.remove_saas(TEST_MODEL, "neighbor-offer")
 
-            # THEN remove-saas was called for the SAAS proxy only
+            # THEN remove-saas was called for that alias
             assert client.cli_calls == [("remove-saas", "neighbor-offer")]
 
-        def test_removes_saas_proxy_when_endpoint_2_is_the_alias(self) -> None:
-            # GIVEN a SAAS proxy exists for endpoint_2's application name
-            client = self.Client(app_endpoint_names=frozenset({"target-offer"}))
-            backend = JubilantBackend(client)
-            endpoint_1 = JujuIntegrationApplication("target", "database")
-            endpoint_2 = JujuIntegrationApplication("target-offer", "database")
-
-            # WHEN
-            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
-
-            # THEN remove-saas was called for the SAAS proxy only
-            assert client.cli_calls == [("remove-saas", "target-offer")]
-
-        def test_no_op_when_neither_endpoint_is_a_saas_proxy(self) -> None:
-            # GIVEN no SAAS proxies exist (e.g. same-model integration)
+        def test_no_op_when_alias_is_not_a_saas_proxy(self) -> None:
+            # GIVEN no SAAS proxy exists for the given alias (e.g. same-model integration)
             client = self.Client(app_endpoint_names=frozenset())
             backend = JubilantBackend(client)
-            endpoint_1 = JujuIntegrationApplication("database", "db")
-            endpoint_2 = JujuIntegrationApplication("webapp", "db")
 
             # WHEN
-            backend.remove_consumed_offer(TEST_MODEL, endpoint_1, endpoint_2)
+            backend.remove_saas(TEST_MODEL, "database")
 
             # THEN no CLI call was made
             assert client.cli_calls == []

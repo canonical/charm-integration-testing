@@ -279,21 +279,15 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_consumed_offer(
-        self,
-        model: JujuModelHandle,
-        endpoint_1: JujuIntegrationApplication,
-        endpoint_2: JujuIntegrationApplication,
-    ) -> None:
-        """Actively remove either endpoint's SAAS proxy (if any) from *model*.
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        """Actively remove the SAAS proxy named *alias* from *model*, if present.
 
         Once a CMR offer's underlying application is destroyed, Juju doesn't automatically clean
         up the consuming model's SAAS proxy for it: ``juju status`` keeps listing it (eventually as
         "dead"/"terminated") indefinitely, which blocks re-consuming the same offer alias with
         "exists but is terminating". Explicitly removing the proxy (``juju remove-saas``) frees the
         alias immediately, rather than waiting on a status change that may never happen on its own.
-        Endpoints that aren't SAAS proxies in this model (same-model integrations, or the local side
-        of a cross-model one) are ignored.
+        A no-op if *alias* isn't a SAAS proxy in this model.
         """
         raise NotImplementedError
 

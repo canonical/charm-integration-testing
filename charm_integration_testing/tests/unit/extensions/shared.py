@@ -135,12 +135,7 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def remove_consumed_offer(
-        self,
-        model: JujuModelHandle,
-        endpoint_1: JujuIntegrationApplication,
-        endpoint_2: JujuIntegrationApplication,
-    ) -> None:
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
         raise NotImplementedError
 
     def wait_for_removal_of_units(
