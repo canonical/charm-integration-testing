@@ -85,10 +85,10 @@ for r in json.load(sys.stdin):
 
 Status headers seen in this repo (and their meaning):
 
-- **🟢 (or no header) Looks good** — no changes requested. Note that the script above
-  prints its own literal `(no header)` when the `### ...` regex finds nothing; that is
-  the script's placeholder text, not a status Copilot itself emits — treat it the same
-  as "Looks good".
+- **🟢 Approval recommended (or no header)** — no changes requested. Note that the
+  script above prints its own literal `(no header)` when the `### ...` regex finds
+  nothing; that is the script's placeholder text, not a status Copilot itself emits —
+  treat it the same as "Approval recommended".
 - **🟡 Changes recommended** — Copilot posted at least one actionable inline comment;
   these show up in the normal `/comments` list from Step 1.
 - **🔵 Needs a closer look** — Copilot flagged a concern but suppressed the inline
