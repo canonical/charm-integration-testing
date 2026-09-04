@@ -12,8 +12,12 @@
 #   0.19+: requires dashboard-links, ingress, istio-ingress-route, logging,
 #     require-cmr-mesh, service-mesh; provides provide-cmr-mesh.
 #     istio-ingress-route, require-cmr-mesh, service-mesh are Istio-specific
-#     alternatives; the charm also has ingress (traefik) so these are optional
-#     in non-Istio deployments. Meaning 1: charm reaches active via ingress.
+#     alternatives (ambient mesh). The `ingress` endpoint is NOT
+#     traefik-compatible: it's driven by legacy serialized_data_interface
+#     (SDI), so it's tagged sdi-legacy below to prevent the solver pairing it
+#     with a modern v2-only ingress provider like traefik-k8s, which would
+#     deadlock at deploy time.
+#     See: https://github.com/canonical/charm-integration-testing/issues/976
 #
 # 0.15/* provides sidebar/katib-ui: Meaning 1 optional - kubeflow-dashboard
 #   sidebar integration is additive, not primary purpose. No discoverable
@@ -28,24 +32,39 @@ overrides:
         optional: true
       sidebar:
         optional: true
+    requires:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
   # 0.15/* (excluding beta, which is handled above): provides sidebar only
   - criteria:
       - track: '0.15'
     provides:
       sidebar:
         optional: true
-  # No overrides needed for 0.16-0.18 or latest
+    requires:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+  # 0.16-0.18: no other overrides needed
   - criteria:
       - any_of:
           - track: '0.16'
           - track: '0.17'
           - track: '0.18'
           - track: 'latest'
+    requires:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
   # 0.19+ (default block): istio-ingress-route, service-mesh, require-cmr-mesh
   # are Istio-specific endpoints added in 0.19. In non-Istio deployments the
-  # charm uses ingress (traefik-k8s), so the Istio endpoints are optional.
-  # Excludes pre-0.19 tracks explicitly so future tracks (0.20, etc.) are
-  # covered without enumeration.
+  # charm uses ingress (SDI, tagged sdi-legacy), so the Istio endpoints are
+  # optional. Excludes pre-0.19 tracks explicitly so future tracks (0.20,
+  # etc.) are covered without enumeration.
   - requires:
       istio-ingress-route:
         optional: true
@@ -53,6 +72,10 @@ overrides:
         optional: true
       service-mesh:
         optional: true
+      ingress:
+        features: [sdi-legacy]
     provides:
       provide-cmr-mesh:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'

@@ -19,9 +19,16 @@ overrides:
       upstream-ingress:
         optional: true
     provides:
+      # sdi-legacy is declared here (but never forced active) so the solver's
+      # feature-coherence check can compare it against requirers. traefik-k8s
+      # speaks the modern charms.traefik_k8s.v2.ingress protocol only, so it
+      # never activates sdi-legacy; requirers that force it active (legacy
+      # serialized_data_interface charms, e.g. dex-auth) are naturally rejected
+      # instead of deadlocking at deploy time.
+      # See: https://github.com/canonical/charm-integration-testing/issues/976
       ingress:
         optional: true
-        features: [tls]
+        features: [tls, sdi-legacy]
       ingress-per-unit:
         optional: true
         features: [tls]
@@ -40,3 +47,8 @@ overrides:
       # certificates is required if any downstream endpoint negotiates tls
       - '"tls" in features(endpoint[traefik-route] | endpoint[ingress] | endpoint[ingress-per-unit])
         => bool(endpoint[certificates])'
+      # traefik-k8s speaks the modern charms.traefik_k8s.v2.ingress protocol
+      # only; explicitly deny sdi-legacy so the solver can't satisfy a legacy
+      # SDI requirer's "sdi-legacy" feature pin by activating it on traefik's
+      # side too. See: https://github.com/canonical/charm-integration-testing/issues/976
+      - 'not ("sdi-legacy" in features(endpoint[ingress]))'

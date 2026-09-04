@@ -1,0 +1,17 @@
+---
+# Source: https://github.com/canonical/nginx-ingress-integrator-operator
+#
+# nginx-ingress-integrator's `ingress` provides endpoint uses the modern
+# charms.traefik_k8s.v2.ingress.IngressPerAppProvider library, the same
+# protocol traefik-k8s speaks. sdi-legacy is declared here (but never forced
+# active) so the solver's feature-coherence check can compare it against
+# requirers: nginx-ingress-integrator never activates sdi-legacy, so legacy
+# serialized_data_interface requirers (which force it active, e.g. dex-auth)
+# are naturally rejected instead of deadlocking at deploy time.
+# See: https://github.com/canonical/charm-integration-testing/issues/976
+overrides:
+  - provides:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'not ("sdi-legacy" in features(endpoint[ingress]))'
