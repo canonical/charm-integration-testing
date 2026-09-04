@@ -171,6 +171,28 @@ sudo k8s kubectl logs postgresql-k8s-0 -n testing -c postgresql
 sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 ```
 
+### 6. `test-observer-mcp` — real test execution data (if available)
+
+If this session was launched with `scripts/sandbox.sh run --with-test-observer-mcp`, an
+MCP server named `test-observer` is registered for this session. It talks to the real Test
+Observer API and exposes tools to query test executions, test results, artefacts, reports,
+rerun requests, reported issues, and to **download and search the juju logs from a failed
+test execution**.
+
+Use it proactively for research when doing development or triage work, instead of guessing
+at failure patterns or reasoning from stale/second-hand descriptions:
+
+- Before fixing a reported test_deploy/validator failure, query real test executions/results
+  for the affected charm(s) to see actual status lines, failure frequency, and trends.
+- Search juju logs from a specific failing test execution to confirm a root-cause hypothesis
+  before writing a fix.
+- Use `get_test_results_report` / `get_test_executions_report` to check whether a failure
+  pattern is isolated or widespread before deciding the scope of a fix.
+
+If this tool is not available in your MCP server list, the session was launched without
+`--with-test-observer-mcp`; fall back to `gh`/CI artefacts for triage as usual, or tell the
+user to relaunch with the flag if live test-data access would help.
+
 ---
 
 ## Important notes
