@@ -22,3 +22,4 @@ overrides:
       # configured by _update_ingress_method(), see charm.py.
       - not (bool(endpoint[ingress]) and bool(endpoint[nginx-route]))
       - bool(endpoint[ingress]) => config[ingress-interface] == "ingress"
+      - bool(endpoint[nginx-route]) => config[ingress-interface] != "ingress"
