@@ -2,7 +2,56 @@
 # Traefik optional flags have been added: https://github.com/canonical/traefik-k8s-operator/pull/474
 # But there has been no release
 # And appears in limbo due to being handed off to IS
+#
+# Two endpoint generations across traefik-k8s tracks:
+#   1.0: predates the tracing/forward-auth/upstream-ingress additions above;
+#     only a single `tracing` endpoint exists.
+#   latest (default track): has the split `charm-tracing`/`workload-tracing`
+#     endpoints plus `experimental-forward-auth`/`upstream-ingress`.
 overrides:
+  # 1.0: single `tracing` endpoint, no forward-auth/upstream-ingress
+  - criteria:
+      - track: "1.0"
+    requires:
+      certificates:
+        optional: true
+      logging:
+        optional: true
+      tracing:
+        optional: true
+      receive-ca-cert:
+        optional: true
+    provides:
+      # traefik-k8s speaks the modern charms.traefik_k8s.v2.ingress protocol
+      # only; it never declares sdi-legacy in its feature universe. Legacy
+      # serialized_data_interface requirers that force sdi-legacy active
+      # (e.g. dex-auth) are therefore rejected by feature-coherence (a
+      # feature declared on only one side is forced inactive) instead of
+      # deadlocking at deploy time.
+      # See: https://github.com/canonical/charm-integration-testing/issues/976
+      ingress:
+        optional: true
+        features: [tls]
+      ingress-per-unit:
+        optional: true
+        features: [tls]
+      metrics-endpoint:
+        optional: true
+      traefik-route:
+        optional: true
+        features: [tls]
+      grafana-dashboard:
+        optional: true
+    proxies:
+      - interface: certificates
+        requires: certificates
+        provides: ingress
+    constraints:
+      # certificates is required if any downstream endpoint negotiates tls
+      - '"tls" in features(endpoint[traefik-route] | endpoint[ingress] | endpoint[ingress-per-unit])
+        => bool(endpoint[certificates])'
+
+  # latest (default track): split tracing endpoints, forward-auth, upstream-ingress
   - requires:
       certificates:
         optional: true

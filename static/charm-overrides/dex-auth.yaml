@@ -1,6 +1,33 @@
 ---
 # Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+#
+# Two endpoint generations across dex-auth tracks:
+#   2.31, 2.36: no dex-oidc-config or logging endpoints
+#   2.39+: adds dex-oidc-config (provides) and logging (requires)
 overrides:
+  # 2.31, 2.36: no dex-oidc-config endpoint to mark cyclic
+  - criteria:
+      - any_of:
+          - track: "2.31"
+          - track: "2.36"
+    provides:
+      metrics-endpoint:
+        optional: true
+      grafana-dashboard:
+        optional: true
+    requires:
+      # dex-auth's `ingress` requires endpoint is driven by legacy
+      # serialized_data_interface (SDI), not the modern
+      # charms.traefik_k8s.v2.ingress library. Tag it sdi-legacy so the solver
+      # doesn't pair it with a modern `ingress` provider like traefik-k8s,
+      # which would deadlock at deploy time.
+      # See: https://github.com/canonical/charm-integration-testing/issues/976
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+
+  # 2.39+: dex-oidc-config endpoint present
   - provides:
       metrics-endpoint:
         optional: true
