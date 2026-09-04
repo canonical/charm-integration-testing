@@ -24,19 +24,8 @@ class MetacontrollerExtension(JujuExtension):
     """Deploys metacontroller-operator into a model when a metacontroller-dependent charm is
     present but has no metacontroller CRDs of its own to reconcile against.
 
-    kfp-profile-controller creates metacontroller.k8s.io/v1alpha1 DecoratorController resources
-    at runtime, with no Juju relation to express the dependency on the CRDs that provide that
-    API group. Checked via Juju application state rather than Kubernetes cluster state: the
-    metacontroller CRDs are cluster-scoped, so their presence says nothing about whether *this*
-    model has a working metacontroller-operator to own and reconcile them -- deploying the CRD
-    owner once per model (rather than assuming cluster-wide pre-installation) keeps each model
-    self-sufficient regardless of test ordering or cluster sharing. Deployment is idempotent: an
-    already-deployed metacontroller-operator application in this model is treated as success,
-    and is only ever attempted once even if multiple dependents are present.
-
-    Modeled directly on IstioMeshExtension (see its docstring for the design trade-off against
-    the more generic, not-yet-merged #922 "ClusterAddonExtension" mechanism); the same trade-off
-    applies here.
+    Deployment is idempotent: an already-deployed metacontroller-operator application in this model
+    is treated as success, and is only ever attempted once even if multiple dependents are present.
     """
 
     juju: JujuBackend
