@@ -107,11 +107,15 @@ class TestMysqlDatabaseReplicationExtension:
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
 
-            # THEN both applications are waited on for scaling and settling
+            # THEN both applications are waited on for scaling, and the offer is waited on to settle
             assert (TEST_MODEL.uri, "mysql-1", "0:10:00") in juju.waited_scaled
             assert (TEST_MODEL.uri, "mysql-1", "0:10:00") in juju.waited_settled
             assert (TEST_MODEL.uri, "mysql-2", "0:10:00") in juju.waited_scaled
-            assert (TEST_MODEL.uri, "mysql-2", "0:10:00") in juju.waited_settled
+
+            # AND the consumer is NOT waited on to settle: it legitimately stays in a
+            # non-blocked/active status (e.g. "Setting up replication") until create-replication
+            # runs, so waiting for it to settle first would deadlock.
+            assert (TEST_MODEL.uri, "mysql-2", "0:10:00") not in juju.waited_settled
 
             # AND the create-replication action is run on the offer side's leader unit
             assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions
@@ -176,11 +180,11 @@ class TestMysqlDatabaseReplicationExtension:
                 model=TEST_MODEL, application_offer="mysql-1", application_consumer="mysql-2"
             )
 
-            # THEN both applications are waited on
+            # THEN both applications are waited on, but only the offer is waited on to settle
             assert (TEST_MODEL.uri, "mysql-1", "0:10:00") in juju.waited_scaled
             assert (TEST_MODEL.uri, "mysql-1", "0:10:00") in juju.waited_settled
             assert (TEST_MODEL.uri, "mysql-2", "0:10:00") in juju.waited_scaled
-            assert (TEST_MODEL.uri, "mysql-2", "0:10:00") in juju.waited_settled
+            assert (TEST_MODEL.uri, "mysql-2", "0:10:00") not in juju.waited_settled
 
             # AND the create-replication action is run on the offer's leader unit
             assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions

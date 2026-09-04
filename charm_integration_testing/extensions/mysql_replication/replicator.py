@@ -71,16 +71,15 @@ class MysqlReplicator:
             self.logger.info(f"Skipping replication setup as no units for {application_offer} were found.")
             return
 
-        # Wait for consumer application to be scaled and settled
+        # Wait for consumer application to be scaled. Unlike the offer side, the consumer's
+        # workload legitimately stays in a non-"settled" status (e.g. maintenance: "Setting up
+        # replication") until create-replication runs on the offer side, so we can't also wait
+        # for it to reach wait_application_settled()'s blocked/active - that would deadlock,
+        # since that transition depends on the action this method is about to run.
         self.logger.info(
             f"Waiting for database charm '{self.charm_info.name}' application '{application_consumer}' to be scaled"
         )
         self.juju.wait_application_scaled(model, application_consumer, timedelta(minutes=10))
-
-        self.logger.info(
-            f"Waiting for database charm '{self.charm_info.name}' application '{application_consumer}' units to be settled"
-        )
-        self.juju.wait_application_settled(model, application_consumer, timedelta(minutes=10))
 
         # Skip if consumer has no units
         if self.juju.num_units(model, application_consumer) == 0:
