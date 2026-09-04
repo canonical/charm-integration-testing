@@ -34,8 +34,8 @@ review submission bodies.
 gh api repos/canonical/charm-integration-testing/pulls/<number> \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Title: {d[\"title\"]}\nAuthor: {d[\"user\"][\"login\"]}\nBranch: {d[\"head\"][\"ref\"]}\n\nBody:\n{d[\"body\"]}')"
 
-# Read all inline review comments (per_page=100 avoids the default 30-result truncation)
-gh api "repos/canonical/charm-integration-testing/pulls/<number>/comments?per_page=100" \
+# Read all inline review comments (--paginate ensures more than 100 comments are read)
+gh api --paginate "repos/canonical/charm-integration-testing/pulls/<number>/comments?per_page=100" \
   | python3 -c "
 import sys, json
 for c in json.load(sys.stdin):
@@ -45,7 +45,7 @@ for c in json.load(sys.stdin):
 "
 
 # Read general (issue-style) comments
-gh api "repos/canonical/charm-integration-testing/issues/<number>/comments?per_page=100" \
+gh api --paginate "repos/canonical/charm-integration-testing/issues/<number>/comments?per_page=100" \
   | python3 -c "
 import sys, json
 for c in json.load(sys.stdin):
