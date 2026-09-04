@@ -152,58 +152,14 @@ def integration_endpoint_2(
 
 
 @pytest.fixture
-def _applications_cache() -> dict[JujuModelHandle, dict[str, JujuApplicationInfo]]:
-    """Per-test cache of ``list_applications`` results, keyed by model.
-
-    Shared by ``target_application_info`` and ``neighbor_application_info`` so a non-CMR test
-    (where both resolve to the same model) only queries that model once.
-    """
-    return {}
-
-
-def _cached_applications(
-    juju_client: JujuClient,
-    model_ref: JujuModelHandle,
-    cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
-) -> dict[str, JujuApplicationInfo]:
-    if model_ref not in cache:
-        cache[model_ref] = juju_client.list_applications(model=model_ref)
-    return cache[model_ref]
-
-
-@pytest.fixture
-def target_application_info(
-    juju_client: JujuClient,
-    target_model_ref: JujuModelHandle,
-    target_application: str,
-    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
-) -> JujuApplicationInfo | None:
-    """Live charm/channel info for the target application, resolved from the live model."""
-    return _cached_applications(juju_client, target_model_ref, _applications_cache).get(target_application)
-
-
-@pytest.fixture
-def neighbor_application_info(
+def integration_endpoints_removable(
+    charm_overrides: Path,
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
-    neighbor_application: str,
-    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
-) -> JujuApplicationInfo | None:
-    """Live charm/channel info for the neighbor application, resolved from the live model.
-
-    Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
-    """
-    model_ref = neighbor_model_ref or target_model_ref
-    return _cached_applications(juju_client, model_ref, _applications_cache).get(neighbor_application)
-
-
-@pytest.fixture
-def integration_endpoints_removable(
-    charm_overrides: Path,
-    target_application_info: JujuApplicationInfo | None,
+    target_application: str,
     target_endpoint: str,
-    neighbor_application_info: JujuApplicationInfo | None,
+    neighbor_application: str,
     neighbor_endpoint: str,
     logger: logging.Logger,
 ) -> bool:
@@ -212,10 +168,16 @@ def integration_endpoints_removable(
     Resolved from the live models so it reflects whichever charm/channel is actually deployed.
     """
     overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
-    for info, endpoint in (
-        (target_application_info, target_endpoint),
-        (neighbor_application_info, neighbor_endpoint),
+    # Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
+    # Cache by model so a non-CMR run only calls list_applications once for the shared model.
+    applications_by_model: dict[JujuModelHandle, dict[str, JujuApplicationInfo]] = {}
+    for model_ref, application, endpoint in (
+        (target_model_ref, target_application, target_endpoint),
+        (neighbor_model_ref or target_model_ref, neighbor_application, neighbor_endpoint),
     ):
+        if model_ref not in applications_by_model:
+            applications_by_model[model_ref] = juju_client.list_applications(model=model_ref)
+        info = applications_by_model[model_ref].get(application)
         if info is None or info.channel is None:
             continue
         channel = CharmChannel.model_validate(str(info.channel))
