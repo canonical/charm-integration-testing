@@ -212,17 +212,31 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
         for cid, var in domain_app.charm_ids.items()
     }
 
-    # Ensure both charms exist if integration exists (local and cross-model)
+    # Ensure both charms exist if integration exists (local and cross-model).
+    # Two distinct DomainCharmIntegration entries can (in principle) describe the
+    # same (requires_charm_id, requires_endpoint, provides_charm_id, provides_endpoint)
+    # 4-tuple, which would otherwise emit an identical assertion tag twice and crash
+    # z3 with "named assertion defined twice". Duplicate entries can carry distinct
+    # `exists` BoolRefs, so instead of skipping later duplicates outright (which would
+    # leave their `exists` var unconstrained), OR together every `exists` var sharing a
+    # tag and assert the implication once per tag.
+    charm_var_by_tag: dict[str, z3.BoolRef] = {}
+    exists_vars_by_tag: dict[str, list[z3.BoolRef]] = {}
     for integration in domain.charm_integrations:
         for charm_id in [integration.requires_charm_id, integration.provides_charm_id]:
             charm_var = domain.charms[charm_id].exists
-            solver.assert_and_track(
-                z3.Implies(integration.exists, charm_var),
-                CharmExistsFromIntegrationTag(
-                    charm=_charm_payload(domain.charms[charm_id], charm_id),
-                    integration=_charm_endpoints_from_integration(integration),
-                ).encode(),
-            )
+            tag = CharmExistsFromIntegrationTag(
+                charm=_charm_payload(domain.charms[charm_id], charm_id),
+                integration=_charm_endpoints_from_integration(integration),
+            ).encode()
+            charm_var_by_tag[tag] = charm_var
+            exists_vars_by_tag.setdefault(tag, []).append(integration.exists)
+    for tag, exists_vars in exists_vars_by_tag.items():
+        condition = exists_vars[0] if len(exists_vars) == 1 else z3.Or(*exists_vars)
+        solver.assert_and_track(
+            z3.Implies(condition, charm_var_by_tag[tag]),
+            tag,
+        )
 
     # Build a lookup of cross-model integration counts per (application, endpoint).
     # Only covers external CMRs - in-domain CMRs have their endpoint count handled
