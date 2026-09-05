@@ -1020,6 +1020,46 @@ class TestHandlePeerChannelMismatch:
         # attribute that differs between the two models in this test)
         assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
 
+    def test_risk_falls_back_to_peer_channel_risk_when_tag_omits_it(self) -> None:
+        # GIVEN a mismatch tag that pins a track and revision but does not specify a risk
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, model_ref)
+        add_charm_to_domain(peer, domain, model_ref)
+        peer_variant = peer.model_copy(update={"revision": 2})
+        anchor_variant = anchor.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant, anchor_variant])
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = PeerChannelMismatchTag(
+            charm=CharmPayload(charm_name="anchor", charm_id=0),
+            endpoint="ep",
+            peer_charm_name="peer",
+            peer_charm_id=1,
+            required_track="latest",
+            required_revision=2,
+        )
+
+        # WHEN resolving the mismatch (tag has no required_risk)
+        result = builder._handle_peer_channel_mismatch(tag, domain)
+
+        # THEN the peer's own channel risk ("stable", from _CHANNEL) is used instead of
+        # None, rather than letting charm_from_store guess a risk via priority order
+        assert result is True
+        assert fake.charm_from_store_calls[0]["charm_risk"] == _CHANNEL.risk
+
 
 class TestMergeMismatchTags:
     """BundleBuilder._merge_mismatch_tags."""
