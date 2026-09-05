@@ -814,6 +814,122 @@ class TestJubilantBackend:
                     count=3,
                 )
 
+    class TestWaitUnhealthy:
+        def test_wait_unhealthy(self) -> None:
+            # GIVEN a unit whose workload is already non-active
+            stub = StatusStub(
+                application_statuses={"target": "blocked"},
+                unit_workload_statuses={"target/0": "blocked"},
+                unit_juju_statuses={"target/0": "idle"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.wait_unhealthy(
+                JujuModelHandle(controller="test-controller", model="test-model"),
+                "target",
+                timedelta(seconds=10),
+                count=3,
+            )
+
+            # THEN status was polled 3 consecutive times before returning
+            assert stub.call_count == 3
+
+        def test_wait_unhealthy_does_not_fail_fast_on_agent_executing(self) -> None:
+            # GIVEN the workload is non-active and the unit agent is executing a hook, not disconnected
+            stub = StatusStub(
+                application_statuses={"target": "blocked"},
+                unit_workload_statuses={"target/0": "blocked"},
+                unit_juju_statuses={"target/0": "executing"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.wait_unhealthy(
+                JujuModelHandle(controller="test-controller", model="test-model"),
+                "target",
+                timedelta(seconds=10),
+                count=3,
+            )
+
+            # THEN it debounces normally instead of failing fast; 'executing' is not a disconnect
+            assert stub.call_count == 3
+
+        def test_wait_unhealthy_raises_immediately_on_agent_disconnect(self) -> None:
+            # GIVEN the workload is still active, but the unit agent has already left idle
+            stub = StatusStub(
+                application_statuses={"target": "active"},
+                unit_workload_statuses={"target/0": "active"},
+                unit_juju_statuses={"target/0": "lost"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN it raises on the very first poll, without waiting for any debounce
+            with pytest.raises(JujuWaitTimeoutError) as exc_info:
+                backend.wait_unhealthy(
+                    JujuModelHandle(controller="test-controller", model="test-model"),
+                    "target",
+                    timedelta(seconds=10),
+                    count=3,
+                )
+            assert stub.call_count == 1
+            assert exc_info.value.wait_state.message == "Juju agent disconnected"
+
+        def test_wait_unhealthy_never_triggers_when_healthy(self) -> None:
+            # GIVEN a fully healthy unit (active workload, idle agent)
+            stub = StatusStub(
+                application_statuses={"target": "active"},
+                unit_workload_statuses={"target/0": "active"},
+                unit_juju_statuses={"target/0": "idle"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_unhealthy is called with datetime mocked to jump past the timeout
+            # THEN it times out because the workload never leaves 'active'
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
+                with pytest.raises(JujuWaitTimeoutError):
+                    backend.wait_unhealthy(
+                        JujuModelHandle(controller="test-controller", model="test-model"),
+                        "target",
+                        timedelta(milliseconds=100),
+                        count=3,
+                    )
+
+        def test_wait_unhealthy_waits_when_application_does_not_exist_yet(self) -> None:
+            # GIVEN a status with no 'target' application at all
+            stub = StatusStub()
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_unhealthy is called with datetime mocked to jump past the timeout
+            # THEN it times out waiting for the app to exist, not succeed instantly
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
+                with pytest.raises(JujuWaitTimeoutError):
+                    backend.wait_unhealthy(
+                        JujuModelHandle(controller="test-controller", model="test-model"),
+                        "target",
+                        timedelta(milliseconds=100),
+                        count=3,
+                    )
+
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN

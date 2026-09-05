@@ -7,6 +7,7 @@ import pytest
 from juju import JujuIntegrationApplication
 from juju_jubilant.wait import (
     all_statuses_are_in,
+    any_status_not_in,
     application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
@@ -406,6 +407,32 @@ class TestWaitConditions:
         # THEN
         assert result is False
         assert "webapp" in wait.noncompliant_applications
+
+    def test_any_status_not_in_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = any_status_not_in(
+            sample_database_webapp_status,
+            application_statuses={"active"},
+            unit_statuses={"active"},
+            unit_agent_statuses={"idle"},
+        )
+
+        # THEN - everything is compliant, so "not in" is False
+        assert result is False
+        assert wait.noncompliant_applications == {}
+        assert wait.noncompliant_units == {}
+        assert wait.noncompliant_unit_agents == {}
+
+    def test_any_status_not_in_noncompliant(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = any_status_not_in(
+            sample_database_webapp_status, application_statuses={"waiting"}, unit_statuses={"waiting"}
+        )
+
+        # THEN - status left the allowed set, so "not in" is True
+        assert result is True
+        assert "webapp" in wait.noncompliant_applications
+        assert wait.message == "left applications: [waiting], units: [waiting]"
 
     def test_applications_are_scaled_compliant(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN

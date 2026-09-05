@@ -88,6 +88,11 @@ class JujuWaitState:
     noncompliant_unit_agents: dict[str, JujuUnitAgentState | None] = field(default_factory=dict)
 
 
+def is_agent_disconnected(wait_state: JujuWaitState) -> bool:
+    """True if any noncompliant unit agent is 'lost' (disconnected from the controller)."""
+    return any(state is not None and state.status == "lost" for state in wait_state.noncompliant_unit_agents.values())
+
+
 class JujuWaitTimeoutError(TimeoutError):
     wait_state: JujuWaitState
 
@@ -209,6 +214,21 @@ class JujuBackend(ABC):
         count: int | None,
         strict_timeout: bool = False,
     ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_unhealthy(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        """Wait for *application*'s unit workload status to leave 'active' for *count* consecutive checks.
+
+        Raises immediately if any unit agent disconnects.
+        """
         raise NotImplementedError
 
     @abstractmethod

@@ -38,6 +38,9 @@ class JujuClient:
     logger: logging.Logger
     extensions: list[JujuExtension]
 
+    # Long enough to debounce transient update-status blips without masking a real degradation.
+    DEFAULT_UNHEALTHY_DEBOUNCE_COUNT = 130
+
     def __init__(
         self,
         backend: JujuBackend,
@@ -77,6 +80,19 @@ class JujuClient:
     ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
+
+    def unhealthy_for_period(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        timeout: timedelta | None = None,
+        count: int = DEFAULT_UNHEALTHY_DEBOUNCE_COUNT,
+        strict_timeout: bool = False,
+    ) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for '{application}' to become unhealthy.")
+        self.backend.wait_unhealthy(
+            model=model, application=application, timeout=timeout, count=count, strict_timeout=strict_timeout
+        )
 
     def multi_model_idle_for_period(
         self,
