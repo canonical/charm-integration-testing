@@ -37,6 +37,9 @@ class CharmEndpointOverrides(BaseModel):
     limit: int | None = None
     cyclic: bool | None = None
     features: set[str] = Field(default_factory=set)
+    # Whether the remove-and-restore test may tear down this endpoint's integration. False when
+    # doing so is fundamentally unsupported, not just flaky. None (unset) means removable.
+    removable: bool | None = None
 
 
 class CharmResourceTrackingOverrides(BaseModel):
@@ -145,6 +148,15 @@ class OverridesClient:
 
     def get_charm_resource_tracking_skips(self, charm: str, channel: CharmChannel) -> frozenset[str]:
         return frozenset(self._get_charm_overrides(charm, channel).resource_tracking.skip)
+
+    def get_charm_endpoint_removable(self, charm: str, channel: CharmChannel, endpoint: str) -> bool:
+        """Whether ``endpoint`` may be torn down and re-added by the remove-and-restore test."""
+        overrides = self._get_charm_overrides(charm, channel)
+        for endpoint_map in (overrides.requires, overrides.provides):
+            endpoint_override = endpoint_map.get(endpoint)
+            if endpoint_override is not None and endpoint_override.removable is not None:
+                return endpoint_override.removable
+        return True
 
     def get_charm_assumes_overrides(self, charm: str, channel: CharmChannel) -> list[str | dict[str, Any]] | None:
         return self._get_charm_overrides(charm, channel).assumes
