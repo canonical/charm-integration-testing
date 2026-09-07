@@ -782,10 +782,10 @@ class BundleBuilder:
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
             track: str | None = resolved.track or peer_channel.track or None
-            risk: str | None = resolved.risk or None
+            risk: str | None = resolved.risk or peer_channel.risk or None
         else:
             track = tag.required_track or peer_channel.track or None
-            risk = tag.required_risk or None
+            risk = tag.required_risk or peer_channel.risk or None
         expanded = False
 
         # Try fetching the peer charm at the required channel.
