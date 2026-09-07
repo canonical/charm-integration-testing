@@ -783,22 +783,36 @@ class BundleBuilder:
             resolved = CharmChannel.model_validate(tag.required_channel)
             track: str | None = resolved.track or peer_channel.track or None
             risk: str | None = resolved.risk or peer_channel.risk or None
+            risk_demanded = resolved.risk is not None
         else:
             track = tag.required_track or peer_channel.track or None
             risk = tag.required_risk or peer_channel.risk or None
+            risk_demanded = tag.required_risk is not None
         expanded = False
 
+        # When the risk is only inherited from the peer's current channel, it is a
+        # preference: the required track may not publish that risk at all (e.g. a
+        # track with no stable release). Fall back to charm_from_store's track-wide
+        # risk search so the peer resolves at a risk the track actually publishes.
+        risk_candidates: list[str | None] = [risk]
+        if risk is not None and not risk_demanded:
+            risk_candidates.append(None)
+
         # Try fetching the peer charm at the required channel.
-        try:
-            peer_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.peer_charm_name,
-                ubuntu_arch=peer_model_spec.arch,
-                juju_version=peer_model_spec.juju_version,
-                platform=peer_model_spec.platform,
-                charm_track=track,
-                charm_risk=risk,
-                charm_revision=tag.required_revision,
-            )
+        for candidate_risk in risk_candidates:
+            try:
+                peer_charm = self.charmhub_client.charm_from_store(
+                    charm_name=tag.peer_charm_name,
+                    ubuntu_arch=peer_model_spec.arch,
+                    juju_version=peer_model_spec.juju_version,
+                    platform=peer_model_spec.platform,
+                    charm_track=track,
+                    charm_risk=candidate_risk,
+                    charm_revision=tag.required_revision,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{candidate_risk or '*'}")
+                continue
             expanded |= self._add_charm_for_charm_id(
                 peer_charm,
                 tag.peer_charm_id,
@@ -807,8 +821,7 @@ class BundleBuilder:
                 connect_to_id=tag.charm.charm_id,
                 connect_to_neighbors=True,
             )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
+            break
 
         # Also try fetching the owning charm at the peer's actual channel so they can match.
         # This handles the case where the peer is pinned and the owning charm must adapt instead.

@@ -1060,6 +1060,83 @@ class TestHandlePeerChannelMismatch:
         assert result is True
         assert fake.charm_from_store_calls[0]["charm_risk"] == _CHANNEL.risk
 
+    def test_inherited_risk_falls_back_to_track_wide_search_when_track_lacks_that_risk(
+        self,
+    ) -> None:
+        # GIVEN a peer whose required track publishes no release at the peer's current
+        # risk (e.g. mysql-k8s track 8.4 has no stable release)
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, model_ref)
+        add_charm_to_domain(peer, domain, model_ref)
+        peer_variant = peer.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(
+            charm_responses=[
+                CharmReleaseNotFoundException("no stable release on this track"),
+                peer_variant,
+                CharmReleaseNotFoundException("no match"),
+            ]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving a mismatch that requires the track but not a specific risk
+        result = builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="8.4"),
+            domain,
+        )
+
+        # THEN the inherited risk is tried first, then retried with risk unset so
+        # charm_from_store searches the risks the track actually publishes
+        assert result is True
+        assert fake.charm_from_store_calls[0]["charm_risk"] == _CHANNEL.risk
+        assert fake.charm_from_store_calls[1]["charm_risk"] is None
+
+    def test_demanded_risk_is_not_retried_without_a_risk(self) -> None:
+        # GIVEN a mismatch tag that explicitly demands a risk
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, model_ref)
+        add_charm_to_domain(peer, domain, model_ref)
+        fake = _FakeCharmhubClient(charm_responses=CharmReleaseNotFoundException("no match"))
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN the demanded risk has no release
+        builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="8.4", risk="edge"),
+            domain,
+        )
+
+        # THEN the peer is never re-fetched with the risk unset, which would silently
+        # resolve a risk the constraint did not ask for
+        peer_calls = [c for c in fake.charm_from_store_calls if c["charm_name"] == "peer"]
+        assert [c["charm_risk"] for c in peer_calls] == ["edge"]
+
 
 class TestMergeMismatchTags:
     """BundleBuilder._merge_mismatch_tags."""
