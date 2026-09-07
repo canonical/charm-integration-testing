@@ -1,0 +1,15 @@
+---
+# Source: https://github.com/canonical/kubeflow-volumes-operator
+#
+# kubeflow-volumes' `ingress` requires endpoint is driven by legacy
+# serialized_data_interface (SDI), not the modern charms.traefik_k8s.v2.ingress
+# library. Tag it `sdi-legacy` so the solver doesn't pair it with a modern
+# `ingress` provider like traefik-k8s, which would deadlock at deploy time
+# (neither side speaks the other's wire protocol).
+# See: https://github.com/canonical/charm-integration-testing/issues/976
+overrides:
+  - requires:
+      ingress:
+        features: [sdi-legacy]
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
