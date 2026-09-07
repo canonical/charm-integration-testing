@@ -25,9 +25,13 @@ overrides:
     requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
@@ -42,9 +46,13 @@ overrides:
     requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
@@ -61,9 +69,13 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
@@ -80,9 +92,13 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
@@ -95,9 +111,13 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
@@ -115,6 +135,9 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       istio-ingress-route:
         optional: true
       kfp-api:
@@ -124,6 +147,7 @@ overrides:
       service-mesh:
         optional: true
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
@@ -136,9 +160,13 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'

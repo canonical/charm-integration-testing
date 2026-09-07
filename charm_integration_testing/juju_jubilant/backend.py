@@ -773,7 +773,7 @@ class JubilantBackend(JujuCmdBackend):
             controller_k8s_namespace = f"controller-{controller_name}"
             k8s.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
             k8s.wait_for_statefulset_restart(
-                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=600
             )
 
     def kill_controller(self, controller: str) -> None:
