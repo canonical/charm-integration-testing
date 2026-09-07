@@ -1,0 +1,62 @@
+---
+# juju-dashboard-k8s: web UI for the Juju controller (k8s variant).
+# Source: https://github.com/canonical/juju-dashboard-charm (k8s-charm/)
+#
+# controller (requires, interface juju-dashboard): the primary purpose -
+#   src/charm.py sets MaintenanceStatus("Awaiting controller relation.") on
+#   install and BlockedStatus("Missing controller integration") if the
+#   relation is absent/departed - the charm never reaches `active` without
+#   it. Not optional. In real deployments this is satisfied by a special
+#   controller-model SAAS offer/consume (`juju offer <ctrl>.controller` +
+#   `juju consume`), not a regular charm-to-charm relation - see
+#   canonical/charm-integration-testing#657 ("Juju-dashboard must be deployed
+#   in controller model ... currently unsupported"). This solver has no
+#   mechanism to synthesize that offer, so it substitutes juju-jimm-k8s
+#   (which also exposes a "dashboard" endpoint on the same interface) and
+#   drags in its dependency chain (hydra, openfga-k8s, pgbouncer-k8s,
+#   postgresql-k8s, self-signed-certificates). Marking `controller` optional
+#   instead was tried and rejected: `wait_idle_multi_model` only accepts
+#   `application_statuses={"active"}`, never "blocked", so an unconnected
+#   juju-dashboard-k8s would time out test_deploy every run regardless.
+#
+# Two endpoint generations, confirmed live via charm_from_store (not `juju
+# info`, which misreports per-channel relations for this charm):
+#   latest/stable, latest/edge, 0.14/beta: no `ingress` endpoint at all -
+#     `nginx-route` is the only reverse-proxy path, so it stays required
+#     (not overridden) on these tracks.
+#   0.15/stable (rev 72) and 0.16/stable (rev 76): both have `ingress` and
+#     `nginx-route` - alternative reverse-proxy mechanisms (k8s ingress vs
+#     nginx-ingress-integrator). Meaning 2 (at-least-one): mark both
+#     optional, then constrain so the solver always connects exactly one
+#     proxy path. Handled as the fallback (no criteria) block below so any
+#     future track after 0.16 automatically gets the same treatment instead
+#     of needing a new track number added here on every release.
+#
+# dashboard (provides, interface http, all tracks): the charm is normally
+#   consumed by a human via a browser (through nginx-route/ingress), not via
+#   another charm relating to this endpoint as an "http" consumer. No charm
+#   in Charmhub's search space declares a requires-endpoint with interface
+#   "http" to pair with it, so the bundle builder can never satisfy it as
+#   non-optional (see canonical/charm-integration-testing#434, which already
+#   suggests this endpoint was inadvertently left required).
+overrides:
+  # latest/ + 0.14/: nginx-route only, no ingress endpoint - nginx-route stays required
+  - criteria:
+      - any_of:
+          - track: latest
+          - track: "0.14"
+    provides:
+      dashboard:
+        optional: true
+
+  # 0.15/, 0.16/, and any future track (fallback): ingress + nginx-route
+  - requires:
+      ingress:
+        optional: true
+      nginx-route:
+        optional: true
+    provides:
+      dashboard:
+        optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) or bool(endpoint[nginx-route])'
