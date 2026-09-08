@@ -175,7 +175,7 @@ class BundleBuilder:
                         )
                     )
 
-                self._handle_unsat_core(unsat_core, domain)
+                self._handle_unsat_core(unsat_core, solver, domain)
             else:
                 raise UncompletableBundleError(
                     diagnostics=(
@@ -189,9 +189,10 @@ class BundleBuilder:
                     )
                 )
 
-    def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
+    def _handle_unsat_core(self, unsat_core: z3.AstVector, solver: z3.Solver, domain: Domain) -> None:
+        raw_tags = [AssertionTag.decode(str(a)) for a in unsat_core]
         tags: list[AssertionTag] = sorted(
-            self._merge_mismatch_tags([AssertionTag.decode(str(a)) for a in unsat_core]),
+            self._merge_mismatch_tags(self._resolve_full_mismatch_tags(raw_tags, solver)),
             key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
         )
         expanded = False
@@ -318,6 +319,53 @@ class BundleBuilder:
                 )
             )
         return canonicalize_diagnostics(diagnostics)
+
+    @staticmethod
+    def _full_mismatch_requirements(solver: z3.Solver) -> dict[tuple[int, int, str], PeerChannelMismatchTag]:
+        """Collect every PeerChannelMismatchTag tracked in the solver, merged by (anchor, peer, endpoint)."""
+        merged: dict[tuple[int, int, str], PeerChannelMismatchTag] = {}
+        for assertion in solver.assertions():
+            if not z3.is_implies(assertion) or assertion.num_args() != 2:
+                continue
+            tracker = assertion.arg(0)
+            if tracker.num_args() != 0:
+                continue  # not a bare tracked name (e.g. an untracked plain assertion)
+            try:
+                tag = AssertionTag.decode(str(tracker))
+            except ValueError:
+                continue
+            if not isinstance(tag, PeerChannelMismatchTag):
+                continue
+            key = (tag.charm.charm_id, tag.peer_charm_id, tag.endpoint)
+            existing = merged.get(key)
+            merged[key] = (
+                tag
+                if existing is None
+                else PeerChannelMismatchTag(
+                    charm=existing.charm,
+                    endpoint=existing.endpoint,
+                    peer_charm_name=existing.peer_charm_name,
+                    peer_charm_id=existing.peer_charm_id,
+                    required_track=existing.required_track or tag.required_track,
+                    required_risk=existing.required_risk or tag.required_risk,
+                    required_channel=existing.required_channel or tag.required_channel,
+                    required_revision=existing.required_revision or tag.required_revision,
+                )
+            )
+        return merged
+
+    @classmethod
+    def _resolve_full_mismatch_tags(cls, tags: list[AssertionTag], solver: z3.Solver) -> list[AssertionTag]:
+        """Replace each PeerChannelMismatchTag with its full (anchor, peer, endpoint) record."""
+        full = cls._full_mismatch_requirements(solver)
+        resolved: list[AssertionTag] = []
+        for tag in tags:
+            if isinstance(tag, PeerChannelMismatchTag):
+                key = (tag.charm.charm_id, tag.peer_charm_id, tag.endpoint)
+                resolved.append(full.get(key, tag))
+            else:
+                resolved.append(tag)
+        return resolved
 
     @staticmethod
     def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
@@ -779,13 +827,20 @@ class BundleBuilder:
         model = domain.models[owning_model]
         peer_model_spec = domain.models[peer_model]
         peer_channel = domain.charms[tag.peer_charm_id].spec.channel
+        # The fixed reference for any dimension the tag doesn't already require explicitly.
+        anchor_channel = domain.charms[tag.charm.charm_id].spec.channel
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
-            track: str | None = resolved.track or peer_channel.track or None
-            risk: str | None = resolved.risk or peer_channel.risk or None
+            track: str | None = resolved.track or anchor_channel.track or None
+            risk: str | None = resolved.risk or None
         else:
-            track = tag.required_track or peer_channel.track or None
-            risk = tag.required_risk or peer_channel.risk or None
+            track = tag.required_track or anchor_channel.track or None
+            risk = tag.required_risk or None
+
+        # charm_from_store's revision-pinned lookup needs an explicit risk to avoid
+        # trying tiers in a fixed order; fall back to the anchor's own risk.
+        if risk is None and tag.required_revision is not None:
+            risk = anchor_channel.risk or None
         expanded = False
 
         # Try fetching the peer charm at the required channel.

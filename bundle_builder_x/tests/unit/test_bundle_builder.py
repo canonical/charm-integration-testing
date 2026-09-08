@@ -13,6 +13,7 @@ from bundle_builder_x.assertion_tags import (
     AppEndpointPayload,
     ApplicationExistsTag,
     ApplicationIntegrationExistsTag,
+    AssertionTag,
     CharmEndpointNonOptionalTag,
     CharmEndpointPayload,
     CharmPayload,
@@ -37,6 +38,7 @@ from bundle_builder_x.bundle_diagnostics import (
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.constraints import add_constraints
+from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -1020,8 +1022,10 @@ class TestHandlePeerChannelMismatch:
         # attribute that differs between the two models in this test)
         assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
 
-    def test_risk_falls_back_to_peer_channel_risk_when_tag_omits_it(self) -> None:
-        # GIVEN a mismatch tag that pins a track and revision but does not specify a risk
+    def test_risk_falls_back_to_anchors_own_channel_risk_when_tag_omits_it(self) -> None:
+        # GIVEN a mismatch tag that pins a track and revision but does not specify a risk,
+        # and a peer whose CURRENT risk differs from the anchor's (so the assertion below
+        # can only pass if the anchor's channel - not the peer's - is what gets read)
         domain = Domain()
         model_ref = ModelRef(name="m")
         domain.models[model_ref] = DomainModel(
@@ -1036,7 +1040,7 @@ class TestHandlePeerChannelMismatch:
         peer = _make_charm(
             "peer",
             {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
-        )
+        ).model_copy(update={"channel": CharmChannel(track="latest", risk="edge", branch="")})
         add_charm_to_domain(anchor, domain, model_ref)
         add_charm_to_domain(peer, domain, model_ref)
         peer_variant = peer.model_copy(update={"revision": 2})
@@ -1055,10 +1059,142 @@ class TestHandlePeerChannelMismatch:
         # WHEN resolving the mismatch (tag has no required_risk)
         result = builder._handle_peer_channel_mismatch(tag, domain)
 
-        # THEN the peer's own channel risk ("stable", from _CHANNEL) is used instead of
-        # None, rather than letting charm_from_store guess a risk via priority order
+        # THEN the anchor's own channel risk ("stable") is used, not the peer's current
+        # ("edge") - the anchor is the fixed reference every self-anchored constraint is
+        # defined against, so nothing is inferred from the peer being replaced
         assert result is True
         assert fake.charm_from_store_calls[0]["charm_risk"] == _CHANNEL.risk
+
+    def test_risk_is_not_inherited_when_no_revision_is_pinned(self) -> None:
+        # GIVEN a track-only mismatch tag (no risk, no revision pinned) whose peer's
+        # current risk ("stable", from _CHANNEL) is not published on the required track
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, model_ref)
+        add_charm_to_domain(peer, domain, model_ref)
+        peer_variant = peer.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant, CharmReleaseNotFoundException("no match")])
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving the mismatch (track required, no risk, no revision)
+        result = builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="8.4"),
+            domain,
+        )
+
+        # THEN risk is left unset instead of inheriting the peer's current risk, so
+        # charm_from_store's own track-wide risk search (which is channel-accurate,
+        # unlike the revision-pinned lookup) can find a risk the track actually publishes
+        assert result is True
+        assert fake.charm_from_store_calls[0]["charm_risk"] is None
+
+
+def _domain_with_peer_mismatch(
+    peer_channel: str, peer_revision: int, anchor_channel: str, anchor_revision: int
+) -> Domain:
+    """An anchor and a single peer, cyclically peered, with a track/risk/revision-match
+    constraint on the anchor - mirrors the real mongodb-k8s sharding_revision_match pattern.
+    """
+    constraint = parse_constraint(
+        "tracks(charms(endpoint[replication-offer])) == tracks({self}) and "
+        "risks(charms(endpoint[replication-offer])) == risks({self}) and "
+        "revisions(charms(endpoint[replication-offer])) == revisions({self})"
+    )
+    endpoints = {
+        "replication": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgdata", optional=True, cyclic=True),
+        "replication-offer": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgdata", optional=True, cyclic=True),
+    }
+    anchor = Charm(
+        name="mongo",
+        channel=CharmChannel.model_validate(anchor_channel),
+        revision=anchor_revision,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=endpoints,
+        platforms=["kubernetes"],
+        constraints=[constraint],
+    )
+    peer = Charm(
+        name="mongo",
+        channel=CharmChannel.model_validate(peer_channel),
+        revision=peer_revision,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=endpoints,
+        platforms=["kubernetes"],
+        constraints=[constraint],
+    )
+    domain = Domain()
+    model_ref = ModelRef(name="m")
+    domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+    anchor_id = add_charm_to_domain(anchor, domain, model_ref)
+    peer_id = add_charm_to_domain(peer, domain, model_ref)
+    pair_charms_in_domain(domain, anchor_id, peer_id)
+    return domain
+
+
+class TestFullMismatchRequirements:
+    """BundleBuilder._full_mismatch_requirements / _resolve_full_mismatch_tags."""
+
+    def test_recovers_a_dimension_the_minimized_core_omitted(self) -> None:
+        # GIVEN a peer that is wrong on BOTH risk and revision at once (track matches)
+        domain = _domain_with_peer_mismatch(
+            peer_channel="8/stable", peer_revision=999, anchor_channel="8/edge", anchor_revision=231
+        )
+        solver = z3.Solver()
+        solver.set("unsat_core", True)
+        add_constraints(solver, domain)
+        solver.add(domain.charms[0].exists)
+        solver.add(domain.charms[1].exists)
+        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
+        assert solver.check() == z3.unsat
+        core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
+
+        # WHEN resolving the core's mismatch tag(s) against the full solver record
+        resolved = BundleBuilder._resolve_full_mismatch_tags(core_tags, solver)
+
+        # THEN the resolved tag carries both violated dimensions, even if the raw
+        # core only cited one of them
+        mismatch_tags = [t for t in resolved if isinstance(t, PeerChannelMismatchTag)]
+        assert len(mismatch_tags) == 1
+        assert mismatch_tags[0].required_risk == "edge"
+        assert mismatch_tags[0].required_revision == 231
+
+    def test_does_not_invent_a_dimension_that_was_never_violated(self) -> None:
+        # GIVEN a peer wrong on revision only (track and risk already match the anchor)
+        domain = _domain_with_peer_mismatch(
+            peer_channel="8/edge", peer_revision=999, anchor_channel="8/edge", anchor_revision=231
+        )
+        solver = z3.Solver()
+        solver.set("unsat_core", True)
+        add_constraints(solver, domain)
+        solver.add(domain.charms[0].exists)
+        solver.add(domain.charms[1].exists)
+        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
+        assert solver.check() == z3.unsat
+        core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
+
+        # WHEN resolving against the full solver record
+        resolved = BundleBuilder._resolve_full_mismatch_tags(core_tags, solver)
+
+        # THEN risk stays unset - it was never actually violated for this peer
+        mismatch_tags = [t for t in resolved if isinstance(t, PeerChannelMismatchTag)]
+        assert len(mismatch_tags) == 1
+        assert mismatch_tags[0].required_risk is None
+        assert mismatch_tags[0].required_revision == 231
 
 
 class TestMergeMismatchTags:
