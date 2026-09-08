@@ -1186,6 +1186,47 @@ def _domain_with_peer_mismatch(
     return domain
 
 
+def _domain_with_two_mismatched_peers(anchor_channel: str, anchor_revision: int) -> Domain:
+    """An anchor and TWO peer candidates, each violating a different single dimension.
+
+    Mirrors a mid-CEGIS domain where an earlier iteration already added a second peer
+    candidate alongside the original, and neither one fully matches the anchor yet.
+    """
+    constraint = parse_constraint(
+        "tracks(charms(endpoint[replication-offer])) == tracks({self}) and "
+        "risks(charms(endpoint[replication-offer])) == risks({self}) and "
+        "revisions(charms(endpoint[replication-offer])) == revisions({self})"
+    )
+    endpoints = {
+        "replication": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgdata", optional=True, cyclic=True),
+        "replication-offer": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgdata", optional=True, cyclic=True),
+    }
+    anchor = Charm(
+        name="mongo",
+        channel=CharmChannel.model_validate(anchor_channel),
+        revision=anchor_revision,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=endpoints,
+        platforms=["kubernetes"],
+        constraints=[constraint],
+    )
+    # Peer A matches risk but has the wrong revision.
+    peer_a = anchor.model_copy(update={"revision": anchor_revision + 1})
+    # Peer B matches revision but has the wrong risk.
+    wrong_risk = "beta" if anchor.channel.risk != "beta" else "edge"
+    peer_b = anchor.model_copy(update={"channel": CharmChannel(track=anchor.channel.track, risk=wrong_risk, branch="")})
+    domain = Domain()
+    model_ref = ModelRef(name="m")
+    domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+    anchor_id = add_charm_to_domain(anchor, domain, model_ref)
+    peer_a_id = add_charm_to_domain(peer_a, domain, model_ref)
+    peer_b_id = add_charm_to_domain(peer_b, domain, model_ref)
+    pair_charms_in_domain(domain, anchor_id, peer_a_id)
+    pair_charms_in_domain(domain, anchor_id, peer_b_id)
+    return domain
+
+
 class TestFullMismatchRequirements:
     """BundleBuilder._full_mismatch_requirements / _resolve_full_mismatch_tags."""
 
@@ -1236,6 +1277,28 @@ class TestFullMismatchRequirements:
         assert mismatch_tags[0].required_risk is None
         assert mismatch_tags[0].required_revision == 231
 
+    def test_merges_dimensions_violated_by_different_peer_candidates(self) -> None:
+        # GIVEN two candidate peers for the same anchor+endpoint: A has the right risk
+        # but wrong revision, B has the right revision but wrong risk - neither one
+        # alone carries both required dimensions
+        domain = _domain_with_two_mismatched_peers(anchor_channel="8/edge", anchor_revision=231)
+        solver = z3.Solver()
+        solver.set("unsat_core", True)
+        add_constraints(solver, domain)
+        for charm in domain.charms:
+            solver.add(charm.exists)
+        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
+        assert solver.check() == z3.unsat
+
+        # WHEN resolving the full solver record for the anchor
+        full = BundleBuilder._full_mismatch_requirements(solver)
+        merged = full[(0, "replication-offer")]
+
+        # THEN the two peers' tags collapse into one requirement carrying both
+        # dimensions, so a single fetch resolves the anchor's actual target fully
+        assert merged.required_risk == "edge"
+        assert merged.required_revision == 231
+
 
 class TestMergeMismatchTags:
     """BundleBuilder._merge_mismatch_tags."""
@@ -1275,10 +1338,10 @@ class TestMergeMismatchTags:
         assert merged.required_track == "zed"
         assert merged.required_risk == "edge"
 
-    def test_different_pairs_kept_separate(self) -> None:
-        # GIVEN mismatch tags for two different (anchor, peer) pairs
+    def test_different_anchors_kept_separate(self) -> None:
+        # GIVEN mismatch tags for two different anchors (different targets)
         tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
-        tag_b = _mismatch(anchor_id=0, peer_id=2, track="antelope")
+        tag_b = _mismatch(anchor_id=1, peer_id=1, track="antelope")
 
         # WHEN merged
         result = BundleBuilder._merge_mismatch_tags([tag_a, tag_b])
@@ -1286,12 +1349,31 @@ class TestMergeMismatchTags:
         # THEN both are kept
         assert len(result) == 2
 
+    def test_different_peers_for_the_same_anchor_are_merged(self) -> None:
+        # GIVEN two different peer candidates for the same anchor+endpoint, each
+        # carrying a different dimension of the same requirement (self's own track
+        # and risk are fixed, so both tags describe the one target being converged to)
+        track_tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
+        risk_tag = _mismatch(anchor_id=0, peer_id=2, risk="edge")
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags([track_tag, risk_tag])
+
+        # THEN they collapse to one tag with both dimensions set, so a fetch based on
+        # either peer's violation still resolves the full requirement
+        assert len(result) == 1
+        merged = result[0]
+        assert isinstance(merged, PeerChannelMismatchTag)
+        assert merged.required_track == "zed"
+        assert merged.required_risk == "edge"
+
     def test_insertion_order_preserved(self) -> None:
-        # GIVEN a mix: non-mismatch, mismatch pair A, non-mismatch, mismatch pair B
+        # GIVEN a mix: non-mismatch, mismatch pair A, non-mismatch, mismatch for a
+        # different anchor
         non_mismatch = _mismatch_tag()
         tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
         tag_a2 = _mismatch(anchor_id=0, peer_id=1, risk="edge")
-        tag_b = _mismatch(anchor_id=0, peer_id=2, track="antelope")
+        tag_b = _mismatch(anchor_id=1, peer_id=2, track="antelope")
 
         # WHEN merged
         result = BundleBuilder._merge_mismatch_tags([non_mismatch, tag_a, non_mismatch, tag_b, tag_a2])

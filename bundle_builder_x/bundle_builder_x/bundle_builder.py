@@ -321,9 +321,15 @@ class BundleBuilder:
         return canonicalize_diagnostics(diagnostics)
 
     @staticmethod
-    def _full_mismatch_requirements(solver: z3.Solver) -> dict[tuple[int, int, str], PeerChannelMismatchTag]:
-        """Collect every PeerChannelMismatchTag tracked in the solver, merged by (anchor, peer, endpoint)."""
-        merged: dict[tuple[int, int, str], PeerChannelMismatchTag] = {}
+    def _full_mismatch_requirements(solver: z3.Solver) -> dict[tuple[int, str], PeerChannelMismatchTag]:
+        """Collect every PeerChannelMismatchTag tracked in the solver, merged by (anchor, endpoint).
+
+        Different candidate peers for the same anchor+endpoint can each violate a
+        different dimension. Merging across peers (not just within one peer) combines
+        every dimension required for that target into one tag, regardless of which
+        peer's violation happened to carry it.
+        """
+        merged: dict[tuple[int, str], PeerChannelMismatchTag] = {}
         for assertion in solver.assertions():
             if not z3.is_implies(assertion) or assertion.num_args() != 2:
                 continue
@@ -336,7 +342,7 @@ class BundleBuilder:
                 continue
             if not isinstance(tag, PeerChannelMismatchTag):
                 continue
-            key = (tag.charm.charm_id, tag.peer_charm_id, tag.endpoint)
+            key = (tag.charm.charm_id, tag.endpoint)
             existing = merged.get(key)
             merged[key] = (
                 tag
@@ -356,12 +362,12 @@ class BundleBuilder:
 
     @classmethod
     def _resolve_full_mismatch_tags(cls, tags: list[AssertionTag], solver: z3.Solver) -> list[AssertionTag]:
-        """Replace each PeerChannelMismatchTag with its full (anchor, peer, endpoint) record."""
+        """Replace each PeerChannelMismatchTag with its full (anchor, endpoint) record."""
         full = cls._full_mismatch_requirements(solver)
         resolved: list[AssertionTag] = []
         for tag in tags:
             if isinstance(tag, PeerChannelMismatchTag):
-                key = (tag.charm.charm_id, tag.peer_charm_id, tag.endpoint)
+                key = (tag.charm.charm_id, tag.endpoint)
                 resolved.append(full.get(key, tag))
             else:
                 resolved.append(tag)
@@ -369,20 +375,21 @@ class BundleBuilder:
 
     @staticmethod
     def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
-        """Merge PeerChannelMismatchTag pairs with the same (anchor, peer) into one tag.
+        """Merge PeerChannelMismatchTags for the same (anchor, endpoint) into one tag.
 
-        Track and risk constraints emit separate tags per dimension.  Merging them
-        ensures _handle_peer_channel_mismatch resolves both in a single CEGIS step,
-        avoiding a wrong intermediate channel on the first pass.
+        Different peer candidates for the same target can each carry a different
+        required dimension; merging across peers (not just per-peer dimensions)
+        ensures _handle_peer_channel_mismatch fetches one candidate satisfying all of
+        them, instead of one partially-correct candidate per peer.
         """
-        seen: dict[tuple[int, int], int] = {}
+        seen: dict[tuple[int, str], int] = {}
         merged: list[AssertionTag] = []
         for tag in tags:
             if isinstance(tag, PeerChannelMismatchTag):
-                pair = (tag.charm.charm_id, tag.peer_charm_id)
-                if pair in seen:
-                    existing = cast(PeerChannelMismatchTag, merged[seen[pair]])
-                    merged[seen[pair]] = PeerChannelMismatchTag(
+                key = (tag.charm.charm_id, tag.endpoint)
+                if key in seen:
+                    existing = cast(PeerChannelMismatchTag, merged[seen[key]])
+                    merged[seen[key]] = PeerChannelMismatchTag(
                         charm=existing.charm,
                         endpoint=existing.endpoint,
                         peer_charm_name=existing.peer_charm_name,
@@ -393,7 +400,7 @@ class BundleBuilder:
                         required_revision=existing.required_revision or tag.required_revision,
                     )
                 else:
-                    seen[pair] = len(merged)
+                    seen[key] = len(merged)
                     merged.append(tag)
             else:
                 merged.append(tag)
