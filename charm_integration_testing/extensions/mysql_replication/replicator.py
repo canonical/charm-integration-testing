@@ -109,8 +109,10 @@ class MysqlReplicator:
 
                 offer_applications = applications_by_model[offer_model]
                 if len(offer_applications) != 1:
-                    # Ambiguous: can't tell which of multiple same-charm applications in the
-                    # offering model this particular consumed offer belongs to.
+                    self.logger.info(
+                        f"Skipping cross-model replication for offer '{offer_alias}' in model '{offer_model.uri}': "
+                        f"found {len(offer_applications)} '{self.charm_info.name}' applications."
+                    )
                     continue
                 (offer_application,) = offer_applications
 
