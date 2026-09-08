@@ -865,29 +865,29 @@ class BundleBuilder:
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
 
-        # Also try fetching the owning charm at the peer's actual channel so they can match.
-        # This handles the case where the peer is pinned and the owning charm must adapt instead.
-        try:
-            owning_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.charm.charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=peer_channel.track,
-                charm_risk=peer_channel.risk,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                owning_charm,
-                tag.charm.charm_id,
-                domain,
-                owning_model,
-                connect_to_id=tag.peer_charm_id,
-                connect_to_neighbors=True,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
-            )
+            # Fall back to adapting the owning charm to the peer's actual channel, only
+            # when no release exists for the peer on the required channel.
+            try:
+                owning_charm = self.charmhub_client.charm_from_store(
+                    charm_name=tag.charm.charm_name,
+                    ubuntu_arch=model.arch,
+                    juju_version=model.juju_version,
+                    platform=model.platform,
+                    charm_track=peer_channel.track,
+                    charm_risk=peer_channel.risk,
+                )
+                expanded |= self._add_charm_for_charm_id(
+                    owning_charm,
+                    tag.charm.charm_id,
+                    domain,
+                    owning_model,
+                    connect_to_id=tag.peer_charm_id,
+                    connect_to_neighbors=True,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(
+                    f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
+                )
 
         return expanded
 

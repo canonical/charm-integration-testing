@@ -937,8 +937,8 @@ def _mismatch(
 class TestHandlePeerChannelMismatch:
     """BundleBuilder._handle_peer_channel_mismatch."""
 
-    def test_variants_are_paired_with_the_original_counterpart(self) -> None:
-        # GIVEN an anchor and peer whose channel-compatible variants are fetched
+    def test_variant_is_paired_with_the_original_counterpart(self) -> None:
+        # GIVEN an anchor and peer, and a store that has a release for the peer's required channel
         domain = Domain()
         model_ref = ModelRef(name="m")
         domain.models[model_ref] = DomainModel(
@@ -957,23 +957,63 @@ class TestHandlePeerChannelMismatch:
         add_charm_to_domain(anchor, domain, model_ref)
         add_charm_to_domain(peer, domain, model_ref)
         peer_variant = peer.model_copy(update={"revision": 2})
-        anchor_variant = anchor.model_copy(update={"revision": 2})
-        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient(charm_responses=[peer_variant, anchor_variant]))
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant])
+        builder = BundleBuilder(charmhub_client=fake)
 
-        # WHEN resolving the mismatch in both directions
+        # WHEN resolving the mismatch
         result = builder._handle_peer_channel_mismatch(
             _mismatch(anchor_id=0, peer_id=1, track="latest"),
             domain,
         )
 
-        # THEN each variant is paired with the original charm on the other side
+        # THEN the peer variant is paired with the anchor, and the owning charm is never
+        # queried since a release for the peer already resolved the mismatch
         assert result is True
         pairs = {
             frozenset((integration.requires_charm_id, integration.provides_charm_id))
             for integration in domain.charm_integrations
         }
         assert frozenset((0, 2)) in pairs
-        assert frozenset((1, 3)) in pairs
+        assert len(fake.charm_from_store_calls) == 1
+
+    def test_owning_charm_adapts_only_when_no_release_exists_for_the_peer(self) -> None:
+        # GIVEN a store with no release for the peer's required channel, but one for the
+        # owning charm at the peer's actual (mismatched) channel
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+        )
+        anchor = _make_charm(
+            "anchor",
+            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+        )
+        peer = _make_charm(
+            "peer",
+            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
+        )
+        add_charm_to_domain(anchor, domain, model_ref)
+        add_charm_to_domain(peer, domain, model_ref)
+        anchor_variant = anchor.model_copy(update={"revision": 2})
+        fake = _FakeCharmhubClient(charm_responses=[CharmReleaseNotFoundException("no match"), anchor_variant])
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving the mismatch
+        result = builder._handle_peer_channel_mismatch(
+            _mismatch(anchor_id=0, peer_id=1, track="latest"),
+            domain,
+        )
+
+        # THEN the owning charm variant is paired with the peer instead
+        assert result is True
+        pairs = {
+            frozenset((integration.requires_charm_id, integration.provides_charm_id))
+            for integration in domain.charm_integrations
+        }
+        assert frozenset((1, 2)) in pairs
+        assert len(fake.charm_from_store_calls) == 2
 
     def test_peer_in_different_model_gets_variant_placed_in_its_own_model(self) -> None:
         # GIVEN an anchor and peer in different models (a cross-model relation), each
