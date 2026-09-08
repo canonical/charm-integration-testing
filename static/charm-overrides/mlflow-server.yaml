@@ -21,23 +21,41 @@ overrides:
           - track: "1.13"
           - track: "1.13.1"
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # latest/candidate: same endpoint set as 1.13/ (db, ingress, object-storage, pod-defaults)
   - criteria:
       - track: latest
         risk: candidate
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # 2.1/: has dashboard-links but no pod-defaults, logging, or secrets
   - criteria:
       - track: "2.1"
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       dashboard-links:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # 2.15/, 2.22/, latest/stable, latest/beta, latest/edge: full optional set
   - criteria:
@@ -51,6 +69,10 @@ overrides:
           - track: latest
             risk: edge
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
         optional: true
       dashboard-links:
@@ -59,3 +81,5 @@ overrides:
         optional: true
       secrets:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'

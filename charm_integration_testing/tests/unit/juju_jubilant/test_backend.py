@@ -939,6 +939,52 @@ class TestJubilantBackend:
                     TEST_MODEL, endpoint_1, endpoint_2, timeout=timedelta(milliseconds=100)
                 )
 
+    class TestRemoveSaas:
+        class Client(JubilantClientStub):
+            def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
+                self.app_endpoint_names = app_endpoint_names
+                self.cli_calls: list[tuple[str, ...]] = []
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    name: jubilant.statustypes.RemoteAppStatus(
+                        url=f"neighbor-controller:admin/neighbor-model.{name}",
+                        endpoints={"database": jubilant.statustypes.RemoteEndpoint(interface="db", role="provider")},
+                    )
+                    for name in self.app_endpoint_names
+                }
+
+            def cli(self, *args: str, **kwargs: Any) -> str:
+                self.cli_calls.append(args)
+                return ""
+
+        def test_removes_saas_proxy_when_present(self) -> None:
+            # GIVEN a SAAS proxy exists for the given alias
+            client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.remove_saas(TEST_MODEL, "neighbor-offer")
+
+            # THEN remove-saas was called for that alias
+            assert client.cli_calls == [("remove-saas", "neighbor-offer")]
+
+        def test_no_op_when_alias_is_not_a_saas_proxy(self) -> None:
+            # GIVEN no SAAS proxy exists for the given alias (e.g. same-model integration)
+            client = self.Client(app_endpoint_names=frozenset())
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.remove_saas(TEST_MODEL, "database")
+
+            # THEN no CLI call was made
+            assert client.cli_calls == []
+
     class TestWaitForRemovalOfUnits:
         def test_removal_of_units(self) -> None:
             # GIVEN
