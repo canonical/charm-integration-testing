@@ -13,7 +13,8 @@ class CharmInfo:
     name: str
     offer_endpoint: str
     consumer_endpoint: str
-    # App status message shown on the offer side once both clusters are ready to be linked.
+    # Workload status message the offer side's leader unit displays once ready to link (checked
+    # via wait_for_unit_message; the application status mirrors the same message but isn't checked).
     create_replication_message: str = "Ready to create replication"
 
 
