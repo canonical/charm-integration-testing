@@ -286,3 +286,31 @@ class TestMySQLClientValidatorDeep:
         write_check = next(c for c in result.checks if c.name == "write_read_verify")
         assert not write_check.passed
         assert "Failed to verify" in write_check.message
+
+    def test_deep_latency_excludes_credential_resolution(self) -> None:
+        # GIVEN credential resolution that takes longer than the whole latency budget,
+        # followed by a fast database round-trip
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[("validator-probe",)]))
+        clock = [0.0]
+
+        def slow_resolve() -> dict[str, str]:
+            clock[0] += 30.0
+            return dict(VALID_DATABAG)
+
+        def fast_connect(**_kwargs: object) -> ConnStub:
+            clock[0] += 0.3
+            return conn
+
+        with (
+            patch.object(validator, "_resolve_credentials", side_effect=slow_resolve),
+            patch("validators.mysql_client.validator.pymysql.connect", side_effect=fast_connect),
+            patch("validators.mysql_client.validator.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN latency passes, because only the database round-trip is measured
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed
+        assert "completed in 0.3s" in latency_check.message
