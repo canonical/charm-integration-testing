@@ -26,9 +26,9 @@
 #     (not overridden) on these tracks.
 #   0.15/stable (rev 72) and 0.16/stable (rev 76): both have `ingress` and
 #     `nginx-route` - alternative reverse-proxy mechanisms (k8s ingress vs
-#     nginx-ingress-integrator). Meaning 2 (at-least-one): mark both
-#     optional, then constrain so the solver always connects exactly one
-#     proxy path. Handled as the fallback (no criteria) block below so any
+#     nginx-ingress-integrator). Meaning XOR (exactly-one): mark both optional,
+#     then constrain so the solver always connects exactly one proxy path.
+#     Handled as the fallback (no criteria) block below so any
 #     future track after 0.16 automatically gets the same treatment instead
 #     of needing a new track number added here on every release.
 #
