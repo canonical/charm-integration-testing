@@ -55,7 +55,8 @@ class MysqlReplicator:
 
         applications_by_model = self._charm_applications_by_model()
         if sum(len(apps) for apps in applications_by_model.values()) < 2:
-            # Skip if there are not 2+ database units deployed across all known models.
+            # Skip if there are not 2+ matching database applications deployed across all known
+            # models.
             return
 
         self._try_replicate_same_model_pairs(applications_by_model)
