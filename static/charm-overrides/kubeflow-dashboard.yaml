@@ -6,9 +6,14 @@ overrides:
   - criteria:
       - track: '1.7'
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kubeflow-profiles:
         features: [kubeflow-profiles]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
     # Tracks 1.8 and 1.9 have grafana-dashboard in provides but not metrics-endpoint.
   - criteria:
@@ -19,9 +24,14 @@ overrides:
       grafana-dashboard:
         optional: true
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kubeflow-profiles:
         features: [kubeflow-profiles]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
     # Track 1.10 and later have both grafana-dashboard and metrics-endpoint in provides.
   - provides:
@@ -30,7 +40,12 @@ overrides:
       grafana-dashboard:
         optional: true
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kubeflow-profiles:
         features: [kubeflow-profiles]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
