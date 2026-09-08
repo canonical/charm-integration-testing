@@ -130,26 +130,26 @@ class MysqlReplicator:
 
     def try_create_replication(
         self,
-        model_offer: JujuModelHandle,
-        application_offer: str,
-        model_consumer: JujuModelHandle,
-        application_consumer: str,
+        offer_model: JujuModelHandle,
+        offer_application: str,
+        consumer_model: JujuModelHandle,
+        consumer_application: str,
     ) -> None:
         # Wait for offer application to be scaled
         self.logger.info(
-            f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' to be scaled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{offer_application}' to be scaled"
         )
-        self.juju.wait_application_scaled(model_offer, application_offer, timedelta(minutes=10))
+        self.juju.wait_application_scaled(offer_model, offer_application, timedelta(minutes=10))
 
         # Wait for offer application units to settle
         self.logger.info(
-            f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' units to be settled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{offer_application}' units to be settled"
         )
-        self.juju.wait_application_settled(model_offer, application_offer, timedelta(minutes=10))
+        self.juju.wait_application_settled(offer_model, offer_application, timedelta(minutes=10))
 
         # Skip if no units
-        if self.juju.num_units(model_offer, application_offer) == 0:
-            self.logger.info(f"Skipping replication setup as no units for {application_offer} were found.")
+        if self.juju.num_units(offer_model, offer_application) == 0:
+            self.logger.info(f"Skipping replication setup as no units for {offer_application} were found.")
             return
 
         # Wait for consumer application to be scaled. Unlike the offer side, the consumer's
@@ -158,26 +158,26 @@ class MysqlReplicator:
         # for it to reach wait_application_settled()'s blocked/active - that would deadlock,
         # since that transition depends on the action this method is about to run.
         self.logger.info(
-            f"Waiting for database charm '{self.charm_info.name}' application '{application_consumer}' to be scaled"
+            f"Waiting for database charm '{self.charm_info.name}' application '{consumer_application}' to be scaled"
         )
-        self.juju.wait_application_scaled(model_consumer, application_consumer, timedelta(minutes=10))
+        self.juju.wait_application_scaled(consumer_model, consumer_application, timedelta(minutes=10))
 
         # Skip if consumer has no units
-        if self.juju.num_units(model_consumer, application_consumer) == 0:
-            self.logger.info(f"Skipping replication setup as no units for {application_consumer} were found.")
+        if self.juju.num_units(consumer_model, consumer_application) == 0:
+            self.logger.info(f"Skipping replication setup as no units for {consumer_application} were found.")
             return
 
-        leader_unit = f"{application_offer}/leader"
+        leader_unit = f"{offer_application}/leader"
 
-        if not self._offer_awaiting_replication_setup(model_offer, leader_unit):
+        if not self._offer_awaiting_replication_setup(offer_model, leader_unit):
             # Either replication was already created by a previous call, or the offer side isn't
             # ready yet for some other reason (e.g. still forming its cluster). Either way there's
             # nothing to do right now; a later post_deploy call will retry if it's still pending.
-            self.logger.info(f"'{application_offer}' is not awaiting replication setup, skipping.")
+            self.logger.info(f"'{offer_application}' is not awaiting replication setup, skipping.")
             return
 
-        self.logger.info(f"Creating replication between '{application_offer}' and '{application_consumer}'.")
-        self.juju.run_action(model_offer, leader_unit, "create-replication", {})
+        self.logger.info(f"Creating replication between '{offer_application}' and '{consumer_application}'.")
+        self.juju.run_action(offer_model, leader_unit, "create-replication", {})
 
     def _offer_awaiting_replication_setup(self, model: JujuModelHandle, unit: str) -> bool:
         """Cheaply check whether ``unit`` is currently displaying the create-replication message.
