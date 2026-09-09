@@ -8,7 +8,7 @@ from http.client import HTTPMessage
 from typing import IO
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, OpenerDirector, ProxyHandler, Request, build_opener
 
 from validators.base import (
     BaseValidator,
@@ -24,6 +24,34 @@ _HOSTNAME_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
 _HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
 
 
+def _redact(value: str) -> str:
+    """Return a display-safe copy of an untrusted external_host/URL value.
+
+    A malformed 'external_host' (e.g. 'user:secret@host' or 'host/path?token=secret')
+    would otherwise place a secret directly in the validator's JSON result, since
+    result messages echo the value verbatim before it has been validated. Strip any
+    query-string/fragment suffix and user-info component before interpolating an
+    untrusted value into a message.
+    """
+    for sep in ("?", "#"):
+        idx = value.find(sep)
+        if idx != -1:
+            value = value[:idx]
+
+    scheme_sep = value.find("://")
+    prefix, rest = (value[: scheme_sep + 3], value[scheme_sep + 3 :]) if scheme_sep != -1 else ("", value)
+
+    path_idx = rest.find("/")
+    authority = rest if path_idx == -1 else rest[:path_idx]
+    remainder = "" if path_idx == -1 else rest[path_idx:]
+
+    at_idx = authority.find("@")
+    if at_idx != -1:
+        authority = authority[at_idx + 1 :]
+
+    return prefix + authority + remainder
+
+
 class _NoRedirectHandler(HTTPRedirectHandler):
     """Raise HTTPError on 3xx instead of following the redirect target.
 
@@ -37,9 +65,21 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         raise HTTPError(req.full_url, code, msg, headers, fp)
 
 
-# ProxyHandler({}) disables http_proxy/https_proxy so the probe reaches the ingress gateway
-# directly, instead of a CI/dev proxy whose response could otherwise be misread as success.
-_opener = build_opener(ProxyHandler({}), _NoRedirectHandler)
+def _build_opener() -> OpenerDirector:
+    """Build the opener used for HTTP probes.
+
+    Factored out (instead of inlined at module scope) so tests can invoke the exact
+    production construction path under a patched environment, rather than
+    independently rebuilding an opener that could silently drift out of sync with it.
+
+    ProxyHandler({}) disables http_proxy/https_proxy so the probe reaches the ingress
+    gateway directly, instead of a CI/dev proxy whose response could otherwise be
+    misread as success.
+    """
+    return build_opener(ProxyHandler({}), _NoRedirectHandler)
+
+
+_opener = _build_opener()
 
 
 class IstioIngressRouteValidator(BaseValidator):
@@ -119,7 +159,7 @@ def _parse_ingress_endpoint(databag: dict[str, str]) -> tuple[ValidationCheck, s
         ValidationCheck(
             name="schema",
             passed=True,
-            message=f"Ingress endpoint found: external_host={external_host!r}, tls_enabled={tls_enabled}.",
+            message=f"Ingress endpoint found: external_host={_redact(external_host)!r}, tls_enabled={tls_enabled}.",
         ),
         url,
     )
@@ -132,13 +172,18 @@ def _parse_ingress_endpoint(databag: dict[str, str]) -> tuple[ValidationCheck, s
 
 def _url_format_check(url: str) -> ValidationCheck:
     """Validate that the derived ingress URL is a well-formed HTTP/HTTPS URL."""
+    # Redact before interpolating into any message: at this point url has not been
+    # validated, so it may still carry a query string or user-info smuggled in via a
+    # malformed 'external_host' (see _redact for details).
+    display = _redact(url)
+
     # urlparse silently strips \t, \r, and \n (and tolerates other control characters),
     # so a value like "good.example\n" would otherwise normalize to a valid-looking host.
     if not url.isprintable():
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} contains control characters that are not valid in a bare host.",
+            message=f"URL {display!r} contains control characters that are not valid in a bare host.",
         )
 
     # Unescaped whitespace (e.g. a literal space in a path segment) is not valid in a
@@ -149,7 +194,18 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} contains unescaped whitespace; percent-encode it (e.g. '%20') instead.",
+            message=f"URL {display!r} contains unescaped whitespace; percent-encode it (e.g. '%20') instead.",
+        )
+
+    # urllib requires an ASCII URI; a raw (non-percent-encoded) non-ASCII character in
+    # the path, e.g. "example.com/café", passes urlparse but raises UnicodeEncodeError
+    # at request time during the deep-level HTTP probe. Percent-encoded paths are ASCII
+    # and remain valid.
+    if not url.isascii():
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {display!r} contains raw non-ASCII characters; percent-encode them instead.",
         )
 
     try:
@@ -158,7 +214,7 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"Failed to parse URL {url!r}: {exc}",
+            message=f"Failed to parse URL {display!r}: {exc}",
         )
 
     if parsed.scheme not in ("http", "https"):
@@ -171,21 +227,21 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has no valid hostname.",
+            message=f"URL {display!r} has no valid hostname.",
         )
 
     if parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} contains a query/fragment/user-info; 'external_host' must not include them.",
+            message=f"URL {display!r} contains a query/fragment/user-info; 'external_host' must not include them.",
         )
 
     if not _is_valid_host(parsed.hostname):
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has an invalid hostname {parsed.hostname!r}.",
+            message=f"URL {display!r} has an invalid hostname {parsed.hostname!r}.",
         )
 
     try:
@@ -194,13 +250,13 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has an invalid port: {exc}",
+            message=f"URL {display!r} has an invalid port: {exc}",
         )
 
     return ValidationCheck(
         name="url_format",
         passed=True,
-        message=f"URL {url!r} is well-formed.",
+        message=f"URL {display!r} is well-formed.",
     )
 
 

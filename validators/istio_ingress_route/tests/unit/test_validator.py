@@ -10,7 +10,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 import ops
 import pytest
 
-from validators.istio_ingress_route.validator import IstioIngressRouteValidator, _NoRedirectHandler
+from validators.istio_ingress_route.validator import IstioIngressRouteValidator, _build_opener, _NoRedirectHandler
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -168,6 +168,7 @@ class TestIstioIngressRouteValidatorSimple:
             "good.example\t",  # embedded tab, silently stripped by urlparse
             "upstream.example.com/model app",  # unescaped space in an otherwise-allowed path
             "ingress.example.com..",  # multiple trailing dots are not a valid FQDN
+            "example.com/café",  # raw non-ASCII char; urllib requires an ASCII URI
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -229,6 +230,28 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "PASS"
         fmt = next(c for c in result.checks if c.name == "url_format")
         assert fmt.passed
+
+    def test_redacts_user_info_from_result_messages(self) -> None:
+        # GIVEN external_host smuggles a credential via user-info
+        validator = _make_validator({"external_host": "user:secret@host", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("secret" not in c.message for c in result.checks)
+
+    def test_redacts_query_string_from_result_messages(self) -> None:
+        # GIVEN external_host smuggles a credential via a query string
+        validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("secret" not in c.message for c in result.checks)
 
     def test_sets_endpoint_and_interface_on_result(self) -> None:
         # GIVEN
@@ -350,8 +373,8 @@ class TestIstioIngressRouteValidatorDeep:
             os.environ,
             {"HTTP_PROXY": "http://proxy.example:3128", "HTTPS_PROXY": "http://proxy.example:3128"},
         ):
-            # WHEN the opener is rebuilt the same way the module builds it
-            opener = build_opener(ProxyHandler({}), _NoRedirectHandler)
+            # WHEN the opener is built via the actual production helper
+            opener = _build_opener()
 
             # THEN no ProxyHandler is wired in, so the probe bypasses the env proxy
             assert not any(isinstance(h, ProxyHandler) for h in opener.handlers)  # type: ignore[attr-defined]
