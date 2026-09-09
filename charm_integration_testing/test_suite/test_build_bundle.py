@@ -10,10 +10,8 @@ from juju import JujuVersion
 from bundle_builder_x import (
     AppSpec,
     BundleBuilder,
-    CharmhubClient,
     IntegrationSpec,
     ModelSpec,
-    OverridesClient,
     SpecFile,
 )
 
@@ -22,8 +20,8 @@ from .scheduler.states import State
 
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
+    bundle_builder: BundleBuilder,
     bundle_mermaid_output: Path,
-    charm_overrides: Path,
     logger: logging.Logger,
     juju_cli_version: JujuVersion,
     target_application: str,
@@ -44,9 +42,6 @@ def test_build_bundle(
     neighbor_model: str | None,
     neighbor_platform: str,
 ) -> None:
-    overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
-    charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
-
     target_app_spec = AppSpec(
         charm=target_charm,
         channel=target_channel,
@@ -118,7 +113,6 @@ def test_build_bundle(
             ]
         )
 
-    bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     solution = bundle_builder.build(spec)
 
     separator = "-" * 80

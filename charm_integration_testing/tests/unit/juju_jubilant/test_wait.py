@@ -528,6 +528,24 @@ class TestWaitConditions:
 
         # THEN
         assert result is True
+
+    def test_integrations_are_removed_ignores_lingering_saas_proxy(
+        self, sample_cmr_consumer_status: jubilant.Status
+    ) -> None:
+        # GIVEN - the relation itself is gone, but the SAAS proxy ("remote-offer") lingers in the
+        # consuming model (e.g. "terminating") while its underlying offer is torn down elsewhere.
+        # This must NOT block callers like test_remove_and_restore_integration that re-add the
+        # relation while the SAAS proxy and its offer are still alive on purpose.
+        integration = (
+            JujuIntegrationApplication("pgbouncer-k8s", "some-other-endpoint"),
+            JujuIntegrationApplication("remote-offer", "database"),
+        )
+
+        # WHEN
+        result, wait = integrations_are_removed(sample_cmr_consumer_status, integration)
+
+        # THEN - the relation for this exact pair doesn't exist in the status, so it's "removed"
+        assert result is True
         assert wait.noncompliant_applications == {}
 
     def test_applications_have_no_units_false(self, sample_database_webapp_status: jubilant.Status) -> None:

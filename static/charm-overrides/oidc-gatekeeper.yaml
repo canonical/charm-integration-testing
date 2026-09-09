@@ -18,12 +18,22 @@ overrides:
     requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       ingress-auth:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # ckf-1.9+, latest: dex-oidc-config required; logging already optional=True upstream
   - requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       ingress-auth:
         optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'

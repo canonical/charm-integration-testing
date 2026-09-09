@@ -54,9 +54,12 @@ from bundle_builder_x import (
     ArchitectureMismatchError,
     AssumesMismatchError,
     BaseMismatchError,
+    BundleBuilder,
     BundleDiagnostic,
+    CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
+    OverridesClient,
     PeerChannelMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseUnavailableError,
@@ -611,6 +614,24 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     if not ppath.exists():
         pytest.fail(f"Provided path for --charm-overrides does not exist: {ppath}")
     return ppath
+
+
+@pytest.fixture
+def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
+    """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
+    return OverridesClient(overrides=charm_overrides, logger=logger)
+
+
+@pytest.fixture
+def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
+    """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
+    return CharmhubClient(logger=logger, overrides_client=overrides_client)
+
+
+@pytest.fixture
+def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
+    """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
+    return BundleBuilder(charmhub_client=charmhub_client, logger=logger)
 
 
 @pytest.fixture

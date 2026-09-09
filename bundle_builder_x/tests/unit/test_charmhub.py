@@ -987,6 +987,22 @@ class TestCharmhubClient:
             # THEN all metadata endpoints are returned
             assert "db" in endpoints
 
+        def test_no_override_defaults_removable_true(self) -> None:
+            # GIVEN no overrides
+            client = _client({})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            # THEN removable defaults to True
+            assert endpoints["db"].removable is True
+
+        def test_override_removable_false_is_applied(self) -> None:
+            # GIVEN an override marking a requires endpoint non-removable
+            client = _client({"overrides": [{"requires": {"db": {"removable": False}}}]})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            # THEN removable reflects the override
+            assert endpoints["db"].removable is False
+
         def test_injects_juju_info_when_absent(self) -> None:
             client = _client({})
             endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)

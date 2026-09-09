@@ -14,6 +14,9 @@
 # sharding/config-server revision match: VersionChecker.get_cluster_mismatched_revision_status in
 # mongo-charms-single-kernel blocks the shard on any revision mismatch, not just track/risk.
 # gcs-credentials (requires): optional - metadata.yaml omits optional:true (unlike sibling s3-credentials); backups.py treats both identically.
+# sharding (requires): non-removable in every block - MongoDB rejects removeShard on a cluster's
+# last remaining shard, and this framework always builds a 1:1 config-server/shard topology. See
+# test_execution 919370.
 overrides:
   # Pre-gcs channels: track 6 (all risks) and 8/stable, 8/candidate, 8/beta.
   - criteria:
@@ -27,6 +30,9 @@ overrides:
             risk: beta
     configs:
       role: &role_values [replication, config-server, shard, null]
+    requires:
+      sharding:
+        removable: false
     constraints:
       # config-server and sharding are mutually exclusive roles
       - &mutually_exclusive_roles 'not (bool(endpoint[sharding]) and bool(endpoint[config-server]))'
@@ -54,6 +60,8 @@ overrides:
     requires:
       gcs-credentials:
         optional: true  # upstream metadata bug: missing optional:true, see header comment
+      sharding:
+        removable: false
     constraints:
       # gcs and s3 backups are mutually exclusive (BackupStatuses.MUTUALLY_EXCLUSIVE in backups.py)
       - &gcs_s3_mutually_exclusive 'not (bool(endpoint[s3-credentials]) and bool(endpoint[gcs-credentials]))'
@@ -70,6 +78,8 @@ overrides:
     requires:
       gcs-credentials:
         optional: true  # upstream metadata bug: missing optional:true, see header comment
+      sharding:
+        removable: false
     constraints:
       - *gcs_s3_mutually_exclusive
       # encryption-at-rest requires vault-kv, and vice versa (VaultStatuses.VAULT_NOT_INTEGRATED/VAULT_INTEGRATED in vault.py)
