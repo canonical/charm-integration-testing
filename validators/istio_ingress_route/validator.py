@@ -30,13 +30,13 @@ def _redact(value: str) -> str:
     """Return a display-safe copy of an untrusted external_host/URL value.
 
     A malformed 'external_host' (e.g. 'user:secret@host', 'host/path?token=secret',
-    or 'host:some-secret' disguised as a port) would otherwise place a secret
-    directly in the validator's JSON result, since result messages echo the value
-    verbatim before it has been validated — including the schema-check message,
-    which runs before URL-format validation has had a chance to reject a malformed
-    port. Strip any query-string/fragment suffix, user-info component, and
-    non-numeric/out-of-range port before interpolating an untrusted value into a
-    message.
+    'host/path;token=secret', or 'host:some-secret' disguised as a port) would
+    otherwise place a secret directly in the validator's JSON result, since result
+    messages echo the value verbatim before it has been validated — including the
+    schema-check message, which runs before URL-format validation has had a chance
+    to reject a malformed port. Strip any query-string/fragment suffix, path-segment
+    parameter suffix, user-info component, and non-numeric/out-of-range port before
+    interpolating an untrusted value into a message.
     """
     for sep in ("?", "#"):
         idx = value.find(sep)
@@ -50,12 +50,25 @@ def _redact(value: str) -> str:
     authority = rest if path_idx == -1 else rest[:path_idx]
     remainder = "" if path_idx == -1 else rest[path_idx:]
 
+    # Semicolon-delimited path-segment parameters (e.g. "/path;token=secret", the
+    # legacy RFC 2396 mechanism urlparse() surfaces via parsed.params) are stripped
+    # the same way query/fragment suffixes are above, rather than trying to
+    # reproduce urlparse()'s exact per-segment semantics here.
+    param_idx = remainder.find(";")
+    if param_idx != -1:
+        remainder = remainder[:param_idx]
+
     at_idx = authority.rfind("@")
     if at_idx != -1:
         authority = authority[at_idx + 1 :]
 
     host_part, sep, port_part = authority.rpartition(":")
-    if sep and not (port_part.isdigit() and int(port_part) <= 65535):
+    # str.isdigit() accepts non-ASCII digit characters (e.g. '\u00b2', superscript
+    # two) that int() then rejects, and an arbitrarily long digit string could make
+    # int() raise on some interpreters; a bounded ASCII-decimal regex avoids both, so
+    # a malformed port here surfaces as an intended URL-format FAIL later instead of
+    # an unhandled exception in this pre-validation redaction step.
+    if sep and not (re.fullmatch(r"[0-9]{1,5}", port_part) and int(port_part) <= 65535):
         authority = f"{host_part}:<redacted>"
 
     return prefix + authority + remainder
@@ -291,7 +304,12 @@ def _url_format_check(url: str) -> ValidationCheck:
     has_query = "?" in url
     has_fragment = "#" in url
     has_userinfo = parsed.username is not None or parsed.password is not None
-    has_params = ";" in parsed.path
+    # urlparse() strips semicolon-delimited parameters from only the *final* path
+    # segment into parsed.params (a legacy RFC 2396 feature), so a value such as
+    # "host/path;token=secret" would have an empty parsed.path-relative check here
+    # unless parsed.params is inspected too; semicolons in any other path segment
+    # remain in parsed.path and are still caught there.
+    has_params = ";" in parsed.path or bool(parsed.params)
 
     if has_params or has_query or has_fragment or has_userinfo:
         return ValidationCheck(

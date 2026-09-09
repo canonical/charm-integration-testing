@@ -206,6 +206,7 @@ class TestIstioIngressRouteValidatorSimple:
             "@host",  # syntactically-present but empty user-info; username == '' not None
             "host?",  # syntactically-present but empty query; query attribute == ''
             "host#",  # syntactically-present but empty fragment; fragment attribute == ''
+            "host/path;token=secret",  # semicolon params on the final path segment
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -220,7 +221,23 @@ class TestIstioIngressRouteValidatorSimple:
         fmt = next(c for c in result.checks if c.name == "url_format")
         assert not fmt.passed
 
-    def test_passes_simple_with_tls_disabled(self) -> None:
+    def test_redacts_non_ascii_digit_port_without_raising(self) -> None:
+        # GIVEN external_host has a port-like segment containing a non-ASCII digit
+        # character (str.isdigit() is True for '\u00b2' but int() rejects it, which
+        # previously escaped as an unhandled exception from _redact instead of the
+        # intended FAIL result)
+        validator = _make_validator({"external_host": "host:12\u00b23", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN validation completes normally (no unhandled exception) and rejects the
+        # malformed port as a FAIL, with the raw port text redacted from every message
+        assert result.status == "FAIL"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert not fmt.passed
+        assert all("12\u00b23" not in c.message for c in result.checks)
+
         # GIVEN valid provider databag with TLS disabled
         validator = _make_validator(VALID_HTTP_DATABAG)
 
@@ -282,6 +299,19 @@ class TestIstioIngressRouteValidatorSimple:
     def test_redacts_query_string_from_result_messages(self) -> None:
         # GIVEN external_host smuggles a credential via a query string
         validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("secret" not in c.message for c in result.checks)
+
+    def test_redacts_path_segment_parameter_from_result_messages(self) -> None:
+        # GIVEN external_host smuggles a credential via a semicolon path-segment
+        # parameter on the final path segment (urlparse() strips this into
+        # parsed.params rather than parsed.path)
+        validator = _make_validator({"external_host": "host/path;token=secret", "tls_enabled": "False"})
 
         # WHEN
         result = validator.validate(level="simple")
