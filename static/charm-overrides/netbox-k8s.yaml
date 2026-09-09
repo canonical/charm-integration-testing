@@ -5,11 +5,16 @@
 overrides:
   - requires:
       ingress:
-        optional: true  # active without ingress; required only when OIDC is enabled; paas_charm/charm.py
+        optional: true  # active without ingress; required only when OIDC is enabled
       logging:
-        optional: true  # COS logging is additive and not checked by is_ready(); paas_charm/observability.py
+        optional: true
+      oidc:
+        features: [tls]  # OIDC uses the HTTPS callback URL exposed through ingress
     provides:
       grafana-dashboard:
-        optional: true  # observability hook, not NetBox's primary purpose; paas_charm/observability.py
+        optional: true
       metrics-endpoint:
-        optional: true  # observability hook, not NetBox's primary purpose; paas_charm/observability.py
+        optional: true
+    constraints:
+      # paas_charm/charm.py blocks OIDC until the ingress relation is ready.
+      - 'bool(endpoint[oidc]) => bool(endpoint[ingress])'
