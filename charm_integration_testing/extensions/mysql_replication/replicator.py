@@ -66,11 +66,8 @@ class MysqlReplicator:
         """Return the matching-charm applications found in each model seen so far."""
         result: dict[JujuModelHandle, set[str]] = {}
         for known_model in self._known_models:
-            matches = {
-                application
-                for application in self.juju.list_applications(known_model)
-                if self.juju.application_charm(known_model, application) == self.charm_info.name
-            }
+            apps = self.juju.list_applications(known_model)
+            matches = {name for name, info in apps.items() if info.charm == self.charm_info.name}
             if matches:
                 result[known_model] = matches
         return result
