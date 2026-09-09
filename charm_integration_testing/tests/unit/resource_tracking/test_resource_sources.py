@@ -342,7 +342,7 @@ class TestConfigMapSource:
         # WHEN the source collects snapshots
         snapshots = ConfigMapSource().collect(client, MODEL)  # type: ignore[arg-type]
 
-        # THEN it is still tracked, because the drop only applies to unlabelled ones
+        # THEN it is still tracked, because the drop only applies when no app.kubernetes.io/name label is present
         assert snapshots == [
             ConfigMapSnapshot(
                 name="istio-ca-root-cert", namespace=MODEL, data_keys="root-cert.pem", application="target"

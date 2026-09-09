@@ -409,7 +409,7 @@ identity.
    * - ``configmap``
      - ``v1`` (``CoreV1Api``)
      - ``keys_changed`` (data_keys)
-     - Records sorted ``data_keys`` only; values excluded. The unlabelled istio-injected ``istio-ca-root-cert`` is skipped as cluster-provisioned.
+     - Records sorted ``data_keys`` only; values excluded. The istio-injected ``istio-ca-root-cert`` is skipped when it has no ``app.kubernetes.io/name`` label (cluster-provisioned).
    * - ``secret``
      - ``v1`` (``CoreV1Api``)
      - ``type_changed`` (type), ``keys_changed`` (data_keys)
@@ -544,5 +544,3 @@ No change to ``StateResourceTracker``, ``calculate_discrepancies``,
 ``record_failure_execution_metadata`` recorder is required: the new kind flows
 through the same generic path and is published under
 ``resource_discrepancy:<new_resource_type>:<qualifier>``.
-
-

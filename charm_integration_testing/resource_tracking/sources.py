@@ -168,8 +168,9 @@ _ISTIO_ROOT_CERT_CONFIG_MAP_NAME = "istio-ca-root-cert"
 def _is_cluster_provisioned_config_map(config_map: Any) -> bool:
     """Return whether a ConfigMap is provisioned by the cluster rather than a charm.
 
-    Only the unlabelled istio root-cert ConfigMap qualifies, so a charm that
-    happens to declare a ConfigMap of the same name is still tracked.
+    Only the istio root-cert ConfigMap named ``istio-ca-root-cert`` that lacks the
+    standard ``app.kubernetes.io/name`` label qualifies, so a charm that declares
+    a ConfigMap of the same name is still tracked.
     """
     metadata = config_map.metadata
     if metadata is None:
