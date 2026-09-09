@@ -157,6 +157,27 @@ def _has_volatile_name(secret: Any) -> bool:
     return not _application(metadata.labels if metadata is not None else None) and _is_juju_secret_content_name(name)
 
 
+# istiod's namespace controller writes this ConfigMap into every namespace it
+# manages so mesh workloads can validate the control-plane CA. It is owned by the
+# cluster's istio installation rather than by any charm, and is injected
+# asynchronously, so it surfaces as ``extra`` on whichever state visit happens to
+# observe the namespace after istiod reached it.
+_ISTIO_ROOT_CERT_CONFIG_MAP_NAME = "istio-ca-root-cert"
+
+
+def _is_cluster_provisioned_config_map(config_map: Any) -> bool:
+    """Return whether a ConfigMap is provisioned by the cluster rather than a charm.
+
+    Only the istio root-cert ConfigMap named ``istio-ca-root-cert`` that lacks the
+    standard ``app.kubernetes.io/name`` label qualifies, so a charm that declares
+    a ConfigMap of the same name is still tracked.
+    """
+    metadata = config_map.metadata
+    if metadata is None:
+        return False
+    return metadata.name == _ISTIO_ROOT_CERT_CONFIG_MAP_NAME and not _application(metadata.labels)
+
+
 # Juju provisions charm storage as PersistentVolumeClaims whose name embeds an
 # 8-hex volume id -- the first block of the storage UUID -- between the storage
 # label and the StatefulSet pod suffix, e.g.
@@ -298,6 +319,8 @@ class ConfigMapSource:
         config_maps = kubernetes_client.backend.core_v1_api.list_namespaced_config_map(model)
         snapshots: list[ResourceSnapshot] = []
         for config_map in config_maps.items:
+            if _is_cluster_provisioned_config_map(config_map):
+                continue
             snapshots.append(
                 ConfigMapSnapshot(
                     name=config_map.metadata.name,

@@ -156,3 +156,6 @@ ServiceAccounts
 StatefulSets
 xid
 Unioning
+istio
+ConfigMap
+istiod's
