@@ -46,6 +46,15 @@ def _redact(value: str) -> str:
     scheme_sep = value.find("://")
     prefix, rest = (value[: scheme_sep + 3], value[scheme_sep + 3 :]) if scheme_sep != -1 else ("", value)
 
+    # A nested scheme in 'external_host' (e.g. "https://user:secret@host", producing
+    # a derived URL of "http://https://user:secret@host") makes the '/' search below
+    # find the inner scheme's "//" instead of a path boundary, so "authority" becomes
+    # just "https:" and the real host/user-info/port end up untouched in "remainder".
+    # Fail closed and mask everything after the outer scheme rather than parse
+    # further, since the split below cannot be trusted once another "://" is present.
+    if "://" in rest:
+        return prefix + "<redacted>"
+
     path_idx = rest.find("/")
     authority = rest if path_idx == -1 else rest[:path_idx]
     remainder = "" if path_idx == -1 else rest[path_idx:]
@@ -78,6 +87,14 @@ def _redact(value: str) -> str:
         host_part = authority[: bracket_end + 1]
         sep = authority[bracket_end + 1 : bracket_end + 2]
         port_part = authority[bracket_end + 2 :]
+        # A closed bracket whose contents aren't a valid IPv6 address (e.g.
+        # "[super-secret-token]") is malformed and rejected later by urlparse, but
+        # would otherwise reach messages verbatim before that happens; mask it the
+        # same way an unterminated bracket is masked.
+        try:
+            ipaddress.IPv6Address(authority[1:bracket_end])
+        except ValueError:
+            host_part = "[<redacted>]"
     else:
         # A valid unbracketed host[:port] authority has at most one colon, so
         # splitting at the *first* one (rather than the last) treats everything
@@ -92,7 +109,9 @@ def _redact(value: str) -> str:
     # a malformed port here surfaces as an intended URL-format FAIL later instead of
     # an unhandled exception in this pre-validation redaction step.
     if sep and not (re.fullmatch(r"[0-9]{1,5}", port_part) and int(port_part) <= 65535):
-        authority = f"{host_part}:<redacted>"
+        port_part = "<redacted>"
+
+    authority = host_part + sep + port_part
 
     return prefix + authority + remainder
 
@@ -301,11 +320,15 @@ def _url_format_check(url: str) -> ValidationCheck:
 
     try:
         parsed = urlparse(url)
-    except Exception as exc:
+    except Exception:
+        # str(exc) can restate the raw invalid value verbatim (e.g. urlparse's
+        # IPv6 error names the bracket contents directly), which may itself be
+        # untrusted/attacker-controlled, so it must not be echoed even though
+        # 'display' is already redacted.
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"Failed to parse URL {display!r}: {exc}",
+            message=f"Failed to parse URL {display!r}.",
         )
 
     if parsed.scheme not in ("http", "https"):
@@ -373,6 +396,18 @@ def _url_format_check(url: str) -> ValidationCheck:
             name="url_format",
             passed=False,
             message=f"URL {display!r} has an invalid port.",
+        )
+
+    # parsed.port silently accepts two malformed-but-non-raising forms: an empty
+    # port (e.g. "host:", which returns None -- indistinguishable from no port being
+    # supplied at all) and a literal 0 (e.g. "host:0", a port number that's never
+    # usable). Reject both explicitly so an externally supplied port is held to the
+    # same 1-65535 range already enforced for local-config listener ports.
+    if parsed.port == 0 or (parsed.port is None and parsed.netloc.endswith(":")):
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {display!r} has an invalid port; it must be in the range 1-65535.",
         )
 
     return ValidationCheck(

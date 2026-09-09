@@ -348,6 +348,58 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "FAIL"
         assert all("super-secret-token" not in c.message for c in result.checks)
 
+    def test_redacts_closed_bracketed_authority_with_invalid_ipv6_contents(self) -> None:
+        # GIVEN a bracketed authority with a closing "]", but its contents are not a
+        # valid IPv6 address; urlparse rejects this later, but the raw contents must
+        # not reach any message unredacted before that happens
+        validator = _make_validator({"external_host": "[super-secret-token]", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("super-secret-token" not in c.message for c in result.checks)
+
+    def test_redacts_nested_scheme_smuggling_userinfo_and_port(self) -> None:
+        # GIVEN external_host itself carries a scheme, so the derived URL contains a
+        # second "://"; naively splitting at the first "/" after the outer scheme
+        # would misidentify the inner scheme as the authority and leave the real
+        # user-info/host/port untouched in the "remainder"
+        validator = _make_validator({"external_host": "https://user:super-secret@host", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("super-secret" not in c.message for c in result.checks)
+
+    def test_url_parse_failure_message_omits_raw_exception_text(self) -> None:
+        # GIVEN a value that reaches urlparse() and raises, where the exception text
+        # itself would restate the raw (potentially secret-bearing) invalid value
+        validator = _make_validator({"external_host": "[super-secret-token]", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN no check message echoes the raw exception text
+        assert result.status == "FAIL"
+        assert all("does not appear to be an IPv4 or IPv6 address" not in c.message for c in result.checks)
+
+    @pytest.mark.parametrize("external_host", ["example.com:", "example.com:0"])
+    def test_fails_on_empty_or_zero_port(self, external_host: str) -> None:
+        # GIVEN an explicit but unusable port: parsed.port is None for a trailing
+        # empty port (indistinguishable from no port at all) and 0 for a literal
+        # zero, neither of which urlparse() rejects on its own
+        validator = _make_validator({"external_host": external_host, "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN validation fails rather than silently accepting an unusable port
+        assert result.status == "FAIL"
+
     def test_redacts_query_string_from_result_messages(self) -> None:
         # GIVEN external_host smuggles a credential via a query string
         validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})
