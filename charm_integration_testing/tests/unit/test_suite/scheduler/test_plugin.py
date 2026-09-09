@@ -81,9 +81,26 @@ class TestMarkAsInjected:
         # WHEN marked as injected
         _mark_as_injected(item)
 
-        # THEN the node ID is the bare function name prefixed with [injected],
-        # not the full file path, so JUnit XML renders it as a short name
-        assert item.nodeid == "[injected] test_foo"
+        # THEN the injected label is prefixed onto the trailing test-name segment
+        assert item.nodeid == "fake_tests/test_foo.py::[injected] test_foo"
+
+    def test_preserves_module_path_in_nodeid(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item whose nodeid carries a file-path/module prefix (as real
+        # pytest.Item nodeids do, e.g. "charm_integration_testing/.../teardown.py::test_teardown")
+        item = make_item("test_foo")
+        original_nodeid = item.nodeid
+        assert "::" in original_nodeid  # sanity check on the fixture
+
+        # WHEN marked as injected
+        _mark_as_injected(item)
+
+        # THEN the path/module prefix before the last "::" is preserved, since
+        # JUnit/Test Observer derive template_id from it - GH-947 regression: a
+        # prior fix (#406) replaced the whole nodeid with the bare name, which
+        # silently dropped this prefix and left template_id blank for every
+        # injected test result.
+        path_prefix = original_nodeid.rsplit("::", 1)[0]
+        assert item.nodeid.startswith(f"{path_prefix}::")
 
     def test_idempotent_second_call_is_noop(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item that has already been marked as injected
@@ -306,10 +323,12 @@ class TestBuildExecutionPlan:
             full_graph=graph,
         )
 
-        # THEN the bridge item is labelled as injected
+        # THEN the bridge item is labelled as injected, with the module-path
+        # prefix of its nodeid preserved (see test_preserves_module_path_in_nodeid)
         assert deploy.get_closest_marker("injected") is not None
         assert deploy.name.startswith("[injected]")
-        assert deploy.nodeid.startswith("[injected]")
+        assert deploy.nodeid.endswith("[injected] test_deploy")
+        assert deploy.nodeid.startswith("fake_tests/test_deploy.py::")
 
     def test_selected_transition_not_labelled_as_injected(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN deploy is explicitly user-selected (present in selected_transitions)

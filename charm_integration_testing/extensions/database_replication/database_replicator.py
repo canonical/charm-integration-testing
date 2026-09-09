@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import timedelta
 
-from juju import JujuBackend
+from juju import JujuBackend, JujuModelHandle
 from pydantic.dataclasses import dataclass
 
 from .database_client import DatabaseClient
@@ -31,7 +31,7 @@ class DatabaseReplicator:
         self.charm_info = charm_info
         self.database_client = database_client
 
-    def try_replicate_all_database_clusters(self, model: str) -> None:
+    def try_replicate_all_database_clusters(self, model: JujuModelHandle) -> None:
         # Look for database charms
         database_applications = set()
 
@@ -58,7 +58,9 @@ class DatabaseReplicator:
                             model=model, application_offer=application1, application_consumer=application2
                         )
 
-    def try_replicate_database_cluster(self, model: str, application_offer: str, application_consumer: str) -> None:
+    def try_replicate_database_cluster(
+        self, model: JujuModelHandle, application_offer: str, application_consumer: str
+    ) -> None:
         # Wait for application to be scaled
         self.logger.info(
             f"Waiting for database charm '{self.charm_info.name}' application '{application_offer}' to be scaled"
@@ -132,7 +134,9 @@ class DatabaseReplicator:
         self.logger.info(f"Waiting for '{application_consumer}' to settle after replication configuration")
         self.juju.wait_application_settled(model, application_consumer, timedelta(minutes=10))
 
-    def find_common_databases(self, model: str, application_offer: str, application_consumer: str) -> list[str]:
+    def find_common_databases(
+        self, model: JujuModelHandle, application_offer: str, application_consumer: str
+    ) -> list[str]:
         """Find databases that exist in both the offer and consumer database clusters."""
         self.logger.info(f"Finding common databases between '{application_offer}' and '{application_consumer}'")
 

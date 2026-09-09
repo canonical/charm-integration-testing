@@ -55,6 +55,7 @@ class TestIntegrationSpec:
             application="db-proxy",
             endpoint="database",
             remote_model="model-b",
+            remote_controller="lxd",
             remote_application="postgresql",
             remote_endpoint="database",
             offer_name="postgresql-offer",
@@ -69,6 +70,7 @@ class TestIntegrationSpec:
             application="a",
             endpoint="e",
             remote_model="m",
+            remote_controller="ctrl",
             remote_application="b",
             remote_endpoint="e",
             offer_name="custom-offer",
@@ -82,11 +84,77 @@ class TestIntegrationSpec:
             application="a",
             endpoint="e",
             remote_model="m",
+            remote_controller="ctrl",
             remote_application="postgresql",
             remote_endpoint="database",
         )
         # THEN resolved_offer_name defaults to <remote_application>-offer
         assert spec.resolved_offer_name() == "postgresql-offer"
+
+    def test_remote_model_and_controller_are_stored(self) -> None:
+        # GIVEN a cross-model integration with both fields set
+        spec = IntegrationSpec(
+            application="a",
+            endpoint="e",
+            remote_application="b",
+            remote_endpoint="e",
+            remote_model="my-model",
+            remote_controller="my-controller",
+        )
+        # THEN both fields are kept as provided
+        assert spec.remote_model == "my-model"
+        assert spec.remote_controller == "my-controller"
+
+    def test_remote_model_alone_is_valid(self) -> None:
+        # GIVEN remote_model without remote_controller
+        # THEN validation succeeds; the controller is resolved later via model lookup or url
+        spec = IntegrationSpec(
+            application="a",
+            endpoint="e",
+            remote_application="b",
+            remote_endpoint="e",
+            remote_model="my-model",
+        )
+        assert spec.remote_model == "my-model"
+        assert spec.remote_controller is None
+
+    def test_remote_controller_requires_remote_model(self) -> None:
+        # GIVEN remote_controller without remote_model
+        # THEN validation fails
+        with pytest.raises(ValueError, match="remote_controller requires remote_model"):
+            IntegrationSpec(
+                application="a",
+                endpoint="e",
+                remote_application="b",
+                remote_endpoint="e",
+                remote_controller="my-controller",
+            )
+
+    def test_remote_model_rejects_empty_name(self) -> None:
+        # GIVEN remote_model with an empty name
+        # THEN validation fails
+        with pytest.raises(ValueError, match="non-empty name"):
+            IntegrationSpec(
+                application="a",
+                endpoint="e",
+                remote_application="b",
+                remote_endpoint="e",
+                remote_model="",
+                remote_controller="my-controller",
+            )
+
+    def test_remote_model_key_includes_controller(self) -> None:
+        # GIVEN a cross-model integration with both fields set
+        spec = IntegrationSpec(
+            application="a",
+            endpoint="e",
+            remote_application="b",
+            remote_endpoint="e",
+            remote_model="my-model",
+            remote_controller="my-controller",
+        )
+        # THEN remote_model_key is controller/name
+        assert spec.remote_model_key == "my-controller/my-model"
 
 
 class TestModelSpec:

@@ -53,10 +53,11 @@ def classify_integrations(
             )
             continue
 
-        remote_model = integration.remote_model
-        if remote_model is None:
+        remote_model_name = integration.remote_model
+        if remote_model_name is None:
             raise ValueError("cross-model integration must have a remote_model")
-        remote_model_key = integration.remote_model_key or remote_model
+        remote_model = ModelRef(name=remote_model_name, controller=integration.remote_controller)
+        remote_model_key = remote_model.key
         offer_name = integration.resolved_offer_name()
 
         # Keep the user-supplied URL if provided; otherwise leave as None.
@@ -67,7 +68,7 @@ def classify_integrations(
         # domain is keyed by model_spec.key (which may be controller/name).
         # Fall back to remote_model_key when remote_spec.name is None (unit tests that
         # construct ModelSpec directly without going through SpecFile validation).
-        remote_ref = ModelRef(name=remote_model_key)
+        remote_ref = remote_model
         if remote_model_key in all_models:
             remote_spec = all_models[remote_model_key]
             if remote_spec.name is not None:

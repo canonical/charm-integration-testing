@@ -118,6 +118,13 @@ class DomainCharmConfig(BaseModel):
     # True when the override declared exactly one non-null value with no null
     # option: the value is always emitted and no Z3 var is needed.
     fixed_value: bool = False
+    # True when `var` is a 0/1 Int standing in for a Bool. Every optional config's
+    # "unset" case is modeled by pinning `var` to a value outside its declared
+    # allowed set (constraints.py); Bool has only {true, false}, so a config with
+    # both allowed and no default has no such value. Encoding it as Int instead
+    # gives it one, at the cost of translating to/from Bool at the edges
+    # (dsl_lowering.config_value_to_z3 and the ConfigExpr case; extract.py).
+    bool_as_int: bool = False
 
 
 class DomainCharmResource(BaseModel):
@@ -344,8 +351,16 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
             )
             continue
         prefix = f"charm_{charm.name}_{charm_id}_config_{key}"
+        default = existing.default if existing is not None else None
+        is_optional = None in allowed
+        bool_as_int = False
         if all(isinstance(v, bool) for v in non_none):
-            var: z3.ExprRef = z3.Bool(prefix)
+            if is_optional and default is None and set(non_none) == {True, False}:
+                # See DomainCharmConfig.bool_as_int.
+                var: z3.ExprRef = z3.Int(prefix)
+                bool_as_int = True
+            else:
+                var = z3.Bool(prefix)
         elif all(isinstance(v, int) and not isinstance(v, bool) for v in non_none):
             var = z3.Int(prefix)
         elif all(isinstance(v, float) for v in non_none):
@@ -357,11 +372,12 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                 f"Config key {key!r} for charm {charm.name!r} has mixed-type allowed values: "
                 f"{[type(v).__name__ for v in non_none]}"
             )
-        isset_var = z3.Bool(f"{prefix}_is_set") if None in allowed else None
+        isset_var = z3.Bool(f"{prefix}_is_set") if is_optional else None
         charm_config[key] = DomainCharmConfig(
             var=var,
             isset_var=isset_var,
-            default=existing.default if existing is not None else None,
+            default=default,
+            bool_as_int=bool_as_int,
         )
 
     # Build per-key resource entries from the override 'resources' list.

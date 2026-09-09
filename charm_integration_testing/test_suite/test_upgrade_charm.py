@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -12,7 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.DEPLOYED)
 def test_upgrade_charm(
     juju_client: JujuClient,
-    model: str,
+    target_model_ref: JujuModelHandle,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
@@ -26,21 +26,21 @@ def test_upgrade_charm(
         application=target_application,
         revision=target_revision,
         channel=target_channel,
-        model=model,
+        model=target_model_ref,
     )
     juju_client.wait_for_application_revision(
         application=target_application,
         expected_revision=target_revision,
-        model=model,
+        model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is upgraded to the target revision and the model is healthy
-    upgraded_revision = juju_client.application_revision(application=target_application, model=model)
+    upgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
     if upgraded_revision != target_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on upgraded revision "
             f"{target_revision}, got {upgraded_revision}."
         )
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.validate_model(model=target_model_ref, level="simple")

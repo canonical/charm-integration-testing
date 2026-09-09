@@ -10,10 +10,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from juju import JujuControllerHandle, JujuModelHandle
 from juju.client import JujuClient
 from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
-from juju.resource_registry.handles import JujuControllerHandle, JujuModelHandle
 from resource_registry.registry import ResourceRegistry
 
 from ...extensions.shared import NullJujuBackend
@@ -58,12 +58,9 @@ class BootstrapKillBackendStub(NullJujuBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
         self.models_added.append((controller, model))
 
-    def switch(self, controller: str, model: str) -> None:
-        pass
-
-    def juju_status_text(self, model: str) -> str:
-        self.status_calls.append(model)
-        return f"status for {model}"
+    def juju_status_text(self, model: JujuModelHandle) -> str:
+        self.status_calls.append(model.uri)
+        return f"status for {model.uri}"
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         pass
@@ -80,9 +77,8 @@ class CrashdumpBackendStub(NullJujuBackend):
     k8s_controllers: set[str] = field(default_factory=set)
     kubeconfig: Path | None = None
 
-    def is_k8s_model(self, model: str) -> bool:
-        controller = model.split(":")[0]
-        return controller in self.k8s_controllers
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return model.controller in self.k8s_controllers
 
     def get_controller_kubeconfig(self, controller: str) -> Path | None:
         if controller not in self.k8s_controllers:

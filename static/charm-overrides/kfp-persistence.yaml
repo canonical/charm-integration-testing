@@ -1,4 +1,11 @@
 ---
+# The KFP charms (kfp-api, kfp-persistence, kfp-ui, ...) reuse the same generic
+# interface/feature tag across many published tracks/risks (2.0-alpha.7 through
+# latest/edge). The "kfp-api" feature tag alone only proves the peer is *a* kfp-api
+# charm, not that it is the matching release; kfp-api's own track/risk combinations
+# are not interchangeable. Pin track/risk equality here as well as on the other KFP-suite
+# consumers (see kfp-ui.yaml) so charms are only integrated with a kfp-api on the same
+# channel.
 overrides:
   - requires:
       kfp-api:

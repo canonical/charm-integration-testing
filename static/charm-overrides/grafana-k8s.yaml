@@ -1,0 +1,21 @@
+---
+# Source: https://github.com/canonical/grafana-k8s-operator
+# Remove after: https://github.com/canonical/grafana-k8s-operator/pull/591
+#
+# Tracks 1/2 predate these endpoints; block applies to 12.4+ and future tracks.
+overrides:
+  - criteria:
+      - none_of:
+          - track: '1'
+          - track: '2'
+    requires:
+      service-mesh:
+        optional: true  # no-ops without relation; ServiceMeshConsumer
+      require-cmr-mesh:
+        optional: true  # only used via service-mesh, see constraint below
+    provides:
+      provide-cmr-mesh:
+        optional: true  # only meaningful once on a mesh
+    constraints:
+      - 'bool(endpoint[require-cmr-mesh]) => bool(endpoint[service-mesh])'
+      - 'bool(endpoint[provide-cmr-mesh]) => bool(endpoint[service-mesh])'

@@ -10,9 +10,12 @@ from extensions.configure_livepatch_server.extensions import (
     LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
     ConfigureLivepatchServerExtension,
 )
+from juju import JujuModelHandle
 from juju.backend import JujuBackend
 
 from ..shared import JujuStub as JujuStubBase
+
+TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
 
 
 @dataclass
@@ -55,7 +58,7 @@ class TestConfigureLivepatchServerExtension:
         ) -> None:
             # GIVEN a model with a livepatch server application
             # WHEN post_deploy is called
-            extension_with_token.post_deploy("test-model")
+            extension_with_token.post_deploy(TEST_MODEL)
 
             # THEN the livepatch server is configured
             assert len(juju.waited_scaled) > 0
@@ -68,7 +71,7 @@ class TestConfigureLivepatchServerExtension:
             extension = ConfigureLivepatchServerExtension(juju_stub, logging.getLogger("test"), "test-token")
 
             # WHEN post_deploy is called
-            extension.post_deploy("test-model")
+            extension.post_deploy(TEST_MODEL)
 
             # THEN no configuration happens
             assert juju_stub.waited_scaled == []
@@ -80,7 +83,7 @@ class TestConfigureLivepatchServerExtension:
         ) -> None:
             # GIVEN an extension without a token
             # WHEN post_deploy is called
-            extension_without_token.post_deploy("test-model")
+            extension_without_token.post_deploy(TEST_MODEL)
 
             # THEN a warning is logged and no configuration happens
             assert any("No Ubuntu Pro token provided" in msg for msg in logger.messages["warning"])
@@ -94,18 +97,18 @@ class TestConfigureLivepatchServerExtension:
         ) -> None:
             # GIVEN a ready extension with a token
             # WHEN configure_livepatch_server is called
-            extension_with_token.configure_livepatch_server("test-model", "livepatch")
+            extension_with_token.configure_livepatch_server(TEST_MODEL, "livepatch")
 
             # THEN the full configuration workflow executes
             # Wait for scaling
-            assert ("test-model", "livepatch", "0:10:00") in juju.waited_scaled
+            assert (TEST_MODEL.uri, "livepatch", "0:10:00") in juju.waited_scaled
 
             # Wait for settling
-            assert ("test-model", "livepatch", "0:10:00") in juju.waited_settled
+            assert (TEST_MODEL.uri, "livepatch", "0:10:00") in juju.waited_settled
 
             # Wait for configure message
             assert (
-                "test-model",
+                TEST_MODEL.uri,
                 "livepatch/leader",
                 LIVEPATCH_SERVER_CONFIGURE_MESSAGE,
                 "0:10:00",
@@ -113,7 +116,7 @@ class TestConfigureLivepatchServerExtension:
 
             # Run the get-resource-token action
             assert (
-                "test-model",
+                TEST_MODEL.uri,
                 "livepatch/leader",
                 "get-resource-token",
                 {"contract-token": "test-token-123"},
@@ -121,7 +124,7 @@ class TestConfigureLivepatchServerExtension:
 
             # Configure the server URL template
             assert (
-                "test-model",
+                TEST_MODEL.uri,
                 "livepatch",
                 {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
             ) in juju.configured_applications
@@ -131,11 +134,15 @@ class TestConfigureLivepatchServerExtension:
         ) -> None:
             # GIVEN the server.url-template is already set
             juju.configured_applications.append(
-                ("test-model", "livepatch", {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"})
+                (
+                    TEST_MODEL.uri,
+                    "livepatch",
+                    {"server.url-template": "http://10.1.2.157:8080/v1/patches/{filename}"},
+                )
             )
 
             # WHEN configure_livepatch_server is called
-            extension_with_token.configure_livepatch_server("test-model", "livepatch")
+            extension_with_token.configure_livepatch_server(TEST_MODEL, "livepatch")
 
             # THEN no further configuration happens
             assert any("already has server.url-template" in msg for msg in logger.messages["info"])
@@ -147,7 +154,7 @@ class TestConfigureLivepatchServerExtension:
         ) -> None:
             # GIVEN an extension without a token
             # WHEN configure_livepatch_server is called
-            extension_without_token.configure_livepatch_server("test-model", "livepatch")
+            extension_without_token.configure_livepatch_server(TEST_MODEL, "livepatch")
 
             # THEN a warning is logged and workflow is skipped
             assert any("No Ubuntu Pro token provided" in msg for msg in logger.messages["warning"])
@@ -160,11 +167,11 @@ class TestConfigureLivepatchServerExtension:
             juju.unit_ips = {"livepatch/leader": "192.168.1.100"}
             extension = ConfigureLivepatchServerExtension(juju, logger, "test-token")
             # WHEN configure_livepatch_server is called
-            extension.configure_livepatch_server("test-model", "livepatch")
+            extension.configure_livepatch_server(TEST_MODEL, "livepatch")
 
             # THEN the URL template uses the correct IP
             assert (
-                "test-model",
+                TEST_MODEL.uri,
                 "livepatch",
                 {"server.url-template": "http://192.168.1.100:8080/v1/patches/{filename}"},
             ) in juju.configured_applications

@@ -6,7 +6,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 
 from validators.base.validator import ValidationResult
 from validators.runner import ValidatorRunnerResults
@@ -46,14 +46,16 @@ class ValidatorInjectorExtension(JujuExtension):
         self.juju = juju
         self.logger = logger.getChild("ValidatorInjectorExtension")
 
-    def post_validate(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
             results[unit] = self._run_validators_on_unit(model, unit, level, model_is_k8s)
         return results
 
-    def _run_validators_on_unit(self, model: str, unit: str, level: str, is_k8s: bool = True) -> list[ValidationResult]:
+    def _run_validators_on_unit(
+        self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
+    ) -> list[ValidationResult]:
         # Inject validators
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
@@ -70,7 +72,7 @@ class ValidatorInjectorExtension(JujuExtension):
         # Collect results
         return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
 
-    def _inject_validators(self, model: str, unit: str, is_k8s: bool = True) -> None:
+    def _inject_validators(self, model: JujuModelHandle, unit: str, is_k8s: bool = True) -> None:
         # Ensure validators path is provided
         if self.validators_path is None:
             raise ValueError("validators_path must be provided to inject validators")

@@ -16,7 +16,8 @@ overrides:
     constraints:
       # A Trino instance cannot be both coordinator and worker
       - 'not (bool(endpoint[trino-coordinator]) and bool(endpoint[trino-worker]))'
-      - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "worker"'
-      - 'bool(endpoint[trino-worker]) => config[charm-function] == "coordinator"'
+      # charm.py::_validate_relations -> trino_coordinator.py/trino_worker.py::_validate()
+      - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "coordinator"'
+      - 'bool(endpoint[trino-worker]) => config[charm-function] == "worker"'
       - 'not bool(endpoint[trino-coordinator]) and not bool(endpoint[trino-worker])
         => config[charm-function] == "all"'

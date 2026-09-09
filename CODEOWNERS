@@ -1,1 +1,24 @@
-*       @canonical/solutions-qa
+# CODEOWNERS — routes PRs to the most likely reviewer.
+# Rules are evaluated top-to-bottom; the LAST matching rule wins.
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# --- Default owner ---
+# Blanket ownership: Solutions QA reviews everything by default.
+*                @canonical/solutions-qa @rpbritton
+
+# --- Broad ownership by language ---
+*.sh             @canonical/solutions-qa-shell @rpbritton 
+*.py             @canonical/solutions-qa-python @rpbritton
+
+# --- Narrow ownership by directory ---
+/bundle_builder_x/           @rpbritton @LucasPluta @motjuste
+/charm_integration_testing/  @rpbritton @moisesbenzan @PeishuoCai @yjkim717
+/development-sandbox/         @rpbritton @LucasPluta
+/docs/                       @rpbritton @PeishuoCai
+/scripts/                    @rpbritton @PeishuoCai
+/static/                     @rpbritton @amc94
+/validators/                 @rpbritton @LucasPluta @almeidaraul
+
+# --- Meta ---
+/CODEOWNERS      @canonical/solutions-qa @rpbritton
+/.github/        @canonical/solutions-qa-github-actions @rpbritton

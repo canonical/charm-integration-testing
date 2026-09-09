@@ -322,8 +322,9 @@ def _mark_as_injected(item: pytest.Item) -> None:
     """Label *item* as a scheduler-injected bridge (idempotent).
 
     Adds the ``injected`` marker and prefixes the item's display name and
-    node ID with ``[injected]`` so it is visually distinct in ``pytest -v``
-    output.  Calling this function more than once on the same item is safe.
+    node ID's trailing test-name segment with ``[injected]`` so it is
+    visually distinct in ``pytest -v`` output.  Calling this function more
+    than once on the same item is safe.
     """
     if id(item) in _injected_item_ids:
         return
@@ -334,7 +335,11 @@ def _mark_as_injected(item: pytest.Item) -> None:
     # pytest exposes no public API to override the node ID; _nodeid is the
     # backing attribute for the read-only ``nodeid`` property.  This is a
     # known limitation: revisit if pytest removes or renames _nodeid.
-    item._nodeid = f"[injected] {original_name}"
+    # Only the trailing test-name segment (after the last "::") is prefixed;
+    # the file-path/module prefix before it must be preserved, since JUnit
+    # XML/Test Observer derive the test's template_id from that prefix (GH-947).
+    path_prefix, separator, _ = item._nodeid.rpartition("::")
+    item._nodeid = f"{path_prefix}{separator}[injected] {original_name}"
 
 
 def _label_occurrence(item: pytest.Item, base_name: str, base_nodeid: str, occurrence: int) -> None:

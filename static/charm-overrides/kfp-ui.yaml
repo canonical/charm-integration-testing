@@ -9,6 +9,12 @@
 # ingress (requires): optional - relation broadcaster/ambient ingress components are independent of the workload service dependencies.
 # dashboard-links (requires): optional - KubeflowDashboardLinksRequirer only adds sidebar links.
 # service-mesh/require-cmr-mesh/istio-ingress-route/provide-cmr-mesh: optional - additive mesh integrations, not inputs to MlPipelineUiPebbleService.
+#
+# kfp-api's "kfp-api" feature tag is shared across all its published tracks/risks
+# (which are not interchangeable). The feature tag alone only proves the peer is *a*
+# kfp-api charm, not the matching release, so track/risk equality is pinned alongside it
+# here (and on kfp-persistence.yaml) to require kfp-ui to integrate with a kfp-api on the
+# same channel.
 overrides:
   - criteria:
       - track: '2.0-alpha.7'
@@ -19,11 +25,17 @@ overrides:
     requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - track: '2.0'
       - risk: beta
@@ -34,11 +46,17 @@ overrides:
     requires:
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - track: '2.0'
       - risk: edge
@@ -51,11 +69,17 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - track: '2.0'
       - risk: stable
@@ -68,11 +92,17 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - track: '2.5'
       - risk: edge
@@ -81,10 +111,16 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - any_of:
           - track: '2.15'
@@ -99,6 +135,9 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       istio-ingress-route:
         optional: true
       kfp-api:
@@ -108,7 +147,10 @@ overrides:
       service-mesh:
         optional: true
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - provides:
       kfp-ui:
         optional: true
@@ -118,8 +160,14 @@ overrides:
         optional: true
       ingress:
         optional: true
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       kfp-api:
         features: [kfp-api]
     constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
       - '"kfp-ui" in features(endpoint[kfp-ui])'
       - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'

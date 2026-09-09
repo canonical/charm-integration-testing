@@ -3,13 +3,23 @@
 
 import json
 import socket
+import ssl
+from email.message import Message
 from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
+from urllib.error import HTTPError
+from urllib.request import Request
 
 import ops
 import pytest
 
-from validators.loki_push_api.validator import LokiPushApiValidator
+from validators.loki_push_api.validator import (
+    _INGEST_WAIT_S,
+    LokiPushApiValidator,
+    _build_ssl_context,
+    _query_canary,
+    _supports_query_api,
+)
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -218,8 +228,6 @@ class TestLokiPushApiValidatorSimple:
         assert not connect.passed
 
     def test_fails_http_ready_when_loki_not_ready(self) -> None:
-        from urllib.error import HTTPError
-
         validator = _make_validator([VALID_UNIT_DATABAG])
         with (
             patch("validators.loki_push_api.validator._tcp_ping"),
@@ -234,9 +242,107 @@ class TestLokiPushApiValidatorSimple:
         ready = next(c for c in result.checks if c.name.startswith("http_ready"))
         assert not ready.passed
 
-    def test_http_ready_passes_after_retry(self) -> None:
-        from urllib.error import HTTPError
+    def test_http_ready_passes_when_route_not_found_push_only_forwarder(self) -> None:
+        """Push-only forwarders (e.g. grafana-agent-k8s) 404 on /ready; that should PASS after the
+        push-endpoint probe confirms the advertised push route is actually live, not retry."""
 
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    _mock_ready_response(status=204, body=b""),
+                ],
+            ) as urlopen_mock,
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "PASS"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert ready.passed
+        assert "does not expose a Loki-compatible readiness endpoint" in ready.message
+        # The message must reference the /ready URL that 404'd and the distinct push URL that
+        # was actually probed — not conflate the two.
+        assert ready_url in ready.message
+        assert LOKI_URL in ready.message
+        # One call for /ready (404), one for the push-endpoint probe; no retries.
+        assert urlopen_mock.call_count == 2
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_fails_when_push_endpoint_also_not_found(self) -> None:
+        """A 404 on /ready alone isn't proof of a push-only forwarder — a fully broken/misconfigured
+        endpoint that 404s on every route must still FAIL once the push-endpoint probe also 404s."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 404, "Not Found", Message(), None),
+                ],
+            ) as urlopen_mock,
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert not ready.passed
+        assert "also returned 404" in ready.message
+        assert urlopen_mock.call_count == 2
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_passes_when_push_endpoint_rejects_probe_with_4xx(self) -> None:
+        """A 405/400 etc. on the probe still proves the push route is registered and live."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 405, "Method Not Allowed", Message(), None),
+                ],
+            ),
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "PASS"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert ready.passed
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_fails_when_push_endpoint_probe_errors(self) -> None:
+        """A 5xx from the push-endpoint probe is a genuine backend problem, not a push-only signal."""
+
+        validator = _make_validator([VALID_UNIT_DATABAG])
+        ready_url = LOKI_URL.rsplit("/loki/api/v1/push", 1)[0] + "/ready"
+        with (
+            patch("validators.loki_push_api.validator._tcp_ping"),
+            patch(
+                "validators.loki_push_api.validator.urlopen",
+                side_effect=[
+                    HTTPError(ready_url, 404, "Not Found", Message(), None),
+                    HTTPError(LOKI_URL, 500, "Internal Server Error", Message(), None),
+                ],
+            ),
+            patch("validators.loki_push_api.validator.time.sleep") as sleep_mock,
+        ):
+            result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        ready = next(c for c in result.checks if c.name.startswith("http_ready"))
+        assert not ready.passed
+        assert "server error" in ready.message
+        sleep_mock.assert_not_called()
+
+    def test_http_ready_passes_after_retry(self) -> None:
         validator = _make_validator([VALID_UNIT_DATABAG])
         attempt = 0
 
@@ -279,18 +385,12 @@ class TestLokiPushApiValidatorSimple:
         assert result.interface == "loki_push_api"
 
     def test_build_ssl_context_returns_none_for_http(self) -> None:
-        from validators.loki_push_api.validator import _build_ssl_context
-
         assert _build_ssl_context({"url": LOKI_URL}) is None
 
     def test_build_ssl_context_skips_verify_when_flag_set(self) -> None:
-        import ssl as ssl_mod
-
-        from validators.loki_push_api.validator import _build_ssl_context
-
         ctx = _build_ssl_context({"url": "https://loki:443/loki/api/v1/push", "tls_insecure_skip_verify": "true"})
         assert ctx is not None
-        assert ctx.verify_mode == ssl_mod.CERT_NONE
+        assert ctx.verify_mode == ssl.CERT_NONE
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +440,6 @@ class TestLokiPushApiValidatorDeep:
         probe (`/loki/api/v1/labels`) 404s, the canary check should pass based on
         the successful push alone, without attempting a query round trip.
         """
-        from urllib.error import HTTPError
-
         validator = _make_validator([VALID_UNIT_DATABAG])
 
         push_resp = MagicMock()
@@ -369,7 +467,6 @@ class TestLokiPushApiValidatorDeep:
 
     def test_deep_fails_when_query_capability_probe_errors(self) -> None:
         """Non-404 errors from the query capability probe are real failures, not skips."""
-        from urllib.error import HTTPError
 
         validator = _make_validator([VALID_UNIT_DATABAG])
 
@@ -398,8 +495,6 @@ class TestLokiPushApiValidatorDeep:
 
     def test_deep_fails_when_canary_push_fails(self) -> None:
         validator = _make_validator([VALID_UNIT_DATABAG])
-
-        from urllib.error import HTTPError
 
         urlopen_returns = [
             _mock_ready_response(),
@@ -452,8 +547,6 @@ class TestLokiPushApiValidatorDeep:
         assert "not found" in canary.message
 
     def test_deep_skips_canary_when_ready_fails(self) -> None:
-        from urllib.error import HTTPError
-
         validator = _make_validator([VALID_UNIT_DATABAG])
 
         with (
@@ -475,13 +568,11 @@ class TestLokiPushApiValidatorDeep:
         captured_payloads: list[bytes] = []
 
         def fake_urlopen(req: object, **kw: object) -> MagicMock:
-            from urllib.request import Request as Req
-
             resp = MagicMock()
             resp.__enter__.return_value = resp
             resp.__exit__.return_value = False
 
-            if isinstance(req, Req) and req.data:
+            if isinstance(req, Request) and req.data:
                 # Push call
                 captured_payloads.append(cast(bytes, req.data))
                 resp.status = 204
@@ -539,15 +630,12 @@ class TestLokiPushApiValidatorDeep:
         ):
             validator.validate(level="deep")
 
-        from validators.loki_push_api.validator import _INGEST_WAIT_S
-
         assert call(_INGEST_WAIT_S) in sleep_calls
 
     def test_query_canary_uses_query_range_endpoint_with_bounded_window(self) -> None:
         """`/loki/api/v1/query` is an instant-query endpoint that rejects log
         selectors; `_query_canary` must use `/loki/api/v1/query_range` with a
         bounded `start`/`end` window instead."""
-        from validators.loki_push_api.validator import _query_canary
 
         query_resp = MagicMock()
         query_resp.__enter__.return_value = query_resp
@@ -573,16 +661,10 @@ class TestLokiPushApiValidatorDeep:
         assert "end=" in captured_urls[0]
 
     def test_supports_query_api_returns_true_on_200(self) -> None:
-        from validators.loki_push_api.validator import _supports_query_api
-
         with patch("validators.loki_push_api.validator.urlopen", return_value=_mock_ready_response(status=200)):
             assert _supports_query_api("http://loki:3100") is True
 
     def test_supports_query_api_returns_false_on_404(self) -> None:
-        from urllib.error import HTTPError
-
-        from validators.loki_push_api.validator import _supports_query_api
-
         with patch(
             "validators.loki_push_api.validator.urlopen",
             side_effect=HTTPError("http://neighbor:3500/loki/api/v1/labels", 404, "Not Found", {}, None),  # type: ignore[arg-type]
@@ -590,10 +672,6 @@ class TestLokiPushApiValidatorDeep:
             assert _supports_query_api("http://neighbor:3500") is False
 
     def test_supports_query_api_reraises_non_404_errors(self) -> None:
-        from urllib.error import HTTPError
-
-        from validators.loki_push_api.validator import _supports_query_api
-
         with (
             patch(
                 "validators.loki_push_api.validator.urlopen",

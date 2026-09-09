@@ -1,11 +1,20 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import datetime
 import json
+import ssl
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import ops
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from validators.prometheus_scrape.validator import PrometheusScrapeValidator
 from validators.test_utils.helpers import make_charm_from_relation
@@ -480,6 +489,184 @@ class TestPrometheusScrapeValidatorDeep:
 
 
 # ---------------------------------------------------------------------------
+# Tests: HTTPS scrape targets with self-signed certs
+# ---------------------------------------------------------------------------
+
+HTTPS_SCRAPE_JOBS = json.dumps(
+    [
+        {
+            "metrics_path": "/metrics",
+            "static_configs": [{"targets": ["my-app-0.my-app.svc.cluster.local:8200"]}],
+            "scheme": "https",
+        }
+    ]
+)
+
+HTTPS_DATABAG: dict[str, str] = {
+    "scrape_metadata": VALID_SCRAPE_METADATA,
+    "scrape_jobs": HTTPS_SCRAPE_JOBS,
+}
+
+
+class TestHttpsScrapeTargets:
+    def test_http_probe_skips_cert_verification_for_https_targets(self) -> None:
+        # Regression test for: prometheus_scrape targets never carry a `tls_config`
+        # (per the upstream charm library, certs for `https` scrape targets are trusted
+        # via `update-ca-certificates` on the host, not via relation data), so this
+        # validator has no way to verify a charm's self-signed cert. It must not reject
+        # an otherwise-reachable https target just because the cert can't be verified.
+        validator = _make_validator(HTTPS_DATABAG)
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_urlopen:
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        _, kwargs = mock_urlopen.call_args
+        assert kwargs.get("context") is not None
+        assert kwargs["context"].verify_mode == ssl.CERT_NONE
+
+    def test_http_probe_does_not_pass_ssl_context_for_http_targets(self) -> None:
+        # GIVEN a plain http:// target — no SSL context should be involved at all.
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_urlopen:
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        _, kwargs = mock_urlopen.call_args
+        assert "context" not in kwargs
+
+    def test_http_probe_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test using a real TLS socket with a self-signed cert,
+        # reproducing the exact CI failure this fix addresses:
+        # "CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate".
+        server, port, thread = _start_self_signed_https_server()
+        try:
+            validator = _make_validator(
+                {
+                    "scrape_metadata": VALID_SCRAPE_METADATA,
+                    "scrape_jobs": json.dumps(
+                        [
+                            {
+                                "metrics_path": "/metrics",
+                                "static_configs": [{"targets": [f"127.0.0.1:{port}"]}],
+                                "scheme": "https",
+                            }
+                        ]
+                    ),
+                }
+            )
+
+            # WHEN
+            result = validator.validate(level="simple")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed, http_check.message
+
+    def test_scrape_check_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test for the L2 `scrape[...]` check: it also passes the
+        # insecure SSL context (via _scrape_and_parse_checks), not just `http_probe`.
+        server, port, thread = _start_self_signed_https_server(response_body=PROMETHEUS_TEXT_BODY)
+        try:
+            validator = _make_validator(
+                {
+                    "scrape_metadata": VALID_SCRAPE_METADATA,
+                    "scrape_jobs": json.dumps(
+                        [
+                            {
+                                "metrics_path": "/metrics",
+                                "static_configs": [{"targets": [f"127.0.0.1:{port}"]}],
+                                "scheme": "https",
+                            }
+                        ]
+                    ),
+                }
+            )
+
+            # WHEN
+            result = validator.validate(level="deep")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        scrape_check = next(c for c in result.checks if c.name.startswith("scrape["))
+        assert scrape_check.passed, scrape_check.message
+
+
+def _start_self_signed_https_server(
+    response_body: bytes = b"# HELP up 1\nup 1\n",
+) -> tuple[HTTPServer, int, threading.Thread]:
+    """Start a background HTTPS server on 127.0.0.1 backed by a self-signed cert."""
+
+    class _MetricsHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - required BaseHTTPRequestHandler signature
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, *args: object) -> None:  # silence default request logging
+            pass
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "selfsigned")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(minutes=5))
+        .sign(key, hashes.SHA256())
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_path = f"{tmpdir}/cert.pem"
+        key_path = f"{tmpdir}/key.pem"
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        with open(key_path, "wb") as f:
+            f.write(
+                key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption(),
+                )
+            )
+
+        server = HTTPServer(("127.0.0.1", 0), _MetricsHandler)
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(cert_path, key_path)
+        server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, port, thread
+
+
+# ---------------------------------------------------------------------------
 # Tests: wildcard host resolution
 # ---------------------------------------------------------------------------
 
@@ -632,3 +819,153 @@ class TestWildcardHostResolution:
         assert result.status == "PASS"
         called_url = mock_open.call_args[0][0]
         assert called_url == "http://[::ffff:10.0.0.1]:9104/metrics"
+
+
+# ---------------------------------------------------------------------------
+# Tests: cross-model (CMR) target qualification
+#
+# Regression test for test execution 919150: mongodb-k8s (provider, model
+# "target-model") is consumed over a cross-model offer by grafana-agent-k8s
+# (requirer, model "neighbor-model"). The provider publishes a bare per-unit
+# Kubernetes DNS host (e.g. "target-0.target-endpoints"), which only resolves
+# within its own namespace. Across a CMR boundary this must be qualified with
+# the provider's namespace, matching the convention already used elsewhere in
+# this codebase (see validators.cross_model_mesh._cross_model_dns_name).
+# ---------------------------------------------------------------------------
+
+CMR_SCRAPE_METADATA = json.dumps(
+    {
+        "model": "target-model",
+        "model_uuid": "abc-123",
+        "application": "target",
+        "unit": "target/0",
+    }
+)
+
+CMR_SCRAPE_JOBS = json.dumps(
+    [
+        {
+            "metrics_path": "/metrics",
+            "static_configs": [{"targets": ["target-0.target-endpoints:9216"]}],
+            "scheme": "http",
+        }
+    ]
+)
+
+CMR_DATABAG: dict[str, str] = {
+    "scrape_metadata": CMR_SCRAPE_METADATA,
+    "scrape_jobs": CMR_SCRAPE_JOBS,
+}
+
+
+def _make_cmr_validator(databag: dict[str, str], local_model_name: str) -> PrometheusScrapeValidator:
+    app = ApplicationStub()
+    relation = RelationStub(name="metrics-endpoint", id=0, app=app, data={app: databag})
+    charm = cast(
+        ops.CharmBase,
+        make_charm_from_relation(relation, interface_name="prometheus_scrape", local_model_name=local_model_name),
+    )
+    return PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
+
+
+class TestCrossModelHostQualification:
+    def test_bare_host_qualified_with_remote_model_across_cmr(self) -> None:
+        # GIVEN the requirer lives in a different model than the target ("target-model")
+        validator = _make_cmr_validator(CMR_DATABAG, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the bare pod-DNS host is qualified with the remote model's namespace
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints.target-model.svc.cluster.local:9216/metrics"
+
+    def test_bare_host_not_qualified_within_same_model(self) -> None:
+        # GIVEN the requirer is in the same model as the target (not a CMR relation)
+        validator = _make_cmr_validator(CMR_DATABAG, local_model_name="target-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: the host is used as-is; same-namespace pod DNS already resolves
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints:9216/metrics"
+
+    def test_namespace_qualified_host_not_double_qualified(self) -> None:
+        # GIVEN a target already qualified with the remote namespace but not the
+        # full ".svc.cluster.local" suffix (e.g. "<pod>.<svc>.<namespace>")
+        jobs = json.dumps(
+            [
+                {
+                    "metrics_path": "/metrics",
+                    "static_configs": [{"targets": ["target-0.target-endpoints.target-model:9216"]}],
+                    "scheme": "http",
+                }
+            ]
+        )
+        databag = {"scrape_metadata": CMR_SCRAPE_METADATA, "scrape_jobs": jobs}
+        validator = _make_cmr_validator(databag, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: it is left untouched, not re-qualified into
+        # "...target-model.target-model.svc.cluster.local"
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://target-0.target-endpoints.target-model:9216/metrics"
+
+    def test_already_fully_qualified_host_not_double_qualified(self) -> None:
+        # GIVEN a target already using the full svc.cluster.local form
+        validator = _make_cmr_validator(VALID_DATABAG, local_model_name="neighbor-model")
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: it is left untouched
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://my-app-0.my-app.svc.cluster.local:8080/metrics"
+
+    def test_ip_address_target_not_qualified_across_cmr(self) -> None:
+        # GIVEN a wildcard target expanded to a concrete unit IP address
+        databag = {"scrape_metadata": CMR_SCRAPE_METADATA, "scrape_jobs": WILDCARD_SCRAPE_JOBS}
+        app = ApplicationStub()
+        unit = UnitStub("provider/0")
+        relation = RelationStub(
+            name="metrics-endpoint",
+            id=0,
+            app=app,
+            data={app: databag, unit: {"prometheus_scrape_unit_address": "10.1.0.50"}},
+            units=frozenset({unit}),
+        )
+        charm = cast(
+            ops.CharmBase,
+            make_charm_from_relation(relation, interface_name="prometheus_scrape", local_model_name="neighbor-model"),
+        )
+        validator = PrometheusScrapeValidator(charm, cast(ops.Relation, relation))
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_open:
+            result = validator.validate(level="simple")
+
+        # THEN: an IP address is never namespace-qualified
+        assert result.status == "PASS"
+        called_url = mock_open.call_args[0][0]
+        assert called_url == "http://10.1.0.50:9104/metrics"

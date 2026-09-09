@@ -22,6 +22,7 @@ from extensions.s3_integrator_minio_backend.extension import (
     UBUNTU_CHARM,
     S3IntegratorMinIOBackendExtension,
 )
+from juju import JujuModelHandle
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -30,6 +31,10 @@ from ..shared import JujuStub as JujuStubBase
 class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"s3-app": "s3-integrator"})
     unit_ips: dict[str, str] = field(default_factory=lambda: {"s3-app-minio/leader": "10.0.0.1"})
+
+
+_MODEL = JujuModelHandle(controller="ctrl", model="test-model")
+_MODEL_URI = "ctrl:test-model"
 
 
 class TestS3IntegratorMinIOBackendExtension:
@@ -47,10 +52,10 @@ class TestS3IntegratorMinIOBackendExtension:
         ) -> None:
             # GIVEN a model with an s3-integrator application
             # WHEN post_deploy is called
-            extension.post_deploy("test-model")
+            extension.post_deploy(_MODEL)
 
             # THEN minio is deployed
-            assert ("test-model", "minio", "s3-app-minio") in juju.deployed
+            assert (_MODEL_URI, "minio", "s3-app-minio") in juju.deployed
 
         def test_ignores_non_s3_integrator_apps(self, juju: JujuStub) -> None:
             # GIVEN a model with no s3-integrator applications
@@ -58,7 +63,7 @@ class TestS3IntegratorMinIOBackendExtension:
             extension = S3IntegratorMinIOBackendExtension(juju, logging.getLogger("test"))
 
             # WHEN post_deploy is called
-            extension.post_deploy("test-model")
+            extension.post_deploy(_MODEL)
 
             # THEN no deployments happen
             assert juju.deployed == []
@@ -68,10 +73,10 @@ class TestS3IntegratorMinIOBackendExtension:
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
             # GIVEN an s3-integrator application that already has an endpoint configured
-            juju.configured_applications.append(("test-model", "s3-app", {"endpoint": "http://existing:9000"}))
+            juju.configured_applications.append((_MODEL_URI, "s3-app", {"endpoint": "http://existing:9000"}))
 
             # WHEN deploy_minio_s3_backend is called
-            extension.deploy_minio_s3_backend("test-model", "s3-app")
+            extension.deploy_minio_s3_backend(_MODEL, "s3-app")
 
             # THEN nothing is deployed or additionally configured
             assert juju.deployed == []
@@ -85,13 +90,13 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN deploy_minio_s3_backend is called
-            extension.deploy_minio_s3_backend("test-model", "s3-app")
+            extension.deploy_minio_s3_backend(_MODEL, "s3-app")
 
             # THEN the minio charm is deployed and configured
-            assert ("test-model", "minio", "s3-app-minio") in juju.deployed
+            assert (_MODEL_URI, "minio", "s3-app-minio") in juju.deployed
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app-minio",
                 {
                     "access-key": MINIO_ACCESS_KEY,
@@ -99,11 +104,11 @@ class TestS3IntegratorMinIOBackendExtension:
                 },
             ) in juju.configured_applications
 
-            assert ("test-model", "s3-app", "0:10:00") in juju.waited_scaled
-            assert ("test-model", "s3-app-minio", "0:10:00") in juju.waited_scaled
+            assert (_MODEL_URI, "s3-app", "0:10:00") in juju.waited_scaled
+            assert (_MODEL_URI, "s3-app-minio", "0:10:00") in juju.waited_scaled
 
             assert juju.scp_calls == [
-                ("test-model", str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}")
+                (_MODEL_URI, str(Path("mc").resolve()), f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}")
             ]
 
             assert any(
@@ -118,7 +123,7 @@ class TestS3IntegratorMinIOBackendExtension:
             assert any("&& rm empty" in cmd for _, _, cmd in juju.ssh_calls)
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app",
                 {
                     "path": MINIO_PATH,
@@ -128,7 +133,7 @@ class TestS3IntegratorMinIOBackendExtension:
             ) in juju.configured_applications
 
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app/leader",
                 "sync-s3-credentials",
                 {
@@ -146,15 +151,15 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_server_file = Path("minio")
 
             # WHEN deploy_minio_s3_backend is called
-            extension.deploy_minio_s3_backend("test-model", "s3-app")
+            extension.deploy_minio_s3_backend(_MODEL, "s3-app")
 
             # THEN ubuntu is deployed (not the minio charm)
-            assert ("test-model", UBUNTU_CHARM, "s3-app-minio") in juju.deployed
-            assert ("test-model", "minio", "s3-app-minio") not in juju.deployed
+            assert (_MODEL_URI, UBUNTU_CHARM, "s3-app-minio") in juju.deployed
+            assert (_MODEL_URI, "minio", "s3-app-minio") not in juju.deployed
 
             # AND minio server binary is uploaded, installed, and started via systemd-run
             assert (
-                "test-model",
+                _MODEL_URI,
                 str(Path("minio").resolve()),
                 f"s3-app-minio/leader:{MINIO_SERVER_STAGING_PATH}",
             ) in juju.scp_calls
@@ -175,13 +180,13 @@ class TestS3IntegratorMinIOBackendExtension:
 
             # AND mc client, bucket, and s3-integrator auth are set up as normal
             assert (
-                "test-model",
+                _MODEL_URI,
                 str(Path("mc").resolve()),
                 f"s3-app-minio/leader:{MINIO_CLIENT_STAGING_PATH}",
             ) in juju.scp_calls
             assert any("/usr/local/bin/mc mb" in cmd for _, _, cmd in juju.ssh_calls)
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app/leader",
                 "sync-s3-credentials",
                 {
@@ -199,7 +204,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             results = generate_results()
 
-            def ssh_errors_once(model: str, target: str, command: str) -> None:
+            def ssh_errors_once(model: JujuModelHandle, target: str, command: str) -> None:
                 result = next(results)
                 if isinstance(result, CalledProcessError):
                     raise result
@@ -211,7 +216,7 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN set_minio_alias is called
-            extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+            extension.set_minio_alias(_MODEL, "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
             # THEN the alias command runs successfully
             assert any("/usr/local/bin/mc alias set local" in cmd for _, _, cmd in juju.ssh_calls)
@@ -219,7 +224,7 @@ class TestS3IntegratorMinIOBackendExtension:
         def test_alias_max_attempts_exceeded(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            def ssh_errors(model: str, target: str, command: str) -> None:
+            def ssh_errors(model: JujuModelHandle, target: str, command: str) -> None:
                 raise CalledProcessError(1, "bad-command")
 
             monkeypatch.setattr(juju, "ssh", ssh_errors)
@@ -229,7 +234,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             # WHEN set_minio_alias fails every attempt, THEN it errors
             with pytest.raises(CalledProcessError):
-                extension.set_minio_alias("test-model", "s3-app", max_attempts=3, retry_sleep_seconds=0)
+                extension.set_minio_alias(_MODEL, "s3-app", max_attempts=3, retry_sleep_seconds=0)
 
         def test_create_minio_bucket_creates_path(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
@@ -238,7 +243,7 @@ class TestS3IntegratorMinIOBackendExtension:
             extension.minio_client_file = Path("mc")
 
             # WHEN create_minio_bucket is called
-            extension.create_minio_bucket("test-model", "s3-app")
+            extension.create_minio_bucket(_MODEL, "s3-app")
 
             # THEN bucket is created
             assert any("/usr/local/bin/mc mb local/minio-bucket-for-testing" in cmd for _, _, cmd in juju.ssh_calls)
@@ -255,11 +260,11 @@ class TestS3IntegratorMinIOBackendExtension:
         ) -> None:
             # GIVEN a ready extension
             # WHEN authenticate_s3_integrator is called
-            extension.authenticate_s3_integrator("test-model", "s3-app")
+            extension.authenticate_s3_integrator(_MODEL, "s3-app")
 
             # THEN s3-integrator is configured with path, endpoint, and bucket
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app",
                 {
                     "path": MINIO_PATH,
@@ -270,7 +275,7 @@ class TestS3IntegratorMinIOBackendExtension:
 
             # AND credentials are synced
             assert (
-                "test-model",
+                _MODEL_URI,
                 "s3-app/leader",
                 "sync-s3-credentials",
                 {
@@ -287,17 +292,17 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
 
             # WHEN pre_remove is called for the s3 integrator
-            extension.pre_remove("test-model", "s3-app")
+            extension.pre_remove(_MODEL, "s3-app")
 
             # THEN the minio app is removed
-            assert ("test-model", "s3-app-minio") in juju.removed
+            assert (_MODEL_URI, "s3-app-minio") in juju.removed
 
         def test_waits_for_minio_removal(self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub) -> None:
             # GIVEN a model with s3-app and its associated minio application
             juju.applications = {"s3-app": "s3-integrator", "s3-app-minio": "minio"}
 
             # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            extension.pre_remove(_MODEL, "s3-app")
 
             # THEN it waits for the minio app to be removed
             assert any("s3-app-minio" in apps for _, apps, _ in juju.waited_removal)
@@ -309,7 +314,7 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.applications = {}
 
             # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            extension.pre_remove(_MODEL, "s3-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -321,7 +326,7 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.applications = {"other-app": "other-charm"}
 
             # WHEN pre_remove is called for that application
-            extension.pre_remove("test-model", "other-app")
+            extension.pre_remove(_MODEL, "other-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -333,7 +338,7 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.applications = {"s3-app": "s3-integrator"}
 
             # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            extension.pre_remove(_MODEL, "s3-app")
 
             # THEN nothing is removed
             assert juju.removed == []
@@ -345,7 +350,7 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.applications = {"s3-app": "s3-integrator"}
 
             # WHEN pre_remove is called
-            extension.pre_remove("test-model", "s3-app")
+            extension.pre_remove(_MODEL, "s3-app")
 
             # THEN no wait for removal is triggered
             assert juju.waited_removal == []
@@ -391,23 +396,23 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.is_k8s = True
 
             # WHEN minio_address is called
-            result = extension.minio_address("test-model", "s3-app")
+            result = extension.minio_address(_MODEL, "s3-app")
 
             # THEN the stable k8s Service DNS name is used instead of the pod IP, since the
             # pod (and its IP) can change after events such as model migration
             assert result == "http://s3-app-minio.test-model.svc:9000"
 
-        def test_minio_address_uses_model_name_segment_of_a_model_uri(
+        def test_minio_address_uses_model_name_segment_regardless_of_controller(
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
-            # GIVEN a k8s model passed as a "controller:model-name" URI, as happens during
-            # JujuClient.deploy_bundles()
+            # GIVEN a k8s model whose controller differs from its model name
             juju.is_k8s = True
+            model = JujuModelHandle(controller="test-controller", model="test-model")
 
             # WHEN minio_address is called
-            result = extension.minio_address("test-controller:test-model", "s3-app")
+            result = extension.minio_address(model, "s3-app")
 
-            # THEN only the model-name segment is used as the k8s namespace
+            # THEN only the model-name segment is used as the k8s namespace (never the controller)
             assert result == "http://s3-app-minio.test-model.svc:9000"
 
         def test_minio_address_builds_from_unit_ip_for_machine_models(
@@ -417,7 +422,7 @@ class TestS3IntegratorMinIOBackendExtension:
             juju.is_k8s = False
 
             # WHEN minio_address is called
-            result = extension.minio_address("test-model", "s3-app")
+            result = extension.minio_address(_MODEL, "s3-app")
 
             # THEN the URL is constructed from the unit IP
             assert result == "http://10.0.0.1:9000"

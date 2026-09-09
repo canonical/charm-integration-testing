@@ -5,7 +5,7 @@ import logging
 from abc import ABC
 from datetime import timedelta
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 
 LIVEPATCH_SERVER_CHARM = "canonical-livepatch-server-k8s"
 LIVEPATCH_SERVER_CONFIGURE_MESSAGE = "patch-sync token not set"
@@ -21,13 +21,13 @@ class ConfigureLivepatchServerExtension(JujuExtension, ABC):
         self.logger = logger
         self.ubuntu_pro_token = ubuntu_pro_token
 
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         # Look for livepatch server application
         for application in self.juju.list_applications(model):
             if self.juju.application_charm(model, application) == LIVEPATCH_SERVER_CHARM:
                 self.configure_livepatch_server(model, application)
 
-    def configure_livepatch_server(self, model: str, application: str) -> None:
+    def configure_livepatch_server(self, model: JujuModelHandle, application: str) -> None:
         # Following guide: https://discourse.ubuntu.com/t/getting-started-with-livepatch-on-prem-and-microk8s/39130
 
         # Skip if no token

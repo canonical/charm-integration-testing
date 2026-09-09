@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -41,7 +41,7 @@ def _create_bundle_with_revision_override(
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
     target_downgrade_revision: int,
-    model: str,
+    target_model_ref: JujuModelHandle,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
@@ -61,13 +61,13 @@ def test_deploy_target_old_revision(
     )
 
     # Deploy the original bundle with only the target app revision overridden
-    juju_client.deploy_bundle_file(str(overridden_bundle), model=model)
+    juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
 
     # Wait until idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is deployed at the target revision and the model is healthy
-    deployed_revision = juju_client.application_revision(application=target_application, model=model)
+    deployed_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
     if deployed_revision != target_downgrade_revision:
         pytest.fail(
             f"Expected '{target_application}' to be deployed at revision {target_downgrade_revision}, "
@@ -75,4 +75,4 @@ def test_deploy_target_old_revision(
         )
 
     # Validate all applications and relations
-    juju_client.validate_model(model=model, level="simple")
+    juju_client.validate_model(model=target_model_ref, level="simple")

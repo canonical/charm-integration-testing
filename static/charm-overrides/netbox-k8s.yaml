@@ -1,0 +1,20 @@
+---
+# Source: https://github.com/canonical/netbox-k8s-operator
+#
+# Published metadata promotes optional ingress and COS observability integrations to required.
+overrides:
+  - requires:
+      ingress:
+        optional: true  # active without ingress; required only when OIDC is enabled
+      logging:
+        optional: true
+      oidc:
+        features: [tls]  # OIDC uses the HTTPS callback URL exposed through ingress
+    provides:
+      grafana-dashboard:
+        optional: true
+      metrics-endpoint:
+        optional: true
+    constraints:
+      # paas_charm/charm.py blocks OIDC until the ingress relation is ready.
+      - 'bool(endpoint[oidc]) => bool(endpoint[ingress])'

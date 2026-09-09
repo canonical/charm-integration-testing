@@ -40,7 +40,10 @@ dependencies = [
     "validators-ingress-auth",
     "validators-istio-ingress-route",
     "validators-prometheus-remote-write",
+    "validators-alertmanager-dispatch",
     "validators-certificate-transfer",
+    "validators-trino-client",
+    "validators-cross-model-mesh",
 ]
 
 [build-system]

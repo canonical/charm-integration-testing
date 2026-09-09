@@ -1,12 +1,18 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from resource_registry import ResourceRegistry
 
-from juju.backend import JujuBackend
 from juju.extension import JujuExtension
 
-from .handles import JujuControllerHandle, JujuModelHandle
+from ..handles import JujuControllerHandle, JujuModelHandle
+
+if TYPE_CHECKING:
+    from juju.backend import JujuBackend
 
 
 class JujuResourceRegistryExtension(JujuExtension):

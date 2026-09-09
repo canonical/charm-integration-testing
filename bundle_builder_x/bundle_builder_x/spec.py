@@ -43,6 +43,14 @@ class IntegrationSpec(BaseModel):
     offer_name: str | None = None
     url: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_remote_model_fields(self) -> IntegrationSpec:
+        if self.remote_controller is not None and self.remote_model is None:
+            raise ValueError("remote_controller requires remote_model to also be set")
+        if self.remote_model is not None and not self.remote_model:
+            raise ValueError("remote_model must have a non-empty name")
+        return self
+
     @property
     def is_cross_model(self) -> bool:
         return self.remote_model is not None
@@ -194,7 +202,6 @@ class SpecFile(BaseModel):
                     seen_local.add(local_key)
                     continue
 
-                remote_model = cast(str, integration.remote_model)  # guaranteed by is_cross_model
                 remote_model_key = cast(str, integration.remote_model_key)  # includes controller if set
 
                 # A CMR whose remote_model resolves to the current model is nonsensical;
@@ -237,21 +244,21 @@ class SpecFile(BaseModel):
                     if integration.remote_application not in remote_model_spec.applications:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration references application "
-                            f"'{integration.remote_application}' in model '{remote_model}', "
+                            f"'{integration.remote_application}' in model '{remote_model_key}', "
                             f"but that application is not defined there"
                         )
                     # In-spec CMR: remote model must have controller set (unless url is provided explicitly)
                     if integration.url is None and remote_model_spec.controller is None:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration references model "
-                            f"'{remote_model}' which has no 'controller' set"
+                            f"'{remote_model_key}' which has no 'controller' set"
                         )
                 else:
                     # External CMR: url is required
                     if integration.url is None:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration to external model "
-                            f"'{remote_model}' requires a 'url' field"
+                            f"'{remote_model_key}' requires a 'url' field"
                         )
         return self
 

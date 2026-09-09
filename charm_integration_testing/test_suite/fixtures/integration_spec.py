@@ -6,7 +6,9 @@ from typing import Literal
 
 import pytest
 import yaml
-from juju import JujuIntegrationApplication
+from juju import JujuApplicationInfo, JujuClient, JujuIntegrationApplication, JujuModelHandle
+
+from bundle_builder_x import Charm, CharmChannel, CharmhubClient
 
 
 def _find_saas_alias(bundle_path: Path, local_app: str, local_ep: str, remote_ep: str) -> str | None:
@@ -72,6 +74,29 @@ def _integration_consuming_side(
 
 
 @pytest.fixture
+def is_cmr_integration(_integration_consuming_side: Literal["target", "neighbor", "same"]) -> bool:
+    """Whether the integration crosses models (cross-model relation) rather than being same-model."""
+    return _integration_consuming_side != "same"
+
+
+@pytest.fixture
+def consumed_offer_alias(
+    _integration_consuming_side: Literal["target", "neighbor", "same"],
+    integration_endpoint_1: JujuIntegrationApplication,
+    integration_endpoint_2: JujuIntegrationApplication,
+) -> str | None:
+    """The SAAS alias for this integration's consuming side in ``integration_model_ref``, or ``None``.
+
+    ``None`` for same-model integrations, which have no SAAS proxy to remove.
+    """
+    if _integration_consuming_side == "neighbor":
+        return integration_endpoint_1.application
+    if _integration_consuming_side == "target":
+        return integration_endpoint_2.application
+    return None
+
+
+@pytest.fixture
 def integration_controller(
     _integration_consuming_side: Literal["target", "neighbor", "same"],
     target_controller: str,
@@ -95,6 +120,12 @@ def integration_model(
         assert neighbor_model is not None
         return neighbor_model
     return model
+
+
+@pytest.fixture
+def integration_model_ref(integration_controller: str, integration_model: str) -> JujuModelHandle:
+    """Explicit controller+model reference for the model that owns the integration."""
+    return JujuModelHandle(controller=integration_controller, model=integration_model)
 
 
 @pytest.fixture
@@ -140,3 +171,89 @@ def integration_endpoint_2(
         assert saas_alias is not None
         return JujuIntegrationApplication(saas_alias, neighbor_endpoint)
     return JujuIntegrationApplication(neighbor_application, neighbor_endpoint)
+
+
+@pytest.fixture
+def _applications_cache() -> dict[JujuModelHandle, dict[str, JujuApplicationInfo]]:
+    """Per-test cache of ``list_applications`` results, keyed by model.
+
+    Shared by ``target_deployed_charm`` and ``neighbor_deployed_charm`` so a non-CMR test
+    (where both resolve to the same model) only queries that model once.
+    """
+    return {}
+
+
+def _resolve_deployed_charm(
+    charmhub_client: CharmhubClient,
+    juju_client: JujuClient,
+    model_ref: JujuModelHandle,
+    application: str,
+    cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    if model_ref not in cache:
+        cache[model_ref] = juju_client.list_applications(model=model_ref)
+    info = cache[model_ref].get(application)
+    if info is None or info.channel is None:
+        return None
+    channel = CharmChannel.model_validate(str(info.channel))
+    return charmhub_client.charm_from_store(
+        info.charm,
+        ubuntu_arch="amd64",
+        charm_track=channel.track or None,
+        charm_risk=channel.risk or None,
+        charm_revision=info.revision,
+    )
+
+
+@pytest.fixture
+def target_deployed_charm(
+    charmhub_client: CharmhubClient,
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    target_application: str,
+    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    """Canonical charm metadata (with overrides merged) for whatever is actually deployed as the
+    target application, or ``None`` if the application isn't found or has no resolvable channel.
+    """
+    return _resolve_deployed_charm(
+        charmhub_client, juju_client, target_model_ref, target_application, _applications_cache
+    )
+
+
+@pytest.fixture
+def neighbor_deployed_charm(
+    charmhub_client: CharmhubClient,
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
+    neighbor_application: str,
+    _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+) -> Charm | None:
+    """Canonical charm metadata for whatever is actually deployed as the neighbor application, or
+    ``None`` if the application isn't found or has no resolvable channel.
+
+    Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
+    """
+    model_ref = neighbor_model_ref or target_model_ref
+    return _resolve_deployed_charm(charmhub_client, juju_client, model_ref, neighbor_application, _applications_cache)
+
+
+@pytest.fixture
+def integration_endpoints_removable(
+    target_deployed_charm: Charm | None,
+    target_endpoint: str,
+    neighbor_deployed_charm: Charm | None,
+    neighbor_endpoint: str,
+) -> bool:
+    """Whether both sides of the tested integration allow remove-and-restore testing."""
+    for charm, endpoint in (
+        (target_deployed_charm, target_endpoint),
+        (neighbor_deployed_charm, neighbor_endpoint),
+    ):
+        if charm is None:
+            continue
+        endpoint_info = charm.endpoints.get(endpoint)
+        if endpoint_info is not None and not endpoint_info.removable:
+            return False
+    return True

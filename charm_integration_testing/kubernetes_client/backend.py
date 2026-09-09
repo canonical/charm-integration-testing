@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Callable
 
 from kubernetes import client, config  # type: ignore[import-untyped]
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from urllib3.util import Retry
 
 # Template retry policy for a single ApiClient's Configuration (see k8s_client). Every request
@@ -49,6 +50,8 @@ class KubernetesBackend:
     core_v1_api: client.CoreV1Api
     apps_v1_api: client.AppsV1Api
     networking_v1_api: client.NetworkingV1Api
+    apiextensions_v1_api: client.ApiextensionsV1Api
+    custom_objects_api: client.CustomObjectsApi
     api_client: client.ApiClient
 
     def __init__(self, api_client: client.ApiClient):
@@ -58,6 +61,18 @@ class KubernetesBackend:
         self.core_v1_api = client.CoreV1Api(api_client)
         self.apps_v1_api = client.AppsV1Api(api_client)
         self.networking_v1_api = client.NetworkingV1Api(api_client)
+        self.apiextensions_v1_api = client.ApiextensionsV1Api(api_client)
+        self.custom_objects_api = client.CustomObjectsApi(api_client)
+
+    def crd_exists(self, name: str) -> bool:
+        """Return True if a CustomResourceDefinition named *name* is registered on the cluster."""
+        try:
+            self.apiextensions_v1_api.read_custom_resource_definition(name)
+        except ApiException as error:
+            if error.status == 404:
+                return False
+            raise
+        return True
 
     @classmethod
     def k8s_client(
