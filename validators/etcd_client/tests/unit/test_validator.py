@@ -184,6 +184,7 @@ class TestEtcdClientValidatorRequiresSimple:
             ("10.1.2.3:notaport", "non-numeric port"),
             ("10.1.2.3:0", "port zero"),
             ("10.1.2.3:99999", "port out of range"),
+            ("10.1.2.3:\u00b2", "digit-like but non-numeric port"),
         ],
     )
     def test_fails_endpoints_format_check(self, bad_value: str, description: str) -> None:
@@ -194,6 +195,16 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "FAIL", f"Expected FAIL for {description}"
         check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+
+    def test_fails_uris_format_at_simple_level_when_malformed(self) -> None:
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:notaport"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "uris_format")
         assert not check.passed
 
     def test_fails_tls_ca_pem_check_when_invalid(self) -> None:
@@ -254,6 +265,58 @@ class TestEtcdClientValidatorRequiresDeep:
         check = next(c for c in result.checks if c.name == "client_identity")
         assert not check.passed
         assert "never conveys a private key" in check.message
+
+    def test_fails_when_local_prefix_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a local databag missing "prefix" entirely (as opposed to an
+        # intentionally empty string): writing a canary without it would target an
+        # unscoped key rather than reporting the malformed local databag.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            local_databag = {"mtls-cert": VALID_CLIENT_CERT_PEM}  # no "prefix"
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=local_databag)
+
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "prefix_present")
+        assert not check.passed
+        for name in ("put", "get", "delete"):
+            assert not any(c.name == name for c in result.checks)
+
+    def test_fails_client_identity_check_when_credentials_are_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a malformed private key that grpc.ssl_channel_credentials rejects:
+        # this must be reported as a failed check instead of an unhandled exception.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write("not-a-valid-key")
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            with patch(
+                "validators.etcd_client.validator.grpc.ssl_channel_credentials",
+                side_effect=ValueError("invalid private key"),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "client_credentials")
+        assert not check.passed
+        for name in ("put", "get", "delete"):
+            assert not any(c.name == name for c in result.checks)
 
     def test_fails_schema_before_reaching_identity_check(self) -> None:
         validator = _make_validator({})

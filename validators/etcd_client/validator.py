@@ -157,6 +157,15 @@ class EtcdClientValidator(BaseValidator):
             return self._make_result(level=level, checks=checks)
         checks.append(self._check_not_expired(ca_cert, check_name="tls_ca_validity_period"))
 
+        # Validated at L1 too (not just before the L2 gRPC probe): "uris" is the
+        # address the deep probe connects to, so a malformed value must fail
+        # simple-level validation rather than only surfacing once deep validation
+        # is attempted.
+        target, target_check = self._pick_grpc_target(data["uris"])
+        checks.append(target_check)
+        if not target_check.passed:
+            return self._make_result(level=level, checks=checks)
+
         # Latency is timed from here, not from the top of the function, so that Juju
         # secret/relation-data resolution above - which can be slow for cross-model
         # relations independent of etcd itself - is not counted against the probe's
@@ -166,11 +175,11 @@ class EtcdClientValidator(BaseValidator):
         if level == "simple":
             checks.append(self._check_tcp_reachable(data["endpoints"]))
         else:
-            checks.extend(self._check_read_write(data))
+            checks.extend(self._check_read_write(data, target))
 
         elapsed = time.monotonic() - start_time
-        target = _SIMPLE_LATENCY_TARGET_S if level == "simple" else _DEEP_LATENCY_TARGET_S
-        checks.append(self._check_latency(elapsed, target))
+        latency_target = _SIMPLE_LATENCY_TARGET_S if level == "simple" else _DEEP_LATENCY_TARGET_S
+        checks.append(self._check_latency(elapsed, latency_target))
 
         return self._make_result(level=level, checks=checks)
 
@@ -199,18 +208,17 @@ class EtcdClientValidator(BaseValidator):
         except OSError as exc:
             return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{first}': {exc}")
 
-    def _check_read_write(self, data: dict[str, str]) -> list[ValidationCheck]:
-        """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity."""
+    def _check_read_write(self, data: dict[str, str], target: str) -> list[ValidationCheck]:
+        """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity.
+
+        ``target`` is the gRPC "host:port" authority already parsed (and format-checked
+        at L1) by the caller from ``data["uris"]``.
+        """
         checks: list[ValidationCheck] = []
 
         cert_path, key_path, identity_check = self._resolve_client_identity()
         checks.append(identity_check)
         if not identity_check.passed:
-            return checks
-
-        target, target_check = self._pick_grpc_target(data["uris"])
-        checks.append(target_check)
-        if not target_check.passed:
             return checks
 
         try:
@@ -233,13 +241,34 @@ class EtcdClientValidator(BaseValidator):
         if not identity_match_check.passed:
             return checks
 
-        credentials = grpc.ssl_channel_credentials(
-            root_certificates=data["tls-ca"].encode(),
-            private_key=key_bytes,
-            certificate_chain=cert_bytes,
-        )
+        if "prefix" not in local_data:
+            checks.append(
+                ValidationCheck(
+                    name="prefix_present",
+                    passed=False,
+                    message=(
+                        "No 'prefix' field on this application's own databag; the requirer contract "
+                        "requires it, and writing a canary without it would target an unscoped key."
+                    ),
+                )
+            )
+            return checks
+        prefix = local_data["prefix"]
 
-        prefix = local_data.get("prefix", "")
+        try:
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=data["tls-ca"].encode(),
+                private_key=key_bytes,
+                certificate_chain=cert_bytes,
+            )
+        except (ValueError, grpc.RpcError) as exc:
+            checks.append(
+                ValidationCheck(
+                    name="client_credentials", passed=False, message=f"Invalid client identity material: {exc}"
+                )
+            )
+            return checks
+
         canary_key = f"{prefix}validator-canary-{uuid.uuid4().hex[:12]}"
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
 
@@ -397,7 +426,6 @@ class EtcdClientValidator(BaseValidator):
     # --- provides role: validating a submitted client cert from the provider's side ---
 
     def _validate_provides(self, level: ValidationLevel) -> ValidationResult:
-        start_time = time.monotonic()
         checks: list[ValidationCheck] = []
 
         error_result = self._check_relation_exists(level)
@@ -412,6 +440,10 @@ class EtcdClientValidator(BaseValidator):
 
         data = self.databag | creds
 
+        # Latency is timed from here, after secret/relation-data resolution, for the
+        # same reason as the requires-side path: a slow Juju secret lookup for
+        # secret-backed provider relations shouldn't count against the probe budget.
+        start_time = time.monotonic()
         cert_check, cert = self._parse_mtls_cert(data["mtls-cert"])
         checks.append(cert_check)
         if not cert_check.passed:
@@ -480,7 +512,11 @@ class EtcdClientValidator(BaseValidator):
         invalid = []
         for entry in entries:
             host, _, port_str = entry.rpartition(":")
-            if not host or not port_str or not port_str.isdigit() or not (1 <= int(port_str) <= 65535):
+            try:
+                port_valid = bool(host) and 1 <= int(port_str) <= 65535
+            except ValueError:
+                port_valid = False
+            if not port_valid:
                 invalid.append(entry)
         if invalid:
             return ValidationCheck(
