@@ -1,15 +1,24 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import datetime
 import json
 import os
+import ssl
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 import ops
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from validators.istio_ingress_route.validator import IstioIngressRouteValidator, _build_opener, _NoRedirectHandler
 from validators.test_utils.helpers import make_charm_from_relation
@@ -619,3 +628,131 @@ class TestIstioIngressRouteValidatorDeep:
         assert connect_checks[1].passed
         # only the reachable listener gets an HTTP probe
         assert sum(1 for c in result.checks if c.name == "http_probe") == 1
+
+    @pytest.mark.parametrize(
+        "listeners",
+        [
+            "not-a-list",
+            [{"port": 8080}],
+            [{"port": 8080, "protocol": "TCP"}],
+            [{"protocol": "HTTP"}],
+            [{"port": "8080", "protocol": "HTTP"}],
+            [{"port": 0, "protocol": "HTTP"}],
+            [{"port": 70000, "protocol": "HTTP"}],
+            [{"port": True, "protocol": "HTTP"}],
+            "bad-listeners",
+        ],
+    )
+    def test_deep_fails_when_listener_entry_is_malformed(self, listeners: object) -> None:
+        # GIVEN a local 'config' whose 'listeners' entries don't match the interface's
+        # schema (not a list, missing required fields, wrong types, or an out-of-range
+        # port). A validator that silently filtered these out (rather than failing)
+        # would misreport a genuinely broken local contract as "nothing to probe" and
+        # let deep validation fall back to a passing simple-only result.
+        validator = _make_validator(
+            VALID_HTTP_DATABAG,
+            local_databag={"config": json.dumps({"model": "m", "listeners": listeners})},
+        )
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        tcp_ping.assert_not_called()
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert not connect.passed
+
+
+# ---------------------------------------------------------------------------
+# Tests: HTTPS deep probes with a private/self-signed CA
+# ---------------------------------------------------------------------------
+
+
+class TestIstioIngressRouteValidatorHttpsCertVerification:
+    def test_build_opener_skips_cert_verification_for_https(self) -> None:
+        # GIVEN this relation carries no CA/trust info (only external_host/tls_enabled),
+        # so there is no way for this validator to verify Istio's own private CA
+        opener = _build_opener()
+
+        # THEN an HTTPSHandler with certificate verification disabled is wired in,
+        # rather than relying on urllib's default (verifying) HTTPS handling
+        https_handlers = [h for h in opener.handlers if isinstance(h, HTTPSHandler)]  # type: ignore[attr-defined]
+        assert https_handlers
+        context = https_handlers[0]._context  # type: ignore[attr-defined] # only way to introspect the wired-in context
+        assert context.verify_mode == ssl.CERT_NONE
+        assert context.check_hostname is False
+
+    def test_http_probe_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test using a real TLS socket with a self-signed cert,
+        # reproducing the exact failure this fix addresses:
+        # "CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate".
+        server, port, thread = _start_self_signed_https_server()
+        try:
+            validator = _make_validator({"external_host": f"127.0.0.1:{port}", "tls_enabled": "True"})
+
+            # WHEN
+            with patch("validators.istio_ingress_route.validator._tcp_ping"):
+                result = validator.validate(level="deep")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed, http_check.message
+
+
+def _start_self_signed_https_server(
+    response_body: bytes = b"OK",
+) -> tuple[HTTPServer, int, threading.Thread]:
+    """Start a background HTTPS server on 127.0.0.1 backed by a self-signed cert."""
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - required BaseHTTPRequestHandler signature
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, *args: object) -> None:  # silence default request logging
+            pass
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "selfsigned")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(minutes=5))
+        .sign(key, hashes.SHA256())
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_path = f"{tmpdir}/cert.pem"
+        key_path = f"{tmpdir}/key.pem"
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        with open(key_path, "wb") as f:
+            f.write(
+                key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption(),
+                )
+            )
+
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(cert_path, key_path)
+        server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, port, thread

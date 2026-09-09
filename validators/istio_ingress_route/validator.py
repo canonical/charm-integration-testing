@@ -5,11 +5,12 @@ import ipaddress
 import json
 import re
 import socket
+import ssl
 from http.client import HTTPMessage
-from typing import IO
+from typing import IO, Any
 from urllib.error import HTTPError
 from urllib.parse import urlparse, urlunparse
-from urllib.request import HTTPRedirectHandler, OpenerDirector, ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, OpenerDirector, ProxyHandler, Request, build_opener
 
 from validators.base import (
     BaseValidator,
@@ -73,6 +74,24 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         raise HTTPError(req.full_url, code, msg, headers, fp)
 
 
+def _insecure_https_context() -> ssl.SSLContext:
+    """Build a TLS context that skips certificate verification for https:// probes.
+
+    This relation exposes only ``external_host`` and ``tls_enabled``: unlike interfaces
+    that carry a CA bundle in relation data, there is no trust path here to whatever
+    private/self-signed CA Istio's own TLS integration tests configure the gateway with
+    (its integration tests supply a custom CA). Without it, a healthy gateway serving
+    such a certificate would raise ``CERTIFICATE_VERIFY_FAILED`` before any HTTP
+    response is observed. L2 only proves the gateway is reachable and routing traffic,
+    not that its certificate is trusted, so skip verification here the same way a basic
+    reachability check (e.g. ``curl -k``) would.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 def _build_opener() -> OpenerDirector:
     """Build the opener used for HTTP probes.
 
@@ -82,9 +101,10 @@ def _build_opener() -> OpenerDirector:
 
     ProxyHandler({}) disables http_proxy/https_proxy so the probe reaches the ingress
     gateway directly, instead of a CI/dev proxy whose response could otherwise be
-    misread as success.
+    misread as success. HTTPSHandler(context=...) skips TLS certificate verification for
+    https:// probes (see _insecure_https_context) and is a no-op for http:// requests.
     """
-    return build_opener(ProxyHandler({}), _NoRedirectHandler)
+    return build_opener(ProxyHandler({}), _NoRedirectHandler, HTTPSHandler(context=_insecure_https_context()))
 
 
 _opener = _build_opener()
@@ -360,7 +380,7 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
         )
 
     try:
-        listeners = json.loads(raw_config)["listeners"]
+        listeners = _parse_listeners(raw_config)
         http_ports = list(dict.fromkeys(int(listener["port"]) for listener in listeners if _is_http_listener(listener)))
     except (TypeError, ValueError, KeyError) as exc:
         return [], ValidationCheck(
@@ -377,6 +397,30 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
         )
 
     return http_ports, None
+
+
+def _parse_listeners(raw_config: str) -> list[dict[str, Any]]:
+    """Decode and validate the 'listeners' list from a requirer's local 'config'.
+
+    Raises TypeError/ValueError/KeyError if 'config' is not valid JSON, 'listeners' is
+    missing or not a list, or any entry lacks a supported 'protocol' or a 'port' in the
+    interface's valid 1-65535 range. A malformed entry (e.g. {"port": 8080} with no
+    protocol) must not be silently filtered out alongside genuinely absent GRPC-only
+    listeners: that would hide a broken local contract behind a false "nothing to
+    probe, so skip" result instead of surfacing it as a failure.
+    """
+    listeners = json.loads(raw_config)["listeners"]
+    if not isinstance(listeners, list):
+        raise TypeError(f"'listeners' must be a list, got {type(listeners).__name__}.")
+    for listener in listeners:
+        if not isinstance(listener, dict):
+            raise TypeError(f"listener entry must be an object, got {type(listener).__name__}.")
+        if str(listener.get("protocol", "")).upper() not in ("HTTP", "GRPC"):
+            raise ValueError(f"listener has an unsupported 'protocol': {listener.get('protocol')!r}.")
+        port = listener.get("port")
+        if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+            raise ValueError(f"listener has an invalid 'port': {port!r}.")
+    return listeners
 
 
 def _is_http_listener(listener: object) -> bool:
