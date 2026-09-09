@@ -8,7 +8,7 @@ from http.client import HTTPMessage
 from typing import IO
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from validators.base import (
     BaseValidator,
@@ -37,7 +37,9 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         raise HTTPError(req.full_url, code, msg, headers, fp)
 
 
-_opener = build_opener(_NoRedirectHandler)
+# ProxyHandler({}) disables http_proxy/https_proxy so the probe reaches the ingress gateway
+# directly, instead of a CI/dev proxy whose response could otherwise be misread as success.
+_opener = build_opener(ProxyHandler({}), _NoRedirectHandler)
 
 
 class IstioIngressRouteValidator(BaseValidator):
@@ -130,6 +132,15 @@ def _parse_ingress_endpoint(databag: dict[str, str]) -> tuple[ValidationCheck, s
 
 def _url_format_check(url: str) -> ValidationCheck:
     """Validate that the derived ingress URL is a well-formed HTTP/HTTPS URL."""
+    # urlparse silently strips \t, \r, and \n (and tolerates other control characters),
+    # so a value like "good.example\n" would otherwise normalize to a valid-looking host.
+    if not url.isprintable():
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {url!r} contains control characters that are not valid in a bare host.",
+        )
+
     try:
         parsed = urlparse(url)
     except Exception as exc:

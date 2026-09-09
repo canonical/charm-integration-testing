@@ -1,10 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import os
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
-from urllib.request import Request
+from urllib.request import ProxyHandler, Request, build_opener
 
 import ops
 import pytest
@@ -163,6 +164,9 @@ class TestIstioIngressRouteValidatorSimple:
             "host?query=1",  # query component smuggled into the host
             "user@host",  # user-info component smuggled into the host
             "-leading-hyphen.example.com",  # invalid DNS label
+            "good.example\n",  # trailing newline, silently stripped by urlparse
+            "good.example\r",  # trailing carriage return, silently stripped by urlparse
+            "good.example\t",  # embedded tab, silently stripped by urlparse
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -312,6 +316,26 @@ class TestIstioIngressRouteValidatorDeep:
         probe = next(c for c in result.checks if c.name == "http_probe")
         assert probe.passed
         assert "302" in probe.message
+
+    def test_opener_disables_environment_proxies(self) -> None:
+        # GIVEN a CI/dev-style environment advertising an HTTP(S) proxy
+        with patch.dict(
+            os.environ,
+            {"HTTP_PROXY": "http://proxy.example:3128", "HTTPS_PROXY": "http://proxy.example:3128"},
+        ):
+            # WHEN the opener is rebuilt the same way the module builds it
+            opener = build_opener(ProxyHandler({}), _NoRedirectHandler)
+
+            # THEN no ProxyHandler is wired in, so the probe bypasses the env proxy
+            assert not any(isinstance(h, ProxyHandler) for h in opener.handlers)  # type: ignore[attr-defined]
+
+            # AND without the explicit override, the proxy would have been picked up —
+            # proving the override, not an unrelated default, is what disables it
+            default_style_opener = build_opener(_NoRedirectHandler)
+            assert any(
+                isinstance(h, ProxyHandler)
+                for h in default_style_opener.handlers  # type: ignore[attr-defined]
+            )
 
     def test_fails_deep_when_http_connection_refused(self) -> None:
         # GIVEN TCP succeeds but HTTP fails
