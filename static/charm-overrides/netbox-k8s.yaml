@@ -1,0 +1,15 @@
+---
+# Source: https://github.com/canonical/netbox-k8s-operator
+#
+# Published metadata promotes optional ingress and COS observability integrations to required.
+overrides:
+  - requires:
+      ingress:
+        optional: true  # active without ingress; required only when OIDC is enabled; paas_charm/charm.py
+      logging:
+        optional: true  # COS logging is additive and not checked by is_ready(); paas_charm/observability.py
+    provides:
+      grafana-dashboard:
+        optional: true  # observability hook, not NetBox's primary purpose; paas_charm/observability.py
+      metrics-endpoint:
+        optional: true  # observability hook, not NetBox's primary purpose; paas_charm/observability.py
