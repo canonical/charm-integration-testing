@@ -2,12 +2,13 @@
 # See LICENSE file for licensing details.
 
 import ipaddress
+import json
 import re
 import socket
 from http.client import HTTPMessage
 from typing import IO
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, OpenerDirector, ProxyHandler, Request, build_opener
 
 from validators.base import (
@@ -94,6 +95,13 @@ class IstioIngressRouteValidator(BaseValidator):
     scheme is ``https`` when TLS is enabled, otherwise ``http``. L1 validates the
     published fields and URL shape; L2 probes the gateway to confirm it is
     reachable and routing traffic.
+
+    ``external_host`` never encodes a port: istio_ingress_route lets a requirer
+    declare arbitrary Gateway listener ports for its routes (not just 80/443) via
+    a ``config`` key the requirer publishes into its *own* local application
+    databag on this relation (JSON-encoded, with a ``listeners`` list of
+    ``{"port": ..., "protocol": "HTTP" | "GRPC"}``). L2 reads that local config to
+    determine which port to probe, instead of assuming a default.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -122,10 +130,17 @@ class IstioIngressRouteValidator(BaseValidator):
             return self._fail_result(level, checks)
 
         if level == "deep":
-            host, port = _extract_host_port(url)
-            checks.append(_connectivity_check(host, port, url))
+            local_databag = dict(self.relation.data[self.charm.app])
+            port, port_check = _resolve_probe_port(url, local_databag)
+            if port is None:
+                if port_check is not None:
+                    checks.append(port_check)
+                return self._make_result(level=level, checks=checks)
+
+            probe_url = _with_port(url, port)
+            checks.append(_connectivity_check(_extract_host(url), port, probe_url))
             if checks[-1].passed:
-                checks.append(_http_probe_check(url))
+                checks.append(_http_probe_check(probe_url))
 
         return self._make_result(level=level, checks=checks)
 
@@ -289,13 +304,74 @@ def _is_valid_host(host: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _extract_host_port(url: str) -> tuple[str, int]:
-    """Extract (host, port) from an ingress URL with sensible defaults."""
+def _extract_host(url: str) -> str:
+    """Extract the hostname from an ingress URL."""
+    return urlparse(url).hostname or ""
+
+
+def _resolve_probe_port(url: str, local_databag: dict[str, str]) -> tuple[int | None, ValidationCheck | None]:
+    """Determine which port the deep-level checks should probe.
+
+    ``external_host`` (see class docstring) never itself encodes a port unless the
+    provider chose to publish one explicitly; when it does, that value is
+    unambiguous and used as-is. Otherwise, the actual listener port is only known
+    from the requirer's own locally-published ``config`` (see class docstring), so
+    it must be read from there rather than assumed to be 80/443.
+
+    Returns (port, check). ``check`` is only set (and ``port`` is None) when no
+    usable port could be determined, so callers can skip the connectivity/probe
+    checks instead of guessing at a port that may not have a listener behind it.
+    """
     parsed = urlparse(url)
-    host = parsed.hostname or ""
     if parsed.port is not None:
-        return host, parsed.port
-    return host, 443 if parsed.scheme == "https" else 80
+        return parsed.port, None
+
+    raw_config = local_databag.get("config")
+    if not raw_config:
+        return None, ValidationCheck(
+            name="connect",
+            passed=True,
+            message="No local 'config' published on this relation; deep connectivity check skipped.",
+        )
+
+    try:
+        listeners = json.loads(raw_config)["listeners"]
+        http_ports = [int(listener["port"]) for listener in listeners if _is_http_listener(listener)]
+    except (TypeError, ValueError, KeyError) as exc:
+        return None, ValidationCheck(
+            name="connect",
+            passed=False,
+            message=f"Failed to parse local 'config': {exc}",
+        )
+
+    if not http_ports:
+        return None, ValidationCheck(
+            name="connect",
+            passed=True,
+            message="No HTTP-protocol listener declared in local 'config'; deep connectivity check skipped.",
+        )
+
+    return http_ports[0], None
+
+
+def _is_http_listener(listener: object) -> bool:
+    """Return True if a decoded listener entry declares the HTTP application protocol.
+
+    GRPC listeners are excluded: they speak HTTP/2 framed gRPC, not plain HTTP, so an
+    HTTP GET probe against one would not exercise a real request/response cycle.
+    """
+    return isinstance(listener, dict) and str(listener.get("protocol", "")).upper() == "HTTP"
+
+
+def _with_port(url: str, port: int) -> str:
+    """Return url with an explicit ':port' set on its authority component (idempotent)."""
+    parsed = urlparse(url)
+    if parsed.port == port:
+        return url
+    host = parsed.hostname or ""
+    if ":" in host:  # bracket a bare IPv6 literal so "host:port" stays unambiguous
+        host = f"[{host}]"
+    return urlunparse(parsed._replace(netloc=f"{host}:{port}"))
 
 
 def _connectivity_check(host: str, port: int, url: str) -> ValidationCheck:

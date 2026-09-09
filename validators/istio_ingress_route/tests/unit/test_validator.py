@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import os
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -34,15 +35,24 @@ VALID_HTTPS_DATABAG: dict[str, str] = {
     "tls_enabled": "True",
 }
 
+# Requirer's own local databag on this relation: declares an HTTP listener on 8080,
+# per the upstream integration tester (see validator module docstring).
+DEFAULT_LOCAL_DATABAG: dict[str, str] = {
+    "config": json.dumps({"model": "test-model", "listeners": [{"port": 8080, "protocol": "HTTP"}]}),
+}
+
 
 def _make_validator(
     app_databag: dict[str, str],
     endpoint: str = "ingress",
     role: RelationRoleStub = RelationRoleStub.requires,
+    local_databag: dict[str, str] | None = None,
 ) -> IstioIngressRouteValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: app_databag})
     charm = make_charm_from_relation(relation, role=role, interface_name="istio_ingress_route")
+    # The requirer publishes its own listener config into its own local app databag.
+    relation.data[charm.app] = DEFAULT_LOCAL_DATABAG if local_databag is None else local_databag
     return IstioIngressRouteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
@@ -464,3 +474,88 @@ class TestIstioIngressRouteValidatorDeep:
 
         assert result.status == "FAIL"
         assert not any(c.name == "connect" for c in result.checks)
+
+    def test_deep_probes_port_declared_in_local_listener_config(self) -> None:
+        # GIVEN external_host carries no port, and the requirer's own local config
+        # declares an HTTP listener on a non-default port (8080, as the upstream
+        # integration tester does), not 80/443
+        validator = _make_validator(
+            VALID_HTTP_DATABAG,
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 8080, "protocol": "HTTP"}]})},
+        )
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping,
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                return_value=_mock_http_response(200),
+            ) as opener_open,
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the declared listener port is used, not a default of 80/443
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once_with("10.64.140.43", 8080)
+        probed_request = opener_open.call_args[0][0]
+        assert probed_request.full_url == "http://10.64.140.43:8080"
+
+    def test_deep_prefers_explicit_port_in_external_host_over_local_config(self) -> None:
+        # GIVEN external_host itself already encodes a port, which is unambiguous
+        validator = _make_validator(
+            {"external_host": "10.64.140.43:9999", "tls_enabled": "False"},
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 8080, "protocol": "HTTP"}]})},
+        )
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping,
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                return_value=_mock_http_response(200),
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the explicit port wins over the locally-declared listener config
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once_with("10.64.140.43", 9999)
+
+    def test_deep_skips_connectivity_when_no_local_config_published(self) -> None:
+        # GIVEN the requirer has not (yet) published its own listener config
+        validator = _make_validator(VALID_HTTP_DATABAG, local_databag={})
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        # THEN the connectivity/probe checks are skipped rather than guessing a port
+        assert result.status == "PASS"
+        tcp_ping.assert_not_called()
+        assert not any(c.name == "http_probe" for c in result.checks)
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert connect.passed
+
+    def test_deep_skips_connectivity_when_local_config_has_no_http_listener(self) -> None:
+        # GIVEN the requirer only declared a GRPC listener, which an HTTP GET probe
+        # would not meaningfully exercise
+        validator = _make_validator(
+            VALID_HTTP_DATABAG,
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 9090, "protocol": "GRPC"}]})},
+        )
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        assert result.status == "PASS"
+        tcp_ping.assert_not_called()
+        assert not any(c.name == "http_probe" for c in result.checks)
+
+    def test_deep_fails_when_local_config_is_malformed(self) -> None:
+        # GIVEN the requirer's local 'config' is not valid JSON
+        validator = _make_validator(VALID_HTTP_DATABAG, local_databag={"config": "not-json"})
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        tcp_ping.assert_not_called()
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert not connect.passed
