@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import os
+import re
 import socket
 import time
 import uuid
@@ -155,7 +156,10 @@ class EtcdClientValidator(BaseValidator):
         checks.append(tls_ca_check)
         if not tls_ca_check.passed:
             return self._make_result(level=level, checks=checks)
-        checks.append(self._check_not_expired(ca_cert, check_name="tls_ca_validity_period"))
+        ca_validity_check = self._check_not_expired(ca_cert, check_name="tls_ca_validity_period")
+        checks.append(ca_validity_check)
+        if not ca_validity_check.passed:
+            return self._make_result(level=level, checks=checks)
 
         # Validated at L1 too (not just before the L2 gRPC probe): "uris" is the
         # address the deep probe connects to, so a malformed value must fail
@@ -227,7 +231,11 @@ class EtcdClientValidator(BaseValidator):
             with open(key_path, "rb") as fh:
                 key_bytes = fh.read()
         except OSError as exc:
-            checks.append(ValidationCheck(name="put", passed=False, message=f"Could not read client identity: {exc}"))
+            checks.append(
+                ValidationCheck(
+                    name="client_identity_read", passed=False, message=f"Could not read client identity: {exc}"
+                )
+            )
             return checks
 
         # The requirer's own contribution to this relation (its "prefix" ACL grant
@@ -310,15 +318,31 @@ class EtcdClientValidator(BaseValidator):
         first = uris.split(",")[0].strip()
         if not first:
             return "", ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
+        # Diagnostic messages below must never echo `first` verbatim: a malformed uri can carry
+        # userinfo (e.g. "user:password@host:2379"), which would otherwise leak a credential into
+        # validator output/logs. Redact it up front for use in any message.
+        redacted_first = re.sub(r"//[^/@]*@", "//<redacted>@", first if "//" in first else f"//{first}")
         try:
             parsed = urlsplit(first if "//" in first else f"//{first}")
             hostname, port = parsed.hostname, parsed.port
         except ValueError as exc:
             return "", ValidationCheck(
-                name="uris_format", passed=False, message=f"Could not parse uri '{first}': {exc}"
+                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_first}': {exc}"
             )
         if not hostname or not port:
-            return "", ValidationCheck(name="uris_format", passed=False, message=f"Could not parse uri '{first}'.")
+            return "", ValidationCheck(
+                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_first}'."
+            )
+        if parsed.username or parsed.password:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_first}' contains userinfo, which this interface does not use "
+                    "(authentication is via mTLS and a separate 'username' field); rejecting it "
+                    "rather than silently discarding it."
+                ),
+            )
         # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
         # urlsplit().hostname strips the brackets, so restore them when the hostname
         # itself contains colons.
@@ -398,10 +422,18 @@ class EtcdClientValidator(BaseValidator):
             if not kvs:
                 return ValidationCheck(name="get", passed=False, message=f"Canary key '{key}' not found after PUT.")
             kv_fields = _decode_message(kvs[0])  # type: ignore[arg-type]
+            actual_key_bytes = kv_fields.get(1, [b""])[0]  # KeyValue.key (field 1)
+            actual_key = actual_key_bytes.decode() if isinstance(actual_key_bytes, bytes) else ""
             actual_bytes = kv_fields.get(5, [b""])[0]  # KeyValue.value (field 5)
             actual_value = actual_bytes.decode() if isinstance(actual_bytes, bytes) else ""
         except (IndexError, ValueError, TypeError, UnicodeDecodeError) as exc:
             return ValidationCheck(name="get", passed=False, message=f"Malformed GET response: {exc}")
+        if actual_key != key:
+            return ValidationCheck(
+                name="get",
+                passed=False,
+                message=f"Canary key mismatch: expected '{key}', got '{actual_key}'.",
+            )
         if actual_value != expected_value:
             return ValidationCheck(
                 name="get",
@@ -515,6 +547,12 @@ class EtcdClientValidator(BaseValidator):
             try:
                 port_valid = bool(host) and 1 <= int(port_str) <= 65535
             except ValueError:
+                port_valid = False
+            # rpartition(":") alone lets a malformed bracketed IPv6 literal (e.g. "[::1:2379",
+            # missing its closing bracket) through as long as the final segment parses as a port:
+            # the "host" would be "[::1" here. Require brackets to be balanced (both present or
+            # both absent) so such entries are rejected.
+            if host.startswith("[") != host.endswith("]"):
                 port_valid = False
             if not port_valid:
                 invalid.append(entry)

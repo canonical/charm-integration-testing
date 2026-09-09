@@ -58,8 +58,12 @@ def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock
                 stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
                 return b""
             if method.endswith("/Range"):
+                request_fields = _decode_message(request)
+                requested_key = request_fields.get(1, [b""])[0]
                 value = get_value() if callable(get_value) else get_value
-                key_value_msg = _encode_bytes_field(1, b"canary-key") + _encode_bytes_field(5, value)
+                key_value_msg = _encode_bytes_field(1, requested_key) + _encode_bytes_field(  # type: ignore[arg-type]
+                    5, value
+                )
                 return _encode_bytes_field(2, key_value_msg)
             if method.endswith("/DeleteRange"):
                 return b""
@@ -185,6 +189,7 @@ class TestEtcdClientValidatorRequiresSimple:
             ("10.1.2.3:0", "port zero"),
             ("10.1.2.3:99999", "port out of range"),
             ("10.1.2.3:\u00b2", "digit-like but non-numeric port"),
+            ("[::1:2379", "unbalanced ipv6 brackets"),
         ],
     )
     def test_fails_endpoints_format_check(self, bad_value: str, description: str) -> None:
@@ -265,6 +270,31 @@ class TestEtcdClientValidatorRequiresDeep:
         check = next(c for c in result.checks if c.name == "client_identity")
         assert not check.passed
         assert "never conveys a private key" in check.message
+
+    def test_fails_client_identity_read_check_when_file_unreadable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN cert/key files that pass the isfile() existence check but fail to
+        # open (e.g. a permissions change race): this must be reported under a
+        # client-identity-specific check, not misattributed to "put" as if a PUT had
+        # been attempted.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            with patch("builtins.open", side_effect=OSError("permission denied")):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "client_identity_read")
+        assert not check.passed
+        assert not any(c.name == "put" for c in result.checks)
 
     def test_fails_when_local_prefix_is_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN a local databag missing "prefix" entirely (as opposed to an
@@ -378,7 +408,57 @@ class TestEtcdClientValidatorRequiresDeep:
         get_check = next(c for c in result.checks if c.name == "get")
         assert not get_check.passed
 
-    def test_still_attempts_delete_after_put_rpc_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_fails_get_check_when_returned_key_mismatches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Range response whose KeyValue.key does not match the requested canary
+        # key (e.g. etcd returned an unrelated key that happens to hold the expected
+        # value): the GET check must fail rather than accept the value alone.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            stored: dict[str, bytes] = {}
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        fields = _decode_message(request)
+                        stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                        return b""
+                    if method.endswith("/Range"):
+                        key_value_msg = _encode_bytes_field(1, b"some-other-key") + _encode_bytes_field(
+                            5, stored.get("value", b"")
+                        )
+                        return _encode_bytes_field(2, key_value_msg)
+                    if method.endswith("/DeleteRange"):
+                        return b""
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        get_check = next(c for c in result.checks if c.name == "get")
+        assert not get_check.passed
+        assert "key mismatch" in get_check.message.lower()
+
         # GIVEN a PUT that fails at the transport level (e.g. a client-side timeout
         # that may still have committed server-side): DeleteRange cleanup must still
         # be attempted so no canary key is orphaned, and GET must be skipped since
@@ -559,6 +639,27 @@ class TestEtcdClientValidatorGrpcTarget:
 
         assert not check.passed
         assert target == ""
+
+    def test_rejects_userinfo_in_uri(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("https://admin:hunter2@10.1.2.3:2379")
+
+        assert not check.passed
+        assert target == ""
+        assert "userinfo" in check.message.lower()
+
+    def test_redacts_userinfo_from_unparseable_uri_message(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        # A URI with userinfo but no valid host/port still must not leak the
+        # credential into the failure message.
+        target, check = validator._pick_grpc_target("https://admin:hunter2@")
+
+        assert not check.passed
+        assert target == ""
+        assert "hunter2" not in check.message
+        assert "<redacted>" in check.message
 
 
 class TestEtcdClientValidatorProvidesSimple:
