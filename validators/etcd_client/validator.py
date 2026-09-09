@@ -185,10 +185,10 @@ class EtcdClientValidator(BaseValidator):
             return self._make_result(level=level, checks=checks)
 
         # Validated at L1 too (not just before the L2 gRPC probe): "uris" is the
-        # address the deep probe connects to, so a malformed value must fail
+        # address(es) the deep probe connects to, so a malformed value must fail
         # simple-level validation rather than only surfacing once deep validation
         # is attempted.
-        target, target_check = self._pick_grpc_target(data["uris"])
+        targets, target_check = self._pick_grpc_target(data["uris"])
         checks.append(target_check)
         if not target_check.passed:
             return self._make_result(level=level, checks=checks)
@@ -202,7 +202,7 @@ class EtcdClientValidator(BaseValidator):
         if level == "simple":
             checks.append(self._check_tcp_reachable(data["endpoints"]))
         else:
-            checks.extend(self._check_read_write(data, target))
+            checks.extend(self._check_read_write(data, targets))
 
         elapsed = time.monotonic() - start_time
         latency_target = _SIMPLE_LATENCY_TARGET_S if level == "simple" else _DEEP_LATENCY_TARGET_S
@@ -217,19 +217,27 @@ class EtcdClientValidator(BaseValidator):
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
 
+    # Explicit allowlist rather than a denylist of "disabled" spellings: a denylist would
+    # silently treat any typo or unrecognized value (e.g. "flase", "no", "0") as enabled, since
+    # it isn't one of the specific rejected spellings.
+    _TLS_ENABLED_VALUES = ("enabled", "true", "True")
+
     def _check_tls_enabled(self, tls: str) -> ValidationCheck:
         """Verify the provider actually advertises TLS as enabled on this relation.
 
-        A missing or disabled ``tls`` value would mean this validator's mTLS-only probe
-        (and charmed-etcd's own TLS-only posture) is being run against a relation that
-        never claimed to support it, so schema presence alone (a non-empty string) is not
-        enough - "disabled" is itself a non-empty value.
+        A missing, disabled, or unrecognized ``tls`` value would mean this validator's
+        mTLS-only probe (and charmed-etcd's own TLS-only posture) is being run against a
+        relation that never claimed to support it, so schema presence alone (a non-empty
+        string) is not enough.
         """
-        if tls in ("", "disabled", "false", "False"):
+        if tls.strip() not in self._TLS_ENABLED_VALUES:
             return ValidationCheck(
                 name="tls_enabled",
                 passed=False,
-                message=f"Relation advertises tls='{tls}'; this interface is only usable over TLS.",
+                message=(
+                    f"Relation advertises tls='{tls}', which is not a recognized enabled value; "
+                    "this interface is only usable over TLS."
+                ),
             )
         return ValidationCheck(name="tls_enabled", passed=True, message="OK")
 
@@ -264,11 +272,13 @@ class EtcdClientValidator(BaseValidator):
             # endpoint could still crash validate() into an ERROR result instead of a clean FAIL.
             return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{redacted_first}': {exc}")
 
-    def _check_read_write(self, data: dict[str, str], target: str) -> list[ValidationCheck]:
+    def _check_read_write(self, data: dict[str, str], targets: list[str]) -> list[ValidationCheck]:
         """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity.
 
-        ``target`` is the gRPC "host:port" authority already parsed (and format-checked
-        at L1) by the caller from ``data["uris"]``.
+        ``targets`` are the gRPC "host:port" authorities already parsed (and format-checked
+        at L1) by the caller from ``data["uris"]``, in the order they were advertised. Each is
+        tried in turn until one completes a PUT, since "uris" enumerates cluster members and a
+        single unreachable member should not fail the canary when another is reachable.
         """
         checks: list[ValidationCheck] = []
 
@@ -341,17 +351,23 @@ class EtcdClientValidator(BaseValidator):
         canary_key = f"{prefix}validator-canary-{uuid.uuid4().hex[:12]}"
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
 
-        with grpc.secure_channel(target, credentials) as channel:
-            put_check = self._etcd_put(channel, canary_key, canary_value)
-            checks.append(put_check)
-            try:
-                if put_check.passed:
-                    checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
-            finally:
-                # Always attempt cleanup, even if PUT reported failure: a client-side
-                # timeout can still mean etcd committed the write server-side, which
-                # would otherwise leave an orphaned canary key behind.
-                checks.append(self._etcd_delete(channel, canary_key))
+        attempt_checks: list[ValidationCheck] = []
+        for target in targets:
+            attempt_checks = []
+            with grpc.secure_channel(target, credentials) as channel:
+                put_check = self._etcd_put(channel, canary_key, canary_value)
+                attempt_checks.append(put_check)
+                try:
+                    if put_check.passed:
+                        attempt_checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
+                finally:
+                    # Always attempt cleanup, even if PUT reported failure: a client-side
+                    # timeout can still mean etcd committed the write server-side, which
+                    # would otherwise leave an orphaned canary key behind.
+                    attempt_checks.append(self._etcd_delete(channel, canary_key))
+            if put_check.passed:
+                break
+        checks.extend(attempt_checks)
         return checks
 
     def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
@@ -376,26 +392,24 @@ class EtcdClientValidator(BaseValidator):
 
     _SUPPORTED_URI_SCHEMES = ("", "https")
 
-    def _pick_grpc_target(self, uris: str) -> tuple[str, ValidationCheck]:
-        """Validate every comma-separated "uris" entry, then derive a gRPC target from the first.
+    def _pick_grpc_target(self, uris: str) -> tuple[list[str], ValidationCheck]:
+        """Validate every comma-separated "uris" entry, deriving a gRPC target from each.
 
         All entries are format-checked (not just the first) so a malformed second/third
-        endpoint fails validation rather than being silently ignored; the first entry's
-        parsed target is what the L2 probe actually connects to.
+        endpoint fails validation rather than being silently ignored; the L2 probe tries
+        each returned target in order (see ``_check_read_write``), since "uris" enumerates
+        cluster members and a single unreachable member shouldn't fail the canary outright.
         """
         entries = [e.strip() for e in uris.split(",") if e.strip()]
         if not entries:
-            return "", ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
-        first_target = ""
-        for i, entry in enumerate(entries):
+            return [], ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
+        targets: list[str] = []
+        for entry in entries:
             target, check = self._parse_single_uri(entry)
             if not check.passed:
-                return "", check
-            if i == 0:
-                first_target = target
-        return first_target, ValidationCheck(
-            name="uris_format", passed=True, message=f"Validated {len(entries)} uri(s)."
-        )
+                return [], check
+            targets.append(target)
+        return targets, ValidationCheck(name="uris_format", passed=True, message=f"Validated {len(entries)} uri(s).")
 
     def _parse_single_uri(self, entry: str) -> tuple[str, ValidationCheck]:
         """Parse and format-check a single "uris" entry, deriving a gRPC "host:port" target."""
@@ -404,7 +418,21 @@ class EtcdClientValidator(BaseValidator):
         # either of which would otherwise leak a credential into validator output/logs. Sanitize
         # up front, working purely textually so this is safe even when urlsplit() itself fails.
         redacted_entry = _redact_uri_for_message(entry)
-        has_scheme = "//" in entry
+        if entry.startswith("//"):
+            # A network-path reference (e.g. "//host:2379", scheme-relative but no scheme) is
+            # neither of this interface's two documented forms (bare "host:port" or
+            # "https://..."); urlsplit() would happily parse it with an empty scheme (which the
+            # allowlist below also accepts, since a bare host:port also parses with an empty
+            # scheme), so it must be rejected explicitly before that ambiguity can let it through.
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' is a network-path reference, which this interface "
+                    "does not use; only a bare host:port or an 'https://' uri is accepted."
+                ),
+            )
+        has_scheme = "://" in entry
         try:
             parsed = urlsplit(entry if has_scheme else f"//{entry}")
             hostname, port = parsed.hostname, parsed.port
@@ -713,6 +741,11 @@ class EtcdClientValidator(BaseValidator):
             # "username" field, not a "user:pass@" prefix); reject it outright rather than
             # silently discarding it as part of the host.
             if "@" in host:
+                port_valid = False
+            if re.search(r"\s", host):
+                # No valid hostname or IP literal contains whitespace, but a naive
+                # rpartition(":")-based split doesn't itself reject it (e.g. "bad host:2379"
+                # would otherwise pass); mirrors the equivalent check in _parse_single_uri.
                 port_valid = False
             if not port_valid:
                 invalid.append(_redact_uri_for_message(entry))

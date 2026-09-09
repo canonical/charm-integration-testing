@@ -303,6 +303,20 @@ class TestEtcdClientValidatorRequiresSimple:
         check = next(c for c in result.checks if c.name == "tls_enabled")
         assert not check.passed
 
+    @pytest.mark.parametrize("typo_value", ["flase", "no", "0", "enable"])
+    def test_fails_tls_enabled_check_for_unrecognized_value(self, typo_value: str) -> None:
+        # An allowlist (not a denylist) must be used for "tls": an unrecognized spelling
+        # like a typo of "enabled"/"true" must be treated as not-enabled rather than
+        # silently passing just because it doesn't match one of the known-disabled strings.
+        databag = {**VALID_REQUIRER_DATABAG, "tls": typo_value}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "tls_enabled")
+        assert not check.passed
+
     def test_fails_uris_format_check_for_whitespace_in_hostname(self) -> None:
         databag = {**VALID_REQUIRER_DATABAG, "uris": "https://bad host:2379"}
         validator = _make_validator(databag)
@@ -311,6 +325,19 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "FAIL"
         check = next(c for c in result.checks if c.name == "uris_format")
+        assert not check.passed
+
+    def test_fails_endpoints_format_check_for_whitespace_in_hostname(self) -> None:
+        # Mirrors test_fails_uris_format_check_for_whitespace_in_hostname: "endpoints" must
+        # reject whitespace in the host the same way "uris" does, rather than accepting an
+        # invalid host that would only fail later (and more confusingly) at connect time.
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": "bad host:2379"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
         assert not check.passed
 
     def test_passes_with_all_required_fields_and_reachable_endpoint(self) -> None:
@@ -585,7 +612,11 @@ class TestEtcdClientValidatorRequiresDeep:
             monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
             monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
 
-            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+            # Single uris entry: this test is about cleanup-on-PUT-failure within one target
+            # attempt, not the separate multi-target retry behavior (covered by
+            # test_retries_next_target_when_put_fails_on_first_target below).
+            databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379"}
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
 
             delete_calls: list[bytes] = []
 
@@ -622,6 +653,120 @@ class TestEtcdClientValidatorRequiresDeep:
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert delete_check.passed
         assert len(delete_calls) == 1
+
+    def test_retries_next_target_when_put_fails_on_first_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN "uris" advertises two cluster members and the first is unreachable: the
+        # canary must still succeed against the second rather than failing outright, since
+        # a single unavailable member shouldn't fail validation of an otherwise-healthy
+        # relation.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "unavailable"
+
+            targets_seen: list[str] = []
+            stored: dict[str, bytes] = {}
+
+            def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+                targets_seen.append(target)
+                if target == "10.1.2.3:2379":
+
+                    def unary_unary(
+                        method: str, request_serializer: Any = None, response_deserializer: Any = None
+                    ) -> Any:
+                        def call(request: bytes, timeout: float = 0) -> bytes:
+                            if method.endswith("/Put"):
+                                raise _FakeRpcError()
+                            if method.endswith("/DeleteRange"):
+                                # Cleanup is attempted for every target tried, even one whose
+                                # PUT failed, in case the write partially landed server-side.
+                                return b""
+                            raise AssertionError(f"unexpected method {method} on unreachable target")
+
+                        return call
+
+                    channel = MagicMock()
+                    channel.unary_unary.side_effect = unary_unary
+                    channel.__enter__.return_value = channel
+                    channel.__exit__.return_value = False
+                    return channel
+                return _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch(
+                    "validators.etcd_client.validator.grpc.secure_channel",
+                    side_effect=make_channel_for_target,
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "PASS", result.checks
+        assert targets_seen == ["10.1.2.3:2379", "10.1.2.4:2379"]
+        for name in ("put", "get", "delete"):
+            check = next(c for c in result.checks if c.name == name)
+            assert check.passed
+
+    def test_fails_get_check_when_response_is_malformed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a successful PUT but a Range RPC that returns truncated/unparseable protobuf
+        # bytes: this must be reported as a failed "get" check (and cleanup still attempted),
+        # not let the decode error (IndexError/ValueError/TypeError/UnicodeDecodeError)
+        # propagate and crash validation into ERROR.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379"}
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        return b""
+                    if method.endswith("/Range"):
+                        # A single 0x80 byte is a varint continuation byte with no following
+                        # byte to complete it, so _decode_varint's next read raises IndexError.
+                        return b"\x80"
+                    if method.endswith("/DeleteRange"):
+                        return b""
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        get_check = next(c for c in result.checks if c.name == "get")
+        assert not get_check.passed
+        assert "malformed" in get_check.message.lower()
+        delete_check = next(c for c in result.checks if c.name == "delete")
+        assert delete_check.passed
 
     def test_fails_delete_check_when_delete_rpc_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN a successful PUT/GET but a DeleteRange call that fails at the transport
@@ -827,27 +972,27 @@ class TestEtcdClientValidatorGrpcTarget:
     def test_formats_ipv4_and_ipv6_targets(self, uris: str, expected_target: str) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target(uris)
+        targets, check = validator._pick_grpc_target(uris)
 
         assert check.passed
-        assert target == expected_target
+        assert targets == [expected_target]
 
     def test_fails_uris_format_check_for_out_of_range_port(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("10.1.2.3:99999")
+        targets, check = validator._pick_grpc_target("10.1.2.3:99999")
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
 
     def test_rejects_userinfo_in_uri(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
         uri = "https://" + "admin" + ":" + "hunter2" + "@10.1.2.3:2379"
 
-        target, check = validator._pick_grpc_target(uri)
+        targets, check = validator._pick_grpc_target(uri)
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
         assert "userinfo" in check.message.lower()
 
     def test_rejects_uri_with_empty_userinfo(self) -> None:
@@ -856,19 +1001,19 @@ class TestEtcdClientValidatorGrpcTarget:
         # would let this slip through. It must still be rejected as userinfo.
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("https://@10.1.2.3:2379")
+        targets, check = validator._pick_grpc_target("https://@10.1.2.3:2379")
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
         assert "userinfo" in check.message.lower()
 
     def test_rejects_uri_with_path_component(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("https://10.1.2.3:2379/not-etcd")
+        targets, check = validator._pick_grpc_target("https://10.1.2.3:2379/not-etcd")
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
 
     def test_redacts_userinfo_from_unparseable_uri_message(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
@@ -877,10 +1022,10 @@ class TestEtcdClientValidatorGrpcTarget:
 
         # A URI with userinfo but no valid host/port still must not leak the
         # credential into the failure message.
-        target, check = validator._pick_grpc_target(uri)
+        targets, check = validator._pick_grpc_target(uri)
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
         assert secret not in check.message
         assert "<redacted>" in check.message
 
@@ -891,10 +1036,10 @@ class TestEtcdClientValidatorGrpcTarget:
         secret = "hunter2"
         uri = "https://admin:" + secret + "@10.1.2.3:notaport?token=" + secret
 
-        target, check = validator._pick_grpc_target(uri)
+        targets, check = validator._pick_grpc_target(uri)
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
         assert secret not in check.message
         assert "token" not in check.message
 
@@ -905,37 +1050,49 @@ class TestEtcdClientValidatorGrpcTarget:
         secret = "hunter2"
         uri = "admin:" + secret + "@10.1.2.3:2379"
 
-        target, check = validator._pick_grpc_target(uri)
+        targets, check = validator._pick_grpc_target(uri)
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
         assert secret not in check.message
 
     def test_rejects_unsupported_uri_scheme(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("http://10.1.2.3:2379")
+        targets, check = validator._pick_grpc_target("http://10.1.2.3:2379")
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
 
     def test_fails_when_second_entry_is_malformed(self) -> None:
         # GIVEN a "uris" field with a valid first entry but a malformed second entry: the
         # malformed entry must not be silently ignored just because the first one is fine.
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:notaport")
+        targets, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:notaport")
 
         assert not check.passed
-        assert target == ""
+        assert targets == []
 
-    def test_uses_first_entry_target_when_all_entries_are_valid(self) -> None:
+    def test_returns_all_valid_targets_in_order(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        target, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:2379")
+        targets, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:2379")
 
         assert check.passed
-        assert target == "10.1.2.3:2379"
+        assert targets == ["10.1.2.3:2379", "10.1.2.4:2379"]
+
+    def test_rejects_network_path_reference_uri(self) -> None:
+        # A "//host:port" network-path reference (no scheme) is neither of this interface's
+        # two documented forms; urlsplit() would otherwise parse it with an empty scheme,
+        # which the scheme allowlist also accepts for bare host:port entries, so it must be
+        # rejected explicitly before that ambiguity lets it through.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        targets, check = validator._pick_grpc_target("//10.1.2.3:2379")
+
+        assert not check.passed
+        assert targets == []
 
 
 class TestEtcdClientValidatorProvidesSimple:
