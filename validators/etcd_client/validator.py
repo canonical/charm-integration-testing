@@ -115,9 +115,12 @@ def _redact_uri_for_message(uri: str) -> str:
     Works purely textually (rather than via urlsplit) so it is safe to call even on a URI
     that fails to parse, and won't itself raise on malformed input. Userinfo is redacted
     whether or not a "//" scheme separator is present, since this interface's "uris" field
-    also accepts bare "host:port" entries without a scheme.
+    also accepts bare "host:port" entries without a scheme. The userinfo segment is matched
+    greedily up to the *last* "@" before the authority (rather than stopping at the first
+    "@"), so malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host")
+    is fully redacted instead of leaking everything after the first "@".
     """
-    sanitized = re.sub(r"(^|//)[^/?#@]*@", r"\1<redacted>@", uri)
+    sanitized = re.sub(r"(^|//)[^/?#]*@", r"\1<redacted>@", uri)
     return re.sub(r"[?#].*$", "", sanitized)
 
 
@@ -237,7 +240,12 @@ class EtcdClientValidator(BaseValidator):
         never conveys (see module docstring), so this check is scoped to basic
         reachability rather than a completed TLS handshake.
         """
-        first = endpoints.split(",")[0].strip()
+        # Use the same non-empty, whitespace-stripped entries _check_endpoints_format() derives
+        # its validation from: a naive split(",")[0] would instead pick up an empty leading
+        # segment from a value like ",host:2379" and try to connect to an empty host, producing
+        # a false FAIL even though a valid endpoint is present later in the list.
+        entries = [e.strip() for e in endpoints.split(",") if e.strip()]
+        first = entries[0]
         # _check_endpoints_format() has already rejected any entry carrying userinfo (an "@"),
         # but redact defensively anyway: this message must never echo a credential verbatim.
         redacted_first = _redact_uri_for_message(first)
@@ -669,10 +677,20 @@ class EtcdClientValidator(BaseValidator):
         invalid = []
         for entry in entries:
             host, _, port_str = entry.rpartition(":")
-            # Require an ASCII-decimal port string: bare int() accepts spellings like "1_000"
-            # or "+2379" that plain-english humans would never write into an endpoint, silently
-            # normalizing them to a different numeric port than what was actually configured.
-            port_valid = bool(host) and port_str.isdigit() and port_str.isascii() and 1 <= int(port_str) <= 65535
+            # Require an ASCII-decimal port string no longer than "65535" (5 digits): bare
+            # int() accepts spellings like "1_000" or "+2379" that plain-english humans would
+            # never write into an endpoint, silently normalizing them to a different numeric
+            # port than what was actually configured. The length cap additionally guards
+            # int()'s own global digit-count limit (Python's integer string conversion limit):
+            # without it, an all-digit but excessively long port_str would raise ValueError
+            # here uncaught, crashing validation into ERROR instead of a clean FAIL.
+            port_valid = (
+                bool(host)
+                and port_str.isdigit()
+                and port_str.isascii()
+                and len(port_str) <= 5
+                and 1 <= int(port_str) <= 65535
+            )
             # rpartition(":") alone lets a malformed host through as long as the final segment
             # still parses as a port - e.g. "[::1:2379" (unbalanced brackets), the unbracketed
             # "::1:2379" (host "::1", which itself contains colons), and "[host:2379" (one-sided

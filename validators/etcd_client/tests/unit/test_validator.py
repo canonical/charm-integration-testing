@@ -55,6 +55,7 @@ def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock
         def call(request: bytes, timeout: float = 0) -> bytes:
             if method.endswith("/Put"):
                 fields = _decode_message(request)
+                stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
                 stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
                 return b""
             if method.endswith("/Range"):
@@ -224,6 +225,36 @@ class TestEtcdClientValidatorRequiresSimple:
         assert not check.passed
         assert secret not in check.message
 
+    def test_redacts_userinfo_containing_an_embedded_at_sign(self) -> None:
+        # A userinfo segment containing a literal embedded "@" (e.g. "admin@secret@host")
+        # must be fully redacted, not just up to the first "@".
+        secret = "hunter2"
+        bad_endpoint = "admin@" + secret + "@10.1.2.3:notaport"
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": bad_endpoint}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+        assert secret not in check.message
+
+    def test_fails_endpoints_format_check_for_overlong_digit_port(self) -> None:
+        # A port string with far more digits than any valid port (max 65535, 5 digits) must
+        # fail cleanly as a normal FAIL, not crash validation into ERROR: int() itself raises
+        # ValueError for excessively long all-digit strings (Python's integer-string
+        # conversion limit), so the length must be bounded before ever calling int().
+        bad_endpoint = "10.1.2.3:" + "9" * 5000
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": bad_endpoint}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+
     def test_rejects_userinfo_in_otherwise_valid_endpoint(self) -> None:
         # Even with a well-formed host:port, an endpoint carrying userinfo (including a
         # percent-encoded credential, which would not contain a literal ":" for the naive
@@ -315,6 +346,22 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "PASS", result.checks
         mock_connect.assert_called_once_with(("::1", 2379), timeout=3.0)
+
+    def test_connects_to_first_non_empty_endpoint_entry(self) -> None:
+        # A leading empty comma-separated segment (e.g. ",10.1.2.3:2379") is itself filtered
+        # out by _check_endpoints_format's own non-empty-entries list, so it passes format
+        # validation; _check_tcp_reachable must derive "first" from that same filtered list
+        # rather than a naive split(",")[0], or it would try to connect to an empty host.
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": ",10.1.2.3:2379"}
+        validator = _make_validator(databag)
+
+        with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
+            mock_connect.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_connect.return_value.__exit__ = MagicMock(return_value=False)
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS", result.checks
+        mock_connect.assert_called_once_with(("10.1.2.3", 2379), timeout=3.0)
 
 
 class TestEtcdClientValidatorRequiresDeep:
@@ -442,6 +489,10 @@ class TestEtcdClientValidatorRequiresDeep:
         for name in ("put", "get", "delete"):
             check = next(c for c in result.checks if c.name == name)
             assert check.passed
+        # Regression guard: the canary key written must be scoped under the requirer's own
+        # local "prefix" (VALID_LOCAL_REQUIRER_DATABAG), not e.g. a regressed read of the
+        # provider's remote databag, which has no "prefix" field of its own.
+        assert stored["key"].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
 
     def test_fails_get_check_when_value_mismatches(self, monkeypatch: pytest.MonkeyPatch) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -758,6 +809,9 @@ class TestEtcdClientValidatorRequiresDeep:
         assert "secret:etcd-user" in charm.model.requested_ids
         assert "secret:etcd-tls" in charm.model.requested_ids
         assert "secret:local-mtls" in charm.model.requested_ids
+        # Regression guard: same as test_passes_full_read_write_cycle_with_provisioned_identity,
+        # confirms the canary key is scoped under the requirer's own local "prefix".
+        assert stored["key"].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
 
 
 class TestEtcdClientValidatorGrpcTarget:
