@@ -4,6 +4,8 @@
 import ipaddress
 import re
 import socket
+from http.client import HTTPMessage
+from typing import IO
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -29,7 +31,9 @@ class _NoRedirectHandler(HTTPRedirectHandler):
     probe must not silently follow to whatever host the redirect names.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+    def redirect_request(
+        self, req: Request, fp: IO[bytes], code: int, msg: str, headers: HTTPMessage, newurl: str
+    ) -> Request | None:
         raise HTTPError(req.full_url, code, msg, headers, fp)
 
 

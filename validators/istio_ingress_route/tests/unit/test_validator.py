@@ -280,7 +280,12 @@ class TestIstioIngressRouteValidatorDeep:
         # WHEN/THEN the handler must not hand back a Request to follow
         with pytest.raises(HTTPError):
             handler.redirect_request(
-                req, None, 302, "Found", {"location": "http://unrelated.example"}, "http://unrelated.example"
+                req,
+                None,  # type: ignore[arg-type]
+                302,
+                "Found",
+                {"location": "http://unrelated.example"},  # type: ignore[arg-type]
+                "http://unrelated.example",
             )
 
     def test_http_probe_treats_redirect_as_reachable_without_following(self) -> None:
