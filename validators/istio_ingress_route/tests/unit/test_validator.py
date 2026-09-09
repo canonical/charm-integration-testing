@@ -207,6 +207,7 @@ class TestIstioIngressRouteValidatorSimple:
             "host?",  # syntactically-present but empty query; query attribute == ''
             "host#",  # syntactically-present but empty fragment; fragment attribute == ''
             "host/path;token=secret",  # semicolon params on the final path segment
+            "https://ingress.example.com",  # a scheme, not the bare host the interface publishes
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -238,6 +239,7 @@ class TestIstioIngressRouteValidatorSimple:
         assert not fmt.passed
         assert all("12\u00b23" not in c.message for c in result.checks)
 
+    def test_passes_simple_with_tls_disabled(self) -> None:
         # GIVEN valid provider databag with TLS disabled
         validator = _make_validator(VALID_HTTP_DATABAG)
 
@@ -649,6 +651,42 @@ class TestIstioIngressRouteValidatorDeep:
         assert result.status == "SKIPPED"
         tcp_ping.assert_not_called()
         assert not any(c.name == "http_probe" for c in result.checks)
+
+    def test_deep_skips_connectivity_when_local_config_omits_listeners(self) -> None:
+        # GIVEN 'listeners' is optional in the interface's IstioIngressRouteConfig and
+        # defaults to an empty list, so its absence is a valid config with nothing to probe
+        validator = _make_validator(
+            VALID_HTTP_DATABAG,
+            local_databag={"config": json.dumps({"model": "m"})},
+        )
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        # THEN the missing key is honoured as the schema default rather than reported as FAIL
+        assert result.status == "SKIPPED"
+        tcp_ping.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            [{"port": 8080, "protocol": "HTTP"}],  # top-level value is not an object
+            {"listeners": [{"port": 8080, "protocol": "HTTP"}]},  # required 'model' missing
+            {"model": 1, "listeners": []},  # 'model' is not a string
+        ],
+    )
+    def test_deep_fails_when_local_config_violates_top_level_schema(self, config: object) -> None:
+        # GIVEN a local 'config' the interface's provider would itself reject, which must
+        # not reach the probes and report a PASS built on an invalid contract
+        validator = _make_validator(VALID_HTTP_DATABAG, local_databag={"config": json.dumps(config)})
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        tcp_ping.assert_not_called()
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert not connect.passed
 
     def test_deep_fails_when_local_config_is_malformed(self) -> None:
         # GIVEN the requirer's local 'config' is not valid JSON

@@ -136,13 +136,15 @@ class IstioIngressRouteValidator(BaseValidator):
     published fields and URL shape; L2 probes the gateway to confirm it is
     reachable and routing traffic.
 
-    ``external_host`` never encodes a port: istio_ingress_route lets a requirer
+    ``external_host`` normally carries no port: istio_ingress_route lets a requirer
     declare arbitrary Gateway listener ports for its routes (not just 80/443) via
     a ``config`` key the requirer publishes into its *own* local application
-    databag on this relation (JSON-encoded, with a ``listeners`` list of
-    ``{"port": ..., "protocol": "HTTP" | "GRPC"}``). L2 reads that local config to
-    determine which port(s) to probe, instead of assuming a default, and probes
-    every declared HTTP-protocol listener (a requirer may declare more than one).
+    databag on this relation (JSON-encoded, with a required ``model`` and an
+    optional ``listeners`` list of ``{"port": ..., "protocol": "HTTP" | "GRPC"}``).
+    L2 therefore resolves the port(s) to probe in precedence order: a port encoded
+    in ``external_host`` is used as-is; otherwise every declared HTTP-protocol
+    listener from that local config is probed (a requirer may declare more than
+    one), instead of assuming a default.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -289,6 +291,16 @@ def _url_format_check(url: str) -> ValidationCheck:
             passed=False,
             message=f"URL scheme {parsed.scheme!r} is not 'http' or 'https'.",
         )
+    # The URL is derived as "{scheme}://{external_host}", so a second '://' means
+    # 'external_host' carried its own scheme (e.g. "https://ingress.example.com").
+    # urlparse would otherwise read that as hostname "https" with path
+    # "//ingress.example.com" and let an unusable address through.
+    if "://" in url.partition("://")[2]:
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {display!r} has a scheme in 'external_host'; it must be a bare host[:port].",
+        )
     if not parsed.netloc or not parsed.hostname:
         return ValidationCheck(
             name="url_format",
@@ -315,7 +327,10 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {display!r} contains a query/fragment/user-info; 'external_host' must not include them.",
+            message=(
+                f"URL {display!r} contains a path parameter/query/fragment/user-info; "
+                "'external_host' must not include them."
+            ),
         )
 
     if not _is_valid_host(parsed.hostname):
@@ -371,15 +386,13 @@ def _extract_host(url: str) -> str:
 def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[int], ValidationCheck | None]:
     """Determine which port(s) the deep-level checks should probe.
 
-    ``external_host`` (see class docstring) never itself encodes a port unless the
-    provider chose to publish one explicitly; when it does, that value is
-    unambiguous and used as-is. Otherwise, the actual listener port(s) are only
-    known from the requirer's own locally-published ``config`` (see class
-    docstring), so they must be read from there rather than assumed to be
-    80/443. A requirer may declare more than one HTTP-protocol listener, and any
-    one of them being unreachable is a real routing problem, so every declared
-    HTTP port is returned (deduplicated, order preserved) rather than only the
-    first.
+    A port encoded in ``external_host`` (see class docstring) is unambiguous and used
+    as-is. Otherwise, the actual listener port(s) are only known from the requirer's
+    own locally-published ``config`` (see class docstring), so they must be read from
+    there rather than assumed to be 80/443. A requirer may declare more than one
+    HTTP-protocol listener, and any one of them being unreachable is a real routing
+    problem, so every declared HTTP port is returned (deduplicated, order preserved)
+    rather than only the first.
 
     A URL carrying a path (see ``test_passes_simple_when_external_host_carries_upstream_route_path``)
     means ``external_host`` is a chained deployment: the provider is itself behind
@@ -412,7 +425,7 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
     try:
         listeners = _parse_listeners(raw_config)
         http_ports = list(dict.fromkeys(int(listener["port"]) for listener in listeners if _is_http_listener(listener)))
-    except (TypeError, ValueError, KeyError) as exc:
+    except (TypeError, ValueError) as exc:
         return [], ValidationCheck(
             name="connect",
             passed=False,
@@ -432,14 +445,23 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
 def _parse_listeners(raw_config: str) -> list[dict[str, Any]]:
     """Decode and validate the 'listeners' list from a requirer's local 'config'.
 
-    Raises TypeError/ValueError/KeyError if 'config' is not valid JSON, 'listeners' is
-    missing or not a list, or any entry lacks a supported 'protocol' or a 'port' in the
+    Mirrors the interface's ``IstioIngressRouteConfig``: the top-level value is an
+    object with a required ``model`` string and an optional ``listeners`` list that
+    defaults to empty.
+
+    Raises TypeError/ValueError if 'config' is not valid JSON, does not match the
+    shape above, or any listener entry lacks a supported 'protocol' or a 'port' in the
     interface's valid 1-65535 range. A malformed entry (e.g. {"port": 8080} with no
     protocol) must not be silently filtered out alongside genuinely absent GRPC-only
     listeners: that would hide a broken local contract behind a false "nothing to
     probe, so skip" result instead of surfacing it as a failure.
     """
-    listeners = json.loads(raw_config)["listeners"]
+    config = json.loads(raw_config)
+    if not isinstance(config, dict):
+        raise TypeError(f"'config' must be an object, got {type(config).__name__}.")
+    if not isinstance(config.get("model"), str):
+        raise ValueError(f"'config' has an invalid required 'model': {config.get('model')!r}.")
+    listeners = config.get("listeners", [])
     if not isinstance(listeners, list):
         raise TypeError(f"'listeners' must be a list, got {type(listeners).__name__}.")
     for listener in listeners:
