@@ -166,6 +166,8 @@ class TestIstioIngressRouteValidatorSimple:
             "good.example\n",  # trailing newline, silently stripped by urlparse
             "good.example\r",  # trailing carriage return, silently stripped by urlparse
             "good.example\t",  # embedded tab, silently stripped by urlparse
+            "upstream.example.com/model app",  # unescaped space in an otherwise-allowed path
+            "ingress.example.com..",  # multiple trailing dots are not a valid FQDN
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -211,6 +213,19 @@ class TestIstioIngressRouteValidatorSimple:
         result = validator.validate(level="simple")
 
         # THEN the routed path is accepted; only query/fragment/user-info are rejected
+        assert result.status == "PASS"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert fmt.passed
+
+    def test_passes_simple_when_external_host_is_an_absolute_fqdn(self) -> None:
+        # GIVEN external_host is an absolute (fully-qualified) DNS name with a
+        # trailing root dot, which is valid and resolvable
+        validator = _make_validator({"external_host": "ingress.example.com.", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the single trailing dot is accepted
         assert result.status == "PASS"
         fmt = next(c for c in result.checks if c.name == "url_format")
         assert fmt.passed

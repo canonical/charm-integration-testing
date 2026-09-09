@@ -141,6 +141,17 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"URL {url!r} contains control characters that are not valid in a bare host.",
         )
 
+    # Unescaped whitespace (e.g. a literal space in a path segment) is not valid in a
+    # URL and urllib rejects it at request time, even though urlparse accepts it and
+    # str.isprintable() treats plain spaces as printable. Percent-encoded whitespace
+    # (e.g. "%20") contains no literal whitespace character, so it is unaffected.
+    if any(char.isspace() for char in url):
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {url!r} contains unescaped whitespace; percent-encode it (e.g. '%20') instead.",
+        )
+
     try:
         parsed = urlparse(url)
     except Exception as exc:
@@ -200,7 +211,11 @@ def _is_valid_host(host: str) -> bool:
         return True
     except ValueError:
         pass
-    return len(host) <= 253 and bool(_HOSTNAME_RE.fullmatch(host))
+    # A single trailing dot denotes an absolute (fully-qualified) DNS name, which is
+    # valid and resolvable; strip at most one before checking the label grammar/length
+    # so a name with two or more trailing dots is still correctly rejected.
+    dns_name = host[:-1] if host.endswith(".") else host
+    return len(dns_name) <= 253 and bool(_HOSTNAME_RE.fullmatch(dns_name))
 
 
 # ---------------------------------------------------------------------------
