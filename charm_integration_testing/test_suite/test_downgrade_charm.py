@@ -12,6 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_downgrade_charm(
     juju_client: JujuClient,
+    require_compatible_downgrade_bases: None,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
     target_charm: str,

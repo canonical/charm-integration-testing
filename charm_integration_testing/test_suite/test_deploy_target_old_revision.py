@@ -40,6 +40,7 @@ def _create_bundle_with_revision_override(
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
+    require_compatible_downgrade_bases: None,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
     target_application: str,
