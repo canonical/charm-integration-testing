@@ -160,7 +160,6 @@ class TestIstioIngressRouteValidatorSimple:
         [
             "bad host",  # embedded whitespace
             "host\x00name",  # control character
-            "host/evil-path",  # path component smuggled into the host
             "host?query=1",  # query component smuggled into the host
             "user@host",  # user-info component smuggled into the host
             "-leading-hyphen.example.com",  # invalid DNS label
@@ -202,6 +201,19 @@ class TestIstioIngressRouteValidatorSimple:
 
         # THEN
         assert result.status == "PASS"
+
+    def test_passes_simple_when_external_host_carries_upstream_route_path(self) -> None:
+        # GIVEN external_host preserves a path from an upstream ingress hop
+        # (e.g. istio-ingress chained behind another ingress), as some providers do
+        validator = _make_validator({"external_host": "upstream.example.com/model-app", "tls_enabled": "True"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the routed path is accepted; only query/fragment/user-info are rejected
+        assert result.status == "PASS"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert fmt.passed
 
     def test_sets_endpoint_and_interface_on_result(self) -> None:
         # GIVEN

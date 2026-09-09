@@ -163,11 +163,11 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"URL {url!r} has no valid hostname.",
         )
 
-    if parsed.path or parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
+    if parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} contains a path/query/fragment/user-info; 'external_host' must be a bare host.",
+            message=f"URL {url!r} contains a query/fragment/user-info; 'external_host' must not include them.",
         )
 
     if not _is_valid_host(parsed.hostname):
