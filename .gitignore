@@ -147,3 +147,6 @@ dmypy.json
 .DS_Store
 generated-*-bundle.yaml
 
+# test-observer-mcp clone (development-sandbox/sandbox.sh --with-test-observer-mcp)
+/.test-observer-mcp/
+
