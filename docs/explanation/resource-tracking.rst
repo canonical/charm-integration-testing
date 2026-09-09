@@ -409,7 +409,7 @@ identity.
    * - ``configmap``
      - ``v1`` (``CoreV1Api``)
      - ``keys_changed`` (data_keys)
-     - Records sorted ``data_keys`` only; values excluded.
+     - Records sorted ``data_keys`` only; values excluded. The istio-injected ``istio-ca-root-cert`` is skipped when it has no ``app.kubernetes.io/name`` label (cluster-provisioned).
    * - ``secret``
      - ``v1`` (``CoreV1Api``)
      - ``type_changed`` (type), ``keys_changed`` (data_keys)
@@ -450,6 +450,20 @@ recreated. Diffing them by ``(namespace, name)`` identity would report spurious
   objects named ``<xid>-<revision>`` (a per-secret xid plus a rotating revision).
   These are skipped only when unlabelled, so a charm-declared secret is never
   dropped by a coincidental name match.
+
+Cluster-provisioned instances within tracked kinds
+--------------------------------------------------
+
+Objects written into the model namespace by the cluster itself are also skipped.
+Their names are stable, so they are not volatile in the sense above, but they are
+not owned by any charm and are created asynchronously, so whether a given state
+visit observes them is a property of the cluster rather than of the charm:
+
+* **istio root certificate.** istiod's namespace controller writes an
+  ``istio-ca-root-cert`` ``configmap`` into every namespace it manages so mesh
+  workloads can validate the control-plane CA. It is skipped only when
+  unlabelled, so a charm that declares a ConfigMap of the same name is still
+  tracked.
 
 Deliberately untracked kinds
 ----------------------------
@@ -530,5 +544,3 @@ No change to ``StateResourceTracker``, ``calculate_discrepancies``,
 ``record_failure_execution_metadata`` recorder is required: the new kind flows
 through the same generic path and is published under
 ``resource_discrepancy:<new_resource_type>:<qualifier>``.
-
-
