@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import grpc
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 
 from validators.base import (
     BaseValidator,
@@ -155,6 +156,7 @@ class EtcdClientValidator(BaseValidator):
         checks.append(tls_ca_check)
         if not tls_ca_check.passed:
             return self._make_result(level=level, checks=checks)
+        checks.append(self._check_not_expired(ca_cert, check_name="tls_ca_validity_period"))
 
         if level == "simple":
             checks.append(self._check_tcp_reachable(data["endpoints"]))
@@ -212,23 +214,38 @@ class EtcdClientValidator(BaseValidator):
             checks.append(ValidationCheck(name="put", passed=False, message=f"Could not read client identity: {exc}"))
             return checks
 
+        # The requirer's own contribution to this relation (its "prefix" ACL grant
+        # and its published mtls-cert) lives on this application's own databag, not
+        # on the remote provider's databag (`data`, used above for endpoints/uris/
+        # tls-ca): see BaseValidator.databag and _local_databag.
+        local_data = self._local_databag()
+
+        identity_match_check = self._check_identity_matches_published_cert(cert_bytes, local_data)
+        checks.append(identity_match_check)
+        if not identity_match_check.passed:
+            return checks
+
         credentials = grpc.ssl_channel_credentials(
             root_certificates=data["tls-ca"].encode(),
             private_key=key_bytes,
             certificate_chain=cert_bytes,
         )
 
-        prefix = data.get("prefix", "")
+        prefix = local_data.get("prefix", "")
         canary_key = f"{prefix}validator-canary-{uuid.uuid4().hex[:12]}"
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
 
         with grpc.secure_channel(target, credentials) as channel:
-            checks.append(self._etcd_put(channel, canary_key, canary_value))
-            if not checks[-1].passed:
-                return checks
-
-            checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
-            checks.append(self._etcd_delete(channel, canary_key))
+            put_check = self._etcd_put(channel, canary_key, canary_value)
+            checks.append(put_check)
+            try:
+                if put_check.passed:
+                    checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
+            finally:
+                # Always attempt cleanup, even if PUT reported failure: a client-side
+                # timeout can still mean etcd committed the write server-side, which
+                # would otherwise leave an orphaned canary key behind.
+                checks.append(self._etcd_delete(channel, canary_key))
         return checks
 
     def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
@@ -256,10 +273,62 @@ class EtcdClientValidator(BaseValidator):
         first = uris.split(",")[0].strip()
         if not first:
             return "", ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
-        parsed = urlsplit(first if "//" in first else f"//{first}")
-        if not parsed.hostname or not parsed.port:
+        try:
+            parsed = urlsplit(first if "//" in first else f"//{first}")
+            hostname, port = parsed.hostname, parsed.port
+        except ValueError as exc:
+            return "", ValidationCheck(
+                name="uris_format", passed=False, message=f"Could not parse uri '{first}': {exc}"
+            )
+        if not hostname or not port:
             return "", ValidationCheck(name="uris_format", passed=False, message=f"Could not parse uri '{first}'.")
-        return f"{parsed.hostname}:{parsed.port}", ValidationCheck(name="uris_format", passed=True, message="OK")
+        return f"{hostname}:{port}", ValidationCheck(name="uris_format", passed=True, message="OK")
+
+    def _local_databag(self) -> dict[str, str]:
+        """Read this application's own contribution to the relation.
+
+        Unlike ``self.databag`` (the remote application's data), the requirer's
+        own ``prefix``/``mtls-cert`` fields live in this application's own
+        databag on the relation, so they must be read directly from
+        ``self.relation.data``.
+        """
+        return dict(self.relation.data[self.charm.app])
+
+    def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
+        """Resolve this application's own published mtls-cert, secret-backed or plaintext."""
+        if uri := local_data.get("secret-mtls"):
+            return self.charm.model.get_secret(id=uri).get_content().get("mtls-cert")
+        return local_data.get("mtls-cert")
+
+    def _check_identity_matches_published_cert(
+        self, loaded_cert_bytes: bytes, local_data: dict[str, str]
+    ) -> ValidationCheck:
+        """Verify the locally-provisioned client cert is the one actually published on this relation.
+
+        Without this check, ``ETCD_CLIENT_CERT_PATH_ENV``/``ETCD_CLIENT_KEY_PATH_ENV`` could
+        point at some other valid identity, and a PASS would validate that identity's ACLs
+        rather than this relation's.
+        """
+        published_pem = self._resolve_local_mtls_cert(local_data)
+        if not published_pem:
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="No mtls-cert published on this relation to compare against.",
+            )
+        loaded_check, loaded_cert = self._parse_mtls_cert(loaded_cert_bytes.decode())
+        if loaded_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
+        published_check, published_cert = self._parse_mtls_cert(published_pem)
+        if published_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=published_check.message)
+        if loaded_cert.fingerprint(hashes.SHA256()) != published_cert.fingerprint(hashes.SHA256()):
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
+            )
+        return ValidationCheck(name="identity_match", passed=True, message="OK")
 
     def _etcd_put(self, channel: grpc.Channel, key: str, value: str) -> ValidationCheck:
         request = _encode_bytes_field(1, key.encode()) + _encode_bytes_field(2, value.encode())
@@ -360,15 +429,13 @@ class EtcdClientValidator(BaseValidator):
             return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
         return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert
 
-    def _check_not_expired(self, cert: x509.Certificate | None) -> ValidationCheck:
+    def _check_not_expired(self, cert: x509.Certificate | None, check_name: str = "validity_period") -> ValidationCheck:
         if cert is None:
-            return ValidationCheck(name="validity_period", passed=False, message="No certificate to check.")
+            return ValidationCheck(name=check_name, passed=False, message="No certificate to check.")
         now = datetime.now(timezone.utc)
         if cert.not_valid_after_utc < now or cert.not_valid_before_utc > now:
-            return ValidationCheck(name="validity_period", passed=False, message="Certificate is not currently valid.")
-        return ValidationCheck(
-            name="validity_period", passed=True, message="Certificate is within its validity period."
-        )
+            return ValidationCheck(name=check_name, passed=False, message="Certificate is not currently valid.")
+        return ValidationCheck(name=check_name, passed=True, message="Certificate is within its validity period.")
 
     # --- shared helpers ---
 

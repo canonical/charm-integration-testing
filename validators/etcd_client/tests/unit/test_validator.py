@@ -21,7 +21,7 @@ from validators.etcd_client.validator import (
     _decode_message,
     _encode_bytes_field,
 )
-from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
@@ -33,11 +33,14 @@ def _make_validator(
     databag: dict[str, str],
     endpoint: str = "etcd-client",
     role: RelationRoleStub = RelationRoleStub.requires,
+    local_databag: dict[str, str] | None = None,
 ) -> EtcdClientValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
-    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="etcd_client", role=role))
-    return EtcdClientValidator(charm, cast(ops.Relation, relation))
+    stub_charm = make_charm_from_relation(relation, interface_name="etcd_client", role=role)
+    if local_databag is not None:
+        relation.data[stub_charm.app] = local_databag
+    return EtcdClientValidator(cast(ops.CharmBase, stub_charm), cast(ops.Relation, relation))
 
 
 def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock:
@@ -110,6 +113,13 @@ VALID_PROVIDER_DATABAG: dict[str, str] = {
     "mtls-cert": VALID_CLIENT_CERT_PEM,
 }
 
+# The requirer's own contribution to the relation (its own local app databag),
+# used by requires-side deep-level tests that exercise identity matching.
+VALID_LOCAL_REQUIRER_DATABAG: dict[str, str] = {
+    "prefix": "myprefix-",
+    "mtls-cert": VALID_CLIENT_CERT_PEM,
+}
+
 
 class TestEtcdClientValidatorRole:
     @pytest.mark.parametrize(
@@ -121,8 +131,11 @@ class TestEtcdClientValidatorRole:
         ],
     )
     def test_skips_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
-        databag = VALID_REQUIRER_DATABAG if role != RelationRoleStub.provides else VALID_PROVIDER_DATABAG
-        validator = _make_validator(databag, role=role)
+        # An empty databag is enough here: this test only asserts the role-based
+        # skip/dispatch behavior, not full validation, and a populated requires-side
+        # databag would otherwise make a real (slow, network-dependent) TCP connect
+        # attempt via _check_tcp_reachable.
+        validator = _make_validator({}, role=role)
 
         result = validator.validate(level="simple")
 
@@ -248,7 +261,7 @@ class TestEtcdClientValidatorRequiresDeep:
             monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
             monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
 
-            validator = _make_validator(VALID_REQUIRER_DATABAG)
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
 
             stored: dict[str, bytes] = {}
             fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
@@ -275,7 +288,7 @@ class TestEtcdClientValidatorRequiresDeep:
             monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
             monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
 
-            validator = _make_validator(VALID_REQUIRER_DATABAG)
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
 
             fake_channel = _make_fake_kv_channel({}, get_value=lambda: b"wrong-value")
 
@@ -288,6 +301,62 @@ class TestEtcdClientValidatorRequiresDeep:
         assert result.status == "FAIL"
         get_check = next(c for c in result.checks if c.name == "get")
         assert not get_check.passed
+
+    def test_fails_identity_match_when_local_cert_does_not_match_published_cert(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN a locally-provisioned identity that is valid but is NOT the cert
+        # actually published on this relation (e.g. env vars pointing at some
+        # other identity's cert/key by mistake).
+        other_cert_pem, other_key_pem = _generate_cert("someone-elses-identity")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(other_cert_pem)
+            with open(key_path, "w") as f:
+                f.write(other_key_pem)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        identity_check = next(c for c in result.checks if c.name == "identity_match")
+        assert not identity_check.passed
+        for name in ("put", "get", "delete"):
+            assert not any(c.name == name for c in result.checks)
+
+    def test_passes_with_secret_backed_credentials_and_local_secret_mtls(self) -> None:
+        # GIVEN provider fields resolved via secrets rather than plaintext, matching
+        # library revisions that publish username/uris/tls-ca as a secret group.
+        databag = {
+            "endpoints": VALID_REQUIRER_DATABAG["endpoints"],
+            "version": VALID_REQUIRER_DATABAG["version"],
+            "secret-user": "secret:etcd-user",
+            "secret-tls": "secret:etcd-tls",
+        }
+        secrets = {
+            "secret:etcd-user": {
+                "username": VALID_REQUIRER_DATABAG["username"],
+                "uris": VALID_REQUIRER_DATABAG["uris"],
+            },
+            "secret:etcd-tls": {"tls-ca": VALID_REQUIRER_DATABAG["tls-ca"]},
+        }
+        app = ApplicationStub()
+        relation = RelationStub(name="etcd-client", id=0, app=app, data={app: databag})
+        charm = make_charm_from_relation_and_secrets(relation, secrets, role=RelationRoleStub.requires)
+        validator = EtcdClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
+            mock_connect.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_connect.return_value.__exit__ = MagicMock(return_value=False)
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS", result.checks
+        assert charm.model.requested_ids == ["secret:etcd-user", "secret:etcd-tls"]
 
 
 class TestEtcdClientValidatorProvidesSimple:
@@ -331,6 +400,21 @@ class TestEtcdClientValidatorProvidesSimple:
         for name in ("schema", "mtls_cert_parseable", "validity_period"):
             check = next(c for c in result.checks if c.name == name)
             assert check.passed
+
+    def test_passes_with_secret_backed_mtls_cert(self) -> None:
+        # GIVEN mtls-cert resolved via a secret group rather than a plaintext field,
+        # matching data-integrator revisions observed publishing it that way.
+        databag = {"prefix": VALID_PROVIDER_DATABAG["prefix"], "secret-mtls": "secret:etcd-mtls"}
+        secrets = {"secret:etcd-mtls": {"mtls-cert": VALID_PROVIDER_DATABAG["mtls-cert"]}}
+        app = ApplicationStub()
+        relation = RelationStub(name="etcd-client", id=0, app=app, data={app: databag})
+        charm = make_charm_from_relation_and_secrets(relation, secrets, role=RelationRoleStub.provides)
+        validator = EtcdClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "PASS", result.checks
+        assert charm.model.requested_ids == ["secret:etcd-mtls"]
 
 
 class TestEtcdClientValidatorProvidesDeep:
