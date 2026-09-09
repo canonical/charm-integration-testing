@@ -62,7 +62,18 @@ def _redact(value: str) -> str:
     if at_idx != -1:
         authority = authority[at_idx + 1 :]
 
-    host_part, sep, port_part = authority.rpartition(":")
+    # A bracketed IPv6 host (e.g. "[2001:db8::1]") contains colons that are part of
+    # the address, not a port separator; only a colon *after* the closing bracket
+    # introduces a port. rpartition(":") on the whole thing would otherwise treat the
+    # address's own last colon-delimited segment as a bogus "port" and corrupt the
+    # display of a valid bracketed host with no port at all.
+    if authority.startswith("["):
+        bracket_end = authority.find("]")
+        host_part = authority if bracket_end == -1 else authority[: bracket_end + 1]
+        sep = "" if bracket_end == -1 else authority[bracket_end + 1 : bracket_end + 2]
+        port_part = "" if bracket_end == -1 else authority[bracket_end + 2 :]
+    else:
+        host_part, sep, port_part = authority.rpartition(":")
     # str.isdigit() accepts non-ASCII digit characters (e.g. '\u00b2', superscript
     # two) that int() then rejects, and an arbitrarily long digit string could make
     # int() raise on some interpreters; a bounded ASCII-decimal regex avoids both, so
@@ -415,7 +426,7 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
         return [443 if parsed.scheme == "https" else 80], None
 
     raw_config = local_databag.get("config")
-    if not raw_config:
+    if raw_config is None:
         return [], ValidationCheck(
             name="connect",
             passed=True,

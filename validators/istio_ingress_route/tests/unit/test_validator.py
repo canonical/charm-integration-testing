@@ -298,6 +298,29 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "FAIL"
         assert all("secret" not in c.message for c in result.checks)
 
+    def test_passes_and_does_not_corrupt_bracketed_ipv6_host_without_port(self) -> None:
+        # GIVEN a bracketed IPv6 external_host with no port (its own colons must not
+        # be mistaken for a port separator when building the redacted display value)
+        validator = _make_validator({"external_host": "[2001:db8::1]", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the host is accepted, and every message shows it intact/unredacted
+        assert result.status == "PASS"
+        assert any("[2001:db8::1]" in c.message for c in result.checks)
+
+    def test_redacts_invalid_port_on_bracketed_ipv6_host_without_corrupting_address(self) -> None:
+        # GIVEN a bracketed IPv6 host with a genuinely invalid port after the bracket
+        validator = _make_validator({"external_host": "[2001:db8::1]:99999", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN only the invalid port is redacted; the address itself is left intact
+        assert result.status == "FAIL"
+        assert any("[2001:db8::1]:<redacted>" in c.message for c in result.checks)
+
     def test_redacts_query_string_from_result_messages(self) -> None:
         # GIVEN external_host smuggles a credential via a query string
         validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})
@@ -635,6 +658,21 @@ class TestIstioIngressRouteValidatorDeep:
         assert not any(c.name == "http_probe" for c in result.checks)
         connect = next(c for c in result.checks if c.name == "connect")
         assert connect.passed
+
+    def test_deep_fails_when_local_config_is_published_but_empty(self) -> None:
+        # GIVEN 'config' is present on the local databag but an empty string, which is
+        # a different condition from the key being absent altogether: the requirer
+        # published something that is not valid JSON, so this must FAIL, not be
+        # treated the same as "nothing published yet" (SKIPPED)
+        validator = _make_validator(VALID_HTTP_DATABAG, local_databag={"config": ""})
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        tcp_ping.assert_not_called()
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert not connect.passed
 
     def test_deep_skips_connectivity_when_local_config_has_no_http_listener(self) -> None:
         # GIVEN the requirer only declared a GRPC listener, which an HTTP GET probe
