@@ -45,7 +45,7 @@ def _redact(value: str) -> str:
     authority = rest if path_idx == -1 else rest[:path_idx]
     remainder = "" if path_idx == -1 else rest[path_idx:]
 
-    at_idx = authority.find("@")
+    at_idx = authority.rfind("@")
     if at_idx != -1:
         authority = authority[at_idx + 1 :]
 
@@ -230,7 +230,17 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"URL {display!r} has no valid hostname.",
         )
 
-    if parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
+    # parsed.query/fragment are '' both when the component is absent and when it is
+    # syntactically present but empty (e.g. "host?" or "host#"), so a truthiness check
+    # misses those cases; likewise parsed.username is '' (not None) only when user-info
+    # is present but empty (e.g. "@host"), so checking "is not None" catches it while a
+    # bare host still yields None. Inspect the raw delimiters/attributes explicitly.
+    has_query = "?" in url
+    has_fragment = "#" in url
+    has_userinfo = parsed.username is not None or parsed.password is not None
+    has_params = ";" in parsed.path
+
+    if has_params or has_query or has_fragment or has_userinfo:
         return ValidationCheck(
             name="url_format",
             passed=False,

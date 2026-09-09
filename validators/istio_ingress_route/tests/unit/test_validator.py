@@ -169,6 +169,9 @@ class TestIstioIngressRouteValidatorSimple:
             "upstream.example.com/model app",  # unescaped space in an otherwise-allowed path
             "ingress.example.com..",  # multiple trailing dots are not a valid FQDN
             "example.com/café",  # raw non-ASCII char; urllib requires an ASCII URI
+            "@host",  # syntactically-present but empty user-info; username == '' not None
+            "host?",  # syntactically-present but empty query; query attribute == ''
+            "host#",  # syntactically-present but empty fragment; fragment attribute == ''
         ],
     )
     def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
@@ -250,6 +253,19 @@ class TestIstioIngressRouteValidatorSimple:
         result = validator.validate(level="simple")
 
         # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("secret" not in c.message for c in result.checks)
+
+    def test_redacts_user_info_with_embedded_at_sign_from_result_messages(self) -> None:
+        # GIVEN a password containing an embedded '@', so the user-info component has
+        # more than one '@' character (e.g. "user:first-secret@second-secret@host")
+        validator = _make_validator({"external_host": "user:first-secret@second-secret@host", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN redaction splits at the *last* '@' (the real userinfo/host boundary), so
+        # neither part of the password ever appears in any check message
         assert result.status == "FAIL"
         assert all("secret" not in c.message for c in result.checks)
 
