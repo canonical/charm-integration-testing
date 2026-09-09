@@ -1062,10 +1062,10 @@ class TestHandlePeerChannelMismatch:
         # attribute that differs between the two models in this test)
         assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
 
-    def test_risk_falls_back_to_anchors_own_channel_risk_when_tag_omits_it(self) -> None:
-        # GIVEN a mismatch tag that pins a track and revision but does not specify a risk,
-        # and a peer whose CURRENT risk differs from the anchor's (so the assertion below
-        # can only pass if the anchor's channel - not the peer's - is what gets read)
+    def test_risk_is_never_inherited_when_the_tag_omits_it(self) -> None:
+        # GIVEN a mismatch tag that pins a track and revision but does not specify a
+        # risk, and a peer whose CURRENT risk differs from the anchor's (so this test
+        # would fail if risk were silently inherited from either side)
         domain = Domain()
         model_ref = ModelRef(name="m")
         domain.models[model_ref] = DomainModel(
@@ -1084,8 +1084,7 @@ class TestHandlePeerChannelMismatch:
         add_charm_to_domain(anchor, domain, model_ref)
         add_charm_to_domain(peer, domain, model_ref)
         peer_variant = peer.model_copy(update={"revision": 2})
-        anchor_variant = anchor.model_copy(update={"revision": 2})
-        fake = _FakeCharmhubClient(charm_responses=[peer_variant, anchor_variant])
+        fake = _FakeCharmhubClient(charm_responses=[peer_variant])
         builder = BundleBuilder(charmhub_client=fake)
         tag = PeerChannelMismatchTag(
             charm=CharmPayload(charm_name="anchor", charm_id=0),
@@ -1099,11 +1098,10 @@ class TestHandlePeerChannelMismatch:
         # WHEN resolving the mismatch (tag has no required_risk)
         result = builder._handle_peer_channel_mismatch(tag, domain)
 
-        # THEN the anchor's own channel risk ("stable") is used, not the peer's current
-        # ("edge") - the anchor is the fixed reference every self-anchored constraint is
-        # defined against, so nothing is inferred from the peer being replaced
+        # THEN risk is left unset - the store's track+revision lookup resolves the
+        # charm without needing one, and nothing is guessed from anchor or peer
         assert result is True
-        assert fake.charm_from_store_calls[0]["charm_risk"] == _CHANNEL.risk
+        assert fake.charm_from_store_calls[0]["charm_risk"] is None
 
     def test_risk_is_not_inherited_when_no_revision_is_pinned(self) -> None:
         # GIVEN a track-only mismatch tag (no risk, no revision pinned) whose peer's
@@ -1227,29 +1225,36 @@ def _domain_with_two_mismatched_peers(anchor_channel: str, anchor_revision: int)
     return domain
 
 
-class TestFullMismatchRequirements:
-    """BundleBuilder._full_mismatch_requirements / _resolve_full_mismatch_tags."""
+class TestMergeMismatchTagsAgainstARealCore:
+    """BundleBuilder._merge_mismatch_tags, applied to a real solver's raw unsat_core().
 
-    def test_recovers_a_dimension_the_minimized_core_omitted(self) -> None:
-        # GIVEN a peer that is wrong on BOTH risk and revision at once (track matches)
-        domain = _domain_with_peer_mismatch(
-            peer_channel="8/stable", peer_revision=999, anchor_channel="8/edge", anchor_revision=231
-        )
+    Proves the two scenarios that motivated widening the merge key to (anchor, endpoint):
+    a single peer whose core citation drops one of two violated dimensions, and multiple
+    peer candidates that each carry a different single dimension.
+    """
+
+    def test_dimensions_recovered_across_accumulated_candidates_for_one_target(self) -> None:
+        # GIVEN an anchor and two peer candidates for the same target: since
+        # _add_charm_for_charm_id accumulates candidates rather than replacing them, this
+        # is exactly what the domain looks like once a prior CEGIS iteration has already
+        # added a partially-fixed candidate alongside the original - one candidate wrong
+        # on revision only, the other wrong on risk only
+        domain = _domain_with_two_mismatched_peers(anchor_channel="8/edge", anchor_revision=231)
         solver = z3.Solver()
         solver.set("unsat_core", True)
         add_constraints(solver, domain)
-        solver.add(domain.charms[0].exists)
-        solver.add(domain.charms[1].exists)
+        for charm in domain.charms:
+            solver.add(charm.exists)
         solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
         assert solver.check() == z3.unsat
         core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
 
-        # WHEN resolving the core's mismatch tag(s) against the full solver record
-        resolved = BundleBuilder._resolve_full_mismatch_tags(core_tags, solver)
+        # WHEN merging the raw core (no assertion scan, just what the core actually cites)
+        merged = BundleBuilder._merge_mismatch_tags(core_tags)
 
-        # THEN the resolved tag carries both violated dimensions, even if the raw
-        # core only cited one of them
-        mismatch_tags = [t for t in resolved if isinstance(t, PeerChannelMismatchTag)]
+        # THEN the two peers' single-dimension violations combine into one full
+        # requirement, without ever reading from the anchor's or peer's own channel
+        mismatch_tags = [t for t in merged if isinstance(t, PeerChannelMismatchTag)]
         assert len(mismatch_tags) == 1
         assert mismatch_tags[0].required_risk == "edge"
         assert mismatch_tags[0].required_revision == 231
@@ -1268,36 +1273,15 @@ class TestFullMismatchRequirements:
         assert solver.check() == z3.unsat
         core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
 
-        # WHEN resolving against the full solver record
-        resolved = BundleBuilder._resolve_full_mismatch_tags(core_tags, solver)
+        # WHEN merging the raw core
+        merged = BundleBuilder._merge_mismatch_tags(core_tags)
 
-        # THEN risk stays unset - it was never actually violated for this peer
-        mismatch_tags = [t for t in resolved if isinstance(t, PeerChannelMismatchTag)]
+        # THEN risk stays unset - it was never actually violated for this peer, and
+        # nothing invents a value for it
+        mismatch_tags = [t for t in merged if isinstance(t, PeerChannelMismatchTag)]
         assert len(mismatch_tags) == 1
         assert mismatch_tags[0].required_risk is None
         assert mismatch_tags[0].required_revision == 231
-
-    def test_merges_dimensions_violated_by_different_peer_candidates(self) -> None:
-        # GIVEN two candidate peers for the same anchor+endpoint: A has the right risk
-        # but wrong revision, B has the right revision but wrong risk - neither one
-        # alone carries both required dimensions
-        domain = _domain_with_two_mismatched_peers(anchor_channel="8/edge", anchor_revision=231)
-        solver = z3.Solver()
-        solver.set("unsat_core", True)
-        add_constraints(solver, domain)
-        for charm in domain.charms:
-            solver.add(charm.exists)
-        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
-        assert solver.check() == z3.unsat
-
-        # WHEN resolving the full solver record for the anchor
-        full = BundleBuilder._full_mismatch_requirements(solver)
-        merged = full[(0, "replication-offer")]
-
-        # THEN the two peers' tags collapse into one requirement carrying both
-        # dimensions, so a single fetch resolves the anchor's actual target fully
-        assert merged.required_risk == "edge"
-        assert merged.required_revision == 231
 
 
 class TestMergeMismatchTags:
