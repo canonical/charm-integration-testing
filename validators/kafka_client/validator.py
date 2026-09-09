@@ -31,7 +31,7 @@ class KafkaClientValidator(BaseValidator):
         self._ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        if self.role != "requires":
+        if self.role not in ("requires", "provides"):
             return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
@@ -50,17 +50,19 @@ class KafkaClientValidator(BaseValidator):
             return error_result
 
         # --- 2. Resolve credentials ---
-        creds = self._resolve_credentials()
+        source = self._connection_databag()
+        creds = self._resolve_credentials(source)
 
         # --- 3. Schema check ---
-        schema_check = self.validate_schema(
-            ["endpoints", "topic", "consumer-group-prefix", "username", "password"], creds
-        )
+        # consumer-group-prefix is only set by the requirer when it opts into the
+        # "consumer" role, so it must not be treated as required (see
+        # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
+        schema_check = self._validate_schema_from(source, ["endpoints", "topic", "username", "password"], creds)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="simple", checks=checks)
 
-        data = self.databag | creds
+        data = source | creds
 
         # --- 4. Endpoint format check ---
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
@@ -118,17 +120,19 @@ class KafkaClientValidator(BaseValidator):
             return error_result
 
         # --- 2. Resolve credentials ---
-        creds = self._resolve_credentials()
+        source = self._connection_databag()
+        creds = self._resolve_credentials(source)
 
         # --- 3. Schema check ---
-        schema_check = self.validate_schema(
-            ["endpoints", "topic", "consumer-group-prefix", "username", "password"], creds
-        )
+        # consumer-group-prefix is only set by the requirer when it opts into the
+        # "consumer" role, so it must not be treated as required (see
+        # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
+        schema_check = self._validate_schema_from(source, ["endpoints", "topic", "username", "password"], creds)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
 
-        data = self.databag | creds
+        data = source | creds
 
         # --- 4. Endpoint format check ---
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
@@ -139,8 +143,8 @@ class KafkaClientValidator(BaseValidator):
         topic = data["topic"]
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
         canary_key = b"validator-canary"
-        # Canary consumer group uses the granted prefix so ACLs permit READ.
-        canary_group = f"{data['consumer-group-prefix']}probe-{uuid.uuid4().hex[:8]}"
+        # Canary consumer group uses the granted prefix (if any) so ACLs permit READ.
+        canary_group = f"{data.get('consumer-group-prefix', '')}probe-{uuid.uuid4().hex[:8]}"
 
         # --- 5. Ensure topic exists ---
         # kafka-k8s disables auto.create.topics.enable; the validator creates the
@@ -280,12 +284,51 @@ class KafkaClientValidator(BaseValidator):
             )
         return None
 
-    def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve credentials from relation databag or Juju secrets."""
+    def _connection_databag(self) -> dict[str, str]:
+        """Return the databag holding kafka_client connection fields for the current role.
+
+        The interface is app scoped. On the requirer side, the connection fields
+        (endpoints, topic, credentials, ...) live on the remote provider app's
+        databag, which ``BaseValidator.databag`` already exposes (``relation.app``
+        is always the *other* application). On the provider side we publish those
+        same fields ourselves, so we must read our own app's databag instead.
+        """
+        if self.role == "provides":
+            if self.charm.app not in self.relation.data:
+                return {}
+            return dict(self.relation.data[self.charm.app])
+        return self.databag
+
+    def _validate_schema_from(
+        self, data: dict[str, str], required_fields: list[str], creds: dict[str, str] | None = None
+    ) -> ValidationCheck:
+        """Like ``BaseValidator.validate_schema``, but checks an explicit databag.
+
+        Needed because ``validate_schema`` always reads ``self.databag`` (the
+        remote app), which is wrong when validating the provider role.
+        """
+        merged = dict(data)
+        if creds:
+            merged.update(creds)
+        missing = [f for f in required_fields if not merged.get(f)]
+        return ValidationCheck(
+            name="schema",
+            passed=not missing,
+            message="OK" if not missing else f"Missing: {', '.join(missing)}",
+        )
+
+    def _resolve_credentials(self, data: dict[str, str]) -> dict[str, str]:
+        """Resolve credentials from the given databag or the Juju secrets it references."""
         return {
-            **self.resolve_secret("secret-user", "username", "password"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
+            **self._resolve_secret_from(data, "secret-user", "username", "password"),
+            **self._resolve_secret_from(data, "secret-tls", "tls", "tls-ca"),
         }
+
+    def _resolve_secret_from(self, data: dict[str, str], uri_key: str, *fields: str) -> dict[str, str]:
+        """Like ``BaseValidator.resolve_secret``, but resolves against an explicit databag."""
+        if uri := data.get(uri_key):
+            return self.charm.model.get_secret(id=uri).get_content()
+        return {f: data[f] for f in fields if f in data}
 
     def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:
         """Build shared Kafka client kwargs, handling SASL and TLS configuration."""

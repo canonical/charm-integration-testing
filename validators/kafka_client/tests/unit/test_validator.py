@@ -25,10 +25,17 @@ def _make_validator(
     databag: dict[str, str],
     endpoint: str = "kafka",
     role: RelationRoleStub = RelationRoleStub.requires,
+    remote_extra: dict[str, str] | None = None,
 ) -> KafkaClientValidator:
-    app = ApplicationStub()
-    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
-    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="kafka_client", role=role))
+    remote_app = ApplicationStub(name="remote-app")
+    # On the provider role, kafka_client fields live on the *local* app databag
+    # (charm.app), not the remote one, so seed it there instead.
+    remote_databag = (remote_extra or {}) if role == RelationRoleStub.provides else databag
+    relation = RelationStub(name=endpoint, id=0, app=remote_app, data={remote_app: remote_databag})
+    charm_stub = make_charm_from_relation(relation, interface_name="kafka_client", role=role)
+    if role == RelationRoleStub.provides:
+        relation.data[charm_stub.app] = databag
+    charm = cast(ops.CharmBase, charm_stub)
     return KafkaClientValidator(charm, cast(ops.Relation, relation))
 
 
@@ -149,7 +156,7 @@ class TestKafkaClientValidatorSimple:
         "role,should_skip",
         [
             (RelationRoleStub.requires, False),
-            (RelationRoleStub.provides, True),
+            (RelationRoleStub.provides, False),
             (RelationRoleStub.peer, True),
         ],
     )
@@ -176,9 +183,21 @@ class TestKafkaClientValidatorSimple:
         assert not schema_check.passed
         assert "endpoints" in schema_check.message
         assert "topic" in schema_check.message
-        assert "consumer-group-prefix" in schema_check.message
         assert "username" in schema_check.message
         assert "password" in schema_check.message
+
+    def test_schema_check_passes_without_consumer_group_prefix(self) -> None:
+        # GIVEN consumer-group-prefix is absent, as it is optional and only set
+        # when the requirer opts into the "consumer" role.
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "consumer-group-prefix"}
+        validator = _make_validator(databag)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert schema_check.passed
 
     @pytest.mark.parametrize(
         "bad_value,description",
@@ -508,6 +527,133 @@ class TestKafkaClientValidatorDeep:
         latency_check = next(c for c in result.checks if c.name == "latency")
         assert latency_check is not None
         assert latency_check.passed
+
+
+# ---------------------------------------------------------------------------
+# Tests — provider role (fields live on the local app databag)
+# ---------------------------------------------------------------------------
+
+
+class TestKafkaClientValidatorProvidesSimple:
+    def test_passes_with_all_required_fields(self) -> None:
+        # GIVEN a complete provider-side databag and a successful Kafka connection
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+        consumer_stub = KafkaConsumerStub(topics_result={"my-topic"})
+
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+
+    def test_fails_schema_check_when_required_fields_missing(self) -> None:
+        # GIVEN an empty local databag (provider has published nothing)
+        validator = _make_validator({}, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+
+    def test_fails_connect_check_when_broker_unreachable(self) -> None:
+        # GIVEN a complete databag but the broker refuses the connection
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+        consumer_stub = KafkaConsumerStub(topics_error=Exception("Connection refused"))
+
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub):
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Connection refused" in connect_check.message
+
+    def test_reads_fields_from_local_app_databag_not_remote(self) -> None:
+        # GIVEN a remote (requirer) databag with unrelated fields, and the real
+        # connection fields published on the local (provider) app databag
+        validator = _make_validator(
+            VALID_DATABAG, role=RelationRoleStub.provides, remote_extra={"extra-user-roles": "admin"}
+        )
+        consumer_stub = KafkaConsumerStub(topics_result={"my-topic"})
+
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub):
+            result = validator.validate(level="simple")
+
+        # THEN validation still passes using the local app databag
+        assert result.status == "PASS"
+
+
+class TestKafkaClientValidatorProvidesDeep:
+    def test_passes_when_canary_message_produced_and_consumed(self) -> None:
+        # GIVEN a complete provider-side databag, a producer that sends successfully,
+        # and a consumer that returns the exact canary value on first poll.
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+        captured_value: list[bytes] = []
+
+        class CapturingProducerStub(KafkaProducerStub):
+            def send(self, topic: str, key: bytes | None = None, value: bytes | None = None) -> FutureStub:
+                if value:
+                    captured_value.append(value)
+                return self.future
+
+        consumer_stub = KafkaConsumerStub()
+
+        def make_consumer(**kwargs: Any) -> KafkaConsumerStub:
+            if captured_value:
+                record = ConsumerRecordStub(value=captured_value[0])
+                consumer_stub.poll_batches = [{"tp": [record]}]
+            return consumer_stub
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=KafkaAdminClientStub()),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=CapturingProducerStub()),
+            patch("validators.kafka_client.validator.KafkaConsumer", side_effect=make_consumer),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "PASS"
+        produce_check = next(c for c in result.checks if c.name == "produce")
+        assert produce_check.passed
+        consume_check = next(c for c in result.checks if c.name == "consume")
+        assert consume_check.passed
+
+    def test_fails_schema_check_when_required_fields_missing(self) -> None:
+        # GIVEN an empty local databag
+        validator = _make_validator({}, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+
+    def test_fails_when_producer_constructor_raises(self) -> None:
+        # GIVEN the KafkaProducer constructor raises immediately
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=KafkaAdminClientStub()),
+            patch(
+                "validators.kafka_client.validator.KafkaProducer",
+                side_effect=Exception("NoBrokersAvailable"),
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN produce check fails and we stop before consume
+        assert result.status == "FAIL"
+        produce_check = next(c for c in result.checks if c.name == "produce")
+        assert not produce_check.passed
+        assert not any(c.name == "consume" for c in result.checks)
 
 
 # ---------------------------------------------------------------------------
