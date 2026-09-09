@@ -191,9 +191,11 @@ class TestKafkaClientValidatorSimple:
         # when the requirer opts into the "consumer" role.
         databag = {k: v for k, v in VALID_DATABAG.items() if k != "consumer-group-prefix"}
         validator = _make_validator(databag)
+        consumer_stub = KafkaConsumerStub(topics_result={"my-topic"})
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub):
+            result = validator.validate(level="simple")
 
         # THEN
         schema_check = next(c for c in result.checks if c.name == "schema")
