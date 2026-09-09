@@ -335,6 +335,19 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "FAIL"
         assert all("super-secret" not in c.message for c in result.checks)
 
+    def test_redacts_entire_unterminated_bracketed_authority(self) -> None:
+        # GIVEN a bracketed authority missing its closing "]": there is no bracket
+        # end to anchor a port split on, so the whole value (including any secret
+        # smuggled in it) must be masked rather than passed through unredacted
+        validator = _make_validator({"external_host": "[host:super-secret-token", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("super-secret-token" not in c.message for c in result.checks)
+
     def test_redacts_query_string_from_result_messages(self) -> None:
         # GIVEN external_host smuggles a credential via a query string
         validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})

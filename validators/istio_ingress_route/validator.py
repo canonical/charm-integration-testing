@@ -69,9 +69,15 @@ def _redact(value: str) -> str:
     # display of a valid bracketed host with no port at all.
     if authority.startswith("["):
         bracket_end = authority.find("]")
-        host_part = authority if bracket_end == -1 else authority[: bracket_end + 1]
-        sep = "" if bracket_end == -1 else authority[bracket_end + 1 : bracket_end + 2]
-        port_part = "" if bracket_end == -1 else authority[bracket_end + 2 :]
+        if bracket_end == -1:
+            # An unterminated bracketed authority (e.g. "[host:super-secret-token")
+            # is malformed and rejected later, but has no closing "]" to anchor a
+            # port split on, so mask the whole thing here rather than let it (and
+            # any secret smuggled in it) pass through unredacted.
+            return prefix + "[<redacted>]" + remainder
+        host_part = authority[: bracket_end + 1]
+        sep = authority[bracket_end + 1 : bracket_end + 2]
+        port_part = authority[bracket_end + 2 :]
     else:
         # A valid unbracketed host[:port] authority has at most one colon, so
         # splitting at the *first* one (rather than the last) treats everything
