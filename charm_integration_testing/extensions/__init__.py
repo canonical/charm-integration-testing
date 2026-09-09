@@ -5,6 +5,7 @@ from .configure_livepatch_server import ConfigureLivepatchServerExtension
 from .database_replication import PostgresqlDatabaseReplicationExtension, PostgresqlK8sDatabaseReplicationExtension
 from .istio_mesh import IstioMeshExtension
 from .lego import LegoExtension
+from .metacontroller import MetacontrollerExtension
 from .mysql_replication import MysqlDatabaseReplicationExtension, MysqlK8sDatabaseReplicationExtension
 from .s3_integrator_minio_backend import S3IntegratorMinIOBackendExtension
 from .temporal import TemporalExtension
@@ -15,6 +16,7 @@ __all__ = [
     "ConfigureLivepatchServerExtension",
     "IstioMeshExtension",
     "LegoExtension",
+    "MetacontrollerExtension",
     "MysqlDatabaseReplicationExtension",
     "MysqlK8sDatabaseReplicationExtension",
     "PostgresqlDatabaseReplicationExtension",
