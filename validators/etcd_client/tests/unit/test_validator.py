@@ -110,6 +110,7 @@ VALID_REQUIRER_DATABAG: dict[str, str] = {
     "uris": "https://10.1.2.3:2379,https://10.1.2.4:2379",
     "username": "client-user",
     "tls-ca": VALID_CA_PEM,
+    "tls": "enabled",
     "version": "3.6.0",
 }
 
@@ -192,6 +193,10 @@ class TestEtcdClientValidatorRequiresSimple:
             ("[::1:2379", "unbalanced ipv6 brackets"),
             ("::1:2379", "unbracketed ipv6 host"),
             ("[10.1.2.3:2379", "one-sided bracket around non-colon host"),
+            ("[10.1.2.3]:2379", "balanced brackets around a non-ipv6 host"),
+            ("[]:2379", "balanced brackets around an empty host"),
+            ("10.1.2.3:1_000", "port with underscore separator"),
+            ("10.1.2.3:+2379", "port with explicit sign"),
         ],
     )
     def test_fails_endpoints_format_check(self, bad_value: str, description: str) -> None:
@@ -219,6 +224,23 @@ class TestEtcdClientValidatorRequiresSimple:
         assert not check.passed
         assert secret not in check.message
 
+    def test_rejects_userinfo_in_otherwise_valid_endpoint(self) -> None:
+        # Even with a well-formed host:port, an endpoint carrying userinfo (including a
+        # percent-encoded credential, which would not contain a literal ":" for the naive
+        # rpartition(":")-based port split to stumble over) must still be rejected: this
+        # interface authenticates via mTLS and a separate "username" field, never a
+        # "user:pass@" URI prefix.
+        secret = "hunter2"
+        bad_endpoint = "admin%3A" + secret + "@10.1.2.3:2379"
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": bad_endpoint}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+
     def test_fails_uris_format_at_simple_level_when_malformed(self) -> None:
         databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:notaport"}
         validator = _make_validator(databag)
@@ -237,6 +259,27 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "FAIL"
         check = next(c for c in result.checks if c.name == "tls_ca_pem")
+        assert not check.passed
+
+    @pytest.mark.parametrize("disabled_value", ["disabled", "false", "False"])
+    def test_fails_tls_enabled_check_when_tls_not_advertised(self, disabled_value: str) -> None:
+        databag = {**VALID_REQUIRER_DATABAG, "tls": disabled_value}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "tls_enabled")
+        assert not check.passed
+
+    def test_fails_uris_format_check_for_whitespace_in_hostname(self) -> None:
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://bad host:2379"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "uris_format")
         assert not check.passed
 
     def test_passes_with_all_required_fields_and_reachable_endpoint(self) -> None:
@@ -614,6 +657,33 @@ class TestEtcdClientValidatorRequiresDeep:
         for name in ("put", "get", "delete"):
             assert not any(c.name == name for c in result.checks)
 
+    def test_fails_username_matches_cert_cn_check_when_username_does_not_match_cert(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN a locally-provisioned client cert that IS the one published on this
+        # relation (identity_match passes), but the provider's "username" field claims
+        # a different identity than the cert's own common name.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            databag = {**VALID_REQUIRER_DATABAG, "username": "someone-else"}
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        username_check = next(c for c in result.checks if c.name == "username_matches_cert_cn")
+        assert not username_check.passed
+        for name in ("put", "get", "delete"):
+            assert not any(c.name == name for c in result.checks)
+
     def test_fails_identity_match_gracefully_when_local_cert_file_is_binary(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -656,7 +726,7 @@ class TestEtcdClientValidatorRequiresDeep:
                 "username": VALID_REQUIRER_DATABAG["username"],
                 "uris": VALID_REQUIRER_DATABAG["uris"],
             },
-            "secret:etcd-tls": {"tls-ca": VALID_REQUIRER_DATABAG["tls-ca"]},
+            "secret:etcd-tls": {"tls-ca": VALID_REQUIRER_DATABAG["tls-ca"], "tls": VALID_REQUIRER_DATABAG["tls"]},
             "secret:local-mtls": {"mtls-cert": VALID_CLIENT_CERT_PEM},
         }
         app = ApplicationStub()

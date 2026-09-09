@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import grpc
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
+from cryptography.x509.oid import NameOID
 
 from validators.base import (
     BaseValidator,
@@ -104,7 +105,7 @@ _DEFAULT_CLIENT_KEY_PATH = "/etc/validators/etcd-client/client.key"
 ETCD_CLIENT_CERT_PATH_ENV = "VALIDATOR_ETCD_CLIENT_CERT_PATH"
 ETCD_CLIENT_KEY_PATH_ENV = "VALIDATOR_ETCD_CLIENT_KEY_PATH"
 
-_REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "version"]
+_REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "tls", "version"]
 _PROVIDER_FIELDS = ["prefix", "mtls-cert"]
 
 
@@ -161,6 +162,11 @@ class EtcdClientValidator(BaseValidator):
 
         data = self.databag | creds
 
+        tls_check = self._check_tls_enabled(data["tls"])
+        checks.append(tls_check)
+        if not tls_check.passed:
+            return self._make_result(level=level, checks=checks)
+
         endpoints_check = self._check_endpoints_format(data["endpoints"])
         checks.append(endpoints_check)
         if not endpoints_check.passed:
@@ -208,6 +214,22 @@ class EtcdClientValidator(BaseValidator):
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
 
+    def _check_tls_enabled(self, tls: str) -> ValidationCheck:
+        """Verify the provider actually advertises TLS as enabled on this relation.
+
+        A missing or disabled ``tls`` value would mean this validator's mTLS-only probe
+        (and charmed-etcd's own TLS-only posture) is being run against a relation that
+        never claimed to support it, so schema presence alone (a non-empty string) is not
+        enough - "disabled" is itself a non-empty value.
+        """
+        if tls in ("", "disabled", "false", "False"):
+            return ValidationCheck(
+                name="tls_enabled",
+                passed=False,
+                message=f"Relation advertises tls='{tls}'; this interface is only usable over TLS.",
+            )
+        return ValidationCheck(name="tls_enabled", passed=True, message="OK")
+
     def _check_tcp_reachable(self, endpoints: str) -> ValidationCheck:
         """Best-effort L1 reachability: open a raw TCP connection to the first endpoint.
 
@@ -216,18 +238,23 @@ class EtcdClientValidator(BaseValidator):
         reachability rather than a completed TLS handshake.
         """
         first = endpoints.split(",")[0].strip()
+        # _check_endpoints_format() has already rejected any entry carrying userinfo (an "@"),
+        # but redact defensively anyway: this message must never echo a credential verbatim.
+        redacted_first = _redact_uri_for_message(first)
         host, _, port_str = first.rpartition(":")
         # socket.create_connection expects a bare IPv6 address (no brackets), while
         # endpoints/uris use bracketed literals (e.g. "[::1]:2379") for disambiguation.
         host = host.removeprefix("[").removesuffix("]")
         try:
             with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
-                return ValidationCheck(name="connect", passed=True, message=f"TCP connection to '{first}' succeeded.")
+                return ValidationCheck(
+                    name="connect", passed=True, message=f"TCP connection to '{redacted_first}' succeeded."
+                )
         except (OSError, ValueError) as exc:
             # socket.create_connection raises ValueError (not OSError) for some malformed
             # hosts, e.g. an embedded NUL byte; without catching it here, an already-validated
             # endpoint could still crash validate() into an ERROR result instead of a clean FAIL.
-            return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{first}': {exc}")
+            return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{redacted_first}': {exc}")
 
     def _check_read_write(self, data: dict[str, str], target: str) -> list[ValidationCheck]:
         """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity.
@@ -264,6 +291,15 @@ class EtcdClientValidator(BaseValidator):
         identity_match_check = self._check_identity_matches_published_cert(cert_bytes, local_data)
         checks.append(identity_match_check)
         if not identity_match_check.passed:
+            return checks
+
+        # The provider's "username" field is defined by the interface contract as the user
+        # created from the client certificate's own common name, not an independent value:
+        # without this check, a relation could publish username="alice" alongside a valid
+        # cert for "bob" and still pass the mTLS canary authenticated as "bob".
+        username_check = self._check_username_matches_cert_cn(cert_bytes, data["username"])
+        checks.append(username_check)
+        if not username_check.passed:
             return checks
 
         if "prefix" not in local_data:
@@ -372,6 +408,16 @@ class EtcdClientValidator(BaseValidator):
             return "", ValidationCheck(
                 name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}'."
             )
+        if re.search(r"\s", hostname):
+            # urlsplit() is lenient about internal whitespace in a hostname (e.g. "bad host"
+            # parses successfully), but no valid hostname or IP literal ever contains it; a
+            # gRPC channel target built from it would just fail to connect at runtime, so
+            # reject it here as a format error instead.
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=f"uri '{redacted_entry}' has an invalid hostname containing whitespace.",
+            )
         if parsed.username is not None or parsed.password is not None:
             return "", ValidationCheck(
                 name="uris_format",
@@ -451,6 +497,28 @@ class EtcdClientValidator(BaseValidator):
                 message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
             )
         return ValidationCheck(name="identity_match", passed=True, message="OK")
+
+    def _check_username_matches_cert_cn(self, cert_bytes: bytes, expected_username: str) -> ValidationCheck:
+        """Verify the client cert's leaf subject CN matches the provider's published "username".
+
+        The interface contract defines "username" as derived from the client certificate's
+        own common name, so this is a consistency check on the provider's own claim, not a
+        cryptographic identity check (that's ``_check_identity_matches_published_cert``).
+        """
+        cert_check, cert = self._parse_mtls_cert_bytes(cert_bytes)
+        if cert is None:
+            return ValidationCheck(name="username_matches_cert_cn", passed=False, message=cert_check.message)
+        cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        cn = str(cn_attrs[0].value) if cn_attrs else None
+        if cn != expected_username:
+            return ValidationCheck(
+                name="username_matches_cert_cn",
+                passed=False,
+                message=(
+                    f"Client cert common name '{cn}' does not match the published " f"username '{expected_username}'."
+                ),
+            )
+        return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
 
     def _etcd_put(self, channel: grpc.Channel, key: str, value: str) -> ValidationCheck:
         request = _encode_bytes_field(1, key.encode()) + _encode_bytes_field(2, value.encode())
@@ -601,19 +669,32 @@ class EtcdClientValidator(BaseValidator):
         invalid = []
         for entry in entries:
             host, _, port_str = entry.rpartition(":")
-            try:
-                port_valid = bool(host) and 1 <= int(port_str) <= 65535
-            except ValueError:
-                port_valid = False
+            # Require an ASCII-decimal port string: bare int() accepts spellings like "1_000"
+            # or "+2379" that plain-english humans would never write into an endpoint, silently
+            # normalizing them to a different numeric port than what was actually configured.
+            port_valid = bool(host) and port_str.isdigit() and port_str.isascii() and 1 <= int(port_str) <= 65535
             # rpartition(":") alone lets a malformed host through as long as the final segment
             # still parses as a port - e.g. "[::1:2379" (unbalanced brackets), the unbracketed
             # "::1:2379" (host "::1", which itself contains colons), and "[host:2379" (one-sided
             # bracket around a non-colon-bearing host) would all otherwise pass. This interface's
             # bracketed host:port literals (e.g. "[::1]:2379") are the only valid bracketed form,
-            # so reject any one-sided bracket outright, and additionally require balanced brackets
-            # whenever the host is colon-bearing (which can only be a valid IPv6 literal bracketed).
+            # so reject any one-sided bracket outright; require balanced brackets to actually
+            # wrap an IPv6 literal (i.e. contain a colon) rather than a plain, non-IPv6 host like
+            # "[10.1.2.3]" or an empty "[]"; and require balanced brackets whenever the host is
+            # colon-bearing (which can only be a valid IPv6 literal bracketed).
+            is_bracketed = host.startswith("[") and host.endswith("]")
             has_one_sided_bracket = host.startswith("[") != host.endswith("]")
-            if has_one_sided_bracket or (":" in host and not (host.startswith("[") and host.endswith("]"))):
+            if has_one_sided_bracket:
+                port_valid = False
+            elif is_bracketed:
+                if ":" not in host[1:-1]:
+                    port_valid = False
+            elif ":" in host:
+                port_valid = False
+            # This interface's endpoints never carry userinfo (auth is via mTLS and a separate
+            # "username" field, not a "user:pass@" prefix); reject it outright rather than
+            # silently discarding it as part of the host.
+            if "@" in host:
                 port_valid = False
             if not port_valid:
                 invalid.append(_redact_uri_for_message(entry))
