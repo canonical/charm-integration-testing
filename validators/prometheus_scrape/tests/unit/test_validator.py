@@ -1,11 +1,20 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import datetime
 import json
+import ssl
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import ops
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from validators.prometheus_scrape.validator import PrometheusScrapeValidator
 from validators.test_utils.helpers import make_charm_from_relation
@@ -477,6 +486,184 @@ class TestPrometheusScrapeValidatorDeep:
         # THEN
         assert result.status == "FAIL"
         mock_urlopen.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: HTTPS scrape targets with self-signed certs
+# ---------------------------------------------------------------------------
+
+HTTPS_SCRAPE_JOBS = json.dumps(
+    [
+        {
+            "metrics_path": "/metrics",
+            "static_configs": [{"targets": ["my-app-0.my-app.svc.cluster.local:8200"]}],
+            "scheme": "https",
+        }
+    ]
+)
+
+HTTPS_DATABAG: dict[str, str] = {
+    "scrape_metadata": VALID_SCRAPE_METADATA,
+    "scrape_jobs": HTTPS_SCRAPE_JOBS,
+}
+
+
+class TestHttpsScrapeTargets:
+    def test_http_probe_skips_cert_verification_for_https_targets(self) -> None:
+        # Regression test for: prometheus_scrape targets never carry a `tls_config`
+        # (per the upstream charm library, certs for `https` scrape targets are trusted
+        # via `update-ca-certificates` on the host, not via relation data), so this
+        # validator has no way to verify a charm's self-signed cert. It must not reject
+        # an otherwise-reachable https target just because the cert can't be verified.
+        validator = _make_validator(HTTPS_DATABAG)
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_urlopen:
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed
+        _, kwargs = mock_urlopen.call_args
+        assert kwargs.get("context") is not None
+        assert kwargs["context"].verify_mode == ssl.CERT_NONE
+
+    def test_http_probe_does_not_pass_ssl_context_for_http_targets(self) -> None:
+        # GIVEN a plain http:// target — no SSL context should be involved at all.
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch(
+            "validators.prometheus_scrape.validator.urlopen",
+            return_value=_mock_http_response(200),
+        ) as mock_urlopen:
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        _, kwargs = mock_urlopen.call_args
+        assert "context" not in kwargs
+
+    def test_http_probe_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test using a real TLS socket with a self-signed cert,
+        # reproducing the exact CI failure this fix addresses:
+        # "CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate".
+        server, port, thread = _start_self_signed_https_server()
+        try:
+            validator = _make_validator(
+                {
+                    "scrape_metadata": VALID_SCRAPE_METADATA,
+                    "scrape_jobs": json.dumps(
+                        [
+                            {
+                                "metrics_path": "/metrics",
+                                "static_configs": [{"targets": [f"127.0.0.1:{port}"]}],
+                                "scheme": "https",
+                            }
+                        ]
+                    ),
+                }
+            )
+
+            # WHEN
+            result = validator.validate(level="simple")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        http_check = next(c for c in result.checks if c.name == "http_probe")
+        assert http_check.passed, http_check.message
+
+    def test_scrape_check_reaches_real_self_signed_https_endpoint(self) -> None:
+        # End-to-end regression test for the L2 `scrape[...]` check: it also passes the
+        # insecure SSL context (via _scrape_and_parse_checks), not just `http_probe`.
+        server, port, thread = _start_self_signed_https_server(response_body=PROMETHEUS_TEXT_BODY)
+        try:
+            validator = _make_validator(
+                {
+                    "scrape_metadata": VALID_SCRAPE_METADATA,
+                    "scrape_jobs": json.dumps(
+                        [
+                            {
+                                "metrics_path": "/metrics",
+                                "static_configs": [{"targets": [f"127.0.0.1:{port}"]}],
+                                "scheme": "https",
+                            }
+                        ]
+                    ),
+                }
+            )
+
+            # WHEN
+            result = validator.validate(level="deep")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        # THEN
+        assert result.status == "PASS"
+        scrape_check = next(c for c in result.checks if c.name.startswith("scrape["))
+        assert scrape_check.passed, scrape_check.message
+
+
+def _start_self_signed_https_server(
+    response_body: bytes = b"# HELP up 1\nup 1\n",
+) -> tuple[HTTPServer, int, threading.Thread]:
+    """Start a background HTTPS server on 127.0.0.1 backed by a self-signed cert."""
+
+    class _MetricsHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - required BaseHTTPRequestHandler signature
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, *args: object) -> None:  # silence default request logging
+            pass
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "selfsigned")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(minutes=5))
+        .sign(key, hashes.SHA256())
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_path = f"{tmpdir}/cert.pem"
+        key_path = f"{tmpdir}/key.pem"
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        with open(key_path, "wb") as f:
+            f.write(
+                key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption(),
+                )
+            )
+
+        server = HTTPServer(("127.0.0.1", 0), _MetricsHandler)
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(cert_path, key_path)
+        server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
+
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, port, thread
 
 
 # ---------------------------------------------------------------------------
