@@ -132,7 +132,6 @@ class EtcdClientValidator(BaseValidator):
     # --- requires role: validating against a real etcd_client provider ---
 
     def _validate_requires(self, level: ValidationLevel) -> ValidationResult:
-        start_time = time.monotonic()
         checks: list[ValidationCheck] = []
 
         error_result = self._check_relation_exists(level)
@@ -158,6 +157,12 @@ class EtcdClientValidator(BaseValidator):
             return self._make_result(level=level, checks=checks)
         checks.append(self._check_not_expired(ca_cert, check_name="tls_ca_validity_period"))
 
+        # Latency is timed from here, not from the top of the function, so that Juju
+        # secret/relation-data resolution above - which can be slow for cross-model
+        # relations independent of etcd itself - is not counted against the probe's
+        # latency budget (see validators/postgresql_client/validator.py for the same
+        # pattern).
+        start_time = time.monotonic()
         if level == "simple":
             checks.append(self._check_tcp_reachable(data["endpoints"]))
         else:
@@ -185,6 +190,9 @@ class EtcdClientValidator(BaseValidator):
         """
         first = endpoints.split(",")[0].strip()
         host, _, port_str = first.rpartition(":")
+        # socket.create_connection expects a bare IPv6 address (no brackets), while
+        # endpoints/uris use bracketed literals (e.g. "[::1]:2379") for disambiguation.
+        host = host.removeprefix("[").removesuffix("]")
         try:
             with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
                 return ValidationCheck(name="connect", passed=True, message=f"TCP connection to '{first}' succeeded.")
@@ -282,7 +290,11 @@ class EtcdClientValidator(BaseValidator):
             )
         if not hostname or not port:
             return "", ValidationCheck(name="uris_format", passed=False, message=f"Could not parse uri '{first}'.")
-        return f"{hostname}:{port}", ValidationCheck(name="uris_format", passed=True, message="OK")
+        # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
+        # urlsplit().hostname strips the brackets, so restore them when the hostname
+        # itself contains colons.
+        authority_host = f"[{hostname}]" if ":" in hostname else hostname
+        return f"{authority_host}:{port}", ValidationCheck(name="uris_format", passed=True, message="OK")
 
     def _local_databag(self) -> dict[str, str]:
         """Read this application's own contribution to the relation.
@@ -316,7 +328,7 @@ class EtcdClientValidator(BaseValidator):
                 passed=False,
                 message="No mtls-cert published on this relation to compare against.",
             )
-        loaded_check, loaded_cert = self._parse_mtls_cert(loaded_cert_bytes.decode())
+        loaded_check, loaded_cert = self._parse_mtls_cert_bytes(loaded_cert_bytes)
         if loaded_cert is None:
             return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
         published_check, published_cert = self._parse_mtls_cert(published_pem)
@@ -351,13 +363,16 @@ class EtcdClientValidator(BaseValidator):
         except grpc.RpcError as exc:
             return ValidationCheck(name="get", passed=False, message=f"GET failed: {exc.details()}")
 
-        fields = _decode_message(response)
-        kvs = fields.get(2, [])  # RangeResponse.kvs (field 2), repeated KeyValue
-        if not kvs:
-            return ValidationCheck(name="get", passed=False, message=f"Canary key '{key}' not found after PUT.")
-        kv_fields = _decode_message(kvs[0])  # type: ignore[arg-type]
-        actual_bytes = kv_fields.get(5, [b""])[0]  # KeyValue.value (field 5)
-        actual_value = actual_bytes.decode() if isinstance(actual_bytes, bytes) else ""
+        try:
+            fields = _decode_message(response)
+            kvs = fields.get(2, [])  # RangeResponse.kvs (field 2), repeated KeyValue
+            if not kvs:
+                return ValidationCheck(name="get", passed=False, message=f"Canary key '{key}' not found after PUT.")
+            kv_fields = _decode_message(kvs[0])  # type: ignore[arg-type]
+            actual_bytes = kv_fields.get(5, [b""])[0]  # KeyValue.value (field 5)
+            actual_value = actual_bytes.decode() if isinstance(actual_bytes, bytes) else ""
+        except (IndexError, ValueError, TypeError, UnicodeDecodeError) as exc:
+            return ValidationCheck(name="get", passed=False, message=f"Malformed GET response: {exc}")
         if actual_value != expected_value:
             return ValidationCheck(
                 name="get",
@@ -409,7 +424,12 @@ class EtcdClientValidator(BaseValidator):
             # internal, undocumented admin material not exposed via this interface
             # (etcd_client never gives the provider a private key either). That
             # coverage is exercised from the requires role instead; see the module
-            # docstring.
+            # docstring. But an already-failed L1 check (e.g. an expired cert) must
+            # still be reported as FAIL rather than discarded by SKIPPED, or the
+            # runner's simple-level fallback would report an invalid relation as a
+            # pass.
+            if any(not check.passed for check in checks):
+                return self._make_result(level=level, checks=checks)
             return self._skipped_result_due_to_level(level)
 
         elapsed = time.monotonic() - start_time
@@ -422,9 +442,18 @@ class EtcdClientValidator(BaseValidator):
         The field may be a bundle of [client_cert, signing_ca] PEM blocks
         concatenated together; only the first (leaf) certificate is validated here.
         """
-        first_pem = mtls_cert_pem.split("-----END CERTIFICATE-----")[0] + "-----END CERTIFICATE-----"
+        return self._parse_mtls_cert_bytes(mtls_cert_pem.encode())
+
+    def _parse_mtls_cert_bytes(self, mtls_cert_pem: bytes) -> tuple[ValidationCheck, x509.Certificate | None]:
+        """Parse a submitted client cert given as raw bytes, without assuming they are UTF-8.
+
+        Accepting bytes here (rather than requiring a decoded ``str``) lets callers
+        report a malformed local cert file as a normal failed check instead of
+        letting ``UnicodeDecodeError`` escape validation.
+        """
+        first_pem = mtls_cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
         try:
-            cert = x509.load_pem_x509_certificate(first_pem.encode())
+            cert = x509.load_pem_x509_certificate(first_pem)
         except ValueError as exc:
             return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
         return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert

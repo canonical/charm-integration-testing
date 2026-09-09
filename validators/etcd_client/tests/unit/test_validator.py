@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import grpc
 import ops
 import pytest
 from cryptography import x509
@@ -227,6 +228,18 @@ class TestEtcdClientValidatorRequiresSimple:
         connect_check = next(c for c in result.checks if c.name == "connect")
         assert not connect_check.passed
 
+    def test_strips_brackets_from_ipv6_endpoint_before_connecting(self) -> None:
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": "[::1]:2379"}
+        validator = _make_validator(databag)
+
+        with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
+            mock_connect.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_connect.return_value.__exit__ = MagicMock(return_value=False)
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS", result.checks
+        mock_connect.assert_called_once_with(("::1", 2379), timeout=3.0)
+
 
 class TestEtcdClientValidatorRequiresDeep:
     def test_fails_when_client_identity_not_provisioned(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -302,6 +315,59 @@ class TestEtcdClientValidatorRequiresDeep:
         get_check = next(c for c in result.checks if c.name == "get")
         assert not get_check.passed
 
+    def test_still_attempts_delete_after_put_rpc_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a PUT that fails at the transport level (e.g. a client-side timeout
+        # that may still have committed server-side): DeleteRange cleanup must still
+        # be attempted so no canary key is orphaned, and GET must be skipped since
+        # PUT did not confirmably succeed.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            delete_calls: list[bytes] = []
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "deadline exceeded"
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        raise _FakeRpcError()
+                    if method.endswith("/DeleteRange"):
+                        delete_calls.append(request)
+                        return b""
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        put_check = next(c for c in result.checks if c.name == "put")
+        assert not put_check.passed
+        assert not any(c.name == "get" for c in result.checks)
+        delete_check = next(c for c in result.checks if c.name == "delete")
+        assert delete_check.passed
+        assert len(delete_calls) == 1
+
     def test_fails_identity_match_when_local_cert_does_not_match_published_cert(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -329,34 +395,107 @@ class TestEtcdClientValidatorRequiresDeep:
         for name in ("put", "get", "delete"):
             assert not any(c.name == name for c in result.checks)
 
-    def test_passes_with_secret_backed_credentials_and_local_secret_mtls(self) -> None:
-        # GIVEN provider fields resolved via secrets rather than plaintext, matching
-        # library revisions that publish username/uris/tls-ca as a secret group.
+    def test_fails_identity_match_gracefully_when_local_cert_file_is_binary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN a cert file containing non-UTF-8 bytes: this must be reported as a
+        # failed identity_match check rather than crashing validate() with an
+        # unhandled UnicodeDecodeError.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "wb") as f:
+                f.write(b"\xff\xfe\x00not-utf8-and-not-pem")
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        identity_check = next(c for c in result.checks if c.name == "identity_match")
+        assert not identity_check.passed
+
+    def test_passes_full_read_write_cycle_with_secret_backed_credentials(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN provider fields (username/uris/tls-ca) AND the requirer's own
+        # mtls-cert resolved via secrets rather than plaintext, matching library
+        # revisions that publish both as secret groups. This exercises the deep
+        # path end-to-end so both _resolve_requirer_side_credentials() and
+        # _resolve_local_mtls_cert()'s secret-backed branches are actually run.
         databag = {
             "endpoints": VALID_REQUIRER_DATABAG["endpoints"],
             "version": VALID_REQUIRER_DATABAG["version"],
             "secret-user": "secret:etcd-user",
             "secret-tls": "secret:etcd-tls",
         }
+        local_databag = {"prefix": VALID_LOCAL_REQUIRER_DATABAG["prefix"], "secret-mtls": "secret:local-mtls"}
         secrets = {
             "secret:etcd-user": {
                 "username": VALID_REQUIRER_DATABAG["username"],
                 "uris": VALID_REQUIRER_DATABAG["uris"],
             },
             "secret:etcd-tls": {"tls-ca": VALID_REQUIRER_DATABAG["tls-ca"]},
+            "secret:local-mtls": {"mtls-cert": VALID_CLIENT_CERT_PEM},
         }
         app = ApplicationStub()
         relation = RelationStub(name="etcd-client", id=0, app=app, data={app: databag})
         charm = make_charm_from_relation_and_secrets(relation, secrets, role=RelationRoleStub.requires)
+        relation.data[charm.app] = local_databag
         validator = EtcdClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
-        with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
-            mock_connect.return_value.__enter__ = MagicMock(return_value=MagicMock())
-            mock_connect.return_value.__exit__ = MagicMock(return_value=False)
-            result = validator.validate(level="simple")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            stored: dict[str, bytes] = {}
+            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
 
         assert result.status == "PASS", result.checks
-        assert charm.model.requested_ids == ["secret:etcd-user", "secret:etcd-tls"]
+        assert "secret:etcd-user" in charm.model.requested_ids
+        assert "secret:etcd-tls" in charm.model.requested_ids
+        assert "secret:local-mtls" in charm.model.requested_ids
+
+
+class TestEtcdClientValidatorGrpcTarget:
+    @pytest.mark.parametrize(
+        "uris,expected_target",
+        [
+            ("https://10.1.2.3:2379", "10.1.2.3:2379"),
+            ("10.1.2.3:2379", "10.1.2.3:2379"),
+            ("https://[::1]:2379", "[::1]:2379"),
+            ("[::1]:2379", "[::1]:2379"),
+        ],
+    )
+    def test_formats_ipv4_and_ipv6_targets(self, uris: str, expected_target: str) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target(uris)
+
+        assert check.passed
+        assert target == expected_target
+
+    def test_fails_uris_format_check_for_out_of_range_port(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("10.1.2.3:99999")
+
+        assert not check.passed
+        assert target == ""
 
 
 class TestEtcdClientValidatorProvidesSimple:
@@ -425,6 +564,19 @@ class TestEtcdClientValidatorProvidesDeep:
 
         assert result.status == "SKIPPED"
         assert result.error is not None
+
+    def test_returns_fail_for_deep_level_when_l1_check_fails(self) -> None:
+        # GIVEN an expired cert: an L1 failure must not be discarded by the deep-level
+        # SKIP, since that would let an invalid relation pass via the runner's
+        # simple-level fallback.
+        databag = {**VALID_PROVIDER_DATABAG, "mtls-cert": EXPIRED_CLIENT_CERT_PEM}
+        validator = _make_validator(databag, role=RelationRoleStub.provides)
+
+        result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "validity_period")
+        assert not check.passed
 
     def test_returns_error_when_no_remote_app_before_skip(self) -> None:
         app = ApplicationStub()
