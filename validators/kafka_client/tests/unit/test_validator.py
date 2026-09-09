@@ -338,6 +338,22 @@ class TestKafkaClientValidatorDeep:
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
 
+    def test_fails_schema_check_when_consumer_group_prefix_missing(self) -> None:
+        # GIVEN consumer-group-prefix is absent. Deep validation always consumes
+        # the canary message, which needs a group covered by the granted ACLs,
+        # so (unlike "simple") this field is required for "deep".
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "consumer-group-prefix"}
+        validator = _make_validator(databag)
+
+        # WHEN
+        result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "consumer-group-prefix" in schema_check.message
+
     def test_fails_bootstrap_server_format_check_in_deep(self) -> None:
         # GIVEN an invalid endpoints value
         databag = {**VALID_DATABAG, "endpoints": "not-valid"}
@@ -659,6 +675,20 @@ class TestKafkaClientValidatorProvidesDeep:
         assert result.status == "FAIL"
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
+
+    def test_fails_schema_check_when_consumer_group_prefix_missing(self) -> None:
+        # GIVEN consumer-group-prefix is absent on the local (provider) app databag
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "consumer-group-prefix"}
+        validator = _make_validator(databag, role=RelationRoleStub.provides)
+
+        # WHEN
+        result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "consumer-group-prefix" in schema_check.message
 
     def test_fails_when_producer_constructor_raises(self) -> None:
         # GIVEN the KafkaProducer constructor raises immediately

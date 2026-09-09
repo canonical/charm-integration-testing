@@ -125,9 +125,14 @@ class KafkaClientValidator(BaseValidator):
 
         # --- 3. Schema check ---
         # consumer-group-prefix is only set by the requirer when it opts into the
-        # "consumer" role, so it must not be treated as required (see
-        # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
-        schema_check = self.validate_schema(["endpoints", "topic", "username", "password"], creds, data=source)
+        # "consumer" role (see data_interfaces.py:
+        # KafkaProvidesData.set_consumer_group_prefix), so "simple" leaves it
+        # optional. Deep validation always consumes the canary message to
+        # confirm the round trip, which requires a group covered by the
+        # granted ACLs, so it is required here.
+        schema_check = self.validate_schema(
+            ["endpoints", "topic", "username", "password", "consumer-group-prefix"], creds, data=source
+        )
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
@@ -143,8 +148,8 @@ class KafkaClientValidator(BaseValidator):
         topic = data["topic"]
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
         canary_key = b"validator-canary"
-        # Canary consumer group uses the granted prefix (if any) so ACLs permit READ.
-        canary_group = f"{data.get('consumer-group-prefix', '')}probe-{uuid.uuid4().hex[:8]}"
+        # Canary consumer group uses the granted prefix so ACLs permit READ.
+        canary_group = f"{data['consumer-group-prefix']}probe-{uuid.uuid4().hex[:8]}"
 
         # --- 5. Ensure topic exists ---
         # kafka-k8s disables auto.create.topics.enable; the validator creates the
