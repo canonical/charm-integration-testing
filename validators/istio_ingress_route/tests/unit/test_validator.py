@@ -163,6 +163,21 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "FAIL"
         fmt = next(c for c in result.checks if c.name == "url_format")
         assert not fmt.passed
+
+    def test_redacts_invalid_port_text_from_result_messages(self) -> None:
+        # GIVEN external_host smuggles a secret disguised as a port (this only raises
+        # ValueError, and thus is only caught, once parsed.port is actually accessed;
+        # both the raw URL and the raised exception's text would otherwise echo it back)
+        validator = _make_validator({"external_host": "host:super-secret-token", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert not fmt.passed
+        assert all("super-secret-token" not in c.message for c in result.checks)
         assert "invalid port" in fmt.message
 
     @pytest.mark.parametrize(
@@ -526,8 +541,10 @@ class TestIstioIngressRouteValidatorDeep:
         with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
             result = validator.validate(level="deep")
 
-        # THEN the connectivity/probe checks are skipped rather than guessing a port
-        assert result.status == "PASS"
+        # THEN the connectivity/probe checks are skipped rather than guessing a port,
+        # and the overall result reports SKIPPED (not a false PASS) since neither the
+        # TCP nor HTTP capability check actually ran
+        assert result.status == "SKIPPED"
         tcp_ping.assert_not_called()
         assert not any(c.name == "http_probe" for c in result.checks)
         connect = next(c for c in result.checks if c.name == "connect")
@@ -544,7 +561,8 @@ class TestIstioIngressRouteValidatorDeep:
         with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
             result = validator.validate(level="deep")
 
-        assert result.status == "PASS"
+        # THEN HTTP probing is inapplicable, so the result is SKIPPED rather than PASS
+        assert result.status == "SKIPPED"
         tcp_ping.assert_not_called()
         assert not any(c.name == "http_probe" for c in result.checks)
 
@@ -559,3 +577,45 @@ class TestIstioIngressRouteValidatorDeep:
         tcp_ping.assert_not_called()
         connect = next(c for c in result.checks if c.name == "connect")
         assert not connect.passed
+
+    def test_deep_probes_every_declared_http_listener_port(self) -> None:
+        # GIVEN the requirer declares two HTTP listeners, and only the second is
+        # actually reachable
+        validator = _make_validator(
+            VALID_HTTP_DATABAG,
+            local_databag={
+                "config": json.dumps(
+                    {
+                        "model": "m",
+                        "listeners": [
+                            {"port": 8080, "protocol": "HTTP"},
+                            {"port": 9090, "protocol": "HTTP"},
+                        ],
+                    }
+                )
+            },
+        )
+
+        def _tcp_ping_side_effect(host: str, port: int, *args: object, **kwargs: object) -> None:
+            if port == 8080:
+                raise ConnectionRefusedError("refused")
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping", side_effect=_tcp_ping_side_effect) as tcp_ping,
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                return_value=_mock_http_response(200),
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN both listeners are probed, and the unreachable one fails the overall
+        # result even though the other listener is fine
+        assert result.status == "FAIL"
+        assert tcp_ping.call_count == 2
+        connect_checks = [c for c in result.checks if c.name == "connect"]
+        assert len(connect_checks) == 2
+        assert not connect_checks[0].passed
+        assert connect_checks[1].passed
+        # only the reachable listener gets an HTTP probe
+        assert sum(1 for c in result.checks if c.name == "http_probe") == 1

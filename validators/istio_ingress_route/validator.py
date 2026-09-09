@@ -28,11 +28,14 @@ _HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
 def _redact(value: str) -> str:
     """Return a display-safe copy of an untrusted external_host/URL value.
 
-    A malformed 'external_host' (e.g. 'user:secret@host' or 'host/path?token=secret')
-    would otherwise place a secret directly in the validator's JSON result, since
-    result messages echo the value verbatim before it has been validated. Strip any
-    query-string/fragment suffix and user-info component before interpolating an
-    untrusted value into a message.
+    A malformed 'external_host' (e.g. 'user:secret@host', 'host/path?token=secret',
+    or 'host:some-secret' disguised as a port) would otherwise place a secret
+    directly in the validator's JSON result, since result messages echo the value
+    verbatim before it has been validated — including the schema-check message,
+    which runs before URL-format validation has had a chance to reject a malformed
+    port. Strip any query-string/fragment suffix, user-info component, and
+    non-numeric/out-of-range port before interpolating an untrusted value into a
+    message.
     """
     for sep in ("?", "#"):
         idx = value.find(sep)
@@ -49,6 +52,10 @@ def _redact(value: str) -> str:
     at_idx = authority.rfind("@")
     if at_idx != -1:
         authority = authority[at_idx + 1 :]
+
+    host_part, sep, port_part = authority.rpartition(":")
+    if sep and not (port_part.isdigit() and int(port_part) <= 65535):
+        authority = f"{host_part}:<redacted>"
 
     return prefix + authority + remainder
 
@@ -101,7 +108,8 @@ class IstioIngressRouteValidator(BaseValidator):
     a ``config`` key the requirer publishes into its *own* local application
     databag on this relation (JSON-encoded, with a ``listeners`` list of
     ``{"port": ..., "protocol": "HTTP" | "GRPC"}``). L2 reads that local config to
-    determine which port to probe, instead of assuming a default.
+    determine which port(s) to probe, instead of assuming a default, and probes
+    every declared HTTP-protocol listener (a requirer may declare more than one).
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -131,16 +139,26 @@ class IstioIngressRouteValidator(BaseValidator):
 
         if level == "deep":
             local_databag = dict(self.relation.data[self.charm.app])
-            port, port_check = _resolve_probe_port(url, local_databag)
-            if port is None:
+            ports, port_check = _resolve_probe_ports(url, local_databag)
+            if not ports:
                 if port_check is not None:
                     checks.append(port_check)
-                return self._make_result(level=level, checks=checks)
+                if port_check is not None and not port_check.passed:
+                    return self._fail_result(level, checks)
+                # Neither the TCP nor HTTP capability check actually ran here (no
+                # config has been published yet, or it declares no HTTP-protocol
+                # listener), so this is not a successful deep validation based on
+                # a real probe. Report SKIPPED rather than PASS so downstream
+                # automation doesn't record it as one.
+                return self._make_result(status="SKIPPED", level=level, checks=checks)
 
-            probe_url = _with_port(url, port)
-            checks.append(_connectivity_check(_extract_host(url), port, probe_url))
-            if checks[-1].passed:
-                checks.append(_http_probe_check(probe_url))
+            host = _extract_host(url)
+            for port in ports:
+                probe_url = _with_port(url, port)
+                connect_check = _connectivity_check(host, port, probe_url)
+                checks.append(connect_check)
+                if connect_check.passed:
+                    checks.append(_http_probe_check(probe_url))
 
         return self._make_result(level=level, checks=checks)
 
@@ -271,11 +289,14 @@ def _url_format_check(url: str) -> ValidationCheck:
 
     try:
         _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
-    except ValueError as exc:
+    except ValueError:
+        # str(exc) would restate the raw invalid port text (e.g. from
+        # "host:some-secret"), which may itself be untrusted/attacker-controlled,
+        # so it must not be echoed here even though 'display' already redacts it.
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {display!r} has an invalid port: {exc}",
+            message=f"URL {display!r} has an invalid port.",
         )
 
     return ValidationCheck(
@@ -309,26 +330,30 @@ def _extract_host(url: str) -> str:
     return urlparse(url).hostname or ""
 
 
-def _resolve_probe_port(url: str, local_databag: dict[str, str]) -> tuple[int | None, ValidationCheck | None]:
-    """Determine which port the deep-level checks should probe.
+def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[int], ValidationCheck | None]:
+    """Determine which port(s) the deep-level checks should probe.
 
     ``external_host`` (see class docstring) never itself encodes a port unless the
     provider chose to publish one explicitly; when it does, that value is
-    unambiguous and used as-is. Otherwise, the actual listener port is only known
-    from the requirer's own locally-published ``config`` (see class docstring), so
-    it must be read from there rather than assumed to be 80/443.
+    unambiguous and used as-is. Otherwise, the actual listener port(s) are only
+    known from the requirer's own locally-published ``config`` (see class
+    docstring), so they must be read from there rather than assumed to be
+    80/443. A requirer may declare more than one HTTP-protocol listener, and any
+    one of them being unreachable is a real routing problem, so every declared
+    HTTP port is returned (deduplicated, order preserved) rather than only the
+    first.
 
-    Returns (port, check). ``check`` is only set (and ``port`` is None) when no
+    Returns (ports, check). ``check`` is only set (and ``ports`` is empty) when no
     usable port could be determined, so callers can skip the connectivity/probe
     checks instead of guessing at a port that may not have a listener behind it.
     """
     parsed = urlparse(url)
     if parsed.port is not None:
-        return parsed.port, None
+        return [parsed.port], None
 
     raw_config = local_databag.get("config")
     if not raw_config:
-        return None, ValidationCheck(
+        return [], ValidationCheck(
             name="connect",
             passed=True,
             message="No local 'config' published on this relation; deep connectivity check skipped.",
@@ -336,22 +361,22 @@ def _resolve_probe_port(url: str, local_databag: dict[str, str]) -> tuple[int | 
 
     try:
         listeners = json.loads(raw_config)["listeners"]
-        http_ports = [int(listener["port"]) for listener in listeners if _is_http_listener(listener)]
+        http_ports = list(dict.fromkeys(int(listener["port"]) for listener in listeners if _is_http_listener(listener)))
     except (TypeError, ValueError, KeyError) as exc:
-        return None, ValidationCheck(
+        return [], ValidationCheck(
             name="connect",
             passed=False,
             message=f"Failed to parse local 'config': {exc}",
         )
 
     if not http_ports:
-        return None, ValidationCheck(
+        return [], ValidationCheck(
             name="connect",
             passed=True,
             message="No HTTP-protocol listener declared in local 'config'; deep connectivity check skipped.",
         )
 
-    return http_ports[0], None
+    return http_ports, None
 
 
 def _is_http_listener(listener: object) -> bool:
