@@ -191,6 +191,7 @@ class TestEtcdClientValidatorRequiresSimple:
             ("10.1.2.3:\u00b2", "digit-like but non-numeric port"),
             ("[::1:2379", "unbalanced ipv6 brackets"),
             ("::1:2379", "unbracketed ipv6 host"),
+            ("[10.1.2.3:2379", "one-sided bracket around non-colon host"),
         ],
     )
     def test_fails_endpoints_format_check(self, bad_value: str, description: str) -> None:
@@ -202,6 +203,21 @@ class TestEtcdClientValidatorRequiresSimple:
         assert result.status == "FAIL", f"Expected FAIL for {description}"
         check = next(c for c in result.checks if c.name == "endpoints_format")
         assert not check.passed
+
+    def test_redacts_userinfo_from_invalid_endpoints_message(self) -> None:
+        # A malformed "endpoints" entry carrying userinfo must not leak the credential into
+        # the endpoints_format failure message.
+        secret = "hunter2"
+        bad_endpoint = "admin:" + secret + "@10.1.2.3:notaport"
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": bad_endpoint}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+        assert secret not in check.message
 
     def test_fails_uris_format_at_simple_level_when_malformed(self) -> None:
         databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:notaport"}
@@ -757,6 +773,45 @@ class TestEtcdClientValidatorGrpcTarget:
         assert target == ""
         assert secret not in check.message
         assert "token" not in check.message
+
+    def test_redacts_userinfo_from_scheme_less_uri_message(self) -> None:
+        # A bare "host:port"-style uris entry (no "//" scheme separator) can still carry
+        # userinfo; the redaction must apply regardless of scheme presence.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "admin:" + secret + "@10.1.2.3:2379"
+
+        target, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert target == ""
+        assert secret not in check.message
+
+    def test_rejects_unsupported_uri_scheme(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("http://10.1.2.3:2379")
+
+        assert not check.passed
+        assert target == ""
+
+    def test_fails_when_second_entry_is_malformed(self) -> None:
+        # GIVEN a "uris" field with a valid first entry but a malformed second entry: the
+        # malformed entry must not be silently ignored just because the first one is fine.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:notaport")
+
+        assert not check.passed
+        assert target == ""
+
+    def test_uses_first_entry_target_when_all_entries_are_valid(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("https://10.1.2.3:2379,https://10.1.2.4:2379")
+
+        assert check.passed
+        assert target == "10.1.2.3:2379"
 
 
 class TestEtcdClientValidatorProvidesSimple:

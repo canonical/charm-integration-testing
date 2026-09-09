@@ -112,9 +112,11 @@ def _redact_uri_for_message(uri: str) -> str:
     """Strip userinfo, query, and fragment components before including a URI in a diagnostic.
 
     Works purely textually (rather than via urlsplit) so it is safe to call even on a URI
-    that fails to parse, and won't itself raise on malformed input.
+    that fails to parse, and won't itself raise on malformed input. Userinfo is redacted
+    whether or not a "//" scheme separator is present, since this interface's "uris" field
+    also accepts bare "host:port" entries without a scheme.
     """
-    sanitized = re.sub(r"//[^/?#@]*@", "//<redacted>@", uri)
+    sanitized = re.sub(r"(^|//)[^/?#@]*@", r"\1<redacted>@", uri)
     return re.sub(r"[?#].*$", "", sanitized)
 
 
@@ -328,33 +330,54 @@ class EtcdClientValidator(BaseValidator):
             )
         return cert_path, key_path, ValidationCheck(name="client_identity", passed=True, message="OK")
 
+    _SUPPORTED_URI_SCHEMES = ("", "https")
+
     def _pick_grpc_target(self, uris: str) -> tuple[str, ValidationCheck]:
-        """Derive a gRPC "host:port" target from the first published URI (stripping any scheme)."""
-        first = uris.split(",")[0].strip()
-        if not first:
+        """Validate every comma-separated "uris" entry, then derive a gRPC target from the first.
+
+        All entries are format-checked (not just the first) so a malformed second/third
+        endpoint fails validation rather than being silently ignored; the first entry's
+        parsed target is what the L2 probe actually connects to.
+        """
+        entries = [e.strip() for e in uris.split(",") if e.strip()]
+        if not entries:
             return "", ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
-        # Diagnostic messages below must never echo `first` verbatim: a malformed uri can carry
+        first_target = ""
+        for i, entry in enumerate(entries):
+            target, check = self._parse_single_uri(entry)
+            if not check.passed:
+                return "", check
+            if i == 0:
+                first_target = target
+        return first_target, ValidationCheck(
+            name="uris_format", passed=True, message=f"Validated {len(entries)} uri(s)."
+        )
+
+    def _parse_single_uri(self, entry: str) -> tuple[str, ValidationCheck]:
+        """Parse and format-check a single "uris" entry, deriving a gRPC "host:port" target."""
+        # Diagnostic messages below must never echo `entry` verbatim: a malformed uri can carry
         # userinfo (e.g. "user:password@host:2379") or a query/fragment (e.g. "?token=secret"),
         # either of which would otherwise leak a credential into validator output/logs. Sanitize
         # up front, working purely textually so this is safe even when urlsplit() itself fails.
-        redacted_first = _redact_uri_for_message(first)
+        redacted_entry = _redact_uri_for_message(entry)
+        has_scheme = "//" in entry
         try:
-            parsed = urlsplit(first if "//" in first else f"//{first}")
+            parsed = urlsplit(entry if has_scheme else f"//{entry}")
             hostname, port = parsed.hostname, parsed.port
         except ValueError as exc:
             return "", ValidationCheck(
-                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_first}': {exc}"
+                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}': {exc}"
             )
         if not hostname or not port:
             return "", ValidationCheck(
-                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_first}'."
+                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}'."
             )
         if parsed.username is not None or parsed.password is not None:
             return "", ValidationCheck(
                 name="uris_format",
                 passed=False,
                 message=(
-                    f"uri '{redacted_first}' contains userinfo, which this interface does not use "
+                    f"uri '{redacted_entry}' contains userinfo, which this interface does not use "
                     "(authentication is via mTLS and a separate 'username' field); rejecting it "
                     "rather than silently discarding it."
                 ),
@@ -364,8 +387,17 @@ class EtcdClientValidator(BaseValidator):
                 name="uris_format",
                 passed=False,
                 message=(
-                    f"uri '{redacted_first}' has a path/query/fragment component, which a bare "
+                    f"uri '{redacted_entry}' has a path/query/fragment component, which a bare "
                     "etcd client endpoint does not use; rejecting it rather than silently discarding it."
+                ),
+            )
+        if has_scheme and parsed.scheme not in self._SUPPORTED_URI_SCHEMES:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' uses scheme '{parsed.scheme}', which this mTLS-only "
+                    "interface does not support; only a bare host:port or an 'https://' uri is accepted."
                 ),
             )
         # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
@@ -573,16 +605,18 @@ class EtcdClientValidator(BaseValidator):
                 port_valid = bool(host) and 1 <= int(port_str) <= 65535
             except ValueError:
                 port_valid = False
-            # rpartition(":") alone lets an IPv6 host through if it happens to still contain a
-            # trailing ":port"-shaped suffix, whether or not it's actually bracketed - e.g. both
-            # "[::1:2379" (unbalanced brackets) and the unbracketed "::1:2379" (host "::1", which
-            # itself contains colons) would otherwise parse as a port and a host. This interface's
-            # bracketed host:port literals (e.g. "[::1]:2379") are the only valid form for a host
-            # containing colons, so require balanced brackets whenever the host is colon-bearing.
-            if ":" in host and not (host.startswith("[") and host.endswith("]")):
+            # rpartition(":") alone lets a malformed host through as long as the final segment
+            # still parses as a port - e.g. "[::1:2379" (unbalanced brackets), the unbracketed
+            # "::1:2379" (host "::1", which itself contains colons), and "[host:2379" (one-sided
+            # bracket around a non-colon-bearing host) would all otherwise pass. This interface's
+            # bracketed host:port literals (e.g. "[::1]:2379") are the only valid bracketed form,
+            # so reject any one-sided bracket outright, and additionally require balanced brackets
+            # whenever the host is colon-bearing (which can only be a valid IPv6 literal bracketed).
+            has_one_sided_bracket = host.startswith("[") != host.endswith("]")
+            if has_one_sided_bracket or (":" in host and not (host.startswith("[") and host.endswith("]"))):
                 port_valid = False
             if not port_valid:
-                invalid.append(entry)
+                invalid.append(_redact_uri_for_message(entry))
         if invalid:
             return ValidationCheck(
                 name="endpoints_format", passed=False, message=f"Invalid endpoint entries: {', '.join(invalid)}"
