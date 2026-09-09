@@ -321,6 +321,20 @@ class TestIstioIngressRouteValidatorSimple:
         assert result.status == "FAIL"
         assert any("[2001:db8::1]:<redacted>" in c.message for c in result.checks)
 
+    def test_redacts_entire_malformed_suffix_after_first_colon_in_unbracketed_authority(self) -> None:
+        # GIVEN an unbracketed authority with more than one colon: the last segment
+        # ("80") looks like a valid port, so splitting at the *last* colon would leave
+        # the earlier "super-secret" segment in the displayed value even though
+        # parsed.port rejects this authority as a whole
+        validator = _make_validator({"external_host": "host:super-secret:80", "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN the secret never appears in any check message
+        assert result.status == "FAIL"
+        assert all("super-secret" not in c.message for c in result.checks)
+
     def test_redacts_query_string_from_result_messages(self) -> None:
         # GIVEN external_host smuggles a credential via a query string
         validator = _make_validator({"external_host": "host/path?token=secret", "tls_enabled": "False"})

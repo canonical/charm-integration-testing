@@ -73,7 +73,13 @@ def _redact(value: str) -> str:
         sep = "" if bracket_end == -1 else authority[bracket_end + 1 : bracket_end + 2]
         port_part = "" if bracket_end == -1 else authority[bracket_end + 2 :]
     else:
-        host_part, sep, port_part = authority.rpartition(":")
+        # A valid unbracketed host[:port] authority has at most one colon, so
+        # splitting at the *first* one (rather than the last) treats everything
+        # from there on as the port candidate. rpartition(":") would otherwise
+        # leave an earlier malformed segment in the displayed host: for
+        # "host:super-secret:80", the last colon looks like a valid "80" port,
+        # so nothing gets redacted and "super-secret" leaks into every message.
+        host_part, sep, port_part = authority.partition(":")
     # str.isdigit() accepts non-ASCII digit characters (e.g. '\u00b2', superscript
     # two) that int() then rejects, and an arbitrarily long digit string could make
     # int() raise on some interpreters; a bounded ASCII-decimal regex avoids both, so
