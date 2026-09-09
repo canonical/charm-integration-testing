@@ -79,6 +79,8 @@ def _decode_message(data: bytes) -> dict[int, list[bytes | int]]:
         field_number, wire_type = tag >> 3, tag & 0x7
         if wire_type == 2:
             length, pos = _decode_varint(data, pos)
+            if pos + length > len(data):
+                raise ValueError(f"truncated length-delimited field: declared length {length} at offset {pos}")
             value: bytes | int = data[pos : pos + length]
             pos += length
         elif wire_type == 0:
@@ -104,6 +106,16 @@ ETCD_CLIENT_KEY_PATH_ENV = "VALIDATOR_ETCD_CLIENT_KEY_PATH"
 
 _REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "version"]
 _PROVIDER_FIELDS = ["prefix", "mtls-cert"]
+
+
+def _redact_uri_for_message(uri: str) -> str:
+    """Strip userinfo, query, and fragment components before including a URI in a diagnostic.
+
+    Works purely textually (rather than via urlsplit) so it is safe to call even on a URI
+    that fails to parse, and won't itself raise on malformed input.
+    """
+    sanitized = re.sub(r"//[^/?#@]*@", "//<redacted>@", uri)
+    return re.sub(r"[?#].*$", "", sanitized)
 
 
 class EtcdClientValidator(BaseValidator):
@@ -209,7 +221,10 @@ class EtcdClientValidator(BaseValidator):
         try:
             with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
                 return ValidationCheck(name="connect", passed=True, message=f"TCP connection to '{first}' succeeded.")
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # socket.create_connection raises ValueError (not OSError) for some malformed
+            # hosts, e.g. an embedded NUL byte; without catching it here, an already-validated
+            # endpoint could still crash validate() into an ERROR result instead of a clean FAIL.
             return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{first}': {exc}")
 
     def _check_read_write(self, data: dict[str, str], target: str) -> list[ValidationCheck]:
@@ -319,9 +334,10 @@ class EtcdClientValidator(BaseValidator):
         if not first:
             return "", ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
         # Diagnostic messages below must never echo `first` verbatim: a malformed uri can carry
-        # userinfo (e.g. "user:password@host:2379"), which would otherwise leak a credential into
-        # validator output/logs. Redact it up front for use in any message.
-        redacted_first = re.sub(r"//[^/@]*@", "//<redacted>@", first if "//" in first else f"//{first}")
+        # userinfo (e.g. "user:password@host:2379") or a query/fragment (e.g. "?token=secret"),
+        # either of which would otherwise leak a credential into validator output/logs. Sanitize
+        # up front, working purely textually so this is safe even when urlsplit() itself fails.
+        redacted_first = _redact_uri_for_message(first)
         try:
             parsed = urlsplit(first if "//" in first else f"//{first}")
             hostname, port = parsed.hostname, parsed.port
@@ -333,7 +349,7 @@ class EtcdClientValidator(BaseValidator):
             return "", ValidationCheck(
                 name="uris_format", passed=False, message=f"Could not parse uri '{redacted_first}'."
             )
-        if parsed.username or parsed.password:
+        if parsed.username is not None or parsed.password is not None:
             return "", ValidationCheck(
                 name="uris_format",
                 passed=False,
@@ -341,6 +357,15 @@ class EtcdClientValidator(BaseValidator):
                     f"uri '{redacted_first}' contains userinfo, which this interface does not use "
                     "(authentication is via mTLS and a separate 'username' field); rejecting it "
                     "rather than silently discarding it."
+                ),
+            )
+        if parsed.path or parsed.query or parsed.fragment:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_first}' has a path/query/fragment component, which a bare "
+                    "etcd client endpoint does not use; rejecting it rather than silently discarding it."
                 ),
             )
         # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
@@ -548,11 +573,13 @@ class EtcdClientValidator(BaseValidator):
                 port_valid = bool(host) and 1 <= int(port_str) <= 65535
             except ValueError:
                 port_valid = False
-            # rpartition(":") alone lets a malformed bracketed IPv6 literal (e.g. "[::1:2379",
-            # missing its closing bracket) through as long as the final segment parses as a port:
-            # the "host" would be "[::1" here. Require brackets to be balanced (both present or
-            # both absent) so such entries are rejected.
-            if host.startswith("[") != host.endswith("]"):
+            # rpartition(":") alone lets an IPv6 host through if it happens to still contain a
+            # trailing ":port"-shaped suffix, whether or not it's actually bracketed - e.g. both
+            # "[::1:2379" (unbalanced brackets) and the unbracketed "::1:2379" (host "::1", which
+            # itself contains colons) would otherwise parse as a port and a host. This interface's
+            # bracketed host:port literals (e.g. "[::1]:2379") are the only valid form for a host
+            # containing colons, so require balanced brackets whenever the host is colon-bearing.
+            if ":" in host and not (host.startswith("[") and host.endswith("]")):
                 port_valid = False
             if not port_valid:
                 invalid.append(entry)

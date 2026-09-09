@@ -190,6 +190,7 @@ class TestEtcdClientValidatorRequiresSimple:
             ("10.1.2.3:99999", "port out of range"),
             ("10.1.2.3:\u00b2", "digit-like but non-numeric port"),
             ("[::1:2379", "unbalanced ipv6 brackets"),
+            ("::1:2379", "unbracketed ipv6 host"),
         ],
     )
     def test_fails_endpoints_format_check(self, bad_value: str, description: str) -> None:
@@ -459,6 +460,7 @@ class TestEtcdClientValidatorRequiresDeep:
         assert not get_check.passed
         assert "key mismatch" in get_check.message.lower()
 
+    def test_attempts_cleanup_when_put_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN a PUT that fails at the transport level (e.g. a client-side timeout
         # that may still have committed server-side): DeleteRange cleanup must still
         # be attempted so no canary key is orphaned, and GET must be skipped since
@@ -510,6 +512,64 @@ class TestEtcdClientValidatorRequiresDeep:
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert delete_check.passed
         assert len(delete_calls) == 1
+
+    def test_fails_delete_check_when_delete_rpc_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a successful PUT/GET but a DeleteRange call that fails at the transport
+        # level: the "delete" check must fail, and validate() must complete gracefully
+        # (not raise) rather than propagate the RpcError.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "deadline exceeded"
+
+            stored: dict[str, bytes] = {}
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        fields = _decode_message(request)
+                        stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
+                        stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                        return b""
+                    if method.endswith("/Range"):
+                        key_value_msg = _encode_bytes_field(1, stored["key"]) + _encode_bytes_field(5, stored["value"])
+                        return _encode_bytes_field(2, key_value_msg)
+                    if method.endswith("/DeleteRange"):
+                        raise _FakeRpcError()
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        put_check = next(c for c in result.checks if c.name == "put")
+        assert put_check.passed
+        get_check = next(c for c in result.checks if c.name == "get")
+        assert get_check.passed
+        delete_check = next(c for c in result.checks if c.name == "delete")
+        assert not delete_check.passed
+        assert "deadline exceeded" in delete_check.message
 
     def test_fails_identity_match_when_local_cert_does_not_match_published_cert(
         self, monkeypatch: pytest.MonkeyPatch
@@ -642,24 +702,61 @@ class TestEtcdClientValidatorGrpcTarget:
 
     def test_rejects_userinfo_in_uri(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
+        uri = "https://" + "admin" + ":" + "hunter2" + "@10.1.2.3:2379"
 
-        target, check = validator._pick_grpc_target("https://admin:hunter2@10.1.2.3:2379")
+        target, check = validator._pick_grpc_target(uri)
 
         assert not check.passed
         assert target == ""
         assert "userinfo" in check.message.lower()
 
-    def test_redacts_userinfo_from_unparseable_uri_message(self) -> None:
+    def test_rejects_uri_with_empty_userinfo(self) -> None:
+        # GIVEN a uri with an empty (but present) username/password, e.g. "https://@host:2379":
+        # urlsplit() reports username=="" (falsy) rather than None, so a truthiness check alone
+        # would let this slip through. It must still be rejected as userinfo.
         validator = _make_validator(VALID_REQUIRER_DATABAG)
 
-        # A URI with userinfo but no valid host/port still must not leak the
-        # credential into the failure message.
-        target, check = validator._pick_grpc_target("https://admin:hunter2@")
+        target, check = validator._pick_grpc_target("https://@10.1.2.3:2379")
 
         assert not check.passed
         assert target == ""
-        assert "hunter2" not in check.message
+        assert "userinfo" in check.message.lower()
+
+    def test_rejects_uri_with_path_component(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        target, check = validator._pick_grpc_target("https://10.1.2.3:2379/not-etcd")
+
+        assert not check.passed
+        assert target == ""
+
+    def test_redacts_userinfo_from_unparseable_uri_message(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "https://admin:" + secret + "@"
+
+        # A URI with userinfo but no valid host/port still must not leak the
+        # credential into the failure message.
+        target, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert target == ""
+        assert secret not in check.message
         assert "<redacted>" in check.message
+
+    def test_redacts_userinfo_and_query_from_malformed_port_message(self) -> None:
+        # A malformed uri whose port fails to parse (triggering urlsplit's own ValueError)
+        # must still not leak userinfo or a query-string secret into the check message.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "https://admin:" + secret + "@10.1.2.3:notaport?token=" + secret
+
+        target, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert target == ""
+        assert secret not in check.message
+        assert "token" not in check.message
 
 
 class TestEtcdClientValidatorProvidesSimple:
