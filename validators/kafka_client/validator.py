@@ -57,7 +57,7 @@ class KafkaClientValidator(BaseValidator):
         # consumer-group-prefix is only set by the requirer when it opts into the
         # "consumer" role, so it must not be treated as required (see
         # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
-        schema_check = self._validate_schema_from(source, ["endpoints", "topic", "username", "password"], creds)
+        schema_check = self.validate_schema(["endpoints", "topic", "username", "password"], creds, data=source)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="simple", checks=checks)
@@ -127,7 +127,7 @@ class KafkaClientValidator(BaseValidator):
         # consumer-group-prefix is only set by the requirer when it opts into the
         # "consumer" role, so it must not be treated as required (see
         # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
-        schema_check = self._validate_schema_from(source, ["endpoints", "topic", "username", "password"], creds)
+        schema_check = self.validate_schema(["endpoints", "topic", "username", "password"], creds, data=source)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
@@ -299,36 +299,12 @@ class KafkaClientValidator(BaseValidator):
             return dict(self.relation.data[self.charm.app])
         return self.databag
 
-    def _validate_schema_from(
-        self, data: dict[str, str], required_fields: list[str], creds: dict[str, str] | None = None
-    ) -> ValidationCheck:
-        """Like ``BaseValidator.validate_schema``, but checks an explicit databag.
-
-        Needed because ``validate_schema`` always reads ``self.databag`` (the
-        remote app), which is wrong when validating the provider role.
-        """
-        merged = dict(data)
-        if creds:
-            merged.update(creds)
-        missing = [f for f in required_fields if not merged.get(f)]
-        return ValidationCheck(
-            name="schema",
-            passed=not missing,
-            message="OK" if not missing else f"Missing: {', '.join(missing)}",
-        )
-
     def _resolve_credentials(self, data: dict[str, str]) -> dict[str, str]:
         """Resolve credentials from the given databag or the Juju secrets it references."""
         return {
-            **self._resolve_secret_from(data, "secret-user", "username", "password"),
-            **self._resolve_secret_from(data, "secret-tls", "tls", "tls-ca"),
+            **self.resolve_secret("secret-user", "username", "password", data=data),
+            **self.resolve_secret("secret-tls", "tls", "tls-ca", data=data),
         }
-
-    def _resolve_secret_from(self, data: dict[str, str], uri_key: str, *fields: str) -> dict[str, str]:
-        """Like ``BaseValidator.resolve_secret``, but resolves against an explicit databag."""
-        if uri := data.get(uri_key):
-            return self.charm.model.get_secret(id=uri).get_content()
-        return {f: data[f] for f in fields if f in data}
 
     def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:
         """Build shared Kafka client kwargs, handling SASL and TLS configuration."""

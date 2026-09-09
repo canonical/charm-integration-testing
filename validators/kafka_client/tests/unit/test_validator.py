@@ -9,7 +9,7 @@ import ops
 import pytest
 
 from validators.kafka_client.validator import KafkaClientValidator
-from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
@@ -587,6 +587,30 @@ class TestKafkaClientValidatorProvidesSimple:
 
         # THEN validation still passes using the local app databag
         assert result.status == "PASS"
+
+    def test_resolves_credentials_from_secret_on_local_app_databag(self) -> None:
+        # GIVEN a local (provider) app databag that references a Juju secret
+        # instead of publishing username/password inline
+        remote_app = ApplicationStub(name="remote-app")
+        databag = {
+            "endpoints": "10.1.2.3:9092",
+            "topic": "my-topic",
+            "secret-user": "secret:kafka-creds",
+        }
+        relation = RelationStub(name="kafka", id=0, app=remote_app, data={remote_app: {}})
+        secrets = {"secret:kafka-creds": {"username": "kafka-user", "password": "s3cr3t"}}
+        charm_stub = make_charm_from_relation_and_secrets(relation, secrets, role=RelationRoleStub.provides)
+        relation.data[charm_stub.app] = databag
+        validator = KafkaClientValidator(cast(ops.CharmBase, charm_stub), cast(ops.Relation, relation))
+        consumer_stub = KafkaConsumerStub(topics_result={"my-topic"})
+
+        # WHEN
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub):
+            result = validator.validate(level="simple")
+
+        # THEN the secret is resolved and validation passes
+        assert result.status == "PASS"
+        assert charm_stub.model.requested_ids == ["secret:kafka-creds"]
 
 
 class TestKafkaClientValidatorProvidesDeep:
