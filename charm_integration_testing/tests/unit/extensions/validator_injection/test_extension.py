@@ -88,6 +88,12 @@ def _fail(stderr: str = "error") -> JujuExecOutput:
     return JujuExecOutput(return_code=1, stdout="", stderr=stderr)
 
 
+def _fail_missing_binary(
+    stderr: str = "script.sh: line 1: .../run_validators: No such file or directory",
+) -> JujuExecOutput:
+    return JujuExecOutput(return_code=127, stdout="", stderr=stderr)
+
+
 def _runner_json(*results: ValidationResult) -> str:
     return ValidatorRunnerResults(results=list(results)).model_dump_json()
 
@@ -226,12 +232,67 @@ class TestValidatorInjectorExtension:
             def test_raises_when_runner_exits_nonzero(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
-                # GIVEN the venv is present but the runner crashes
-                juju.exec_responses.extend([_ok(), _fail(stderr="crash")])
+                # GIVEN the venv is present, the runner crashes, and it's still present afterwards
+                # (i.e. a genuine validator failure, not a missing runner binary)
+                juju.exec_responses.extend([_ok(), _fail(stderr="crash"), _ok()])
 
                 # WHEN / THEN
                 with pytest.raises(RuntimeError, match="Validators failed"):
                     extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+        class TestRunnerBinaryVanishesBetweenInjectionAndRun:
+            """The runner binary is present at injection time but missing by the time it runs."""
+
+            def test_reinjects_and_retries_when_runner_vanishes(
+                self, extension: ValidatorInjectorExtension, juju: JujuStub, logger: LoggerStub
+            ) -> None:
+                # GIVEN the venv was present, but the runner binary is gone by the time it runs,
+                # so the run fails with rc=127 and a re-check confirms the runner is now missing
+                run_stdout = _runner_json(_pass_result())
+                juju.exec_responses.extend(
+                    [
+                        _ok(),  # initial test -f: present, so injection is skipped
+                        _fail_missing_binary(),  # run: rc=127, runner vanished
+                        _fail(),  # re-check test -f: confirms missing
+                        _ok(),
+                        _ok(),
+                        _ok(),  # re-injection: 3 install commands succeed
+                        _ok(run_stdout),  # retry run: succeeds
+                    ]
+                )
+
+                # WHEN
+                results = extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+                # THEN the retried run succeeds and returns the expected result
+                assert len(results) == 1
+                assert results[0].status == "PASS"
+                # AND validators were re-copied (re-injection happened)
+                assert len(juju.scp_calls) == 2
+                # AND a warning about the reinjection was logged
+                assert any("reinject" in w.lower() for w in logger.warnings)
+
+            def test_raises_when_retry_after_reinjection_also_fails(
+                self, extension: ValidatorInjectorExtension, juju: JujuStub
+            ) -> None:
+                # GIVEN the runner vanishes, gets reinjected, but the retried run still fails
+                juju.exec_responses.extend(
+                    [
+                        _ok(),  # initial test -f: present
+                        _fail_missing_binary(),  # run: rc=127
+                        _fail(),  # re-check: confirms missing
+                        _ok(),
+                        _ok(),
+                        _ok(),  # re-injection succeeds
+                        _fail(stderr="still broken"),  # retry run: fails again
+                    ]
+                )
+
+                # WHEN / THEN a single retry is attempted, then it raises rather than looping forever
+                with pytest.raises(RuntimeError, match="Validators failed"):
+                    extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+                assert len(juju.exec_calls) == 7
 
         class TestVenvAbsent:
             def test_warns_and_skips_when_no_validators_path(
