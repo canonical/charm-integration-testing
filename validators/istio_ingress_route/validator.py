@@ -1,10 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ipaddress
+import re
 import socket
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from validators.base import (
     BaseValidator,
@@ -15,6 +17,23 @@ from validators.base import (
 
 _TCP_TIMEOUT = 5
 _HTTP_TIMEOUT = 5
+
+_HOSTNAME_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Raise HTTPError on 3xx instead of following the redirect target.
+
+    Any HTTP response (including a redirect) proves the gateway is live, so the
+    probe must not silently follow to whatever host the redirect names.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        raise HTTPError(req.full_url, code, msg, headers, fp)
+
+
+_opener = build_opener(_NoRedirectHandler)
 
 
 class IstioIngressRouteValidator(BaseValidator):
@@ -129,6 +148,20 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"URL {url!r} has no valid hostname.",
         )
 
+    if parsed.path or parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {url!r} contains a path/query/fragment/user-info; 'external_host' must be a bare host.",
+        )
+
+    if not _is_valid_host(parsed.hostname):
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message=f"URL {url!r} has an invalid hostname {parsed.hostname!r}.",
+        )
+
     try:
         _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
     except ValueError as exc:
@@ -143,6 +176,16 @@ def _url_format_check(url: str) -> ValidationCheck:
         passed=True,
         message=f"URL {url!r} is well-formed.",
     )
+
+
+def _is_valid_host(host: str) -> bool:
+    """Return True if host is a valid IPv4/IPv6 address or DNS hostname (RFC 1123)."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    return len(host) <= 253 and bool(_HOSTNAME_RE.fullmatch(host))
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +227,7 @@ def _http_probe_check(url: str) -> ValidationCheck:
     """
     try:
         req = Request(url)  # nosec B310 - url is http/https only
-        with urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
+        with _opener.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
             status = resp.status
         return ValidationCheck(
             name="http_probe",

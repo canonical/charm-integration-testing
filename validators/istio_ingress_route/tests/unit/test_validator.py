@@ -4,11 +4,12 @@
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 import ops
 import pytest
 
-from validators.istio_ingress_route.validator import IstioIngressRouteValidator
+from validators.istio_ingress_route.validator import IstioIngressRouteValidator, _NoRedirectHandler
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -153,6 +154,29 @@ class TestIstioIngressRouteValidatorSimple:
         assert not fmt.passed
         assert "invalid port" in fmt.message
 
+    @pytest.mark.parametrize(
+        "external_host",
+        [
+            "bad host",  # embedded whitespace
+            "host\x00name",  # control character
+            "host/evil-path",  # path component smuggled into the host
+            "host?query=1",  # query component smuggled into the host
+            "user@host",  # user-info component smuggled into the host
+            "-leading-hyphen.example.com",  # invalid DNS label
+        ],
+    )
+    def test_fails_url_format_when_external_host_is_malformed(self, external_host: str) -> None:
+        # GIVEN a malformed external_host that is not a bare host[:port]
+        validator = _make_validator({"external_host": external_host, "tls_enabled": "False"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        fmt = next(c for c in result.checks if c.name == "url_format")
+        assert not fmt.passed
+
     def test_passes_simple_with_tls_disabled(self) -> None:
         # GIVEN valid provider databag with TLS disabled
         validator = _make_validator(VALID_HTTP_DATABAG)
@@ -200,7 +224,7 @@ class TestIstioIngressRouteValidatorDeep:
         with (
             patch("validators.istio_ingress_route.validator._tcp_ping"),
             patch(
-                "validators.istio_ingress_route.validator.urlopen",
+                "validators.istio_ingress_route.validator._opener.open",
                 return_value=_mock_http_response(200),
             ),
         ):
@@ -217,7 +241,7 @@ class TestIstioIngressRouteValidatorDeep:
         with (
             patch("validators.istio_ingress_route.validator._tcp_ping"),
             patch(
-                "validators.istio_ingress_route.validator.urlopen",
+                "validators.istio_ingress_route.validator._opener.open",
                 side_effect=HTTPError(
                     "http://10.64.140.43",
                     404,
@@ -248,6 +272,42 @@ class TestIstioIngressRouteValidatorDeep:
         connect = next(c for c in result.checks if c.name == "connect")
         assert not connect.passed
 
+    def test_no_redirect_handler_raises_instead_of_following(self) -> None:
+        # GIVEN a 302 response naming an unrelated/unreachable redirect target
+        handler = _NoRedirectHandler()
+        req = Request("http://10.64.140.43")
+
+        # WHEN/THEN the handler must not hand back a Request to follow
+        with pytest.raises(HTTPError):
+            handler.redirect_request(
+                req, None, 302, "Found", {"location": "http://unrelated.example"}, "http://unrelated.example"
+            )
+
+    def test_http_probe_treats_redirect_as_reachable_without_following(self) -> None:
+        # GIVEN the gateway responds with a redirect — proves it is live, but must
+        # not be followed to the (possibly unreachable/unrelated) redirect target
+        validator = _make_validator(VALID_HTTP_DATABAG)
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping"),
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                side_effect=HTTPError(
+                    "http://10.64.140.43",
+                    302,
+                    "Found",
+                    {"location": "http://unrelated.example"},  # type: ignore[arg-type]
+                    None,
+                ),
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        assert result.status == "PASS"
+        probe = next(c for c in result.checks if c.name == "http_probe")
+        assert probe.passed
+        assert "302" in probe.message
+
     def test_fails_deep_when_http_connection_refused(self) -> None:
         # GIVEN TCP succeeds but HTTP fails
         validator = _make_validator(VALID_HTTP_DATABAG)
@@ -255,7 +315,7 @@ class TestIstioIngressRouteValidatorDeep:
         with (
             patch("validators.istio_ingress_route.validator._tcp_ping"),
             patch(
-                "validators.istio_ingress_route.validator.urlopen",
+                "validators.istio_ingress_route.validator._opener.open",
                 side_effect=URLError("Connection refused"),
             ),
         ):
@@ -280,7 +340,7 @@ class TestIstioIngressRouteValidatorDeep:
 
         with (
             patch("validators.istio_ingress_route.validator._tcp_ping"),
-            patch("validators.istio_ingress_route.validator.urlopen", side_effect=mock_exc),
+            patch("validators.istio_ingress_route.validator._opener.open", side_effect=mock_exc),
         ):
             result = validator.validate(level="deep")
 
