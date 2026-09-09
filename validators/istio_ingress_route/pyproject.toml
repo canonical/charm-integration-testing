@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "cryptography>=42.0.0",
     "validators-test-utils",
 ]
 

@@ -2862,11 +2862,12 @@ files = []
 develop = true
 
 [package.dependencies]
+cryptography = {version = ">=42.0.0", optional = true}
 validators-base = "*"
 validators-test-utils = {version = "*", optional = true}
 
 [package.extras]
-dev = ["validators-test-utils"]
+dev = ["cryptography (>=42.0.0)", "validators-test-utils"]
 
 [package.source]
 type = "directory"

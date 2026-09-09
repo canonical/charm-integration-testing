@@ -363,6 +363,15 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
     HTTP port is returned (deduplicated, order preserved) rather than only the
     first.
 
+    A URL carrying a path (see ``test_passes_simple_when_external_host_carries_upstream_route_path``)
+    means ``external_host`` is a chained deployment: the provider is itself behind
+    another ingress hop, and the path routes to it there. The requirer's locally
+    declared listener ports describe the *inner* Istio gateway behind that hop, not
+    this outer one, so applying them here would corrupt an otherwise-valid URL (e.g.
+    turning ``https://upstream.example/model-app`` into
+    ``https://upstream.example:8080/model-app``, an address the outer hop never
+    listens on). Probe the scheme's conventional external port instead in that case.
+
     Returns (ports, check). ``check`` is only set (and ``ports`` is empty) when no
     usable port could be determined, so callers can skip the connectivity/probe
     checks instead of guessing at a port that may not have a listener behind it.
@@ -370,6 +379,9 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
     parsed = urlparse(url)
     if parsed.port is not None:
         return [parsed.port], None
+
+    if parsed.path:
+        return [443 if parsed.scheme == "https" else 80], None
 
     raw_config = local_databag.get("config")
     if not raw_config:
@@ -415,7 +427,11 @@ def _parse_listeners(raw_config: str) -> list[dict[str, Any]]:
     for listener in listeners:
         if not isinstance(listener, dict):
             raise TypeError(f"listener entry must be an object, got {type(listener).__name__}.")
-        if str(listener.get("protocol", "")).upper() not in ("HTTP", "GRPC"):
+        # ProtocolType's wire values are exactly "HTTP"/"GRPC" (the provider's Pydantic
+        # model rejects any other casing), so compare the raw value directly instead of
+        # normalizing case: a lowercase "http" is itself a malformed local contract that
+        # the provider could never have parsed, not a valid-but-differently-cased value.
+        if listener.get("protocol") not in ("HTTP", "GRPC"):
             raise ValueError(f"listener has an unsupported 'protocol': {listener.get('protocol')!r}.")
         port = listener.get("port")
         if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
@@ -427,9 +443,10 @@ def _is_http_listener(listener: object) -> bool:
     """Return True if a decoded listener entry declares the HTTP application protocol.
 
     GRPC listeners are excluded: they speak HTTP/2 framed gRPC, not plain HTTP, so an
-    HTTP GET probe against one would not exercise a real request/response cycle.
+    HTTP GET probe against one would not exercise a real request/response cycle. The
+    wire value is compared verbatim (not case-normalized): see _parse_listeners.
     """
-    return isinstance(listener, dict) and str(listener.get("protocol", "")).upper() == "HTTP"
+    return isinstance(listener, dict) and listener.get("protocol") == "HTTP"
 
 
 def _with_port(url: str, port: int) -> str:

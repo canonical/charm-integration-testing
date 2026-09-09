@@ -543,6 +543,51 @@ class TestIstioIngressRouteValidatorDeep:
         assert result.status == "PASS"
         tcp_ping.assert_called_once_with("10.64.140.43", 9999)
 
+    def test_deep_probes_default_port_for_chained_deployment_with_route_path(self) -> None:
+        # GIVEN external_host carries an upstream route path (a chained deployment,
+        # e.g. istio-ingress behind another ingress hop), and the requirer also
+        # declares a local listener port for its *inner* gateway (which does not
+        # apply to this outer hop)
+        validator = _make_validator(
+            {"external_host": "upstream.example.com/model-app", "tls_enabled": "True"},
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 8080, "protocol": "HTTP"}]})},
+        )
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping,
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                return_value=_mock_http_response(200),
+            ) as opener_open,
+        ):
+            result = validator.validate(level="deep")
+
+        # THEN the scheme's conventional external port (443 for https) is probed, not
+        # the inner listener's 8080, and the route path is preserved in the probe URL
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once_with("upstream.example.com", 443)
+        probed_request = opener_open.call_args[0][0]
+        assert probed_request.full_url == "https://upstream.example.com:443/model-app"
+
+    def test_deep_probes_default_http_port_for_chained_deployment_without_tls(self) -> None:
+        # GIVEN the same chained-deployment scenario, but over plain http
+        validator = _make_validator(
+            {"external_host": "upstream.example.com/model-app", "tls_enabled": "False"},
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 8080, "protocol": "HTTP"}]})},
+        )
+
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping,
+            patch(
+                "validators.istio_ingress_route.validator._opener.open",
+                return_value=_mock_http_response(200),
+            ),
+        ):
+            result = validator.validate(level="deep")
+
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once_with("upstream.example.com", 80)
+
     def test_deep_skips_connectivity_when_no_local_config_published(self) -> None:
         # GIVEN the requirer has not (yet) published its own listener config
         validator = _make_validator(VALID_HTTP_DATABAG, local_databag={})
@@ -640,6 +685,8 @@ class TestIstioIngressRouteValidatorDeep:
             [{"port": 0, "protocol": "HTTP"}],
             [{"port": 70000, "protocol": "HTTP"}],
             [{"port": True, "protocol": "HTTP"}],
+            [{"port": 8080, "protocol": "http"}],  # lowercase: not a wire value the provider can emit
+            [{"port": 9090, "protocol": "Grpc"}],  # mixed case: same reasoning
             "bad-listeners",
         ],
     )
