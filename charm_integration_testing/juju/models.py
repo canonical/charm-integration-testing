@@ -84,18 +84,23 @@ class JujuConsumedOfferInfo:
     url: str
     endpoints: frozenset[str] = field(default_factory=frozenset)
 
-    def parse_url(self) -> tuple[JujuModelHandle, str] | None:
-        """Parse ``url`` (``controller:user/model.offer-name``) into its offering model and offer name.
+    def parse_url(self) -> tuple[str, JujuModelHandle, str] | None:
+        """Parse ``url`` (``controller:user/model.offer-name``) into owner, offering model and offer name.
 
-        Returns None if the URL doesn't match the expected shape.
+        The returned ``JujuModelHandle.model`` is the bare model name (without the owner), matching
+        how models are otherwise identified/compared throughout this framework (e.g. against models
+        already tracked without an owner prefix). Callers that need to directly address the offering
+        model (e.g. for a status query) should qualify it with the returned owner, since Juju CLI
+        addressing may require it when the model's owner differs from the currently authenticated
+        user. Returns None if the URL doesn't match the expected shape.
         """
         if ":" not in self.url or "/" not in self.url:
             return None
         controller, rest = self.url.split(":", 1)
-        _, model_and_offer = rest.split("/", 1)
+        owner, model_and_offer = rest.split("/", 1)
         if "." not in model_and_offer:
             return None
         model, offer_name = model_and_offer.rsplit(".", 1)
-        if not controller or not model or not offer_name:
+        if not controller or not owner or not model or not offer_name:
             return None
-        return JujuModelHandle(controller=controller, model=model), offer_name
+        return owner, JujuModelHandle(controller=controller, model=model), offer_name

@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 
 import pytest
-from juju import CharmChannel, JujuIntegrationApplication
+from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuModelHandle
 
 
 class TestCharmChannel:
@@ -168,3 +168,55 @@ class TestJujuIntegrationApplication:
                 # THEN application and endpoint are correctly parsed
                 assert endpoint.application == params.expected_application
                 assert endpoint.endpoint == params.expected_endpoint
+
+
+class TestJujuConsumedOfferInfo:
+    class TestParseUrl:
+        @dataclass
+        class Params:
+            label: str
+            url: str
+            expected_owner: str | None = None
+            expected_model: JujuModelHandle | None = None
+            expected_offer_name: str | None = None
+            should_be_none: bool = False
+
+        test_cases = [
+            Params(
+                label="valid_url",
+                url="other-controller:admin/other-model.postgresql-k8s",
+                expected_owner="admin",
+                expected_model=JujuModelHandle(controller="other-controller", model="other-model"),
+                expected_offer_name="postgresql-k8s",
+            ),
+            Params(
+                label="valid_url_non_admin_owner",
+                url="my-controller:alice/my-model.mysql-offer",
+                expected_owner="alice",
+                expected_model=JujuModelHandle(controller="my-controller", model="my-model"),
+                expected_offer_name="mysql-offer",
+            ),
+            Params(label="missing_colon", url="admin/other-model.postgresql-k8s", should_be_none=True),
+            Params(label="missing_slash", url="other-controller:other-model.postgresql-k8s", should_be_none=True),
+            Params(label="missing_dot", url="other-controller:admin/other-model-postgresql-k8s", should_be_none=True),
+            Params(label="empty_string", url="", should_be_none=True),
+            Params(label="empty_controller", url=":admin/other-model.postgresql-k8s", should_be_none=True),
+            Params(label="empty_owner", url="other-controller:/other-model.postgresql-k8s", should_be_none=True),
+            Params(label="empty_model", url="other-controller:admin/.postgresql-k8s", should_be_none=True),
+            Params(label="empty_offer_name", url="other-controller:admin/other-model.", should_be_none=True),
+        ]
+
+        @pytest.mark.parametrize("params", test_cases, ids=lambda p: p.label)
+        def test_parse_url(self, params: "TestJujuConsumedOfferInfo.TestParseUrl.Params") -> None:
+            # GIVEN a consumed offer with a given URL
+            offer = JujuConsumedOfferInfo(url=params.url)
+
+            # WHEN parsing the URL
+            result = offer.parse_url()
+
+            # THEN the owner, offering model, and offer name are correctly parsed (or None for
+            # malformed URLs)
+            if params.should_be_none:
+                assert result is None
+            else:
+                assert result == (params.expected_owner, params.expected_model, params.expected_offer_name)

@@ -84,7 +84,7 @@ class MysqlReplicator:
                     continue
 
                 parsed_offer_url = offer_info.parse_url()
-                offer_model = parsed_offer_url[0] if parsed_offer_url is not None else None
+                offer_model = parsed_offer_url[1] if parsed_offer_url is not None else None
                 if offer_model is None or offer_model not in applications_by_model:
                     continue
 

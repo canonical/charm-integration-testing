@@ -836,6 +836,7 @@ def _integration_endpoint_str(
     side: JujuIntegrationApplication,
     applications: dict[str, JujuApplicationInfo],
     consumed_offers: dict[str, JujuConsumedOfferInfo],
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None],
 ) -> str:
     """Render one side of an integration as ``<charm>:<endpoint>``, normalized for matching.
 
@@ -846,11 +847,19 @@ def _integration_endpoint_str(
     which are randomly generated per test run and would make the recorded value useless for
     matching across runs. If the offering model can't be resolved (e.g. unreachable controller),
     fall back to the offer's local alias, which -- unlike the URL -- is stable across runs.
+
+    ``resolved_offer_applications`` caches resolutions by offer alias across calls for the same
+    model, so each consumed offer is only resolved (i.e. status-queried) at most once per
+    recording pass, even if it's referenced by multiple integrations or by both integration sides.
     """
     if side.application in applications:
         return f"{applications[side.application].charm}:{side.endpoint}"
     if side.application in consumed_offers:
-        offer_application = juju_client.resolve_consumed_offer_application(consumed_offers[side.application])
+        if side.application not in resolved_offer_applications:
+            resolved_offer_applications[side.application] = juju_client.resolve_consumed_offer_application(
+                consumed_offers[side.application]
+            )
+        offer_application = resolved_offer_applications[side.application]
         if offer_application is not None:
             return f"{offer_application.charm}:{side.endpoint}"
         return f"offer:{side.application}:{side.endpoint}"
@@ -876,14 +885,19 @@ def record_charm_info_execution_metadata_instantaneous(
             execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
     consumed_offers = juju_client.list_consumed_offers(model=model)
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None] = {}
 
     # Get all integrations (including CMRs) and record them.
     # Only integrations actually reported by ``list_integrations`` are recorded, so
     # consumed offers that aren't integrated with anything are naturally excluded.
     for integration in juju_client.list_integrations(model=model):
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        provider_str = _integration_endpoint_str(juju_client, integration.provider, applications, consumed_offers)
-        requirer_str = _integration_endpoint_str(juju_client, integration.requirer, applications, consumed_offers)
+        provider_str = _integration_endpoint_str(
+            juju_client, integration.provider, applications, consumed_offers, resolved_offer_applications
+        )
+        requirer_str = _integration_endpoint_str(
+            juju_client, integration.requirer, applications, consumed_offers, resolved_offer_applications
+        )
         execution_metadata("integration", f"{provider_str}/{integration.interface}/{requirer_str}")
 
 

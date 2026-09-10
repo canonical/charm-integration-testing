@@ -159,11 +159,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
-        """Resolve the application backing a consumed offer via its offering model's status.
+        """Resolve the application backing a consumed offer.
 
-        Returns None if the offer's URL can't be parsed, or if the offering model/application
-        can no longer be resolved (e.g. unreachable controller, removed offer). Backends that
-        can't cheaply resolve this may leave this unimplemented and rely on the default.
+        Returns None if the offer's URL can't be parsed, or if the offering application can no
+        longer be resolved (e.g. unreachable controller, removed offer). Backends that can't
+        cheaply resolve this may leave this unimplemented and rely on the default.
         """
         return None
 
