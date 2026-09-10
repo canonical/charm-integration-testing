@@ -214,11 +214,54 @@ class Domain(BaseModel):
         (see docs/explanation/cross-model-mesh.md in canonical/service-mesh) -- with no
         interface-specific knowledge needed here, since every cross-model pairing is grouped by
         charm pair unconditionally.
+
+        If the anchor integration was user-specified (an explicit CMR in the input spec, with
+        its own resolved offer name), that name is reused verbatim instead of being synthesized:
+        otherwise a solver-discovered companion (e.g. a cross_model_mesh endpoint) would land on
+        a different offer than the real, user-declared CMR it is meant to ride alongside,
+        producing two Juju offers for the same application pair instead of one.
         """
         anchor = self._offer_sharing_anchor(integration, z3_model)
+        user_offer_name = self._user_offer_name(integration, z3_model)
+        if user_offer_name is not None:
+            return user_offer_name
         interface = self.integration_interface(anchor)
         prov_charm = self.charms[anchor.provides_charm_id]
         return f"{prov_charm.spec.name}-{anchor.provides_endpoint}-{interface}-offer".replace("_", "-")
+
+    def _user_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None) -> str | None:
+        """Return the user-declared offer name shared by ``integration``'s pair, if any.
+
+        Scans every active integration in the same provides -> requires group as
+        ``integration`` (not just the anchor) for one that some model's
+        ``application_integrations`` maps to (via ``charm_integration_ids``) with an active
+        mapping variable; that application integration already carries a resolved (never-None)
+        ``offer_name`` for cross-model pairs. Checking the whole group, not just the anchor, is
+        necessary because the anchor is chosen by endpoint-name ordering and may itself be a
+        purely solver-discovered integration (e.g. a cross_model_mesh endpoint) even when a
+        sibling integration in the same group is the real, user-declared CMR. Returns None if no
+        integration in the group is user-declared, or if ``z3_model`` is unavailable to evaluate
+        mapping activity.
+        """
+        if z3_model is None:
+            return None
+        group_idxs = {
+            i
+            for i, other in enumerate(self.charm_integrations)
+            if self.is_cross_model(other)
+            and other.provides_charm_id == integration.provides_charm_id
+            and other.requires_charm_id == integration.requires_charm_id
+            and z3_model.evaluate(other.exists, model_completion=True)
+        }
+        if not group_idxs:
+            return None
+        for idx in sorted(group_idxs):
+            for mc in self.models.values():
+                for app_int in mc.application_integrations:
+                    mapping_var = app_int.charm_integration_ids.get(idx)
+                    if mapping_var is not None and z3_model.evaluate(mapping_var, model_completion=True):
+                        return app_int.offer_name
+        return None
 
     def _offer_sharing_anchor(
         self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None

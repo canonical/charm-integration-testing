@@ -29,3 +29,7 @@ overrides:
     constraints:
       - 'charms(cross_model(endpoint[alerting] | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))
         == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
+      # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
+      # empty). See GH-980.
+      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
