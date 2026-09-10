@@ -128,17 +128,27 @@ def _redact_uri_for_message(uri: str) -> str:
     Works purely textually (rather than via urlsplit) so it is safe to call even on a URI
     that fails to parse, and won't itself raise on malformed input. Userinfo is redacted
     whether or not a "//" scheme separator is present, since this interface's "uris" field
-    also accepts bare "host:port" entries without a scheme. The userinfo segment is matched
-    greedily up to the *last* "@" before the first "/" (rather than stopping at the first "@",
-    or at a "?"/"#"), so malformed userinfo containing an embedded literal "@" (e.g.
-    "admin@secret@host") or a "?"/"#" character before its own terminating "@" (e.g.
-    "admin:secret?token@host", where the credential is followed by what looks like a query
-    separator but is still part of the userinfo) is fully redacted rather than leaking
-    everything up to that character. Query/fragment stripping is applied only after userinfo
-    redaction, and on whatever text remains, so it never has a chance to short-circuit before
-    the userinfo match is attempted.
+    also accepts bare "host:port" entries without a scheme.
+
+    Any "//" scheme separator is located first (by plain substring search, not a regex
+    anchored against other delimiters) so its prefix is never itself mistaken for part of
+    the userinfo. Only the text *after* that separator (or the whole string, if there is no
+    separator) is then scanned for userinfo: unconditionally up to the *last* "@" in that
+    remainder, regardless of any "/", "?", or "#" characters appearing before it. This
+    means malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host"),
+    or containing what looks like a path/query/fragment delimiter before its own terminating
+    "@" (e.g. "admin:secret?token@host" or "admin:secret?token/foo@host"), is always fully
+    redacted rather than leaking a prefix of it. Query/fragment stripping is applied last, on
+    whatever text remains, so it never has a chance to run before the userinfo redaction.
     """
-    sanitized = re.sub(r"(^|//)[^/]*@", r"\1<redacted>@", uri)
+    scheme_sep = "//"
+    sep_index = uri.find(scheme_sep)
+    if sep_index == -1:
+        prefix, rest = "", uri
+    else:
+        prefix, rest = uri[: sep_index + len(scheme_sep)], uri[sep_index + len(scheme_sep) :]
+    rest = re.sub(r".*@", "<redacted>@", rest)
+    sanitized = prefix + rest
     return re.sub(r"[?#].*$", "", sanitized)
 
 
@@ -395,14 +405,15 @@ class EtcdClientValidator(BaseValidator):
                     delete_check = self._etcd_delete(channel, canary_key, timeout=cleanup_timeout)
                     iter_checks.append(delete_check)
             final_checks = iter_checks
-            if put_check.passed:
+            if put_check.passed and delete_check.passed:
                 break
             if not delete_check.passed and i < len(targets) - 1:
+                reason = "after a failed PUT" if not put_check.passed else "after a successful PUT"
                 orphan_checks.append(
                     ValidationCheck(
                         name="delete",
                         passed=False,
-                        message=f"Cleanup failed for target '{target}' after a failed PUT: {delete_check.message}",
+                        message=f"Cleanup failed for target '{target}' {reason}: {delete_check.message}",
                     )
                 )
         checks.extend(orphan_checks)
@@ -647,7 +658,11 @@ class EtcdClientValidator(BaseValidator):
             return ValidationCheck(
                 name="get",
                 passed=False,
-                message=f"Canary value mismatch: expected '{expected_value}', got '{actual_value}'.",
+                # actual_value is attacker/environment-influenced data returned by the remote
+                # etcd server (e.g. a malformed or unexpected response could return another
+                # key's value entirely), so it must never be echoed verbatim into a diagnostic
+                # message; only report that verification failed, not the mismatched content.
+                message=f"Canary value mismatch: expected value not found for key '{key}'.",
             )
         return ValidationCheck(name="get", passed=True, message="Canary value read back and verified.")
 

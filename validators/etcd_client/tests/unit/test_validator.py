@@ -44,11 +44,15 @@ def _make_validator(
     return EtcdClientValidator(cast(ops.CharmBase, stub_charm), cast(ops.Relation, relation))
 
 
-def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock:
+def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any, put_keys: list[bytes] | None = None) -> MagicMock:
     """Build a fake grpc.Channel whose unary_unary() mimics etcd's KV service.
 
     Encodes/decodes using the validator module's own hand-rolled protobuf wire
     helpers, so the fake responses are realistic without needing generated stubs.
+
+    `stored` models etcd's actual current state (mutated by PUT/DELETE), while the optional
+    `put_keys` list independently records every key ever PUT, in order, so tests can still
+    assert on the canary key used even after a passing DELETE has removed it from `stored`.
     """
 
     def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
@@ -57,6 +61,8 @@ def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock
                 fields = _decode_message(request)
                 stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
                 stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                if put_keys is not None:
+                    put_keys.append(stored["key"])
                 return b""
             if method.endswith("/Range"):
                 request_fields = _decode_message(request)
@@ -67,6 +73,17 @@ def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any) -> MagicMock
                 )
                 return _encode_bytes_field(2, key_value_msg)
             if method.endswith("/DeleteRange"):
+                request_fields = _decode_message(request)
+                requested_key = request_fields.get(1, [b""])[0]
+                # Model deletion for real (rather than unconditionally succeeding without
+                # effect): only remove the stored key/value if the request's key actually
+                # matches what was stored, and leave `stored` untouched otherwise, so tests
+                # can assert the canary is genuinely gone after a passing validation (and
+                # would catch a regression that deletes the wrong key or leaves the canary
+                # behind).
+                if stored.get("key") == requested_key:
+                    stored.pop("key", None)
+                    stored.pop("value", None)
                 return b""
             raise AssertionError(f"unexpected method {method}")
 
@@ -257,6 +274,26 @@ class TestEtcdClientValidatorRequiresSimple:
         assert targets == []
         assert secret not in check.message
         assert "<redacted>" in check.message
+
+    def test_redacts_userinfo_containing_slash_before_terminating_at_sign(self) -> None:
+        # GIVEN a malformed uri where a "?" and a "/" both appear within the userinfo segment
+        # itself, before its own terminating "@" (e.g. "admin:secret?token/foo@host"): the
+        # userinfo redaction must not stop at either delimiter, since a naive redaction that
+        # only crosses "?"/"#" but still stops at the first "/" would leave "admin:secret"
+        # exposed (the "//" scheme separator's slashes are handled separately, by locating
+        # them via substring search rather than by scanning past every "/" in the rest of
+        # the string).
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "https://admin:" + secret + "?token/foo@host:2379"
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
+        assert "<redacted>" in check.message
+        assert check.message.startswith("Could not parse uri 'https://<redacted>@host:2379'")
 
     def test_fails_endpoints_format_check_for_overlong_digit_port(self) -> None:
         # A port string with far more digits than any valid port (max 65535, 5 digits) must
@@ -574,7 +611,8 @@ class TestEtcdClientValidatorRequiresDeep:
             validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
 
             stored: dict[str, bytes] = {}
-            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+            put_keys: list[bytes] = []
+            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""), put_keys=put_keys)
 
             with (
                 patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
@@ -589,7 +627,11 @@ class TestEtcdClientValidatorRequiresDeep:
         # Regression guard: the canary key written must be scoped under the requirer's own
         # local "prefix" (VALID_LOCAL_REQUIRER_DATABAG), not e.g. a regressed read of the
         # provider's remote databag, which has no "prefix" field of its own.
-        assert stored["key"].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
+        assert put_keys and put_keys[-1].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
+        # Regression guard: the fake DeleteRange handler above only removes `stored` when the
+        # delete request's key actually matches, so this also confirms the DELETE really did
+        # target the same canary key that was PUT, not merely that the "delete" check passed.
+        assert "key" not in stored
 
     def test_fails_get_check_when_value_mismatches(self, monkeypatch: pytest.MonkeyPatch) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -787,6 +829,87 @@ class TestEtcdClientValidatorRequiresDeep:
         for name in ("put", "get", "delete"):
             check = next(c for c in result.checks if c.name == name)
             assert check.passed
+
+    def test_retries_cleanup_on_next_target_when_put_succeeds_but_delete_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN the first target's PUT (and GET verification) succeed, but its own DELETE
+        # fails, and a second advertised target is available: the retry loop must not stop
+        # simply because PUT succeeded on the first target. It must keep trying the
+        # remaining targets so the orphaned canary actually gets cleaned up, only stopping
+        # once cleanup has genuinely succeeded (not merely once some target's PUT has).
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "deadline exceeded"
+
+            targets_seen: list[str] = []
+            stored: dict[str, bytes] = {}
+
+            def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+                targets_seen.append(target)
+                if target == "10.1.2.3:2379":
+
+                    def unary_unary(
+                        method: str, request_serializer: Any = None, response_deserializer: Any = None
+                    ) -> Any:
+                        def call(request: bytes, timeout: float = 0) -> bytes:
+                            if method.endswith("/Put"):
+                                fields = _decode_message(request)
+                                stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
+                                stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                                return b""
+                            if method.endswith("/Range"):
+                                requested_key = _decode_message(request).get(1, [b""])[0]
+                                value = stored.get("value", b"")
+                                key_value_msg = _encode_bytes_field(1, requested_key) + _encode_bytes_field(  # type: ignore[arg-type]
+                                    5, value
+                                )
+                                return _encode_bytes_field(2, key_value_msg)
+                            if method.endswith("/DeleteRange"):
+                                # Cleanup fails on this target even though the PUT succeeded.
+                                raise _FakeRpcError()
+                            raise AssertionError(f"unexpected method {method}")
+
+                        return call
+
+                    channel = MagicMock()
+                    channel.unary_unary.side_effect = unary_unary
+                    channel.__enter__.return_value = channel
+                    channel.__exit__.return_value = False
+                    return channel
+                return _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch(
+                    "validators.etcd_client.validator.grpc.secure_channel",
+                    side_effect=make_channel_for_target,
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        # The first target's PUT succeeded but its DELETE failed, so the retry loop must
+        # have carried on to the second target rather than stopping right after that PUT.
+        assert targets_seen == ["10.1.2.3:2379", "10.1.2.4:2379"]
+        delete_checks = [c for c in result.checks if c.name == "delete"]
+        assert any(not c.passed for c in delete_checks)
+        assert any(c.passed for c in delete_checks)
+        # The second target's own full cycle (PUT/GET/DELETE) succeeded, and its DELETE
+        # really did remove the canary (see _make_fake_kv_channel's DeleteRange handling),
+        # so the canary is not left behind even though target 1's cleanup failed.
+        assert "key" not in stored
 
     def test_preserves_cleanup_failure_from_superseded_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN the first target's PUT fails and its own best-effort cleanup DELETE also
@@ -1072,7 +1195,8 @@ class TestEtcdClientValidatorRequiresDeep:
             monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
 
             stored: dict[str, bytes] = {}
-            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+            put_keys: list[bytes] = []
+            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""), put_keys=put_keys)
 
             with (
                 patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
@@ -1086,7 +1210,10 @@ class TestEtcdClientValidatorRequiresDeep:
         assert "secret:local-mtls" in charm.model.requested_ids
         # Regression guard: same as test_passes_full_read_write_cycle_with_provisioned_identity,
         # confirms the canary key is scoped under the requirer's own local "prefix".
-        assert stored["key"].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
+        assert put_keys and put_keys[-1].decode().startswith(VALID_LOCAL_REQUIRER_DATABAG["prefix"])
+        # Regression guard: confirms the fake DeleteRange handler's key actually matched and
+        # removed the canary, not merely that the "delete" check passed.
+        assert "key" not in stored
 
 
 class TestEtcdClientValidatorGrpcTarget:
