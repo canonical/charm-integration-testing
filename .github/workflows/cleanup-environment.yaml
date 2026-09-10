@@ -351,3 +351,35 @@ jobs:
               openstack floating ip delete "$fip_id" || true
             fi
           done
+      - name: Find and delete orphaned ports that are in the DOWN state and older than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |-
+          mapfile -t active_lbs < <(openstack loadbalancer list -f value -c id)
+
+          is_active_lb() {
+            local id=$1
+            for lb in "${active_lbs[@]}"; do
+              [[ $lb == "$id" ]] && return 0
+            done
+            return 1
+          }
+
+          openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID' | while read -r port_id; do
+            port_data=$(openstack port show "$port_id" --format json)
+            device_owner=$(jq -r '.device_owner' <<<"$port_data")
+            device_id=$(jq -r '.device_id' <<<"$port_data")
+            created=$(jq -r '.created_at' <<<"$port_data")
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+          
+            [[ $device_owner != "Octavia" ]] && continue
+            [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
+          
+            lb_id=${device_id#lb-}
+            if is_active_lb "$lb_id"; then
+              echo "Skipping port $port_id — still used by load balancer $lb_id"
+            else
+              echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
+              openstack port delete "$port_id" || true
+            fi
+          done
