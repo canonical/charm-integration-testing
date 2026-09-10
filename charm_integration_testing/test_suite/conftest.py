@@ -592,7 +592,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             charm_revision=previous_revision,
             ubuntu_version=target_base,
         )
-    except CharmReleaseNotFoundException:
+    except BaseMismatchError:
         pytest.skip(
             f"Charm '{target_charm}' revision {previous_revision} does not support base "
             f"'{target_base}' used by target revision {target_revision}; the downgrade/upgrade "
