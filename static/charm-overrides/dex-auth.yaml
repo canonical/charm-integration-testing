@@ -54,7 +54,7 @@ overrides:
     constraints:
       - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
-  # 2.41+ (and latest): adds require-cmr-mesh/service-mesh (requires) and
+  # 2.41, latest: adds require-cmr-mesh/service-mesh (requires) and
   # provide-cmr-mesh (provides). provide-cmr-mesh must be integrated cross-model with
   # exactly the same charms as the mesh-managed dex-oidc-config/metrics-endpoint
   # endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py) are

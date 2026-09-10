@@ -224,19 +224,26 @@ class Domain(BaseModel):
         self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
     ) -> DomainCharmIntegration:
         """Return the canonical integration whose name all cross-model integrations between the
-        same two charms as ``integration`` should share as their Juju offer name.
+        same two charms as ``integration``, in the same provides -> requires direction, should
+        share as their Juju offer name.
+
+        Matching is directional (same provides_charm_id/requires_charm_id), not just the same
+        unordered charm pair: a Juju offer is hosted by one application (the provider), so two
+        charms that provide *different* endpoints to each other (a mutually-required pair, e.g.
+        a cyclic relation) need two separate offers, one per direction - merging them would make
+        both directions collide on one offer name and corrupt the SAAS/offer-URL mapping.
 
         If ``z3_model`` is given, only integrations the solver actually activated are considered;
         otherwise (e.g. in tests exercising offer-naming in isolation) all declared integrations
         between the pair are candidates. Ties are broken deterministically by endpoint name, so
-        every integration between the pair resolves to the same anchor.
+        every integration between the pair (in this direction) resolves to the same anchor.
         """
-        charm_pair = {integration.requires_charm_id, integration.provides_charm_id}
         candidates = [
             other
             for other in self.charm_integrations
             if self.is_cross_model(other)
-            and {other.requires_charm_id, other.provides_charm_id} == charm_pair
+            and other.provides_charm_id == integration.provides_charm_id
+            and other.requires_charm_id == integration.requires_charm_id
             and (z3_model is None or z3_model.evaluate(other.exists, model_completion=True))
         ]
         if not candidates:
