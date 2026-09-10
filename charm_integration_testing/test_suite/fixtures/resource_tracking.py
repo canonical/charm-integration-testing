@@ -122,7 +122,7 @@ def resource_tracking_skips_by_application(
                 key = (handle.controller, handle.model, application, channel.explicit_track)
                 if key in _resource_tracking_skip_cache:
                     continue
-                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel)
+                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
                 if resolved:
                     _resource_tracking_skip_cache[key] = resolved
 

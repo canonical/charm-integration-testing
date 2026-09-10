@@ -583,6 +583,7 @@ class JubilantBackend(JujuCmdBackend):
                 charm=app_info.charm,
                 revision=app_info.charm_rev,
                 channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+                base=app_info.base.channel if app_info.base else None,
             )
             for app_name, app_info in self.status(model).apps.items()
         }

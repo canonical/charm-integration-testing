@@ -18,7 +18,7 @@ from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import UnparsableCharmException
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
-from bundle_builder_x.release_errors import ReleaseUnavailableError
+from bundle_builder_x.release_errors import ReleaseUnavailableError, ReleaseUnavailableKind
 
 
 def test_charm_override_yaml_is_valid(
@@ -45,7 +45,11 @@ def test_charm_override_file_is_valid(
         )
     except UnparsableCharmException as exc:
         pytest.fail(str(exc))
-    except ReleaseUnavailableError:
+    except ReleaseUnavailableError as exc:
+        if exc.kind is ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE:
+            # A malformed/unexpected Charmhub response is a real failure, not evidence
+            # that this (channel, ubuntu_version) combination simply isn't published.
+            raise
         # This (channel, ubuntu_version) combination isn't actually published for this
         # charm (e.g. an old track never released a revision for a newer base, or vice
         # versa) - unrelated to whether the override's declared endpoints are stale.
