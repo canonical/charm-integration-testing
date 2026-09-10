@@ -2864,6 +2864,28 @@ type = "directory"
 url = "validators/ingress_auth"
 
 [[package]]
+name = "validators-istio-ingress-route"
+version = "0.1.0"
+description = "Validator for the istio_ingress_route interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = {version = ">=42.0.0", optional = true}
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["cryptography (>=42.0.0)", "validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/istio_ingress_route"
+
+[[package]]
 name = "validators-kafka-client"
 version = "0.1.0"
 description = "Validator for kafka_client interface"
@@ -3174,6 +3196,7 @@ validators-grafana-datasource = "*"
 validators-http-interface = "*"
 validators-ingress = "*"
 validators-ingress-auth = "*"
+validators-istio-ingress-route = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
 validators-loki-push-api = "*"
@@ -3482,4 +3505,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "1508853519b1b9bdd863d246a69e7321ab1878161cf13203bedc94e037773b1d"
+content-hash = "5202152ea6dba2e0749df9a526cb0082f3064e90a542e2a6b0d01ee581925535"
