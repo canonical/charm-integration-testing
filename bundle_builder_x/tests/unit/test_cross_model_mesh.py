@@ -374,6 +374,62 @@ class TestCrossModelMeshOfferSharing:
             workload_alt_integration, model
         )
 
+    def test_bidirectional_cross_model_pair_keeps_separate_offers_per_direction(self) -> None:
+        # GIVEN two charms in different models that each provide a distinct endpoint to the
+        # other (a mutually-required pair, e.g. dex-auth/oidc-gatekeeper's dex-oidc-config <->
+        # oidc-client cyclic relation). Offer-sharing must NOT merge these into one offer: a
+        # Juju offer is hosted by a single application, so charm-a's offer (exposing endpoint-a)
+        # and charm-b's offer (exposing endpoint-b) are necessarily two separate offers.
+        charm_a = _make_charm(
+            "charm-a",
+            {
+                "provide-a": CharmEndpoint(type=EndpointType.PROVIDES, interface="iface-a", cyclic=True),
+                "require-b": CharmEndpoint(type=EndpointType.REQUIRES, interface="iface-b"),
+            },
+        )
+        charm_b = _make_charm(
+            "charm-b",
+            {
+                "require-a": CharmEndpoint(type=EndpointType.REQUIRES, interface="iface-a", cyclic=True),
+                "provide-b": CharmEndpoint(type=EndpointType.PROVIDES, interface="iface-b"),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"a": DomainApplication(charm="charm-a")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"b": DomainApplication(charm="charm-b")},
+                ),
+            }
+        )
+        charm_a_id = add_charm_to_domain(charm_a, domain, ModelRef(name="model-a"))
+        charm_b_id = add_charm_to_domain(charm_b, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, charm_a_id, charm_b_id)
+
+        [iface_a_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "iface-a"]
+        [iface_b_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "iface-b"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(iface_a_integration.exists)
+        solver.add(iface_b_integration.exists)
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN each direction keeps its own offer name (charm-a hosts one offer, charm-b hosts
+        # the other), rather than colliding on a single shared name.
+        offer_a = domain.integration_offer_name(iface_a_integration, model)
+        offer_b = domain.integration_offer_name(iface_b_integration, model)
+        assert offer_a != offer_b
+
 
 class TestCrossModelMeshCompanionOverrideConstraint:
     """The companion requirement is no longer a core-solver rule (see issue #980's resolution):
