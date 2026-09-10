@@ -71,7 +71,6 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
-from bundle_builder_x.charmhub_http import RefreshAction
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -556,59 +555,43 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             current_revision=target_revision,
             track=track,
         )
-        if previous_revision is None:
-            # No usable historical revision (e.g. all prior revisions predate a base change and
-            # are unreachable without --force-series). Skip rather than fail to avoid cascading
-            # SKIPs of test_deploy_target_old_revision and [injected] test_upgrade_charm.
-            pytest.skip(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{target_channel}'."
-            )
-        return previous_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
-
-def _charm_base_channels(charmhub_client: CharmhubClient, charm_name: str, revision: int) -> set[str]:
-    """Return the Ubuntu base channels (e.g. "22.04") a charm revision supports on Charmhub.
-
-    Returns an empty set if the bases can't be determined, so callers treat that as "unknown"
-    rather than "incompatible".
-    """
-    refresh_info = charmhub_client.http_client.refresh(
-        RefreshAction(charm_name=charm_name, charm_revision=revision, always_include_base=True)
-    )
-    if refresh_info.error is not None or refresh_info.charm is None or refresh_info.charm.bases is None:
-        return set()
-    return {base.channel for base in refresh_info.charm.bases}
-
-
-@pytest.fixture
-def require_compatible_downgrade_bases(
-    charmhub_client: CharmhubClient,
-    target_charm: str,
-    target_revision: int | None,
-    target_downgrade_revision: int,
-) -> None:
-    """Skip the downgrade/upgrade cycle when the two revisions share no Ubuntu base.
-
-    Both ``test_downgrade_charm`` and ``test_upgrade_charm`` reach their target revision via
-    ``juju refresh``, which Juju rejects across incompatible bases (this framework does not use
-    ``--force-series``). When ``target_revision`` and ``target_downgrade_revision`` have disjoint
-    base sets, neither the downgrade refresh nor the upgrade refresh can succeed, so the cycle is
-    untestable. Every test in the cycle depends on this fixture so they skip as a unit, leaving
-    the model in its current state instead of running a refresh against the wrong revision.
-    """
-    if target_revision is None:
-        return
-    target_bases = _charm_base_channels(charmhub_client, target_charm, target_revision)
-    downgrade_bases = _charm_base_channels(charmhub_client, target_charm, target_downgrade_revision)
-    if target_bases and downgrade_bases and target_bases.isdisjoint(downgrade_bases):
+    if previous_revision is None:
+        # No usable historical revision (e.g. all prior revisions predate a base change and
+        # are unreachable without --force-series). Skip rather than fail to avoid cascading
+        # SKIPs of test_deploy_target_old_revision and [injected] test_upgrade_charm.
         pytest.skip(
-            f"Charm '{target_charm}' revisions {target_revision} (bases {sorted(target_bases)}) and "
-            f"{target_downgrade_revision} (bases {sorted(downgrade_bases)}) share no common base; the "
-            "downgrade/upgrade refresh cycle cannot run without --force-series."
+            "Unable to find a historical revision with a passing test_deploy result "
+            f"for charm '{target_charm}' in channel '{target_channel}'."
         )
+
+    # test_downgrade_charm and test_upgrade_charm reach their target revision via juju refresh,
+    # which Juju rejects across incompatible bases (this framework does not use --force-series).
+    # Skip when the downgrade revision cannot run on the base the target revision is deployed on.
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+    target_series: str | None = request.getfixturevalue("target_series")
+    target_base = charmhub_client.charm_from_store(
+        charm_name=target_charm,
+        ubuntu_arch="amd64",
+        charm_revision=target_revision,
+        ubuntu_version=target_series,
+    ).ubuntu_version
+    try:
+        charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            ubuntu_arch="amd64",
+            charm_revision=previous_revision,
+            ubuntu_version=target_base,
+        )
+    except CharmReleaseNotFoundException:
+        pytest.skip(
+            f"Charm '{target_charm}' revision {previous_revision} does not support base "
+            f"'{target_base}' used by target revision {target_revision}; the downgrade/upgrade "
+            "refresh cycle cannot run without --force-series."
+        )
+    return previous_revision
 
 
 @pytest.fixture
