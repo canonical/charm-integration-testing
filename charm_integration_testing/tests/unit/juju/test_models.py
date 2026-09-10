@@ -198,6 +198,11 @@ class TestJujuConsumedOfferInfo:
             ),
             Params(label="missing_colon", url="admin/other-model.postgresql-k8s", should_be_none=True),
             Params(label="missing_slash", url="other-controller:other-model.postgresql-k8s", should_be_none=True),
+            Params(
+                label="slash_before_colon_only",
+                url="other/controller:other-model.postgresql-k8s",
+                should_be_none=True,
+            ),
             Params(label="missing_dot", url="other-controller:admin/other-model-postgresql-k8s", should_be_none=True),
             Params(label="empty_string", url="", should_be_none=True),
             Params(label="empty_controller", url=":admin/other-model.postgresql-k8s", should_be_none=True),

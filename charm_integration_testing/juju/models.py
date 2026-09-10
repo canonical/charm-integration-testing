@@ -94,9 +94,11 @@ class JujuConsumedOfferInfo:
         addressing may require it when the model's owner differs from the currently authenticated
         user. Returns None if the URL doesn't match the expected shape.
         """
-        if ":" not in self.url or "/" not in self.url:
+        if ":" not in self.url:
             return None
         controller, rest = self.url.split(":", 1)
+        if "/" not in rest:
+            return None
         owner, model_and_offer = rest.split("/", 1)
         if "." not in model_and_offer:
             return None
