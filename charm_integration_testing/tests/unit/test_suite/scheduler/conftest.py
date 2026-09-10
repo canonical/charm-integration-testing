@@ -73,11 +73,15 @@ def reset_injected_ids() -> Iterator[None]:
     """Clear all module-level plugin globals before and after every test.
 
     Prevents state leaking between unit tests that call the plugin hooks
-    directly. ``_current_state`` is set to a default valid state (mirroring
-    what ``pytest_collection_modifyitems`` always does before any test runs
-    in a real session) rather than left as ``None``, since ``None`` means
-    "environment state unknown" and would make every hook under test behave
-    as if a prior failure had already halted the run.
+    directly. ``_current_state`` is set to an arbitrary valid state
+    (``State.EMPTY_MODEL``, chosen only because it is a real, non-terminal
+    member of ``State`` -- it does not mirror the plugin's actual
+    ``--current-state`` default of ``State.NO_BUNDLE``) rather than left as
+    ``None``, since ``None`` means "environment state unknown" and would make
+    every hook under test behave as if a prior failure had already halted the
+    run. Tests that depend on the exact starting state should set
+    ``_plugin_module._current_state`` explicitly rather than relying on this
+    default.
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()

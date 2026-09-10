@@ -77,9 +77,11 @@ _injected_item_ids: set[int] = set()
 # still identify which scheduled item a duplicate came from.
 _duplicate_original_ids: dict[int, int] = {}
 
-# Set to the first transition item that fails at call-time.  Once non-None,
-# all subsequent state-marked tests are skipped because the environment state
-# is unknown. Pure test failures do NOT set this: they leave the state intact.
+# Set to the first state-marked item (transition or pure) that fails at
+# setup, call, or teardown time.  Once non-None, all subsequent state-marked
+# tests are skipped because the environment state is unknown: any state-marked
+# failure -- not just a transition test's -- also sets ``_current_state`` to
+# ``None``, since a pure test failure can leave the environment broken too.
 _failed_state_test: pytest.Item | None = None
 
 # The scheduler's runtime belief about the environment's actual state, updated

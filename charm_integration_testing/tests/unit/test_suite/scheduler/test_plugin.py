@@ -1030,7 +1030,10 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._current_state is None
 
     def test_does_not_set_for_unmarked_item_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN an item with no state marker
+        # GIVEN an item with no state marker, with the current state set explicitly
+        # (rather than relying on the reset_injected_ids fixture's default) so this
+        # assertion stays valid even if that default changes.
+        _plugin_module._current_state = State.EMPTY_MODEL
         item = make_item("test_something")
         call = SimpleNamespace(excinfo=SimpleNamespace(type=AssertionError, value=AssertionError()))
         report = _make_report(when="call", failed=True)
