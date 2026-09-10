@@ -268,6 +268,7 @@ class TestEtcdClientValidatorRequiresSimple:
             ("[10.1.2.3:2379", "one-sided bracket around non-colon host"),
             ("[10.1.2.3]:2379", "balanced brackets around a non-ipv6 host"),
             ("[]:2379", "balanced brackets around an empty host"),
+            ("[1:2:3:4:5:6:7:8:9]:2379", "balanced brackets around a colon-bearing but invalid ipv6 host"),
             ("10.1.2.3:1_000", "port with underscore separator"),
             ("10.1.2.3:+2379", "port with explicit sign"),
         ],
@@ -1348,6 +1349,36 @@ class TestEtcdClientValidatorRequiresDeep:
         assert result.status == "FAIL"
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert not delete_check.passed
+
+    def test_fails_identity_match_gracefully_when_local_databag_key_is_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # GIVEN a relation where this application hasn't published anything on its own
+        # side yet: self.charm.app is not a key in self.relation.data at all (as opposed
+        # to being present with an empty dict). _local_databag() must return {} in that
+        # case, like BaseValidator.databag does for the remote side, rather than let
+        # indexing self.relation.data[self.charm.app] raise KeyError and crash deep
+        # validation into ERROR instead of a clean FAIL.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            # No local_databag passed: self.charm.app is absent from relation.data entirely.
+            validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+            result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        identity_check = next(c for c in result.checks if c.name == "identity_match")
+        assert not identity_check.passed
+        for name in ("put", "get", "delete"):
+            assert not any(c.name == name for c in result.checks)
 
     def test_fails_identity_match_when_local_cert_does_not_match_published_cert(
         self, monkeypatch: pytest.MonkeyPatch

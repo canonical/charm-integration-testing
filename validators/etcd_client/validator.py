@@ -7,6 +7,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
+from ipaddress import IPv6Address
 from urllib.parse import urlsplit
 
 import grpc
@@ -607,7 +608,15 @@ class EtcdClientValidator(BaseValidator):
         own ``prefix``/``mtls-cert`` fields live in this application's own
         databag on the relation, so they must be read directly from
         ``self.relation.data``.
+
+        Mirrors ``BaseValidator.databag``'s defensive lookup: if this application hasn't
+        published anything on the relation yet, ``self.charm.app`` may not be a key in
+        ``self.relation.data`` at all, and indexing it directly would raise ``KeyError``
+        instead of letting the caller's existing missing-field checks (e.g.
+        ``prefix_present``) report a normal FAIL.
         """
+        if self.charm.app not in self.relation.data:
+            return {}
         return dict(self.relation.data[self.charm.app])
 
     def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
@@ -877,7 +886,12 @@ class EtcdClientValidator(BaseValidator):
             if has_one_sided_bracket:
                 port_valid = False
             elif is_bracketed:
-                if ":" not in host[1:-1]:
+                # A colon alone doesn't prove the bracketed content is a valid IPv6 literal
+                # (e.g. "[not-an-ipv6]:2379" contains no colon but "[not:an:ipv6]:2379" would
+                # wrongly pass a bare colon check); parse it as an actual IPv6 address.
+                try:
+                    IPv6Address(host[1:-1])
+                except ValueError:
                     port_valid = False
             elif ":" in host:
                 port_valid = False
