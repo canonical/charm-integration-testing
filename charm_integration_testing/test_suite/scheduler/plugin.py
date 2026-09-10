@@ -77,9 +77,9 @@ _injected_item_ids: set[int] = set()
 # still identify which scheduled item a duplicate came from.
 _duplicate_original_ids: dict[int, int] = {}
 
-# Set to the first transition item that fails at call-time.  Once non-None,
-# all subsequent state-marked tests are skipped because the environment state
-# is unknown. Pure test failures do NOT set this: they leave the state intact.
+# Set to the first state-marked test that fails at setup, call, or teardown time. Once non-None,
+# all subsequent state-marked tests are skipped because the environment state is unknown. Any
+# state-marked failure sets this, including pure tests; unmarked tests never do.
 _failed_state_test: pytest.Item | None = None
 
 # Set to the first state-marked *transition* test that is skipped.  A skipped
@@ -200,7 +200,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     same Python process (e.g. from a test harness) would see stale data from
     the previous run.
     """
-    global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test, _skipped_transition_test
+    global _all_collected, _injected_item_ids, _duplicate_original_ids
+    global _failed_state_test, _skipped_transition_test
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()

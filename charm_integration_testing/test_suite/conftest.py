@@ -603,8 +603,9 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     except BaseMismatchError:
         # The target itself cannot be resolved on the requested series (e.g. stale --target-series
         # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
+        requested_series = target_series if target_series is not None else "default"
         pytest.skip(
-            f"Charm '{target_charm}' target does not support the requested base '{target_series}'; "
+            f"Charm '{target_charm}' target does not support the requested base '{requested_series}'; "
             "the downgrade/upgrade refresh cycle is untestable."
         )
 
