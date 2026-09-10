@@ -63,9 +63,17 @@ class ValidatorInjectorExtension(JujuExtension):
                 return []
             self._inject_validators(model, unit, is_k8s=is_k8s)
 
-        # Run validators, retrying once if the runner binary has disappeared since injection.
+        # Run validators. Only retry when the runner binary is missing (rc=127, "command not
+        # found"), which indicates the unit/pod was rescheduled and lost the injected runner.
+        # A genuine validator failure returns a different rc and must not trigger a re-check
+        # or reinjection that could mask the real failure.
         run_result = self._run_validators_once(model, unit, level, is_k8s)
-        if run_result.return_code != 0 and not self._is_venv_runner_present(model, unit, is_k8s):
+        if run_result.return_code == 127 and not self._is_venv_runner_present(model, unit, is_k8s):
+            if not self.validators_path:
+                raise RuntimeError(
+                    f"Validators runner missing on {unit} and no validators_path configured to reinject "
+                    f"(rc={run_result.return_code}): {run_result.stderr}"
+                )
             self.logger.warning(f"Validators no longer present on {unit}; reinjecting and retrying")
             self._inject_validators(model, unit, is_k8s=is_k8s)
             run_result = self._run_validators_once(model, unit, level, is_k8s)
