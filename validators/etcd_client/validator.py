@@ -63,10 +63,28 @@ def _encode_varint(value: int) -> bytes:
             return bytes(out)
 
 
+_MAX_VARINT_BYTES = 10  # ceil(64 / 7): the longest a varint encoding a 64-bit value can be.
+
+
 def _decode_varint(data: bytes, pos: int) -> tuple[int, int]:
+    """Decode a single protobuf varint starting at `pos`, bounding both length and reads.
+
+    Server-provided bytes are untrusted input: without an explicit bound, a truncated or
+    adversarial buffer whose continuation bit ("high bit") is set on every remaining byte
+    would otherwise be read one byte past the buffer's end (`IndexError`, an implicit and
+    unbounded-looking failure mode) or, for a buffer padded with high-bit-set bytes, loop for
+    up to `len(data)` iterations shifting an ever-growing integer. Real protobuf varints never
+    exceed 10 bytes (the encoding of a full 64-bit value), so both are rejected explicitly as
+    a `ValueError` rather than relying on an eventual out-of-bounds access or unbounded CPU work.
+    """
     result = 0
     shift = 0
+    start = pos
     while True:
+        if pos >= len(data):
+            raise ValueError(f"truncated varint starting at offset {start}")
+        if pos - start >= _MAX_VARINT_BYTES:
+            raise ValueError(f"overlong varint (>{_MAX_VARINT_BYTES} bytes) starting at offset {start}")
         byte = data[pos]
         pos += 1
         result |= (byte & 0x7F) << shift
@@ -719,9 +737,7 @@ class EtcdClientValidator(BaseValidator):
             return ValidationCheck(
                 name="username_matches_cert_cn",
                 passed=False,
-                message=(
-                    f"Client cert common name '{cn}' does not match the published " f"username '{expected_username}'."
-                ),
+                message=f"Client cert common name '{cn}' does not match the published username '{expected_username}'.",
             )
         return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
 
@@ -751,7 +767,18 @@ class EtcdClientValidator(BaseValidator):
             kvs = fields.get(2, [])  # RangeResponse.kvs (field 2), repeated KeyValue
             if not kvs:
                 return ValidationCheck(name="get", passed=False, message=f"Canary key '{key}' not found after PUT.")
-            kv_fields = _decode_message(kvs[0])  # type: ignore[arg-type]
+            first_kv = kvs[0]
+            if not isinstance(first_kv, bytes):
+                # RangeResponse.kvs (field 2) is a length-delimited (wire type 2) repeated
+                # field, which _decode_message always decodes as bytes; a malformed response
+                # that instead encodes field 2 with wire type 0 (varint) would make kvs[0] an
+                # int here, which _decode_message cannot itself further decode as a nested
+                # message. Reporting that explicitly (rather than via a bare type: ignore
+                # suppressing the type-checker's own correct concern) gives a clearer failure.
+                return ValidationCheck(
+                    name="get", passed=False, message="Malformed GET response: kvs[0] has the wrong wire type."
+                )
+            kv_fields = _decode_message(first_kv)
             actual_key_bytes = kv_fields.get(1, [b""])[0]  # KeyValue.key (field 1)
             actual_key = actual_key_bytes.decode() if isinstance(actual_key_bytes, bytes) else ""
             actual_bytes = kv_fields.get(5, [b""])[0]  # KeyValue.value (field 5)
@@ -856,7 +883,17 @@ class EtcdClientValidator(BaseValidator):
             # pass.
             if any(not check.passed for check in checks):
                 return self._make_result(level=level, checks=checks)
-            return self._skipped_result_due_to_level(level)
+            return self._make_result(
+                status="SKIPPED",
+                level=level,
+                checks=checks,
+                error=(
+                    "Deep validation of the 'provides' role would require provider-side admin "
+                    "material this interface never exposes (etcd_client gives the provider no "
+                    "private key either); the read/write round-trip this would otherwise cover "
+                    "is instead exercised from the 'requires' role (see module docstring)."
+                ),
+            )
 
         elapsed = time.monotonic() - start_time
         checks.append(self._check_latency(elapsed, _SIMPLE_LATENCY_TARGET_S))

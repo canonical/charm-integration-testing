@@ -1329,7 +1329,8 @@ class TestEtcdClientValidatorRequiresDeep:
                         return b""
                     if method.endswith("/Range"):
                         # A single 0x80 byte is a varint continuation byte with no following
-                        # byte to complete it, so _decode_varint's next read raises IndexError.
+                        # byte to complete it, so _decode_varint's own bounds check raises a
+                        # controlled ValueError (rather than reading past the buffer's end).
                         return b"\x80"
                     if method.endswith("/DeleteRange"):
                         return _encode_varint_field(2, 1)
@@ -1354,6 +1355,52 @@ class TestEtcdClientValidatorRequiresDeep:
         assert "malformed" in get_check.message.lower()
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert delete_check.passed
+
+    def test_fails_get_check_when_response_has_overlong_varint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a Range response whose bytes are 11 varint continuation bytes (0x80) in a
+        # row: a real protobuf varint never exceeds 10 bytes (the encoding of a full 64-bit
+        # value), so this must be rejected as a controlled ValueError rather than looping
+        # indefinitely accumulating shifted bits from an unbounded/adversarial buffer.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379"}
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        return b""
+                    if method.endswith("/Range"):
+                        return b"\x80" * 11
+                    if method.endswith("/DeleteRange"):
+                        return _encode_varint_field(2, 1)
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        get_check = next(c for c in result.checks if c.name == "get")
+        assert not get_check.passed
+        assert "malformed" in get_check.message.lower()
 
     def test_fails_delete_check_when_delete_rpc_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN a successful PUT/GET but a DeleteRange call that fails at the transport
@@ -1965,6 +2012,13 @@ class TestEtcdClientValidatorProvidesDeep:
 
         assert result.status == "SKIPPED"
         assert result.error is not None
+        # The already-passing L1 checks must be preserved on the SKIPPED result, not
+        # discarded, and the message must be specific to this role rather than the
+        # generic (and here misleading, since deep *is* supported for "requires")
+        # "Level 'deep' is not supported" wording.
+        assert result.checks
+        assert all(c.passed for c in result.checks)
+        assert "requires" in result.error.lower()
 
     def test_returns_fail_for_deep_level_when_l1_check_fails(self) -> None:
         # GIVEN an expired cert: an L1 failure must not be discarded by the deep-level
