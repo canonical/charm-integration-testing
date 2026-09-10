@@ -135,6 +135,9 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        raise NotImplementedError
+
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
     ) -> None:
