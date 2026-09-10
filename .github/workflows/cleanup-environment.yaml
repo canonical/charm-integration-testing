@@ -371,7 +371,15 @@ jobs:
             done
             return 1
           }
-          openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID' | while read -r port_id; do
+          port_ids_output=$(openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID') || {
+            echo "Failed to list DOWN ports; refusing to continue orphaned port cleanup"
+            exit 1
+          }
+          down_port_ids=()
+          if [[ -n $port_ids_output ]]; then
+            mapfile -t down_port_ids <<<"$port_ids_output"
+          fi
+          for port_id in "${down_port_ids[@]}"; do
             port_data=$(openstack port show "$port_id" --format json) || {
               echo "Failed to read port $port_id; refusing to continue orphaned port cleanup"
               exit 1
