@@ -25,6 +25,11 @@ _SIMPLE_LATENCY_TARGET_S = 0.5
 _DEEP_LATENCY_TARGET_S = 10.0
 _TCP_CONNECT_TIMEOUT_S = 3.0
 _GRPC_TIMEOUT_S = 5.0
+# Best-effort cleanup after a PUT that already failed on this target doesn't need the full
+# RPC timeout budget: the same unreachability that failed the PUT will fail DeleteRange too,
+# so waiting the full _GRPC_TIMEOUT_S here would let one bad target consume most of the
+# deep-level latency budget before the next advertised target is even tried.
+_GRPC_CLEANUP_AFTER_FAILED_PUT_TIMEOUT_S = 1.0
 
 # etcd's client port serves both native gRPC and a JSON grpc-gateway. The
 # grpc-gateway is deliberately unusable here: etcd rejects gateway writes made
@@ -106,7 +111,10 @@ ETCD_CLIENT_CERT_PATH_ENV = "VALIDATOR_ETCD_CLIENT_CERT_PATH"
 ETCD_CLIENT_KEY_PATH_ENV = "VALIDATOR_ETCD_CLIENT_KEY_PATH"
 
 _REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "tls", "version"]
-_PROVIDER_FIELDS = ["prefix", "mtls-cert"]
+# "prefix" is checked separately from validate_schema() (see _validate_provides): an
+# intentionally empty prefix (root of the keyspace) is a valid value, so its presence
+# must be checked by key rather than truthiness, unlike "mtls-cert" which must be non-empty.
+_PROVIDER_FIELDS = ["mtls-cert"]
 
 
 def _redact_uri_for_message(uri: str) -> str:
@@ -351,23 +359,44 @@ class EtcdClientValidator(BaseValidator):
         canary_key = f"{prefix}validator-canary-{uuid.uuid4().hex[:12]}"
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
 
-        attempt_checks: list[ValidationCheck] = []
-        for target in targets:
-            attempt_checks = []
+        # orphan_checks accumulates failed-cleanup checks from targets that were superseded by
+        # a later, successful target: a client-side PUT failure can still mean etcd committed
+        # the write server-side, so a subsequent DELETE failure on that same target must not be
+        # silently dropped just because a *different* target's canary round-trip ultimately
+        # succeeded (see test_preserves_cleanup_failure_from_superseded_target).
+        orphan_checks: list[ValidationCheck] = []
+        final_checks: list[ValidationCheck] = []
+        for i, target in enumerate(targets):
+            iter_checks: list[ValidationCheck] = []
             with grpc.secure_channel(target, credentials) as channel:
                 put_check = self._etcd_put(channel, canary_key, canary_value)
-                attempt_checks.append(put_check)
+                iter_checks.append(put_check)
                 try:
                     if put_check.passed:
-                        attempt_checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
+                        iter_checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
                 finally:
                     # Always attempt cleanup, even if PUT reported failure: a client-side
                     # timeout can still mean etcd committed the write server-side, which
-                    # would otherwise leave an orphaned canary key behind.
-                    attempt_checks.append(self._etcd_delete(channel, canary_key))
+                    # would otherwise leave an orphaned canary key behind. A target whose PUT
+                    # already failed gets a much shorter cleanup timeout: the same
+                    # unreachability that failed the PUT will fail DeleteRange too, and this
+                    # target is about to be abandoned in favor of the next one anyway.
+                    cleanup_timeout = _GRPC_TIMEOUT_S if put_check.passed else _GRPC_CLEANUP_AFTER_FAILED_PUT_TIMEOUT_S
+                    delete_check = self._etcd_delete(channel, canary_key, timeout=cleanup_timeout)
+                    iter_checks.append(delete_check)
+            final_checks = iter_checks
             if put_check.passed:
                 break
-        checks.extend(attempt_checks)
+            if not delete_check.passed and i < len(targets) - 1:
+                orphan_checks.append(
+                    ValidationCheck(
+                        name="delete",
+                        passed=False,
+                        message=f"Cleanup failed for target '{target}' after a failed PUT: {delete_check.message}",
+                    )
+                )
+        checks.extend(orphan_checks)
+        checks.extend(final_checks)
         return checks
 
     def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
@@ -603,7 +632,7 @@ class EtcdClientValidator(BaseValidator):
             )
         return ValidationCheck(name="get", passed=True, message="Canary value read back and verified.")
 
-    def _etcd_delete(self, channel: grpc.Channel, key: str) -> ValidationCheck:
+    def _etcd_delete(self, channel: grpc.Channel, key: str, timeout: float = _GRPC_TIMEOUT_S) -> ValidationCheck:
         request = _encode_bytes_field(1, key.encode())
         call = channel.unary_unary(
             f"/{_KV_SERVICE}/DeleteRange",
@@ -611,7 +640,7 @@ class EtcdClientValidator(BaseValidator):
             response_deserializer=lambda data: data,
         )
         try:
-            call(request, timeout=_GRPC_TIMEOUT_S)
+            call(request, timeout=timeout)
         except grpc.RpcError as exc:
             return ValidationCheck(name="delete", passed=False, message=f"DELETE failed: {exc.details()}")
         return ValidationCheck(name="delete", passed=True, message=f"Canary key '{key}' deleted.")
@@ -629,6 +658,16 @@ class EtcdClientValidator(BaseValidator):
         schema_check = self.validate_schema(_PROVIDER_FIELDS, creds)
         checks.append(schema_check)
         if not schema_check.passed:
+            return self._make_result(level=level, checks=checks)
+
+        if "prefix" not in self.databag:
+            checks.append(
+                ValidationCheck(
+                    name="prefix_present",
+                    passed=False,
+                    message="No 'prefix' field on the requirer's databag; the requirer contract requires it.",
+                )
+            )
             return self._make_result(level=level, checks=checks)
 
         data = self.databag | creds

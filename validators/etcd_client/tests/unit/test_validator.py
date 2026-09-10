@@ -105,6 +105,7 @@ def _generate_cert(common_name: str, not_after_days: int = 365) -> tuple[str, st
 VALID_CA_PEM, _VALID_CA_KEY_PEM = _generate_cert("ca_common_name")
 VALID_CLIENT_CERT_PEM, VALID_CLIENT_KEY_PEM = _generate_cert("client-user")
 EXPIRED_CLIENT_CERT_PEM, _ = _generate_cert("expired-user", not_after_days=-1)
+EXPIRED_CA_PEM, _ = _generate_cert("expired-ca_common_name", not_after_days=-1)
 
 VALID_REQUIRER_DATABAG: dict[str, str] = {
     "endpoints": "10.1.2.3:2379,10.1.2.4:2379",
@@ -290,6 +291,19 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "FAIL"
         check = next(c for c in result.checks if c.name == "tls_ca_pem")
+        assert not check.passed
+
+    def test_fails_tls_ca_validity_period_check_when_ca_expired(self) -> None:
+        # An expired CA is a distinct failure mode from an expired client cert (checked
+        # elsewhere on the provides side): it must fail cleanly at L1, before the deep
+        # probe attempts to build TLS credentials from it.
+        databag = {**VALID_REQUIRER_DATABAG, "tls-ca": EXPIRED_CA_PEM}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "tls_ca_validity_period")
         assert not check.passed
 
     @pytest.mark.parametrize("disabled_value", ["disabled", "false", "False"])
@@ -718,6 +732,66 @@ class TestEtcdClientValidatorRequiresDeep:
             check = next(c for c in result.checks if c.name == name)
             assert check.passed
 
+    def test_preserves_cleanup_failure_from_superseded_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN the first target's PUT fails and its own best-effort cleanup DELETE also
+        # fails (so a canary key may be orphaned there), and a second target then completes
+        # the full PUT/GET/DELETE cycle successfully: the overall result must still surface
+        # the first target's cleanup failure rather than reporting an unqualified PASS, since
+        # an orphaned canary key is a real (if minor) side effect that shouldn't be hidden
+        # just because failover to another target ultimately worked.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "unavailable"
+
+            stored: dict[str, bytes] = {}
+
+            def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+                if target == "10.1.2.3:2379":
+
+                    def unary_unary(
+                        method: str, request_serializer: Any = None, response_deserializer: Any = None
+                    ) -> Any:
+                        def call(request: bytes, timeout: float = 0) -> bytes:
+                            # Both PUT and cleanup DELETE fail on this target.
+                            raise _FakeRpcError()
+
+                        return call
+
+                    channel = MagicMock()
+                    channel.unary_unary.side_effect = unary_unary
+                    channel.__enter__.return_value = channel
+                    channel.__exit__.return_value = False
+                    return channel
+                return _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch(
+                    "validators.etcd_client.validator.grpc.secure_channel",
+                    side_effect=make_channel_for_target,
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL", result.checks
+        delete_checks = [c for c in result.checks if c.name == "delete"]
+        assert any(not c.passed for c in delete_checks)
+        assert any(c.passed for c in delete_checks)
+        put_checks = [c for c in result.checks if c.name == "put"]
+        assert any(c.passed for c in put_checks)
+
     def test_fails_get_check_when_response_is_malformed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN a successful PUT but a Range RPC that returns truncated/unparseable protobuf
         # bytes: this must be reported as a failed "get" check (and cleanup still attempted),
@@ -1094,6 +1168,19 @@ class TestEtcdClientValidatorGrpcTarget:
         assert not check.passed
         assert targets == []
 
+    def test_rejects_bracketed_non_ipv6_uri_host(self) -> None:
+        # Brackets are only valid syntax around an IPv6 literal (e.g. "[::1]:2379"). On this
+        # interpreter, urlsplit() itself already rejects a bracketed non-IPv6 host like
+        # "[10.1.2.3]" with a ValueError ("An IPv4 address cannot be in brackets"), which
+        # _parse_single_uri's existing except-ValueError branch converts into a failed check;
+        # this test locks that behavior in as a regression guard.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        targets, check = validator._pick_grpc_target("https://[10.1.2.3]:2379")
+
+        assert not check.passed
+        assert targets == []
+
 
 class TestEtcdClientValidatorProvidesSimple:
     def test_fails_schema_check_when_required_fields_missing(self) -> None:
@@ -1104,8 +1191,34 @@ class TestEtcdClientValidatorProvidesSimple:
         assert result.status == "FAIL"
         schema_check = next(c for c in result.checks if c.name == "schema")
         assert not schema_check.passed
-        assert "prefix" in schema_check.message
         assert "mtls-cert" in schema_check.message
+
+    def test_fails_prefix_present_check_when_prefix_key_absent(self) -> None:
+        # "prefix" must be checked for key presence, not truthiness: an empty prefix (root
+        # of the keyspace) is a valid value and must not be rejected the same way an
+        # actually-absent field is.
+        databag = {**VALID_PROVIDER_DATABAG}
+        del databag["prefix"]
+        validator = _make_validator(databag, role=RelationRoleStub.provides)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "prefix_present")
+        assert not check.passed
+
+    def test_passes_schema_and_prefix_present_checks_with_empty_prefix(self) -> None:
+        # An intentionally empty prefix (root of the keyspace) is a valid value: it must not
+        # be rejected by the schema check (which would otherwise treat any falsy value as
+        # "missing"), and no prefix_present failure should be raised either.
+        databag = {**VALID_PROVIDER_DATABAG, "prefix": ""}
+        validator = _make_validator(databag, role=RelationRoleStub.provides)
+
+        result = validator.validate(level="simple")
+
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert schema_check.passed
+        assert not any(c.name == "prefix_present" for c in result.checks)
 
     def test_fails_when_mtls_cert_not_parseable(self) -> None:
         databag = {**VALID_PROVIDER_DATABAG, "mtls-cert": "not-a-pem"}
