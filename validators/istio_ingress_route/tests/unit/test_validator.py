@@ -473,6 +473,24 @@ class TestIstioIngressRouteValidatorSimple:
         connect = next(c for c in result.checks if c.name == "connect")
         assert not connect.passed
 
+    def test_simple_probes_default_port_for_chained_deployment_with_route_path(self) -> None:
+        # GIVEN external_host carries an upstream route path (a chained deployment,
+        # e.g. istio-ingress behind another ingress hop); local listener config, if
+        # any, describes the *inner* gateway and does not apply to this outer hop
+        validator = _make_validator(
+            {"external_host": "upstream.example.com/model-app", "tls_enabled": "True"},
+            local_databag={"config": json.dumps({"model": "m", "listeners": [{"port": 8080, "protocol": "HTTP"}]})},
+        )
+
+        # WHEN
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="simple")
+
+        # THEN the scheme's conventional external port (443 for https) is probed
+        # instead of the inner listener's 8080, without consulting local config
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once_with("upstream.example.com", 443)
+
     def test_simple_does_not_issue_http_probe(self) -> None:
         # GIVEN a reachable gateway
         validator = _make_validator(VALID_HTTP_DATABAG)

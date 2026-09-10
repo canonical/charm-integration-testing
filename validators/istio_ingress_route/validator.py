@@ -187,9 +187,12 @@ class IstioIngressRouteValidator(BaseValidator):
     databag on this relation (JSON-encoded, with a required ``model`` and an
     optional ``listeners`` list of ``{"port": ..., "protocol": "HTTP" | "GRPC"}``).
     Both levels therefore resolve the port(s) to probe in precedence order: a port
-    encoded in ``external_host`` is used as-is; otherwise every declared
-    HTTP-protocol listener from that local config is probed (a requirer may declare
-    more than one), instead of assuming a default.
+    encoded in ``external_host`` is used as-is; otherwise, if ``external_host``
+    carries a path (a chained deployment behind another ingress hop; see
+    ``_resolve_probe_ports``), the scheme's conventional port (80/443) is probed
+    without consulting local config; otherwise every declared HTTP-protocol
+    listener from that local config is probed (a requirer may declare more than
+    one), instead of assuming a default.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -482,7 +485,7 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
         return [], ValidationCheck(
             name="connect",
             passed=True,
-            message="No local 'config' published on this relation; connectivity check skipped."
+            message="No local 'config' published on this relation; connectivity check skipped.",
         )
 
     try:
