@@ -19,6 +19,8 @@ from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
+    DomainApplicationEndpoint,
+    DomainApplicationIntegration,
     DomainModel,
     ModelRef,
     add_charm_to_domain,
@@ -320,6 +322,63 @@ class TestCrossModelMeshOfferSharing:
         offer_names = {cmr.offer_name for cmr in provider_bundle.cross_model_integrations}
         assert offer_names == {workload_offer}
 
+    def test_discovered_mesh_companion_reuses_explicit_user_cmr_offer_name(self) -> None:
+        # GIVEN two charms in different models, with the user already declaring an explicit
+        # (in-spec) CMR on the workload endpoint, under a custom offer name, and the solver
+        # separately discovering the cross_model_mesh companion relation between the same pair.
+        consumer_ref = ModelRef(name="model-a", controller="foo")
+        provider_ref = ModelRef(name="model-b", controller="foo")
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve", model=provider_ref
+                            ),
+                            offer_name="my-custom-workload-offer",
+                        )
+                    ],
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN both integrations resolve to the user's own custom offer name, not a synthesized
+        # one: the discovered mesh companion must ride the same Juju offer as the real,
+        # user-declared CMR it describes.
+        mesh_offer = domain.integration_offer_name(mesh_integration, model)
+        workload_offer = domain.integration_offer_name(workload_integration, model)
+        assert workload_offer == "my-custom-workload-offer"
+        assert mesh_offer == "my-custom-workload-offer"
+
     def test_two_unrelated_cross_model_endpoints_still_share_one_offer(self) -> None:
         # GIVEN two charms in different models, related on TWO distinct, ordinary (non-mesh)
         # endpoints. This demonstrates that offer coupling in domain.py has no cross_model_mesh
@@ -436,21 +495,29 @@ class TestCrossModelMeshCompanionOverrideConstraint:
     it is expressed per-charm as an override constraint using the general-purpose DSL, e.g.
     ``charms(cross_model(endpoint[x])) == charms(cross_model(endpoint[provide-cmr-mesh]))``.
     These tests exercise that DSL expression directly to confirm it has the intended semantics.
+
+    The equality alone is vacuous for a purely local (same-model) mesh relation: cross_model()
+    ignores local integrations, so both sides would read as the empty set regardless of whether
+    provide-cmr-mesh is actually integrated. Since cross_model_mesh only makes sense to describe
+    a genuine CMR, every override also asserts that provide-cmr-mesh, if integrated at all, is
+    entirely cross-model -- ``len(endpoint[provide-cmr-mesh]) ==
+    len(cross_model(endpoint[provide-cmr-mesh]))`` -- which closes that gap.
     """
 
     def _companion_constraint_expr(self, provider_id: int, domain: Domain) -> z3.BoolRef:
         ctx = LoweringContext(charm_id=provider_id, domain_charm=domain.charms[provider_id], domain=domain)
         expr = parse_constraint(
             "charms(cross_model(endpoint[serve])) == charms(cross_model(endpoint[provide-cmr-mesh]))"
+            " and len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))"
         )
         return lower(expr, ctx).expr
 
-    def test_local_only_cmr_mesh_pairing_is_unaffected_by_the_companion_constraint(self) -> None:
+    def test_local_only_cmr_mesh_pairing_is_rejected_by_the_companion_constraint(self) -> None:
         # GIVEN two charms in the SAME model, related via BOTH cross_model_mesh and workload.
         # A local-only mesh relation carries no CMR data at all (there is no cross-model
-        # relation for it to describe), so the companion constraint has nothing to say about it:
-        # cross_model(endpoint[provide-cmr-mesh]) is empty regardless of whether the local mesh
-        # integration exists, so the equality holds trivially (both sides empty).
+        # relation for it to describe), so cross_model_mesh should never be used purely
+        # in-model: the companion constraint's cross-model-only clause rejects it even though
+        # the bare equality alone would hold vacuously (both sides empty).
         domain = _make_domain(
             {
                 ModelRef(name="default"): DomainModel(
@@ -479,7 +546,7 @@ class TestCrossModelMeshCompanionOverrideConstraint:
         solver.add(workload_integration.exists)
         solver.add(self._companion_constraint_expr(provider_id, domain))
 
-        assert solver.check() == z3.sat
+        assert solver.check() == z3.unsat
 
     def test_cross_model_cmr_mesh_pairing_without_companion_is_rejected(self) -> None:
         # GIVEN two charms in different models, related ONLY via cross_model_mesh (no workload)
