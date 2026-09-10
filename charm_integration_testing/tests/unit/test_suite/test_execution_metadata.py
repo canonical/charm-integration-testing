@@ -497,7 +497,7 @@ def test_record_charm_info_execution_metadata_ignores_unintegrated_consumed_offe
     assert not any(category == "integration" for category, _ in recorded)
 
 
-def test_record_charm_info_execution_metadata_raises_for_unknown_endpoint() -> None:
+def test_record_charm_info_execution_metadata_raises_for_unknown_application() -> None:
     # An integration side that is neither a known local application nor a consumed offer
     # signals a bug elsewhere (e.g. a stale/removed application), and should surface loudly.
     applications = {"data-integrator": JujuApplicationInfo(charm="data-integrator", revision=2)}
