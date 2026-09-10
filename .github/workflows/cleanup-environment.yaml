@@ -387,7 +387,11 @@ jobs:
             device_owner=$(jq -r '.device_owner' <<<"$port_data")
             device_id=$(jq -r '.device_id' <<<"$port_data")
             created=$(jq -r '.created_at' <<<"$port_data")
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            created_ts=$(date -d "$created" +%s) || {
+              echo "Failed to parse port $port_id created_at timestamp; refusing to continue orphaned port cleanup"
+              exit 1
+            }
+            age_minutes=$(( ($(date +%s) - created_ts) / 60 ))
             [[ $device_owner != "Octavia" ]] && continue
             [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
             lb_id=${device_id#lb-}
