@@ -568,23 +568,46 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             )
         previous_revision = resolved_revision
 
-    if target_revision is None:
-        # Without a concrete target revision the deployed base is unknown, so the compatibility
-        # check below cannot run; return the explicit downgrade revision unchecked.
-        return previous_revision
-
     # test_downgrade_charm and test_upgrade_charm reach their target revision via juju refresh,
     # which Juju rejects across incompatible bases (this framework does not use --force-series).
-    # Skip when the downgrade revision cannot run on the base the target revision is deployed on.
-    # Runs for both explicit and Test-Observer-resolved downgrade revisions.
+    # Skip when the downgrade revision cannot run on the base the target is deployed on. The target
+    # base is resolved the same way the bundle builder resolves it; when --target-revision is
+    # "default" the concrete revision is unknown, so fall back to the channel rather than skipping
+    # the guard. Runs for both explicit and Test-Observer-resolved downgrade revisions.
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
     target_series: str | None = request.getfixturevalue("target_series")
-    target_base = charmhub_client.charm_from_store(
-        charm_name=target_charm,
-        ubuntu_arch="amd64",
-        charm_revision=target_revision,
-        ubuntu_version=target_series,
-    ).ubuntu_version
+
+    channel_track: str | None = None
+    channel_risk: str | None = None
+    if target_channel is not None:
+        channel_parts = target_channel.split("/", maxsplit=1)
+        channel_track = channel_parts[0] or None
+        channel_risk = channel_parts[1] if len(channel_parts) > 1 else None
+
+    try:
+        if target_revision is not None:
+            target_base = charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch="amd64",
+                charm_revision=target_revision,
+                ubuntu_version=target_series,
+            ).ubuntu_version
+        else:
+            target_base = charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch="amd64",
+                charm_track=channel_track,
+                charm_risk=channel_risk,
+                ubuntu_version=target_series,
+            ).ubuntu_version
+    except BaseMismatchError:
+        # The target itself cannot be resolved on the requested series (e.g. stale --target-series
+        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
+        pytest.skip(
+            f"Charm '{target_charm}' target does not support the requested base '{target_series}'; "
+            "the downgrade/upgrade refresh cycle is untestable."
+        )
+
     try:
         charmhub_client.charm_from_store(
             charm_name=target_charm,
@@ -595,8 +618,8 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     except BaseMismatchError:
         pytest.skip(
             f"Charm '{target_charm}' revision {previous_revision} does not support base "
-            f"'{target_base}' used by target revision {target_revision}; the downgrade/upgrade "
-            "refresh cycle cannot run without --force-series."
+            f"'{target_base}' used by the target; the downgrade/upgrade refresh cycle cannot run "
+            "without --force-series."
         )
     return previous_revision
 

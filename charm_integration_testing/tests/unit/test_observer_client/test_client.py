@@ -3,9 +3,11 @@
 
 import logging
 
+import pytest
 from requests.adapters import HTTPAdapter
 from test_observer_client.client import DEFAULT_RETRY_KWARGS
 from test_observer_client.client import TestObserverClient as ObserverClient
+from test_observer_client.client import TestObserverQueryError as ObserverQueryError
 from urllib3.util.retry import Retry
 
 
@@ -49,3 +51,47 @@ class TestClientInit:
         adapter = client._session.get_adapter("https://example.com")
         assert isinstance(adapter, HTTPAdapter)
         assert adapter.max_retries is custom_retries
+
+
+class TestChooseHistoricalRevision:
+    @staticmethod
+    def _client() -> ObserverClient:
+        return ObserverClient(logging.getLogger(__name__), api_url="https://example.com", token="token")
+
+    @staticmethod
+    def _stub_history_and_builds(client: ObserverClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(client, "query_artefacts_history", lambda **_: {"artefacts": [{"id": 1}]})
+        monkeypatch.setattr(
+            client,
+            "query_artefact_builds",
+            lambda **_: {"builds": [{"revision": 298, "test_executions": [{"id": 555}]}]},
+        )
+
+    def test_raises_when_all_result_queries_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN history/builds resolve but every result query fails (e.g. a Test Observer outage)
+        client = self._client()
+        self._stub_history_and_builds(client, monkeypatch)
+
+        def _raise(**_: object) -> dict[str, object]:
+            raise ObserverQueryError("results endpoint down")
+
+        monkeypatch.setattr(client, "query_test_results_for_execution", _raise)
+
+        # THEN the outage is surfaced instead of being reported as "no historical revision"
+        with pytest.raises(ObserverQueryError):
+            client.choose_historical_revision_with_passing_test(
+                charm_name="traefik-k8s", stage="stable", current_revision=378, track="latest"
+            )
+
+    def test_returns_none_when_no_passing_and_no_query_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN result queries succeed but none report a passing test
+        client = self._client()
+        self._stub_history_and_builds(client, monkeypatch)
+        monkeypatch.setattr(client, "query_test_results_for_execution", lambda **_: {"test_results": []})
+        monkeypatch.setattr(client, "_has_test_passed", lambda *_: False)
+
+        # THEN None is returned to signal a definitive "no passing revision"
+        result = client.choose_historical_revision_with_passing_test(
+            charm_name="traefik-k8s", stage="stable", current_revision=378, track="latest"
+        )
+        assert result is None

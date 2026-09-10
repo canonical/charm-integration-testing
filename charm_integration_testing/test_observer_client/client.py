@@ -318,6 +318,11 @@ class TestObserverClient:
 
         self.logger.debug(f"Found {len(artefacts)} artefacts in history")
 
+        # Track whether any per-execution result query failed. If no passing revision is found but a
+        # query failed, we cannot tell "no history" from a Test Observer outage, so we must not
+        # return None (which callers treat as a definitive "no passing revision").
+        result_query_failed = False
+
         for artefact in artefacts:
             artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
             if artefact_id is None:
@@ -365,8 +370,16 @@ class TestObserverClient:
                             return revision
                     except TestObserverQueryError as exc:
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
+                        result_query_failed = True
                         continue
 
+        if result_query_failed:
+            # Every candidate execution's result query failed; surface the outage instead of a
+            # None that callers would treat as a definitive "no historical passing revision".
+            raise TestObserverQueryError(
+                f"Could not determine a historical revision with passing {test_name} for {charm_name}: "
+                "all candidate test-result queries failed (Test Observer may be unavailable)."
+            )
         self.logger.info(f"No historical revision found with passing {test_name}")
         return None
 
