@@ -1,0 +1,15 @@
+---
+# Source: https://github.com/canonical/blackbox-exporter-k8s-operator
+#
+# require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides) are already
+# optional: true upstream. They are only present on the dev track (not tracks 0.28, 1 or 2);
+# tracks predating dev do not yet have the service_mesh integration.
+#
+# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
+# mesh-managed provides endpoint (per the charm's ServiceMeshConsumer policy in src/charm.py:
+# self-metrics-endpoint) is cross-model with; see issue GH-980.
+overrides:
+  - criteria:
+      - track: dev
+    constraints:
+      - 'charms(cross_model(endpoint[self-metrics-endpoint])) == charms(cross_model(endpoint[provide-cmr-mesh]))'

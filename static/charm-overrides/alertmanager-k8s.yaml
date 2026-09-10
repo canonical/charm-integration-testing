@@ -8,6 +8,10 @@
 # require-cmr-mesh (requires): optional - CMR mesh cross-model access, secondary to alertmanager's core alerting purpose
 # service-mesh (requires): optional - Istio service mesh integration, secondary to core alerting
 # provide-cmr-mesh (provides): optional - CMR mesh consumer hook, secondary to core alerting
+#
+# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
+# mesh-managed provides endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py:
+# alerting, grafana-source, self-metrics-endpoint) are cross-model with; see issue GH-980.
 overrides:
   - criteria:
       - any_of:
@@ -22,3 +26,6 @@ overrides:
     provides:
       provide-cmr-mesh:
         optional: true
+    constraints:
+      - 'charms(cross_model(endpoint[alerting] | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))
+        == charms(cross_model(endpoint[provide-cmr-mesh]))'

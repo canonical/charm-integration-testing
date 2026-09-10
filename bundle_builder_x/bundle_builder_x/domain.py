@@ -95,6 +95,12 @@ class DomainCharmEndpoint(BaseModel):
 
     count: z3.ArithRef
     integrated: z3.BoolRef
+    # cross_model_count/cross_model_integrated mirror count/integrated but only account for
+    # integrations whose peer lives in a different model (Domain.is_cross_model). Backs the
+    # cross_model() DSL filter so bool(cross_model(endpoint[x])), len(cross_model(endpoint[x]))
+    # etc. reflect only genuinely cross-model activity on x, not any local activity too.
+    cross_model_count: z3.ArithRef
+    cross_model_integrated: z3.BoolRef
     # One Z3 Bool per feature declared on this endpoint in the charm spec.
     # Each bool is constrained to equal `endpoint.integrated` in add_charm_metadata_constraints.
     features: dict[str, z3.BoolRef] = Field(default_factory=dict)
@@ -198,10 +204,44 @@ class Domain(BaseModel):
     def integration_interface(self, integration: DomainCharmIntegration) -> str:
         return self.charms[integration.requires_charm_id].spec.endpoints[integration.requires_endpoint].interface
 
-    def integration_offer_name(self, integration: DomainCharmIntegration) -> str:
-        prov_charm = self.charms[integration.provides_charm_id]
-        interface = self.integration_interface(integration)
-        return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer".replace("_", "-")
+    def integration_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None) -> str:
+        """Return the Juju offer name backing a cross-model integration.
+
+        All cross-model integrations between the same pair of charms share one Juju offer,
+        matching normal Juju CMR practice (an offer can expose multiple endpoints, related to
+        independently). This also happens to be what makes e.g. istio-beacon-k8s's
+        cross_model_mesh metadata land on the same offer as the workload relation it describes
+        (see docs/explanation/cross-model-mesh.md in canonical/service-mesh) -- with no
+        interface-specific knowledge needed here, since every cross-model pairing is grouped by
+        charm pair unconditionally.
+        """
+        anchor = self._offer_sharing_anchor(integration, z3_model)
+        interface = self.integration_interface(anchor)
+        prov_charm = self.charms[anchor.provides_charm_id]
+        return f"{prov_charm.spec.name}-{anchor.provides_endpoint}-{interface}-offer".replace("_", "-")
+
+    def _offer_sharing_anchor(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
+    ) -> DomainCharmIntegration:
+        """Return the canonical integration whose name all cross-model integrations between the
+        same two charms as ``integration`` should share as their Juju offer name.
+
+        If ``z3_model`` is given, only integrations the solver actually activated are considered;
+        otherwise (e.g. in tests exercising offer-naming in isolation) all declared integrations
+        between the pair are candidates. Ties are broken deterministically by endpoint name, so
+        every integration between the pair resolves to the same anchor.
+        """
+        charm_pair = {integration.requires_charm_id, integration.provides_charm_id}
+        candidates = [
+            other
+            for other in self.charm_integrations
+            if self.is_cross_model(other)
+            and {other.requires_charm_id, other.provides_charm_id} == charm_pair
+            and (z3_model is None or z3_model.evaluate(other.exists, model_completion=True))
+        ]
+        if not candidates:
+            return integration
+        return min(candidates, key=lambda o: (o.provides_endpoint, o.requires_endpoint))
 
 
 def _refresh_application_integration_mappings(domain: Domain) -> None:
@@ -412,6 +452,10 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                 name: DomainCharmEndpoint(
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
+                    cross_model_count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_cross_model_count"),
+                    cross_model_integrated=z3.Bool(
+                        f"charm_{charm.name}_{charm_id}_endpoint_{name}_cross_model_integrated"
+                    ),
                     features={
                         f: z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_feature_{f}")
                         for f in endpoint.features

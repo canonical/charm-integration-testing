@@ -25,6 +25,7 @@ Grammar (in precedence order, lowest to highest)::
                  | 'bool' '(' constraint ')'
                  | 'charms' '(' constraint ')'
                  | 'reachable' '(' constraint ')'
+                 | 'cross_model' '(' constraint ')'
                  | 'features' '(' constraint ')'
                  | 'tracks' '(' constraint ')'
                  | 'risks' '(' constraint ')'
@@ -283,6 +284,24 @@ class BoolFunc(BaseModel):
     arg: "AnyExpr"
 
 
+class CrossModelExpr(BaseModel):
+    """cross_model(endpoint[x]) - filters a RelationSet to only its cross-model-integrated view.
+
+    Returns a RelationSet (like endpoint[x] itself), tagging the selected endpoints so that
+    downstream reducers (bool(), len(), charms()) read cross-model-scoped counts instead of
+    plain ones. Backed by Domain.is_cross_model(): only integrations whose peer charm is
+    assigned to a different model count as cross-model. Unlike bool(endpoint[x]), which is
+    True for any active integration (local or cross-model), bool(cross_model(endpoint[x]))
+    is True only for cross-model ones.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["cross_model"] = "cross_model"
+    dsl_type: Literal[DSLType.RELATION_SET] = DSLType.RELATION_SET
+    arg: "AnyExpr"
+
+
 class CharmsExpr(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -455,6 +474,7 @@ AnyExpr = Annotated[
         CharmsExpr,
         FeaturesExpr,
         ReachableExpr,
+        CrossModelExpr,
         TracksExpr,
         RisksExpr,
         ChannelsExpr,
@@ -480,6 +500,7 @@ BoolFunc.model_rebuild()
 CharmsExpr.model_rebuild()
 FeaturesExpr.model_rebuild()
 ReachableExpr.model_rebuild()
+CrossModelExpr.model_rebuild()
 TracksExpr.model_rebuild()
 RisksExpr.model_rebuild()
 ChannelsExpr.model_rebuild()
@@ -663,6 +684,7 @@ class _Parser:
                 "charms",
                 "features",
                 "reachable",
+                "cross_model",
                 "tracks",
                 "risks",
                 "channels",
@@ -691,6 +713,8 @@ class _Parser:
                         return FeaturesExpr(arg=arg)
                     case "reachable":
                         return ReachableExpr(arg=arg)
+                    case "cross_model":
+                        return CrossModelExpr(arg=arg)
                     case "tracks":
                         return TracksExpr(arg=arg)
                     case "risks":
@@ -851,6 +875,12 @@ def _check_types(node: AnyExpr) -> AnyExpr:  # noqa: C901 (intentionally large s
             if not isinstance(arg, EndpointExpr):
                 raise _type_error("reachable() argument must be endpoint[name] directly")
             return ReachableExpr(arg=arg)
+
+        case CrossModelExpr(arg=arg):
+            arg = _check_types(arg)
+            if arg.dsl_type != DSLType.RELATION_SET:
+                raise _type_error(f"cross_model() requires RelationSet argument, got {arg.dsl_type.value}")
+            return CrossModelExpr(arg=arg)
 
         case TracksExpr(arg=arg):
             arg = _check_types(arg)

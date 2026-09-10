@@ -1,0 +1,502 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Tests for the cross_model_mesh-specific solver constraints and offer grouping.
+
+See issue #980: cross_model_mesh (provide-cmr-mesh/require-cmr-mesh) carries no application
+traffic; it only makes sense alongside a genuine, already cross-model relation between the
+same two charms, riding the same Juju offer.
+"""
+
+import logging
+
+import z3  # type: ignore[import-untyped]
+
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
+from bundle_builder_x.constraints import add_constraints
+from bundle_builder_x.constraints_dsl import parse_constraint
+from bundle_builder_x.domain import (
+    Domain,
+    DomainApplication,
+    DomainModel,
+    ModelRef,
+    add_charm_to_domain,
+    pair_charms_in_domain,
+)
+from bundle_builder_x.dsl_lowering import LoweringContext, lower
+from bundle_builder_x.extract import extract_solution
+from bundle_builder_x.juju_version import JujuVersion
+
+_JUJU = JujuVersion(major=3, minor=6, patch=0)
+_CHANNEL = CharmChannel(track="1", risk="stable", branch="")
+
+
+def _make_domain(models: dict[ModelRef, DomainModel]) -> Domain:
+    domain = Domain()
+    domain.models.update(models)
+    return domain
+
+
+def _make_charm(name: str, endpoints: dict[str, CharmEndpoint]) -> Charm:
+    return Charm(
+        name=name,
+        channel=_CHANNEL,
+        revision=1,
+        ubuntu_version="22.04",
+        ubuntu_arch="amd64",
+        endpoints=endpoints,
+        platforms=["kubernetes"],
+    )
+
+
+def _mesh_pair_charms() -> tuple[Charm, Charm]:
+    """A consumer charm requiring cmr-mesh + a real workload, and a provider charm providing both."""
+    consumer = _make_charm(
+        "consumer-app",
+        {
+            "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+            "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+        },
+    )
+    provider = _make_charm(
+        "provider-app",
+        {
+            "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+            "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+        },
+    )
+    return consumer, provider
+
+
+class TestCrossModelExprDSL:
+    def test_cross_model_true_only_for_cross_model_integration(self) -> None:
+        # GIVEN two charms in different models, related on a plain workload endpoint
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+        expr = parse_constraint("bool(cross_model(endpoint[backend]))")
+        result = lower(expr, ctx)
+
+        # cross_model_integrated is linked to the actual integration existence via
+        # add_constraints (constraints.py), so it must be present on both solvers.
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(workload_integration.exists)
+        assert solver.check(result.expr) == z3.sat
+
+        solver2 = z3.Solver()
+        add_constraints(solver2, domain)
+        solver2.add(z3.Not(workload_integration.exists))
+        assert solver2.check(result.expr) == z3.unsat
+
+    def test_cross_model_over_unioned_relation_set_is_or_semantics(self) -> None:
+        # GIVEN two charms in different models, related on two distinct real endpoints, using
+        # the idiomatic `endpoint[a] | endpoint[b]` RelationSet-union form (matching the pattern
+        # used in static/charm-overrides, e.g. traefik-k8s.yaml's features(endpoint[...] | ...))
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer = _make_charm(
+            "consumer-app",
+            {
+                "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+                "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", optional=True),
+                "backend-alt": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload_alt", optional=True),
+            },
+        )
+        provider = _make_charm(
+            "provider-app",
+            {
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+                "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+                "serve-alt": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_alt", optional=True),
+            },
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+        [workload_alt_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_alt"
+        ]
+
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+        expr = parse_constraint("bool(cross_model(endpoint[backend] | endpoint[backend-alt]))")
+        result = lower(expr, ctx)
+
+        # THEN True when EITHER underlying endpoint has a cross-model integration...
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(z3.Not(workload_integration.exists))
+        solver.add(workload_alt_integration.exists)
+        assert solver.check(result.expr) == z3.sat
+
+        # ...and False when neither does
+        solver2 = z3.Solver()
+        add_constraints(solver2, domain)
+        solver2.add(z3.Not(workload_integration.exists))
+        solver2.add(z3.Not(workload_alt_integration.exists))
+        assert solver2.check(result.expr) == z3.unsat
+
+    def test_len_cross_model_counts_only_cross_model_integrations(self) -> None:
+        # GIVEN a consumer with an unlimited endpoint integrated with both a local peer
+        # (same model) and a remote peer (different model)
+        consumer = _make_charm(
+            "consumer-app",
+            {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", limit=None)},
+        )
+        local_provider = _make_charm(
+            "local-provider-app",
+            {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")},
+        )
+        remote_provider = _make_charm(
+            "remote-provider-app",
+            {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")},
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "consumer": DomainApplication(charm="consumer-app"),
+                        "local-provider": DomainApplication(charm="local-provider-app"),
+                    },
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"remote-provider": DomainApplication(charm="remote-provider-app")},
+                ),
+            }
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        local_provider_id = add_charm_to_domain(local_provider, domain, ModelRef(name="model-a"))
+        remote_provider_id = add_charm_to_domain(remote_provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, local_provider_id)
+        pair_charms_in_domain(domain, consumer_id, remote_provider_id)
+
+        [local_integration] = [
+            i
+            for i in domain.charm_integrations
+            if (i.requires_charm_id == consumer_id and i.provides_charm_id == local_provider_id)
+            or (i.provides_charm_id == consumer_id and i.requires_charm_id == local_provider_id)
+        ]
+        [remote_integration] = [
+            i
+            for i in domain.charm_integrations
+            if (i.requires_charm_id == consumer_id and i.provides_charm_id == remote_provider_id)
+            or (i.provides_charm_id == consumer_id and i.requires_charm_id == remote_provider_id)
+        ]
+
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+        expr = parse_constraint("len(cross_model(endpoint[backend])) == 1")
+        result = lower(expr, ctx)
+
+        # THEN true when the remote (cross-model) integration is active, regardless of the local one...
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(local_integration.exists)
+        solver.add(remote_integration.exists)
+        assert solver.check(result.expr) == z3.sat
+
+        # ...but false if only the local integration is active (no cross-model contribution at all)
+        solver2 = z3.Solver()
+        add_constraints(solver2, domain)
+        solver2.add(local_integration.exists)
+        solver2.add(z3.Not(remote_integration.exists))
+        assert solver2.check(result.expr) == z3.unsat
+
+    def test_features_of_cross_model_endpoint_is_rejected(self) -> None:
+        # GIVEN a plain endpoint reference wrapped in cross_model()
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+            }
+        )
+        consumer, _provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+
+        # THEN features() on a cross_model()-tagged endpoint set fails loudly, since features
+        # are declared per-endpoint (not per-relation-instance) and cross_model() filtering
+        # has no well-defined meaning for them.
+        expr = parse_constraint('features(cross_model(endpoint[backend])) == {"a"}')
+        try:
+            lower(expr, ctx)
+            raise AssertionError("expected DSLLoweringError")
+        except Exception as exc:
+            assert "features()" in str(exc)
+
+
+class TestCrossModelMeshOfferSharing:
+    def test_cross_model_pairing_shares_offer_with_companion_relation(self) -> None:
+        # GIVEN two charms in different models, related via BOTH a real workload endpoint AND
+        # cross_model_mesh. Offer-sharing is fully generic in domain.py: it applies to ANY two
+        # cross-model integrations between the same charm pair, not just cross_model_mesh ones.
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a", controller="foo"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b", controller="foo"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a", controller="foo"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b", controller="foo"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN the mesh integration reuses the workload integration's offer name, so bundle.py's
+        # grouping-by-offer-name logic puts both endpoints in the same Juju offer
+        mesh_offer = domain.integration_offer_name(mesh_integration, model)
+        workload_offer = domain.integration_offer_name(workload_integration, model)
+        assert mesh_offer == workload_offer
+
+        solution = extract_solution(model, domain, logging.getLogger("test"))
+        provider_model_ref = ModelRef(name="model-b", controller="foo")
+        [provider_bundle] = [b for b in solution.bundles if b.model == provider_model_ref.key]
+        offer_names = {cmr.offer_name for cmr in provider_bundle.cross_model_integrations}
+        assert offer_names == {workload_offer}
+
+    def test_two_unrelated_cross_model_endpoints_still_share_one_offer(self) -> None:
+        # GIVEN two charms in different models, related on TWO distinct, ordinary (non-mesh)
+        # endpoints. This demonstrates that offer coupling in domain.py has no cross_model_mesh
+        # -specific knowledge: it groups by charm pair alone.
+        consumer = _make_charm(
+            "consumer-app",
+            {
+                "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+                "backend-alt": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload_alt"),
+            },
+        )
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+                "serve-alt": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_alt"),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+        [workload_alt_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_alt"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(workload_integration.exists)
+        solver.add(workload_alt_integration.exists)
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        assert domain.integration_offer_name(workload_integration, model) == domain.integration_offer_name(
+            workload_alt_integration, model
+        )
+
+
+class TestCrossModelMeshCompanionOverrideConstraint:
+    """The companion requirement is no longer a core-solver rule (see issue #980's resolution):
+    it is expressed per-charm as an override constraint using the general-purpose DSL, e.g.
+    ``charms(cross_model(endpoint[x])) == charms(cross_model(endpoint[provide-cmr-mesh]))``.
+    These tests exercise that DSL expression directly to confirm it has the intended semantics.
+    """
+
+    def _companion_constraint_expr(self, provider_id: int, domain: Domain) -> z3.BoolRef:
+        ctx = LoweringContext(charm_id=provider_id, domain_charm=domain.charms[provider_id], domain=domain)
+        expr = parse_constraint(
+            "charms(cross_model(endpoint[serve])) == charms(cross_model(endpoint[provide-cmr-mesh]))"
+        )
+        return lower(expr, ctx).expr
+
+    def test_local_only_cmr_mesh_pairing_is_unaffected_by_the_companion_constraint(self) -> None:
+        # GIVEN two charms in the SAME model, related via BOTH cross_model_mesh and workload.
+        # A local-only mesh relation carries no CMR data at all (there is no cross-model
+        # relation for it to describe), so the companion constraint has nothing to say about it:
+        # cross_model(endpoint[provide-cmr-mesh]) is empty regardless of whether the local mesh
+        # integration exists, so the equality holds trivially (both sides empty).
+        domain = _make_domain(
+            {
+                ModelRef(name="default"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "consumer": DomainApplication(charm="consumer-app"),
+                        "provider": DomainApplication(charm="provider-app"),
+                    },
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="default"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="default"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+        solver.add(self._companion_constraint_expr(provider_id, domain))
+
+        assert solver.check() == z3.sat
+
+    def test_cross_model_cmr_mesh_pairing_without_companion_is_rejected(self) -> None:
+        # GIVEN two charms in different models, related ONLY via cross_model_mesh (no workload)
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(z3.Not(workload_integration.exists))
+        solver.add(self._companion_constraint_expr(provider_id, domain))
+
+        # THEN unsatisfiable: charms(cross_model(provide-cmr-mesh)) is non-empty (the mesh
+        # integration is cross-model and exists) but charms(cross_model(serve)) is empty, so the
+        # two sets cannot be equal
+        assert solver.check() == z3.unsat
+
+    def test_cross_model_cmr_mesh_pairing_with_companion_is_satisfiable(self) -> None:
+        # GIVEN two charms in different models, related via BOTH cross_model_mesh and workload
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+        solver.add(self._companion_constraint_expr(provider_id, domain))
+
+        # THEN satisfiable: both sets contain exactly {provider-app}
+        assert solver.check() == z3.sat
