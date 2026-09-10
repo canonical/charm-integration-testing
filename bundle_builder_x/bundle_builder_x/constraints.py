@@ -19,6 +19,8 @@ from .assertion_tags import (
     CharmMappedToSingleApplicationTag,
     CharmPayload,
     CharmRankBoundedTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
+    CrossModelEndpointIntegratedMatchesCountTag,
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
@@ -245,14 +247,19 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
             integrations_using_endpoint: list[z3.BoolRef] = []
+            cross_model_integrations_using_endpoint: list[z3.BoolRef] = []
             for integration in domain.charm_integrations:
                 if (integration.requires_charm_id == charm_id and integration.requires_endpoint == endpoint_name) or (
                     integration.provides_charm_id == charm_id and integration.provides_endpoint == endpoint_name
                 ):
                     integrations_using_endpoint.append(integration.exists)
+                    if domain.is_cross_model(integration):
+                        cross_model_integrations_using_endpoint.append(integration.exists)
 
             # Add cross-model contributions: for each (app, endpoint) that has CMR
             # integrations, add +N when the application-to-charm mapping is active.
+            # External CMRs (the only kind tracked here) are inherently cross-model, so they
+            # contribute to both the plain count and the cross-model-only count.
             cmr_terms: list[z3.ArithRef] = []
             for (app, ep), ext_count in cmr_counts.items():
                 if ep != endpoint_name:
@@ -274,6 +281,26 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             solver.assert_and_track(
                 endpoint.integrated == (endpoint.count >= 1),
                 EndpointIntegratedMatchesCountTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                ).encode(),
+            )
+
+            # Mirror the two constraints above, scoped to cross-model integrations only.
+            # Backs the cross_model() DSL filter (see dsl_lowering.py).
+            cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
+            cross_model_count_expr = z3.Sum(
+                [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
+            )
+            solver.assert_and_track(
+                endpoint.cross_model_count == cross_model_count_expr,
+                CrossModelEndpointCountMatchesIntegrationsTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                    num_terms=cross_model_num_terms,
+                ).encode(),
+            )
+            solver.assert_and_track(
+                endpoint.cross_model_integrated == (endpoint.cross_model_count >= 1),
+                CrossModelEndpointIntegratedMatchesCountTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
                 ).encode(),
             )

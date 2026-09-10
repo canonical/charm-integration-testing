@@ -1,0 +1,19 @@
+---
+# Source: https://github.com/canonical/mimir-coordinator-k8s-operator
+#
+# require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides) are already
+# optional: true upstream. They are only present on track 2.17 and dev (not track 1 or plain
+# track 2); older tracks predate the service_mesh integration.
+#
+# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
+# mesh-managed provides endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py
+# _charm_mesh_policies: receive-remote-write, grafana-source, prometheus-api) are cross-model
+# with; see issue GH-980.
+overrides:
+  - criteria:
+      - any_of:
+          - track: '2.17'
+          - track: dev
+    constraints:
+      - 'charms(cross_model(endpoint[receive-remote-write] | endpoint[grafana-source]
+        | endpoint[prometheus-api])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
