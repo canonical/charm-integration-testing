@@ -482,7 +482,7 @@ def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[
         return [], ValidationCheck(
             name="connect",
             passed=True,
-            message="No local 'config' published on this relation; deep connectivity check skipped.",
+            message="No local 'config' published on this relation; connectivity check skipped."
         )
 
     try:
