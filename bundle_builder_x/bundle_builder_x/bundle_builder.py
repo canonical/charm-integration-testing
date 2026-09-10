@@ -190,8 +190,9 @@ class BundleBuilder:
                 )
 
     def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
+        raw_tags = [AssertionTag.decode(str(a)) for a in unsat_core]
         tags: list[AssertionTag] = sorted(
-            self._merge_mismatch_tags([AssertionTag.decode(str(a)) for a in unsat_core]),
+            self._merge_mismatch_tags(raw_tags),
             key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
         )
         expanded = False
@@ -321,20 +322,21 @@ class BundleBuilder:
 
     @staticmethod
     def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
-        """Merge PeerChannelMismatchTag pairs with the same (anchor, peer) into one tag.
+        """Merge PeerChannelMismatchTags for the same (anchor, endpoint) into one tag.
 
-        Track and risk constraints emit separate tags per dimension.  Merging them
-        ensures _handle_peer_channel_mismatch resolves both in a single CEGIS step,
-        avoiding a wrong intermediate channel on the first pass.
+        Different peer candidates for the same target can each carry a different
+        required dimension; merging across peers (not just per-peer dimensions)
+        ensures _handle_peer_channel_mismatch fetches one candidate satisfying all of
+        them, instead of one partially-correct candidate per peer.
         """
-        seen: dict[tuple[int, int], int] = {}
+        seen: dict[tuple[int, str], int] = {}
         merged: list[AssertionTag] = []
         for tag in tags:
             if isinstance(tag, PeerChannelMismatchTag):
-                pair = (tag.charm.charm_id, tag.peer_charm_id)
-                if pair in seen:
-                    existing = cast(PeerChannelMismatchTag, merged[seen[pair]])
-                    merged[seen[pair]] = PeerChannelMismatchTag(
+                key = (tag.charm.charm_id, tag.endpoint)
+                if key in seen:
+                    existing = cast(PeerChannelMismatchTag, merged[seen[key]])
+                    merged[seen[key]] = PeerChannelMismatchTag(
                         charm=existing.charm,
                         endpoint=existing.endpoint,
                         peer_charm_name=existing.peer_charm_name,
@@ -345,7 +347,7 @@ class BundleBuilder:
                         required_revision=existing.required_revision or tag.required_revision,
                     )
                 else:
-                    seen[pair] = len(merged)
+                    seen[key] = len(merged)
                     merged.append(tag)
             else:
                 merged.append(tag)
@@ -764,77 +766,92 @@ class BundleBuilder:
             for i in domain.charm_integrations
         )
 
+    def _fetch_and_add_charm_variant(
+        self,
+        *,
+        charm_id: int,
+        charm_name: str,
+        domain: Domain,
+        model_key: ModelRef,
+        track: str | None,
+        risk: str | None,
+        connect_to_id: int,
+        revision: int | None = None,
+    ) -> bool:
+        """Fetch `charm_name` on the given channel and add it to the domain for `charm_id`.
+
+        Returns whether the domain was expanded. Returns False (no-op) when no release
+        exists on that channel, rather than raising, so callers can try a fallback.
+        """
+        model_spec = domain.models[model_key]
+        try:
+            charm = self.charmhub_client.charm_from_store(
+                charm_name=charm_name,
+                ubuntu_arch=model_spec.arch,
+                juju_version=model_spec.juju_version,
+                platform=model_spec.platform,
+                charm_track=track,
+                charm_risk=risk,
+                charm_revision=revision,
+            )
+        except CharmReleaseNotFoundException:
+            self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
+            return False
+        return self._add_charm_for_charm_id(
+            charm,
+            charm_id,
+            domain,
+            model_key,
+            connect_to_id=connect_to_id,
+            connect_to_neighbors=True,
+        )
+
     def _handle_peer_channel_mismatch(
         self,
         tag: PeerChannelMismatchTag,
         domain: Domain,
     ) -> bool:
-        """Expand the domain by fetching a peer charm variant on the required channel."""
+        """Expand the domain by moving one side of a peer relation onto a shared channel.
+
+        Tries moving the peer to the tag's required channel first. If no release exists
+        there, falls back to moving the owning charm onto the peer's own (already-verified)
+        channel instead - the only remaining way to satisfy the constraint when the peer
+        itself can't be moved. The peer may live in a different model when the relation is
+        cross-model (CMR), so each candidate is placed in its own owner's model.
+        """
         owning_model = domain.charms[tag.charm.charm_id].model
-        # The peer may live in a different model when the relation is cross-model (CMR),
-        # so its replacement candidate must be placed in its own model, not the owning
-        # charm's model - otherwise the candidate can never satisfy the cross-model
-        # integration and the solver keeps re-triggering this same mismatch.
         peer_model = domain.charms[tag.peer_charm_id].model
-        model = domain.models[owning_model]
-        peer_model_spec = domain.models[peer_model]
         peer_channel = domain.charms[tag.peer_charm_id].spec.channel
+
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
-            track: str | None = resolved.track or peer_channel.track or None
-            risk: str | None = resolved.risk or peer_channel.risk or None
+            track: str | None = resolved.track or None
+            risk: str | None = resolved.risk or None
         else:
-            track = tag.required_track or peer_channel.track or None
-            risk = tag.required_risk or peer_channel.risk or None
-        expanded = False
+            track = tag.required_track or None
+            risk = tag.required_risk or None
 
-        # Try fetching the peer charm at the required channel.
-        try:
-            peer_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.peer_charm_name,
-                ubuntu_arch=peer_model_spec.arch,
-                juju_version=peer_model_spec.juju_version,
-                platform=peer_model_spec.platform,
-                charm_track=track,
-                charm_risk=risk,
-                charm_revision=tag.required_revision,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                peer_charm,
-                tag.peer_charm_id,
-                domain,
-                peer_model,
-                connect_to_id=tag.charm.charm_id,
-                connect_to_neighbors=True,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(f"No release found for {tag.peer_charm_name} on {track}/{risk or '*'}")
+        if self._fetch_and_add_charm_variant(
+            charm_id=tag.peer_charm_id,
+            charm_name=tag.peer_charm_name,
+            domain=domain,
+            model_key=peer_model,
+            track=track,
+            risk=risk,
+            revision=tag.required_revision,
+            connect_to_id=tag.charm.charm_id,
+        ):
+            return True
 
-        # Also try fetching the owning charm at the peer's actual channel so they can match.
-        # This handles the case where the peer is pinned and the owning charm must adapt instead.
-        try:
-            owning_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.charm.charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=peer_channel.track,
-                charm_risk=peer_channel.risk,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                owning_charm,
-                tag.charm.charm_id,
-                domain,
-                owning_model,
-                connect_to_id=tag.peer_charm_id,
-                connect_to_neighbors=True,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for {tag.charm.charm_name} on {peer_channel.track}/{peer_channel.risk or '*'}"
-            )
-
-        return expanded
+        return self._fetch_and_add_charm_variant(
+            charm_id=tag.charm.charm_id,
+            charm_name=tag.charm.charm_name,
+            domain=domain,
+            model_key=owning_model,
+            track=peer_channel.track,
+            risk=peer_channel.risk,
+            connect_to_id=tag.peer_charm_id,
+        )
 
     def _handle_subordinate_base_mismatch(
         self,
