@@ -372,7 +372,10 @@ jobs:
             return 1
           }
           openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID' | while read -r port_id; do
-            port_data=$(openstack port show "$port_id" --format json)
+            port_data=$(openstack port show "$port_id" --format json) || {
+              echo "Failed to read port $port_id; refusing to continue orphaned port cleanup"
+              exit 1
+            }
             device_owner=$(jq -r '.device_owner' <<<"$port_data")
             device_id=$(jq -r '.device_id' <<<"$port_data")
             created=$(jq -r '.created_at' <<<"$port_data")
