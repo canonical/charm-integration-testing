@@ -399,6 +399,6 @@ jobs:
               echo "Skipping port $port_id — still used by load balancer $lb_id"
             else
               echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
-              openstack port delete "$port_id" || true
+              openstack port delete "$port_id"
             fi
           done
