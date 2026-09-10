@@ -116,6 +116,11 @@ _REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "tls", "version"]
 # must be checked by key rather than truthiness, unlike "mtls-cert" which must be non-empty.
 _PROVIDER_FIELDS = ["mtls-cert"]
 
+# No valid hostname or IP literal contains whitespace or a C0/DEL control character (e.g. a
+# literal NUL byte), but urlsplit() is lenient about both appearing inside parsed.hostname, so
+# this is checked explicitly wherever a host is derived from "uris"/"endpoints" entries.
+_INVALID_HOST_CHARS_RE = re.compile(r"[\s\x00-\x1f\x7f]")
+
 
 def _redact_uri_for_message(uri: str) -> str:
     """Strip userinfo, query, and fragment components before including a URI in a diagnostic.
@@ -124,11 +129,16 @@ def _redact_uri_for_message(uri: str) -> str:
     that fails to parse, and won't itself raise on malformed input. Userinfo is redacted
     whether or not a "//" scheme separator is present, since this interface's "uris" field
     also accepts bare "host:port" entries without a scheme. The userinfo segment is matched
-    greedily up to the *last* "@" before the authority (rather than stopping at the first
-    "@"), so malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host")
-    is fully redacted instead of leaking everything after the first "@".
+    greedily up to the *last* "@" before the first "/" (rather than stopping at the first "@",
+    or at a "?"/"#"), so malformed userinfo containing an embedded literal "@" (e.g.
+    "admin@secret@host") or a "?"/"#" character before its own terminating "@" (e.g.
+    "admin:secret?token@host", where the credential is followed by what looks like a query
+    separator but is still part of the userinfo) is fully redacted rather than leaking
+    everything up to that character. Query/fragment stripping is applied only after userinfo
+    redaction, and on whatever text remains, so it never has a chance to short-circuit before
+    the userinfo match is attempted.
     """
-    sanitized = re.sub(r"(^|//)[^/?#]*@", r"\1<redacted>@", uri)
+    sanitized = re.sub(r"(^|//)[^/]*@", r"\1<redacted>@", uri)
     return re.sub(r"[?#].*$", "", sanitized)
 
 
@@ -466,22 +476,31 @@ class EtcdClientValidator(BaseValidator):
             parsed = urlsplit(entry if has_scheme else f"//{entry}")
             hostname, port = parsed.hostname, parsed.port
         except ValueError as exc:
+            # exc's own str() can itself embed the raw, unredacted offending substring (e.g.
+            # Python's "Port could not be cast to integer value as 'hunter2'" when a malformed
+            # uri's credential ends up parsed as the port, as with
+            # "https://admin:hunter2?token@host:2379"), so it must never be included verbatim
+            # in this message; only the exception *type* is reported, alongside the
+            # already-redacted uri.
             return "", ValidationCheck(
-                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}': {exc}"
+                name="uris_format",
+                passed=False,
+                message=f"Could not parse uri '{redacted_entry}': {type(exc).__name__} while parsing.",
             )
         if not hostname or not port:
             return "", ValidationCheck(
                 name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}'."
             )
-        if re.search(r"\s", hostname):
-            # urlsplit() is lenient about internal whitespace in a hostname (e.g. "bad host"
-            # parses successfully), but no valid hostname or IP literal ever contains it; a
-            # gRPC channel target built from it would just fail to connect at runtime, so
-            # reject it here as a format error instead.
+        if _INVALID_HOST_CHARS_RE.search(hostname):
+            # urlsplit() is lenient about internal whitespace and control characters (e.g. a
+            # literal NUL byte) in a hostname (e.g. "bad host" or "127.0.0.1\x00" both parse
+            # successfully), but no valid hostname or IP literal ever contains either; a gRPC
+            # channel target built from it would just fail to connect at runtime, so reject
+            # it here as a format error instead.
             return "", ValidationCheck(
                 name="uris_format",
                 passed=False,
-                message=f"uri '{redacted_entry}' has an invalid hostname containing whitespace.",
+                message=f"uri '{redacted_entry}' has an invalid hostname containing whitespace or control characters.",
             )
         if parsed.username is not None or parsed.password is not None:
             return "", ValidationCheck(
@@ -781,10 +800,18 @@ class EtcdClientValidator(BaseValidator):
             # silently discarding it as part of the host.
             if "@" in host:
                 port_valid = False
-            if re.search(r"\s", host):
-                # No valid hostname or IP literal contains whitespace, but a naive
-                # rpartition(":")-based split doesn't itself reject it (e.g. "bad host:2379"
-                # would otherwise pass); mirrors the equivalent check in _parse_single_uri.
+            if _INVALID_HOST_CHARS_RE.search(host):
+                # No valid hostname or IP literal contains whitespace or a C0/DEL control
+                # character (e.g. a literal NUL byte), but a naive rpartition(":")-based split
+                # doesn't itself reject either (e.g. "bad host:2379" would otherwise pass);
+                # mirrors the equivalent check in _parse_single_uri.
+                port_valid = False
+            if any(delimiter in host for delimiter in ("/", "?", "#")):
+                # A naive rpartition(":")-based split doesn't reject a URI delimiter embedded
+                # in the host, e.g. "host/path:2379" or "host?query:2379"; unlike
+                # _parse_single_uri (which routes through urlsplit() and rejects any parsed
+                # path/query/fragment separately), rpartition(":") here would otherwise treat
+                # "host/path" as a plain (if unusual) hostname and accept the entry.
                 port_valid = False
             if not port_valid:
                 invalid.append(_redact_uri_for_message(entry))

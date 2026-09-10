@@ -241,6 +241,23 @@ class TestEtcdClientValidatorRequiresSimple:
         assert not check.passed
         assert secret not in check.message
 
+    def test_redacts_userinfo_with_query_delimiter_before_terminating_at_sign(self) -> None:
+        # GIVEN a malformed uri where a "?" appears within the userinfo segment itself, before
+        # its own terminating "@" (e.g. "admin:secret?token@host"): the userinfo-redaction
+        # regex must not stop at the "?" and let the query-stripping regex run first, which
+        # would otherwise strip only "?token@host..." and leave "admin:secret" exposed in the
+        # message.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "https://admin:" + secret + "?token@host:2379"
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
+        assert "<redacted>" in check.message
+
     def test_fails_endpoints_format_check_for_overlong_digit_port(self) -> None:
         # A port string with far more digits than any valid port (max 65535, 5 digits) must
         # fail cleanly as a normal FAIL, not crash validation into ERROR: int() itself raises
@@ -341,11 +358,50 @@ class TestEtcdClientValidatorRequiresSimple:
         check = next(c for c in result.checks if c.name == "uris_format")
         assert not check.passed
 
+    def test_fails_uris_format_check_for_control_character_in_hostname(self) -> None:
+        # urlsplit() is lenient about C0 control characters (e.g. an embedded NUL byte)
+        # inside a hostname, unlike whitespace's separate check above; a gRPC target built
+        # from such a hostname would just fail to connect, so it must be rejected as a
+        # format error instead.
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://127.0.0.1\x00:2379"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "uris_format")
+        assert not check.passed
+
     def test_fails_endpoints_format_check_for_whitespace_in_hostname(self) -> None:
         # Mirrors test_fails_uris_format_check_for_whitespace_in_hostname: "endpoints" must
         # reject whitespace in the host the same way "uris" does, rather than accepting an
         # invalid host that would only fail later (and more confusingly) at connect time.
         databag = {**VALID_REQUIRER_DATABAG, "endpoints": "bad host:2379"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+
+    def test_fails_endpoints_format_check_for_control_character_in_hostname(self) -> None:
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": "127.0.0.1\x00:2379"}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+
+    def test_fails_endpoints_format_check_for_uri_delimiter_in_second_entry(self) -> None:
+        # GIVEN a reachable first endpoint but a second entry with a URI delimiter embedded
+        # in its host (e.g. "host/path"): a naive rpartition(":")-based split doesn't itself
+        # reject this the way urlsplit()-based _parse_single_uri does for "uris", so it must
+        # be checked explicitly here too, rather than letting a malformed second endpoint be
+        # silently ignored just because _check_tcp_reachable() only probes the first entry.
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": "10.1.2.3:2379,host/path:2379"}
         validator = _make_validator(databag)
 
         result = validator.validate(level="simple")
