@@ -10,6 +10,7 @@ same two charms, riding the same Juju offer.
 
 import logging
 
+import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
@@ -23,7 +24,7 @@ from bundle_builder_x.domain import (
     add_charm_to_domain,
     pair_charms_in_domain,
 )
-from bundle_builder_x.dsl_lowering import LoweringContext, lower
+from bundle_builder_x.dsl_lowering import DSLLoweringError, LoweringContext, lower
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
 
@@ -264,11 +265,8 @@ class TestCrossModelExprDSL:
         # are declared per-endpoint (not per-relation-instance) and cross_model() filtering
         # has no well-defined meaning for them.
         expr = parse_constraint('features(cross_model(endpoint[backend])) == {"a"}')
-        try:
+        with pytest.raises(DSLLoweringError, match="features\\(\\)"):
             lower(expr, ctx)
-            raise AssertionError("expected DSLLoweringError")
-        except Exception as exc:
-            assert "features()" in str(exc)
 
 
 class TestCrossModelMeshOfferSharing:
