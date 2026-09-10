@@ -8,8 +8,8 @@ resource-tracking machinery lives in one place.  After every passing,
 state-marked test the autouse fixture snapshots the resources present in each
 model; the recorded observations are diffed into discrepancies at the end of the
 suite.  Which resource *kinds* a charm version opts out of is resolved through
-the bundle-builder ``OverridesClient`` using the charm and channel read from the
-live model, so no charm names are hard-coded here.
+the bundle-builder ``OverridesClient`` using the charm, channel and Ubuntu base
+read from the live model, so no charm names are hard-coded here.
 """
 
 from __future__ import annotations

@@ -75,10 +75,12 @@ stays small and substrate-agnostic:
   A charm version opts out of tracking a resource kind under its ``overrides``
   block in ``static/charm-overrides/<charm>.yaml``. The
   ``resource_tracking_skips_by_application`` fixture reads each deployed
-  application's charm and channel from the live model via
+  application's charm, channel and Ubuntu base from the live model via
   ``juju_client.list_applications`` and looks up its ``resource_tracking.skip``
-  set through the bundle-builder ``OverridesClient``. Each application's channel
-  is resolved once per controller, model and track and cached for the session.
+  set through the bundle-builder ``OverridesClient``, so an override's skip list
+  can be scoped to a specific ``ubuntu_version`` as well as a track/risk. Each
+  application's channel is resolved once per controller, model and track and
+  cached for the session.
   The resolved map is scoped to ``(controller, model, application)`` and unions
   the skips of every track the application ran on *within that model*: because
   all of a model's states share one namespace, a resource kind retained by any
@@ -264,11 +266,15 @@ A charm version opts out of tracking a resource *kind* by adding a
          ...
 
 Because the section lives inside a per-version ``overrides`` entry, different
-tracks or risks of the same charm can declare different skips. Resolution reuses
-the bundle-builder machinery: the deployed application's charm and channel are
-read from the live model and the matching entry's skip set is looked up through
-``OverridesClient.get_charm_resource_tracking_skips()``, so the resource tracker
-and the solver share one source of truth for per-version overrides.
+tracks or risks of the same charm can declare different skips; a ``criteria``
+entry can also add a ``ubuntu_version`` field to scope the skip to a specific
+Ubuntu base, for charms whose metadata (and thus which resources they leave
+behind) differs by base rather than by track alone. Resolution reuses the
+bundle-builder machinery: the deployed application's charm, channel and base
+are read from the live model and the matching entry's skip set is looked up
+through ``OverridesClient.get_charm_resource_tracking_skips()``, so the
+resource tracker and the solver share one source of truth for per-version
+overrides.
 
 Skips are declared per *charm version*, but resources live in a *model's*
 namespace (on a specific controller) and are attributed to an *application* (a
