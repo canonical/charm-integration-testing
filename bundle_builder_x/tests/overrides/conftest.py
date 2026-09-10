@@ -107,7 +107,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         for override in global_overrides.overrides:
             matched = sorted(
                 (cv for cv in remaining if override.meets(*cv)),
-                key=lambda cv: (str(cv[0]), cv[1] or ""),
+                key=lambda cv: (cv[0], cv[1] or ""),
             )
             remaining = {cv for cv in remaining if cv not in matched}
             if not matched:

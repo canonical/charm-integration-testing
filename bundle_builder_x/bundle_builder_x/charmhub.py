@@ -845,7 +845,7 @@ class CharmhubClient:
             if stale:
                 raise UnparsableCharmException(
                     f"Charm {charm_name!r} override declares {label} endpoints not present in "
-                    f"charm metadata at channel {channel}: {stale}"
+                    f"charm metadata at channel {channel}, ubuntu_version {ubuntu_version}: {stale}"
                 )
 
         # Gather endpoints
@@ -929,7 +929,7 @@ class CharmhubClient:
         if stale_configs:
             raise UnparsableCharmException(
                 f"Charm {charm_name!r} override declares config keys not present in "
-                f"charm config at channel {channel}: {stale_configs}"
+                f"charm config at channel {channel}, ubuntu_version {ubuntu_version}: {stale_configs}"
             )
         return config_overrides
 
@@ -941,7 +941,7 @@ class CharmhubClient:
         if stale_resources:
             raise UnparsableCharmException(
                 f"Charm {charm_name!r} override declares resource keys not present in "
-                f"charm metadata at channel {channel}: {stale_resources}"
+                f"charm metadata at channel {channel}, ubuntu_version {ubuntu_version}: {stale_resources}"
             )
         return resource_overrides
 

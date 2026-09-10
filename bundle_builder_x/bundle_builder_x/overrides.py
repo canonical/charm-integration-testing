@@ -19,12 +19,7 @@ class CharmOverridesCriteria(BaseModel):
     none_of: list["CharmOverridesCriteria"] | None = None
     track: str | None = None
     risk: str | None = None
-    # Some charms (e.g. kubernetes-worker) publish substantially different metadata
-    # (different provides/requires endpoints) for the *same* track depending on the
-    # Ubuntu base - typically because an older charm generation is still served on
-    # legacy bases under a track that has since moved to a rewritten charm for newer
-    # bases. track/risk alone cannot express that split, so ubuntu_version lets an
-    # override block additionally require an exact base match (e.g. '22.04').
+    # Restricts this override block to an exact Ubuntu base (e.g. '22.04').
     ubuntu_version: str | None = None
 
     def meets(self, channel: CharmChannel, ubuntu_version: str | None = None) -> bool:
@@ -166,12 +161,16 @@ class OverridesClient:
     ) -> list[str]:
         return self._get_charm_overrides(charm, channel, ubuntu_version).constraints
 
-    def get_charm_resource_tracking_skips(self, charm: str, channel: CharmChannel) -> frozenset[str]:
-        return frozenset(self._get_charm_overrides(charm, channel).resource_tracking.skip)
+    def get_charm_resource_tracking_skips(
+        self, charm: str, channel: CharmChannel, ubuntu_version: str | None = None
+    ) -> frozenset[str]:
+        return frozenset(self._get_charm_overrides(charm, channel, ubuntu_version).resource_tracking.skip)
 
-    def get_charm_endpoint_removable(self, charm: str, channel: CharmChannel, endpoint: str) -> bool:
+    def get_charm_endpoint_removable(
+        self, charm: str, channel: CharmChannel, endpoint: str, ubuntu_version: str | None = None
+    ) -> bool:
         """Whether ``endpoint`` may be torn down and re-added by the remove-and-restore test."""
-        overrides = self._get_charm_overrides(charm, channel)
+        overrides = self._get_charm_overrides(charm, channel, ubuntu_version)
         for endpoint_map in (overrides.requires, overrides.provides):
             endpoint_override = endpoint_map.get(endpoint)
             if endpoint_override is not None and endpoint_override.removable is not None:
