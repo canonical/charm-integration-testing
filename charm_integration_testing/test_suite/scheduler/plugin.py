@@ -82,6 +82,13 @@ _duplicate_original_ids: dict[int, int] = {}
 # is unknown. Pure test failures do NOT set this: they leave the state intact.
 _failed_state_test: pytest.Item | None = None
 
+# Set to the first state-marked *transition* test that is skipped.  A skipped
+# transition never advances the environment to its ``provides`` state, so the
+# statically-planned sequence that follows would run against a stale state.
+# Once non-None, all subsequent state-marked tests are skipped as a unit. Pure
+# test skips do NOT set this: they leave the state intact.
+_skipped_transition_test: pytest.Item | None = None
+
 
 # ---------------------------------------------------------------------------
 # Plugin hooks
@@ -141,33 +148,48 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:  # type: ignore[misc]
-    """Detect failed state-marked tests and halt the state machine.
+    """Halt the state machine when a state-marked test fails or a transition is skipped.
 
     When any state-marked test fails at setup, call, or teardown time the
     environment state is no longer known: a setup failure may leave the
     environment partially configured, and a teardown failure may leave it in
-    an indeterminate state.  All subsequent state-marked tests are skipped to
-    prevent them from running against a broken or indeterminate environment.
+    an indeterminate state.
 
-    Unmarked tests are never affected.
+    When a state-marked *transition* test is skipped, the environment never
+    advances to its ``provides`` state, so the statically-planned sequence that
+    follows would run against a stale state (e.g. an injected teardown removing
+    an application a skipped deploy never created).
+
+    In either case all subsequent state-marked tests are skipped.  Pure-test
+    skips leave the state intact and never halt.  Unmarked tests are never
+    affected.
     """
-    global _failed_state_test
+    global _failed_state_test, _skipped_transition_test
     outcome = yield
-    if _failed_state_test is not None:
+    if _failed_state_test is not None or _skipped_transition_test is not None:
         return  # Already halted; no need to re-check.
     report = outcome.get_result()
+    try:
+        marker = read_state_marker(item)
+    except ValueError:
+        marker = None
+    if marker is None:
+        return
     if report.failed:
-        try:
-            marker = read_state_marker(item)
-        except ValueError:
-            marker = None
-        if marker is not None:
-            _failed_state_test = item
-            logger.error(
-                "State-marked test %r failed: environment state is unknown.  "
-                "All remaining state-marked tests will be skipped.",
-                item.nodeid,
-            )
+        _failed_state_test = item
+        logger.error(
+            "State-marked test %r failed: environment state is unknown.  "
+            "All remaining state-marked tests will be skipped.",
+            item.nodeid,
+        )
+    elif report.skipped and marker.is_transition:
+        _skipped_transition_test = item
+        logger.warning(
+            "State-marked transition test %r was skipped: the environment did not advance to %r.  "
+            "All remaining state-marked tests will be skipped to avoid running against a stale state.",
+            item.nodeid,
+            marker.provides.value,
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
@@ -178,30 +200,40 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     same Python process (e.g. from a test harness) would see stale data from
     the previous run.
     """
-    global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
+    global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test, _skipped_transition_test
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()
     _failed_state_test = None
+    _skipped_transition_test = None
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """Skip state-marked tests after a transition failure.
+    """Skip state-marked tests after a transition fails or is skipped.
 
-    Called before each test's setup phase.  If a previous transition test
-    has failed, this hook raises ``pytest.skip`` for every state-marked test
-    that follows, leaving unmarked tests unaffected.
+    Called before each test's setup phase.  If a previous state-marked test
+    has failed, or a previous state-marked *transition* test was skipped, this
+    hook raises ``pytest.skip`` for every state-marked test that follows,
+    leaving unmarked tests unaffected.
     """
-    if _failed_state_test is None:
+    halt_item = _failed_state_test or _skipped_transition_test
+    if halt_item is None:
         return
-    if item is _failed_state_test:
-        return  # Don't skip the failing test itself; let it report naturally.
+    if item is halt_item:
+        return  # Don't skip the triggering test itself; let it report naturally.
     try:
         marker = read_state_marker(item)
     except ValueError:
         marker = None
-    if marker is not None:
+    if marker is None:
+        return
+    if _failed_state_test is not None:
         pytest.skip(f"Skipped: state-marked test {_failed_state_test.nodeid!r} failed: environment state is unknown.")
+    if _skipped_transition_test is not None:
+        pytest.skip(
+            f"Skipped: state-marked transition test {_skipped_transition_test.nodeid!r} was skipped; "
+            "the environment did not reach the expected state."
+        )
 
 
 @pytest.hookimpl(trylast=True)

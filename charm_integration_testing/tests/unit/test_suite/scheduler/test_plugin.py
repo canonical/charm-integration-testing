@@ -976,9 +976,9 @@ class TestBuildExecutionPlan:
 # ---------------------------------------------------------------------------
 
 
-def _make_report(when: str = "call", failed: bool = False) -> Any:
+def _make_report(when: str = "call", failed: bool = False, skipped: bool = False) -> Any:
     """Return a minimal test report substitute."""
-    return SimpleNamespace(when=when, failed=failed)
+    return SimpleNamespace(when=when, failed=failed, skipped=skipped)
 
 
 def _drive_makereport(item: pytest.Item, call: Any, report: Any) -> None:
@@ -1056,6 +1056,56 @@ class TestPytestRuntestMakereport:
         # THEN the original failing test is preserved
         assert _plugin_module._failed_state_test is first
 
+    def test_sets_skipped_transition_test_on_marked_transition_skip(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a state-marked transition item and a skipped setup-phase report
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the transition is recorded so the cycle halts as a unit
+        assert _plugin_module._skipped_transition_test is item
+
+    def test_does_not_set_on_pure_test_skip(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a state-marked *pure* test (requires == provides) that is skipped
+        item = make_item("test_validate", requires=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        _drive_makereport(item, call, report)
+
+        # THEN a pure-test skip never halts the state machine
+        assert _plugin_module._skipped_transition_test is None
+
+    def test_does_not_set_on_unmarked_skip(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item with no state marker that is skipped
+        item = make_item("test_smoke")
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._skipped_transition_test is None
+
+    def test_skip_does_not_overwrite_prior_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a prior failure already halted the state machine
+        failed = make_item("test_first", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
+
+        # WHEN a later transition test is skipped
+        item = make_item("test_deploy", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+        _drive_makereport(item, call, report)
+
+        # THEN the failure remains the trigger and no skip trigger is recorded
+        assert _plugin_module._failed_state_test is failed
+        assert _plugin_module._skipped_transition_test is None
+
 
 # ---------------------------------------------------------------------------
 # Tests for pytest_runtest_setup (halting downstream tests)
@@ -1113,6 +1163,39 @@ class TestPytestRuntestSetup:
 
         assert "test_deploy" in str(exc_info.value)
 
+    def test_skips_state_marked_test_after_transition_skip(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a previous transition test was skipped
+        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._skipped_transition_test = skipped
+
+        # AND a subsequent state-marked test
+        subsequent = make_item("test_teardown", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+
+        # THEN running setup for the subsequent test raises skip
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            pytest_runtest_setup(subsequent)
+
+        assert "test_downgrade_charm" in str(exc_info.value)
+
+    def test_does_not_skip_the_skipped_transition_item_itself(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the skipped transition item is the same item being set up
+        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._skipped_transition_test = skipped
+
+        # THEN setup is allowed to proceed (no skip raised)
+        pytest_runtest_setup(skipped)  # must not raise
+
+    def test_does_not_skip_unmarked_item_after_transition_skip(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a previous transition test was skipped
+        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._skipped_transition_test = skipped
+
+        # AND an unmarked test
+        unmarked = make_item("test_smoke")
+
+        # THEN setup is allowed to proceed for the unmarked test
+        pytest_runtest_setup(unmarked)  # must not raise
+
 
 # ---------------------------------------------------------------------------
 # Tests for pytest_sessionfinish (global cleanup)
@@ -1136,6 +1219,11 @@ class TestPytestSessionFinish:
         _plugin_module._failed_state_test = make_item("test_deploy")
         pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._failed_state_test is None
+
+    def test_clears_skipped_transition_test(self, make_item: Callable[..., pytest.Item]) -> None:
+        _plugin_module._skipped_transition_test = make_item("test_downgrade_charm")
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._skipped_transition_test is None
 
     def test_clears_duplicate_original_ids(self, make_item: Callable[..., pytest.Item]) -> None:
         item = make_item("test_foo")
