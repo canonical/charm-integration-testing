@@ -26,8 +26,11 @@ from extensions import (
     ValidatorInjectorExtension,
 )
 from juju import (
+    JujuApplicationInfo,
     JujuBackend,
     JujuClient,
+    JujuConsumedOfferInfo,
+    JujuIntegrationApplication,
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
@@ -828,6 +831,32 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
+def _integration_endpoint_str(
+    juju_client: JujuClient,
+    side: JujuIntegrationApplication,
+    applications: dict[str, JujuApplicationInfo],
+    consumed_offers: dict[str, JujuConsumedOfferInfo],
+) -> str:
+    """Render one side of an integration as ``<charm>:<endpoint>``, normalized for matching.
+
+    Local applications are identified by charm name. Remote SAAS entries backed by a consumed
+    offer are resolved to the actual charm behind the offer (via a status check against the
+    offering model), so cross-model integrations are recorded identically to same-model ones.
+    The offer URL itself is never used for this: it embeds the offering controller/model names,
+    which are randomly generated per test run and would make the recorded value useless for
+    matching across runs. If the offering model can't be resolved (e.g. unreachable controller),
+    fall back to the offer's local alias, which -- unlike the URL -- is stable across runs.
+    """
+    if side.application in applications:
+        return f"{applications[side.application].charm}:{side.endpoint}"
+    if side.application in consumed_offers:
+        offer_application = juju_client.resolve_consumed_offer_application(consumed_offers[side.application])
+        if offer_application is not None:
+            return f"{offer_application.charm}:{side.endpoint}"
+        return f"offer:{side.application}:{side.endpoint}"
+    raise KeyError(f"'{side.application}' is neither a known application nor a consumed offer")
+
+
 def record_charm_info_execution_metadata_instantaneous(
     juju_client: JujuClient, model: JujuModelHandle, execution_metadata: Callable[[str, str], None]
 ) -> None:
@@ -846,30 +875,16 @@ def record_charm_info_execution_metadata_instantaneous(
             # Risk is always present in a valid channel string
             execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
-    consumed_offers = juju_client.list_consumed_offers(model=model).keys()
+    consumed_offers = juju_client.list_consumed_offers(model=model)
 
-    # Get all integrations and record them
+    # Get all integrations (including CMRs) and record them.
+    # Only integrations actually reported by ``list_integrations`` are recorded, so
+    # consumed offers that aren't integrated with anything are naturally excluded.
     for integration in juju_client.list_integrations(model=model):
-        # Skip cross-model integrations where one side is a remote SAAS entry
-        # TODO: record CMRs in a future iteration
-        if integration.provider.application not in applications or integration.requirer.application not in applications:
-            continue
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        try:
-            integration_str = (
-                f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
-                f"{integration.interface}/"
-                f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
-            )
-            execution_metadata("integration", integration_str)
-        except KeyError as err:
-            if consumed_offers.isdisjoint({integration.provider.application, integration.requirer.application}):
-                raise KeyError("neither app nor consumed offer") from err
-
-            # FIXME(@motjuste): not recording execution metadata for consumed offers
-            #   either use the URL which does not have charm info,
-            #   or do a second status-check for offering model to get that info,
-            #   AND, only do it for **actually** integrated offers
+        provider_str = _integration_endpoint_str(juju_client, integration.provider, applications, consumed_offers)
+        requirer_str = _integration_endpoint_str(juju_client, integration.requirer, applications, consumed_offers)
+        execution_metadata("integration", f"{provider_str}/{integration.interface}/{requirer_str}")
 
 
 @pytest.fixture

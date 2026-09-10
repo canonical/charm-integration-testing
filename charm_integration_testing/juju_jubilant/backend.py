@@ -579,19 +579,44 @@ class JubilantBackend(JujuCmdBackend):
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         return {
-            app_name: JujuApplicationInfo(
-                charm=app_info.charm,
-                revision=app_info.charm_rev,
-                channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
-            )
+            app_name: self._application_info_from_status(app_info)
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    @staticmethod
+    def _application_info_from_status(app_info: jubilant.statustypes.AppStatus) -> JujuApplicationInfo:
+        return JujuApplicationInfo(
+            charm=app_info.charm,
+            revision=app_info.charm_rev,
+            channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+        )
 
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         return {
             offer: JujuConsumedOfferInfo(url=info.url, endpoints=frozenset(info.endpoints.keys()))
             for offer, info in self.status(model).app_endpoints.items()
         }
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        parsed_url = offer.parse_url()
+        if parsed_url is None:
+            return None
+        offering_model, offer_name = parsed_url
+
+        try:
+            offering_status = self.status(offering_model)
+        except jubilant.CLIError:
+            # The offering controller/model may not be reachable from here (e.g. a different,
+            # unregistered controller), or may no longer exist.
+            return None
+
+        offer_status = offering_status.offers.get(offer_name)
+        if offer_status is None:
+            return None
+        app_info = offering_status.apps.get(offer_status.app)
+        if app_info is None:
+            return None
+        return self._application_info_from_status(app_info)
 
     def list_offers(self, model: JujuModelHandle) -> set[str]:
         result = self.client.model(model).cli("offers", "--format", "json")
