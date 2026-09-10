@@ -240,11 +240,12 @@ class TestIstioIngressRouteValidatorSimple:
         assert all("12\u00b23" not in c.message for c in result.checks)
 
     def test_passes_simple_with_tls_disabled(self) -> None:
-        # GIVEN valid provider databag with TLS disabled
+        # GIVEN valid provider databag with TLS disabled, gateway reachable
         validator = _make_validator(VALID_HTTP_DATABAG)
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN
         assert result.status == "PASS"
@@ -252,11 +253,12 @@ class TestIstioIngressRouteValidatorSimple:
         assert schema.passed
 
     def test_passes_simple_with_tls_enabled(self) -> None:
-        # GIVEN valid provider databag with TLS enabled
+        # GIVEN valid provider databag with TLS enabled, gateway reachable
         validator = _make_validator(VALID_HTTPS_DATABAG)
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN
         assert result.status == "PASS"
@@ -267,7 +269,8 @@ class TestIstioIngressRouteValidatorSimple:
         validator = _make_validator({"external_host": "upstream.example.com/model-app", "tls_enabled": "True"})
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN the routed path is accepted; only query/fragment/user-info are rejected
         assert result.status == "PASS"
@@ -280,7 +283,8 @@ class TestIstioIngressRouteValidatorSimple:
         validator = _make_validator({"external_host": "ingress.example.com.", "tls_enabled": "False"})
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN the single trailing dot is accepted
         assert result.status == "PASS"
@@ -304,7 +308,8 @@ class TestIstioIngressRouteValidatorSimple:
         validator = _make_validator({"external_host": "[2001:db8::1]", "tls_enabled": "False"})
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN the host is accepted, and every message shows it intact/unredacted
         assert result.status == "PASS"
@@ -442,11 +447,62 @@ class TestIstioIngressRouteValidatorSimple:
         validator = _make_validator(VALID_HTTP_DATABAG, endpoint="my-ingress")
 
         # WHEN
-        result = validator.validate(level="simple")
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
 
         # THEN
         assert result.endpoint == "my-ingress"
         assert result.interface == "istio_ingress_route"
+
+    def test_fails_simple_when_gateway_workload_is_down(self) -> None:
+        # GIVEN a well-formed, otherwise-valid databag (e.g. stale data left behind
+        # after the provider's gateway workload was scaled down), but the gateway is
+        # unreachable
+        validator = _make_validator(VALID_HTTP_DATABAG)
+
+        # WHEN
+        with patch(
+            "validators.istio_ingress_route.validator._tcp_ping",
+            side_effect=ConnectionRefusedError("Connection refused"),
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN simple-level validation catches the down workload rather than reporting
+        # a false PASS based on stale-but-well-formed data alone
+        assert result.status == "FAIL"
+        connect = next(c for c in result.checks if c.name == "connect")
+        assert not connect.passed
+
+    def test_simple_does_not_issue_http_probe(self) -> None:
+        # GIVEN a reachable gateway
+        validator = _make_validator(VALID_HTTP_DATABAG)
+
+        # WHEN
+        with (
+            patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping,
+            patch("validators.istio_ingress_route.validator._opener.open") as opener_open,
+        ):
+            result = validator.validate(level="simple")
+
+        # THEN only the read-only TCP check runs; no HTTP request is made at this level
+        assert result.status == "PASS"
+        tcp_ping.assert_called_once()
+        opener_open.assert_not_called()
+        assert not any(c.name == "http_probe" for c in result.checks)
+
+    def test_simple_skips_connectivity_when_no_local_config_published(self) -> None:
+        # GIVEN the requirer has not (yet) published its own listener config, so no
+        # port is known to probe
+        validator = _make_validator(VALID_HTTP_DATABAG, local_databag={})
+
+        # WHEN
+        with patch("validators.istio_ingress_route.validator._tcp_ping") as tcp_ping:
+            result = validator.validate(level="simple")
+
+        # THEN the connectivity check is skipped rather than guessing a port, and the
+        # overall result reports SKIPPED (not a false PASS)
+        assert result.status == "SKIPPED"
+        tcp_ping.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

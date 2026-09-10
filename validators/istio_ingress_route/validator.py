@@ -175,18 +175,21 @@ class IstioIngressRouteValidator(BaseValidator):
 
     The requirer derives its external URL as ``{scheme}://{external_host}`` where
     scheme is ``https`` when TLS is enabled, otherwise ``http``. L1 validates the
-    published fields and URL shape; L2 probes the gateway to confirm it is
-    reachable and routing traffic.
+    published fields and URL shape, then TCP-probes the gateway (read-only, no
+    HTTP request) so a down workload is caught even though its last-known-good
+    databag values are still well-formed. L2 additionally issues an HTTP GET to
+    confirm the gateway is actually routing traffic, not just accepting TCP
+    connections.
 
     ``external_host`` normally carries no port: istio_ingress_route lets a requirer
     declare arbitrary Gateway listener ports for its routes (not just 80/443) via
     a ``config`` key the requirer publishes into its *own* local application
     databag on this relation (JSON-encoded, with a required ``model`` and an
     optional ``listeners`` list of ``{"port": ..., "protocol": "HTTP" | "GRPC"}``).
-    L2 therefore resolves the port(s) to probe in precedence order: a port encoded
-    in ``external_host`` is used as-is; otherwise every declared HTTP-protocol
-    listener from that local config is probed (a requirer may declare more than
-    one), instead of assuming a default.
+    Both levels therefore resolve the port(s) to probe in precedence order: a port
+    encoded in ``external_host`` is used as-is; otherwise every declared
+    HTTP-protocol listener from that local config is probed (a requirer may declare
+    more than one), instead of assuming a default.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -214,28 +217,30 @@ class IstioIngressRouteValidator(BaseValidator):
         if not checks[-1].passed:
             return self._fail_result(level, checks)
 
-        if level == "deep":
-            local_databag = dict(self.relation.data[self.charm.app])
-            ports, port_check = _resolve_probe_ports(url, local_databag)
-            if not ports:
-                if port_check is not None:
-                    checks.append(port_check)
-                if port_check is not None and not port_check.passed:
-                    return self._fail_result(level, checks)
-                # Neither the TCP nor HTTP capability check actually ran here (no
-                # config has been published yet, or it declares no HTTP-protocol
-                # listener), so this is not a successful deep validation based on
-                # a real probe. Report SKIPPED rather than PASS so downstream
-                # automation doesn't record it as one.
-                return self._make_result(status="SKIPPED", level=level, checks=checks)
+        # A TCP reachability check is read-only (no HTTP request, no side effects), so
+        # it belongs at 'simple' level too: otherwise 'simple' would report PASS on
+        # nothing but a stale-but-well-formed databag even when the gateway workload
+        # is entirely down. The HTTP probe stays deep-only.
+        local_databag = dict(self.relation.data[self.charm.app])
+        ports, port_check = _resolve_probe_ports(url, local_databag)
+        if not ports:
+            if port_check is not None:
+                checks.append(port_check)
+            if port_check is not None and not port_check.passed:
+                return self._fail_result(level, checks)
+            # No connectivity check actually ran here (no config has been published
+            # yet, or it declares no HTTP-protocol listener), so this is not a
+            # successful validation based on a real probe. Report SKIPPED rather
+            # than PASS so downstream automation doesn't record it as one.
+            return self._make_result(status="SKIPPED", level=level, checks=checks)
 
-            host = _extract_host(url)
-            for port in ports:
-                probe_url = _with_port(url, port)
-                connect_check = _connectivity_check(host, port, probe_url)
-                checks.append(connect_check)
-                if connect_check.passed:
-                    checks.append(_http_probe_check(probe_url))
+        host = _extract_host(url)
+        for port in ports:
+            probe_url = _with_port(url, port)
+            connect_check = _connectivity_check(host, port, probe_url)
+            checks.append(connect_check)
+            if level == "deep" and connect_check.passed:
+                checks.append(_http_probe_check(probe_url))
 
         return self._make_result(level=level, checks=checks)
 
@@ -442,7 +447,7 @@ def _extract_host(url: str) -> str:
 
 
 def _resolve_probe_ports(url: str, local_databag: dict[str, str]) -> tuple[list[int], ValidationCheck | None]:
-    """Determine which port(s) the deep-level checks should probe.
+    """Determine which port(s) the connectivity checks should probe.
 
     A port encoded in ``external_host`` (see class docstring) is unambiguous and used
     as-is. Otherwise, the actual listener port(s) are only known from the requirer's
