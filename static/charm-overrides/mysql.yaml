@@ -21,9 +21,13 @@ overrides:
       shared-db:
         optional: true
     constraints:
-      # Mutually exclusive access interfaces; exactly one must be connected.
-      - len(endpoint[database]) + len(endpoint[mysql]) + len(endpoint[db-router])
-        + len(endpoint[shared-db]) == 1
+      # database/mysql/db-router/shared-db are mutually exclusive; a replica (requires:
+      # replication connected) serves no clients directly, so all must be 0 instead of 1.
+      - 'bool(endpoint[replication]) => len(endpoint[database]) + len(endpoint[mysql])
+        + len(endpoint[db-router]) + len(endpoint[shared-db]) == 0'
+      - 'not bool(endpoint[replication]) => len(endpoint[database]) + len(endpoint[mysql])
+        + len(endpoint[db-router]) + len(endpoint[shared-db]) == 1'
+      # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
 
@@ -31,9 +35,12 @@ overrides:
     # cos-agent and replication-offer are already optional upstream in 8.4.
   - provides:
       database:
-        optional: true
         features: [mysql-server]
+        optional: true
     constraints:
-      - len(endpoint[database]) == 1
+      # a replica (requires: replication connected) serves no clients directly
+      - 'bool(endpoint[replication]) => len(endpoint[database]) == 0'
+      - 'not bool(endpoint[replication]) => len(endpoint[database]) == 1'
+      # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
