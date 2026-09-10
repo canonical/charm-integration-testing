@@ -1543,6 +1543,23 @@ class TestEtcdClientValidatorGrpcTarget:
         assert not check.passed
         assert targets == []
 
+    @pytest.mark.parametrize("uri", ["https://::1:2379", "::1:2379", "https://fe80::1:2379", "fe80::1:2379"])
+    def test_rejects_unbracketed_ipv6_authority(self, uri: str) -> None:
+        # GIVEN an unbracketed IPv6-style authority (this interface's only valid IPv6 form is
+        # bracketed, e.g. "[::1]:2379"): urlsplit()'s hostname/port parsing splits the netloc
+        # on only the *first* colon, so any unbracketed authority with more than one colon
+        # always leaves a non-numeric remainder for the "port" component and urlsplit.port
+        # raises ValueError -- it can never successfully parse such an entry into a
+        # colon-bearing hostname with a valid port. This is a regression test proving that
+        # (contrary to a claim that it silently reconstructs a "[host]:port" gRPC target),
+        # such input is cleanly rejected as a failed uris_format check instead.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+
     def test_rejects_userinfo_in_uri(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
         uri = "https://" + "admin" + ":" + "hunter2" + "@10.1.2.3:2379"
