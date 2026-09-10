@@ -927,6 +927,7 @@ class IntegrationTrackingBackendStub(NullJujuBackend):
     wait_removal_calls: list[
         tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication, timedelta | None]
     ] = field(default_factory=list)
+    remove_saas_calls: list[tuple[JujuModelHandle, str]] = field(default_factory=list)
 
     def integrate(
         self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
@@ -946,6 +947,9 @@ class IntegrationTrackingBackendStub(NullJujuBackend):
         timeout: timedelta | None,
     ) -> None:
         self.wait_removal_calls.append((model, endpoint_1, endpoint_2, timeout))
+
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        self.remove_saas_calls.append((model, alias))
 
 
 _EP1 = JujuIntegrationApplication("target", "grafana-dashboards-consumer")
@@ -991,6 +995,12 @@ class TestIntegrationMethods:
         _client(backend).wait_for_removal_of_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
 
         assert backend.wait_removal_calls == [(_MODEL, _EP1, _EP2, None)]
+
+    def test_remove_saas_delegates_to_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        _client(backend).remove_saas("neighbor-offer", model=_MODEL)
+
+        assert backend.remove_saas_calls == [(_MODEL, "neighbor-offer")]
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,4 @@
+---
+# https://github.com/canonical/observability-libs/issues/128
+# https://github.com/canonical/charm-integration-testing/issues/163
+default_channel: 2/stable
