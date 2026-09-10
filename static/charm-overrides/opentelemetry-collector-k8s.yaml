@@ -10,7 +10,10 @@
 #   blocks when this IS connected but unpaired; absent relation causes no BlockedStatus.
 # grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose.
 # require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration.
-# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration.
+# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration; must be
+#   integrated cross-model with exactly the same charms as the mesh-managed provides endpoints
+#   (per src/integrations.py setup_service_mesh(): receive-loki-logs, receive-traces,
+#   receive-profiles) are cross-model with; see issue GH-980.
 # Pipeline pairing: _get_missing_mandatory_relations() sets BlockedStatus if an incoming telemetry
 #   relation is connected without a matching outgoing backend. Modelled as implications.
 overrides:
@@ -50,6 +53,8 @@ overrides:
       - 'bool(endpoint[receive-traces]) => bool(endpoint[cloud-config]) or bool(endpoint[send-traces])'
       - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
         or bool(endpoint[cloud-config])'
+      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
 
   # dev: CMR mesh + send-otlp/receive-otlp added as valid pipeline backends
   - criteria:
@@ -77,3 +82,5 @@ overrides:
         or bool(endpoint[cloud-config])'
       - 'bool(endpoint[receive-otlp]) => bool(endpoint[cloud-config]) or bool(endpoint[send-otlp])
         or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
+      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'

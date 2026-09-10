@@ -326,7 +326,7 @@ def extract_solution(
             continue
 
         interface = domain.integration_interface(integration)
-        offer_name = domain.integration_offer_name(integration)
+        offer_name = domain.integration_offer_name(integration, z3_model)
 
         logger.info(
             f"Discovered CMR: {prov_model_ref.key}.{prov_app}:{integration.provides_endpoint} "
