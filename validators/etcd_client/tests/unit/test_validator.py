@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import grpc
 import ops
@@ -21,6 +21,7 @@ from validators.etcd_client.validator import (
     EtcdClientValidator,
     _decode_message,
     _encode_bytes_field,
+    _encode_varint_field,
 )
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import (
@@ -80,11 +81,14 @@ def _make_fake_kv_channel(stored: dict[str, bytes], get_value: Any, put_keys: li
                 # matches what was stored, and leave `stored` untouched otherwise, so tests
                 # can assert the canary is genuinely gone after a passing validation (and
                 # would catch a regression that deletes the wrong key or leaves the canary
-                # behind).
-                if stored.get("key") == requested_key:
+                # behind). The response's "deleted" count (field 2) reflects this too, since
+                # the validator itself now checks that count rather than trusting a bare
+                # successful gRPC status.
+                deleted_count = 1 if stored.get("key") == requested_key else 0
+                if deleted_count:
                     stored.pop("key", None)
                     stored.pop("value", None)
-                return b""
+                return _encode_varint_field(2, deleted_count)
             raise AssertionError(f"unexpected method {method}")
 
         return call
@@ -144,6 +148,56 @@ VALID_LOCAL_REQUIRER_DATABAG: dict[str, str] = {
     "prefix": "myprefix-",
     "mtls-cert": VALID_CLIENT_CERT_PEM,
 }
+
+
+class TestProtobufWireHelpers:
+    """Independently verifies the hand-rolled protobuf wire helpers against literal,
+    by-hand-computed byte fixtures (not derived by round-tripping through the same
+    encoder/decoder pair), so a shared bug in both encode and decode can't hide behind
+    a self-consistent fake gRPC channel in the rest of this test file.
+    """
+
+    def test_encodes_bytes_field_matching_hand_computed_wire_bytes(self) -> None:
+        # GIVEN field number 1 (tag byte (1 << 3) | 2 = 0x0A) and the 3-byte value b"foo"
+        # WHEN encoding it as a length-delimited field
+        result = _encode_bytes_field(1, b"foo")
+        # THEN the bytes are exactly: tag 0x0A, length 0x03, then the raw value.
+        assert result == b"\x0a\x03foo"
+
+    def test_encodes_varint_field_matching_protobuf_documentation_example(self) -> None:
+        # GIVEN field number 2 (tag byte (2 << 3) | 0 = 0x10) and the value 150, whose
+        # varint encoding (0x96, 0x01) is the canonical worked example from Google's
+        # protobuf wire-format documentation (there, for field 1: "08 96 01").
+        result = _encode_varint_field(2, 150)
+        # THEN the bytes are exactly the tag followed by that well-known varint encoding.
+        assert result == b"\x10\x96\x01"
+
+    def test_decodes_hand_written_bytes_for_single_length_delimited_field(self) -> None:
+        # GIVEN a hand-written message (not produced by this module's own encoder)
+        # containing one length-delimited field, number 1, value b"foo"
+        raw = b"\x0a\x03foo"
+        # WHEN decoding it
+        fields = _decode_message(raw)
+        # THEN it recovers exactly that field/value.
+        assert fields == {1: [b"foo"]}
+
+    def test_decodes_hand_written_bytes_for_single_varint_field(self) -> None:
+        # GIVEN the same canonical protobuf documentation example, hand-written directly
+        raw = b"\x10\x96\x01"
+        # WHEN decoding it
+        fields = _decode_message(raw)
+        # THEN it recovers field number 2 with the integer value 150.
+        assert fields == {2: [150]}
+
+    def test_decodes_hand_written_bytes_for_mixed_field_message(self) -> None:
+        # GIVEN a hand-written message combining a length-delimited field (number 1,
+        # value b"key") and a varint field (number 2, value 5), interleaved as etcd's
+        # own KeyValue messages are (key bytes followed by a numeric field)
+        raw = b"\x0a\x03key" + b"\x10\x05"
+        # WHEN decoding it
+        fields = _decode_message(raw)
+        # THEN both fields are recovered independently of each other.
+        assert fields == {1: [b"key"], 2: [5]}
 
 
 class TestEtcdClientValidatorRole:
@@ -280,9 +334,8 @@ class TestEtcdClientValidatorRequiresSimple:
         # itself, before its own terminating "@" (e.g. "admin:secret?token/foo@host"): the
         # userinfo redaction must not stop at either delimiter, since a naive redaction that
         # only crosses "?"/"#" but still stops at the first "/" would leave "admin:secret"
-        # exposed (the "//" scheme separator's slashes are handled separately, by locating
-        # them via substring search rather than by scanning past every "/" in the rest of
-        # the string).
+        # exposed (the "://" scheme separator is handled separately, by locating it via
+        # substring search rather than by scanning past every "/" in the rest of the string).
         validator = _make_validator(VALID_REQUIRER_DATABAG)
         secret = "hunter2"
         uri = "https://admin:" + secret + "?token/foo@host:2379"
@@ -294,6 +347,23 @@ class TestEtcdClientValidatorRequiresSimple:
         assert secret not in check.message
         assert "<redacted>" in check.message
         assert check.message.startswith("Could not parse uri 'https://<redacted>@host:2379'")
+
+    def test_redacts_userinfo_in_scheme_less_uri_containing_bare_double_slash(self) -> None:
+        # GIVEN a malformed, scheme-less uri (no "://" at all) whose userinfo segment happens
+        # to contain a bare "//" before its own terminating "@" (e.g.
+        # "admin:secret@host//path:2379"): redaction must not mistake that "//" for a scheme
+        # separator and treat everything before it as an un-redactable prefix, since this
+        # entry never had a scheme in the first place. Only a genuine "://" delimits a scheme.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "admin:" + secret + "@host//path:2379"
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
+        assert "<redacted>" in check.message
 
     def test_fails_endpoints_format_check_for_overlong_digit_port(self) -> None:
         # A port string with far more digits than any valid port (max 65535, 5 digits) must
@@ -436,8 +506,9 @@ class TestEtcdClientValidatorRequiresSimple:
         # GIVEN a reachable first endpoint but a second entry with a URI delimiter embedded
         # in its host (e.g. "host/path"): a naive rpartition(":")-based split doesn't itself
         # reject this the way urlsplit()-based _parse_single_uri does for "uris", so it must
-        # be checked explicitly here too, rather than letting a malformed second endpoint be
-        # silently ignored just because _check_tcp_reachable() only probes the first entry.
+        # be checked explicitly here too, regardless of which field _check_tcp_reachable()
+        # itself now derives its connect targets from ("endpoints" must still be
+        # schema/format-valid on its own merits).
         databag = {**VALID_REQUIRER_DATABAG, "endpoints": "10.1.2.3:2379,host/path:2379"}
         validator = _make_validator(databag)
 
@@ -469,8 +540,12 @@ class TestEtcdClientValidatorRequiresSimple:
         connect_check = next(c for c in result.checks if c.name == "connect")
         assert not connect_check.passed
 
-    def test_strips_brackets_from_ipv6_endpoint_before_connecting(self) -> None:
-        databag = {**VALID_REQUIRER_DATABAG, "endpoints": "[::1]:2379"}
+    def test_strips_brackets_from_ipv6_target_before_connecting(self) -> None:
+        # GIVEN a "uris" entry advertising a bracketed IPv6 literal: the connect targets for
+        # simple-level validation are derived from the same already-parsed "uris" targets
+        # deep validation uses (not from the separate "endpoints" field), so this must be
+        # driven by "uris" here.
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://[::1]:2379"}
         validator = _make_validator(databag)
 
         with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
@@ -481,13 +556,10 @@ class TestEtcdClientValidatorRequiresSimple:
         assert result.status == "PASS", result.checks
         mock_connect.assert_called_once_with(("::1", 2379), timeout=3.0)
 
-    def test_connects_to_first_non_empty_endpoint_entry(self) -> None:
-        # A leading empty comma-separated segment (e.g. ",10.1.2.3:2379") is itself filtered
-        # out by _check_endpoints_format's own non-empty-entries list, so it passes format
-        # validation; _check_tcp_reachable must derive "first" from that same filtered list
-        # rather than a naive split(",")[0], or it would try to connect to an empty host.
-        databag = {**VALID_REQUIRER_DATABAG, "endpoints": ",10.1.2.3:2379"}
-        validator = _make_validator(databag)
+    def test_connects_to_first_advertised_uris_target(self) -> None:
+        # GIVEN "uris" advertises two cluster members: simple-level reachability connects to
+        # the first one, matching the order "uris" itself advertises them in.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
 
         with patch("validators.etcd_client.validator.socket.create_connection") as mock_connect:
             mock_connect.return_value.__enter__ = MagicMock(return_value=MagicMock())
@@ -496,6 +568,36 @@ class TestEtcdClientValidatorRequiresSimple:
 
         assert result.status == "PASS", result.checks
         mock_connect.assert_called_once_with(("10.1.2.3", 2379), timeout=3.0)
+
+    def test_connects_to_second_target_when_first_is_unreachable_at_simple_level(self) -> None:
+        # GIVEN "uris" advertises two cluster members and the first is unreachable: simple
+        # validation must fail over to the second, matching the same multi-target retry
+        # policy L2's read/write probe uses (see
+        # test_retries_next_target_when_put_fails_on_first_target), rather than failing
+        # simple-level validation just because the first advertised member happens to be
+        # down while another is healthy.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        def fake_create_connection(address: Any, timeout: float = 0) -> MagicMock:
+            if address == ("10.1.2.3", 2379):
+                raise OSError("refused")
+            connection = MagicMock()
+            connection.__enter__ = MagicMock(return_value=MagicMock())
+            connection.__exit__ = MagicMock(return_value=False)
+            return connection
+
+        with patch(
+            "validators.etcd_client.validator.socket.create_connection", side_effect=fake_create_connection
+        ) as mock_connect:
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS", result.checks
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+        assert mock_connect.call_args_list == [
+            call(("10.1.2.3", 2379), timeout=3.0),
+            call(("10.1.2.4", 2379), timeout=3.0),
+        ]
 
 
 class TestEtcdClientValidatorRequiresDeep:
@@ -688,7 +790,7 @@ class TestEtcdClientValidatorRequiresDeep:
                         )
                         return _encode_bytes_field(2, key_value_msg)
                     if method.endswith("/DeleteRange"):
-                        return b""
+                        return _encode_varint_field(2, 1)
                     raise AssertionError(f"unexpected method {method}")
 
                 return call
@@ -742,7 +844,9 @@ class TestEtcdClientValidatorRequiresDeep:
                         raise _FakeRpcError()
                     if method.endswith("/DeleteRange"):
                         delete_calls.append(request)
-                        return b""
+                        # Model the write having actually landed server-side despite the
+                        # client-side PUT failure, per this test's own premise (see docstring).
+                        return _encode_varint_field(2, 1)
                     raise AssertionError(f"unexpected method {method}")
 
                 return call
@@ -802,8 +906,11 @@ class TestEtcdClientValidatorRequiresDeep:
                                 raise _FakeRpcError()
                             if method.endswith("/DeleteRange"):
                                 # Cleanup is attempted for every target tried, even one whose
-                                # PUT failed, in case the write partially landed server-side.
-                                return b""
+                                # PUT failed, in case the write partially landed server-side;
+                                # model that here so this test's focus stays on the retry
+                                # behavior itself, not on cleanup-response fidelity (covered by
+                                # test_retries_cleanup_on_next_target_when_put_succeeds_but_delete_fails).
+                                return _encode_varint_field(2, 1)
                             raise AssertionError(f"unexpected method {method} on unreachable target")
 
                         return call
@@ -998,7 +1105,7 @@ class TestEtcdClientValidatorRequiresDeep:
                         # byte to complete it, so _decode_varint's next read raises IndexError.
                         return b"\x80"
                     if method.endswith("/DeleteRange"):
-                        return b""
+                        return _encode_varint_field(2, 1)
                     raise AssertionError(f"unexpected method {method}")
 
                 return call
@@ -1078,6 +1185,62 @@ class TestEtcdClientValidatorRequiresDeep:
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert not delete_check.passed
         assert "deadline exceeded" in delete_check.message
+
+    def test_fails_delete_check_when_response_reports_zero_deletions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a successful PUT/GET but a DeleteRange call that returns a successful gRPC
+        # status while its DeleteRangeResponse.deleted count is 0 (e.g. the request targeted
+        # the wrong key, or the key was already gone): the "delete" check must fail rather
+        # than trusting the bare absence of an RpcError, since a no-op deletion would
+        # otherwise let validation report an unqualified PASS while the canary is left behind.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            stored: dict[str, bytes] = {}
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        fields = _decode_message(request)
+                        stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
+                        stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                        return b""
+                    if method.endswith("/Range"):
+                        key_value_msg = _encode_bytes_field(1, stored["key"]) + _encode_bytes_field(5, stored["value"])
+                        return _encode_bytes_field(2, key_value_msg)
+                    if method.endswith("/DeleteRange"):
+                        # Successful gRPC status, but nothing was actually deleted.
+                        return _encode_varint_field(2, 0)
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
+        put_check = next(c for c in result.checks if c.name == "put")
+        assert put_check.passed
+        get_check = next(c for c in result.checks if c.name == "get")
+        assert get_check.passed
+        delete_check = next(c for c in result.checks if c.name == "delete")
+        assert not delete_check.passed
 
     def test_fails_identity_match_when_local_cert_does_not_match_published_cert(
         self, monkeypatch: pytest.MonkeyPatch

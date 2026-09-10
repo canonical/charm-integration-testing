@@ -72,6 +72,11 @@ def _encode_bytes_field(field_number: int, value: bytes) -> bytes:
     return _encode_varint(tag) + _encode_varint(len(value)) + value
 
 
+def _encode_varint_field(field_number: int, value: int) -> bytes:
+    tag = (field_number << 3) | 0  # wire type 0: varint
+    return _encode_varint(tag) + _encode_varint(value)
+
+
 def _decode_message(data: bytes) -> dict[int, list[bytes | int]]:
     """Decode a protobuf message into a map of field number -> list of raw values.
 
@@ -127,29 +132,34 @@ def _redact_uri_for_message(uri: str) -> str:
 
     Works purely textually (rather than via urlsplit) so it is safe to call even on a URI
     that fails to parse, and won't itself raise on malformed input. Userinfo is redacted
-    whether or not a "//" scheme separator is present, since this interface's "uris" field
+    whether or not a "scheme://" separator is present, since this interface's "uris" field
     also accepts bare "host:port" entries without a scheme.
 
-    Any "//" scheme separator is located first (by plain substring search, not a regex
-    anchored against other delimiters) so its prefix is never itself mistaken for part of
-    the userinfo. Only the text *after* that separator (or the whole string, if there is no
-    separator) is then scanned for userinfo: unconditionally up to the *last* "@" in that
-    remainder, regardless of any "/", "?", or "#" characters appearing before it. This
-    means malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host"),
-    or containing what looks like a path/query/fragment delimiter before its own terminating
-    "@" (e.g. "admin:secret?token@host" or "admin:secret?token/foo@host"), is always fully
+    A genuine "://" scheme separator is located first (by plain substring search for the
+    full three-character delimiter, not a bare "//", and not a regex anchored against other
+    delimiters), so its prefix is never itself mistaken for part of the userinfo -- unlike a
+    bare "//", which can legitimately appear later in a malformed, scheme-less entry (e.g.
+    "admin:secret@host//path:2379") without denoting a scheme at all. Only the text *after*
+    that separator (or the whole string, if there is no "://") is then scanned for userinfo:
+    unconditionally up to the *last* "@" in that remainder, regardless of any "/", "?", "#",
+    or even embedded newline characters appearing before it (hence `re.DOTALL`, so "." can
+    cross a literal newline rather than leaving text after it unredacted). This means
+    malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host"), or
+    containing what looks like a path/query/fragment delimiter before its own terminating "@"
+    (e.g. "admin:secret?token@host" or "admin:secret?token/foo@host"), is always fully
     redacted rather than leaking a prefix of it. Query/fragment stripping is applied last, on
-    whatever text remains, so it never has a chance to run before the userinfo redaction.
+    whatever text remains (also with `re.DOTALL`, for the same embedded-newline reason), so it
+    never has a chance to run before the userinfo redaction.
     """
-    scheme_sep = "//"
+    scheme_sep = "://"
     sep_index = uri.find(scheme_sep)
     if sep_index == -1:
         prefix, rest = "", uri
     else:
         prefix, rest = uri[: sep_index + len(scheme_sep)], uri[sep_index + len(scheme_sep) :]
-    rest = re.sub(r".*@", "<redacted>@", rest)
+    rest = re.sub(r".*@", "<redacted>@", rest, flags=re.DOTALL)
     sanitized = prefix + rest
-    return re.sub(r"[?#].*$", "", sanitized)
+    return re.sub(r"[?#].*$", "", sanitized, flags=re.DOTALL)
 
 
 class EtcdClientValidator(BaseValidator):
@@ -228,7 +238,13 @@ class EtcdClientValidator(BaseValidator):
         # pattern).
         start_time = time.monotonic()
         if level == "simple":
-            checks.append(self._check_tcp_reachable(data["endpoints"]))
+            # Derived from the same `targets` list already parsed from "uris" above (not
+            # re-parsed from the separate "endpoints" field), so L1 reachability can never
+            # diverge from what L2's gRPC probe actually connects to: a provider publishing
+            # a reachable "endpoints" value alongside a stale or unreachable "uris" value
+            # would otherwise let simple validation PASS despite deep being unable to
+            # connect to any advertised gRPC target.
+            checks.append(self._check_tcp_reachable(targets))
         else:
             checks.extend(self._check_read_write(data, targets))
 
@@ -269,36 +285,45 @@ class EtcdClientValidator(BaseValidator):
             )
         return ValidationCheck(name="tls_enabled", passed=True, message="OK")
 
-    def _check_tcp_reachable(self, endpoints: str) -> ValidationCheck:
-        """Best-effort L1 reachability: open a raw TCP connection to the first endpoint.
+    def _check_tcp_reachable(self, targets: list[str]) -> ValidationCheck:
+        """Best-effort L1 reachability: open a raw TCP connection to an advertised target.
+
+        ``targets`` are the same already-parsed "host:port" gRPC authorities (from "uris")
+        that L2's read/write probe connects to (see ``_check_read_write``), so L1 and L2
+        always agree on which addresses are being probed. Each is tried in turn until one
+        succeeds, matching L2's own multi-target failover policy: "uris" enumerates cluster
+        members, and a single unreachable member should not fail simple-level validation
+        when another is reachable.
 
         A full mTLS handshake requires a client cert/key pair, which the interface
         never conveys (see module docstring), so this check is scoped to basic
         reachability rather than a completed TLS handshake.
         """
-        # Use the same non-empty, whitespace-stripped entries _check_endpoints_format() derives
-        # its validation from: a naive split(",")[0] would instead pick up an empty leading
-        # segment from a value like ",host:2379" and try to connect to an empty host, producing
-        # a false FAIL even though a valid endpoint is present later in the list.
-        entries = [e.strip() for e in endpoints.split(",") if e.strip()]
-        first = entries[0]
-        # _check_endpoints_format() has already rejected any entry carrying userinfo (an "@"),
-        # but redact defensively anyway: this message must never echo a credential verbatim.
-        redacted_first = _redact_uri_for_message(first)
-        host, _, port_str = first.rpartition(":")
-        # socket.create_connection expects a bare IPv6 address (no brackets), while
-        # endpoints/uris use bracketed literals (e.g. "[::1]:2379") for disambiguation.
-        host = host.removeprefix("[").removesuffix("]")
-        try:
-            with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
-                return ValidationCheck(
-                    name="connect", passed=True, message=f"TCP connection to '{redacted_first}' succeeded."
+        last_check = ValidationCheck(name="connect", passed=False, message="No targets were provided to check.")
+        for target in targets:
+            # _pick_grpc_target() has already rejected any entry carrying userinfo (an "@"),
+            # but redact defensively anyway: this message must never echo a credential verbatim.
+            redacted_target = _redact_uri_for_message(target)
+            host, _, port_str = target.rpartition(":")
+            # socket.create_connection expects a bare IPv6 address (no brackets), while
+            # gRPC targets use bracketed literals (e.g. "[::1]:2379") for disambiguation.
+            host = host.removeprefix("[").removesuffix("]")
+            try:
+                with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
+                    return ValidationCheck(
+                        name="connect", passed=True, message=f"TCP connection to '{redacted_target}' succeeded."
+                    )
+            except (OSError, ValueError) as exc:
+                # socket.create_connection raises ValueError (not OSError) for some malformed
+                # hosts, e.g. an embedded NUL byte; without catching it here, an
+                # already-validated target could still crash validate() into an ERROR result
+                # instead of a clean FAIL.
+                last_check = ValidationCheck(
+                    name="connect", passed=False, message=f"Could not reach '{redacted_target}': {exc}"
                 )
-        except (OSError, ValueError) as exc:
-            # socket.create_connection raises ValueError (not OSError) for some malformed
-            # hosts, e.g. an embedded NUL byte; without catching it here, an already-validated
-            # endpoint could still crash validate() into an ERROR result instead of a clean FAIL.
-            return ValidationCheck(name="connect", passed=False, message=f"Could not reach '{redacted_first}': {exc}")
+        # targets is always non-empty here (see _pick_grpc_target), so the loop above always
+        # runs at least once and overwrites this placeholder before it can be returned.
+        return last_check
 
     def _check_read_write(self, data: dict[str, str], targets: list[str]) -> list[ValidationCheck]:
         """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity.
@@ -674,9 +699,21 @@ class EtcdClientValidator(BaseValidator):
             response_deserializer=lambda data: data,
         )
         try:
-            call(request, timeout=timeout)
+            response = call(request, timeout=timeout)
         except grpc.RpcError as exc:
             return ValidationCheck(name="delete", passed=False, message=f"DELETE failed: {exc.details()}")
+        try:
+            fields = _decode_message(response)
+            deleted = fields.get(2, [0])[0]  # DeleteRangeResponse.deleted (field 2)
+        except (IndexError, ValueError, TypeError) as exc:
+            return ValidationCheck(name="delete", passed=False, message=f"Malformed DELETE response: {exc}")
+        if not deleted:
+            # A successful gRPC status alone doesn't mean the canary was actually removed:
+            # etcd reports the true outcome via DeleteRangeResponse.deleted, which is 0 for a
+            # no-op deletion (e.g. the key was already gone, or the request targeted the wrong
+            # key). Treating that as a passed cleanup would let validation succeed while the
+            # canary is left behind.
+            return ValidationCheck(name="delete", passed=False, message=f"DELETE reported no keys removed for '{key}'.")
         return ValidationCheck(name="delete", passed=True, message=f"Canary key '{key}' deleted.")
 
     # --- provides role: validating a submitted client cert from the provider's side ---
