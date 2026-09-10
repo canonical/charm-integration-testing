@@ -530,46 +530,53 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     returned directly. When the value is ``"default"``, Test Observer is queried
     for a historical revision with a passing deploy for the target charm.
     """
-    value = request.config.getoption("--target-downgrade-revision")
-    if value != "default":
-        return int(value)
-
-    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
     target_revision: int | None = request.getfixturevalue("target_revision")
 
-    if target_revision is None or target_channel is None:
-        pytest.fail(
-            "--target-revision and --target-channel must be provided for this test to select a historical revision."
-        )
+    value = request.config.getoption("--target-downgrade-revision")
+    if value != "default":
+        previous_revision = int(value)
+    else:
+        if target_revision is None or target_channel is None:
+            pytest.fail(
+                "--target-revision and --target-channel must be provided for this test to select a historical revision."
+            )
 
-    parts = target_channel.split("/", maxsplit=1)
-    track = parts[0]
-    stage = parts[1] if len(parts) > 1 else "stable"
+        test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+        parts = target_channel.split("/", maxsplit=1)
+        track = parts[0]
+        stage = parts[1] if len(parts) > 1 else "stable"
 
-    try:
-        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
-            charm_name=target_charm,
-            stage=stage,
-            current_revision=target_revision,
-            track=track,
-        )
-    except TestObserverClientError as exc:
-        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+        try:
+            resolved_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
+                charm_name=target_charm,
+                stage=stage,
+                current_revision=target_revision,
+                track=track,
+            )
+        except TestObserverClientError as exc:
+            raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
-    if previous_revision is None:
-        # No usable historical revision (e.g. all prior revisions predate a base change and
-        # are unreachable without --force-series). Skip rather than fail to avoid cascading
-        # SKIPs of test_deploy_target_old_revision and [injected] test_upgrade_charm.
-        pytest.skip(
-            "Unable to find a historical revision with a passing test_deploy result "
-            f"for charm '{target_charm}' in channel '{target_channel}'."
-        )
+        if resolved_revision is None:
+            # No usable historical revision (e.g. all prior revisions predate a base change and
+            # are unreachable without --force-series). Skip rather than fail to avoid cascading
+            # SKIPs of test_deploy_target_old_revision and [injected] test_upgrade_charm.
+            pytest.skip(
+                "Unable to find a historical revision with a passing test_deploy result "
+                f"for charm '{target_charm}' in channel '{target_channel}'."
+            )
+        previous_revision = resolved_revision
+
+    if target_revision is None:
+        # Without a concrete target revision the deployed base is unknown, so the compatibility
+        # check below cannot run; return the explicit downgrade revision unchecked.
+        return previous_revision
 
     # test_downgrade_charm and test_upgrade_charm reach their target revision via juju refresh,
     # which Juju rejects across incompatible bases (this framework does not use --force-series).
     # Skip when the downgrade revision cannot run on the base the target revision is deployed on.
+    # Runs for both explicit and Test-Observer-resolved downgrade revisions.
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
     target_series: str | None = request.getfixturevalue("target_series")
     target_base = charmhub_client.charm_from_store(
