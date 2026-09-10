@@ -31,6 +31,13 @@ _GRPC_TIMEOUT_S = 5.0
 # so waiting the full _GRPC_TIMEOUT_S here would let one bad target consume most of the
 # deep-level latency budget before the next advertised target is even tried.
 _GRPC_CLEANUP_AFTER_FAILED_PUT_TIMEOUT_S = 1.0
+# Bounds the *total* time _check_read_write may spend failing over across "uris" targets,
+# independent of the per-target latency measurement reported to the caller: without this, a
+# provider publishing many unreachable/stale entries could make deep validation block for
+# len(targets) * (_GRPC_TIMEOUT_S + _GRPC_CLEANUP_AFTER_FAILED_PUT_TIMEOUT_S) seconds, since a
+# fast final target still passes the (per-target-only) _DEEP_LATENCY_TARGET_S check regardless
+# of how long earlier failovers took.
+_MAX_TARGET_LOOP_DURATION_S = 30.0
 
 # etcd's client port serves both native gRPC and a JSON grpc-gateway. The
 # grpc-gateway is deliberately unusable here: etcd rejects gateway writes made
@@ -162,7 +169,15 @@ def _redact_uri_for_message(uri: str) -> str:
         prefix, rest = scheme_match.group(0), uri[scheme_match.end() :]
     rest = re.sub(r".*@", "<redacted>@", rest, flags=re.DOTALL)
     sanitized = prefix + rest
-    return re.sub(r"[?#].*$", "", sanitized, flags=re.DOTALL)
+    sanitized = re.sub(r"[?#].*$", "", sanitized, flags=re.DOTALL)
+    # A malformed "uris" entry that fails parsing is still rejected, but its (redacted) text is
+    # echoed back verbatim in the resulting ValidationCheck message; without this, an entry
+    # containing a raw newline, carriage return, or other C0/DEL control character could forge
+    # or split validator log output even though the uri itself never becomes a live target.
+    # Escaping here (rather than only checking hostnames, as `_INVALID_HOST_CHARS_RE` does)
+    # covers control characters anywhere in the string, not just within a successfully parsed
+    # hostname.
+    return re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", sanitized)
 
 
 class EtcdClientValidator(BaseValidator):
@@ -347,17 +362,23 @@ class EtcdClientValidator(BaseValidator):
 
         ``targets`` are the gRPC "host:port" authorities already parsed (and format-checked
         at L1) by the caller from ``data["uris"]``, in the order they were advertised. Each is
-        tried in turn until one completes a PUT, since "uris" enumerates cluster members and a
-        single unreachable member should not fail the canary when another is reachable.
+        tried in turn until one completes a PUT *and* GET *and* DELETE, since "uris" enumerates
+        cluster members and a single unreachable/unhealthy member should not fail the canary
+        when another is reachable; a target whose write succeeds but whose read or cleanup
+        fails is treated the same as an unreachable one and failover continues.
 
-        Returns the checks alongside the elapsed time of only the *final* target attempted
-        (the one whose checks are ultimately reported), not the cumulative time across every
-        attempt: a prior unreachable target can otherwise consume most of its RPC timeout
-        before a later target succeeds quickly, and charging that failover time against the
-        caller's latency budget would fail validation over a scenario the multi-target policy
-        above is explicitly meant to tolerate. Time spent before the target loop (identity
-        resolution, cert parsing) is comparatively small and constant regardless of failover,
-        so it is measured from function entry like any other early-return path here.
+        Returns the checks alongside an elapsed time that excludes time spent on any *prior,
+        abandoned* target attempt, but not time spent on the *first* attempt's own setup: a
+        prior unreachable target can otherwise consume most of its RPC timeout before a later
+        target succeeds quickly, and charging that failover time against the caller's latency
+        budget would fail validation over a scenario the multi-target policy above is
+        explicitly meant to tolerate. The identity-resolution/cert-parsing work above this
+        loop, however, is only ever done once, before the *first* attempt, so it is charged to
+        that first attempt's elapsed time (and to every early-return path above the loop) by
+        timing from function entry; only a *retry* after a failed-over target resets the timer
+        to that retry's own start. Total time spent failing over across many targets is
+        separately bounded by ``_MAX_TARGET_LOOP_DURATION_S``, independent of this
+        per-attempt latency measurement.
         """
         func_start = time.monotonic()
         checks: list[ValidationCheck] = []
@@ -438,16 +459,39 @@ class EtcdClientValidator(BaseValidator):
         # succeeded (see test_preserves_cleanup_failure_from_superseded_target).
         orphan_checks: list[ValidationCheck] = []
         final_checks: list[ValidationCheck] = []
+        # The first attempt is timed from func_start, not from just before its own PUT: the
+        # identity-resolution/cert-parsing work already done above this loop is comparatively
+        # small but not zero, and the common (single-target, no failover) case must still
+        # attribute that time to the reported latency rather than silently dropping it. Only
+        # retries after a failed-over target reset the timer to that attempt's own start, so a
+        # slow/unreachable prior target still isn't charged against the caller's latency budget.
         target_start = func_start
+        loop_deadline = time.monotonic() + _MAX_TARGET_LOOP_DURATION_S
         for i, target in enumerate(targets):
-            target_start = time.monotonic()
+            if i > 0:
+                if time.monotonic() >= loop_deadline:
+                    checks.append(
+                        ValidationCheck(
+                            name="target_loop_deadline",
+                            passed=False,
+                            message=(
+                                f"Gave up after {i} of {len(targets)} target(s): the overall "
+                                f"{_MAX_TARGET_LOOP_DURATION_S:.0f}s target-loop deadline was exceeded "
+                                "(failover across unreachable/stale targets cannot continue indefinitely)."
+                            ),
+                        )
+                    )
+                    break
+                target_start = time.monotonic()
             iter_checks: list[ValidationCheck] = []
+            get_check: ValidationCheck | None = None
             with grpc.secure_channel(target, credentials) as channel:
                 put_check = self._etcd_put(channel, canary_key, canary_value)
                 iter_checks.append(put_check)
                 try:
                     if put_check.passed:
-                        iter_checks.append(self._etcd_get_and_verify(channel, canary_key, canary_value))
+                        get_check = self._etcd_get_and_verify(channel, canary_key, canary_value)
+                        iter_checks.append(get_check)
                 finally:
                     # Always attempt cleanup, even if PUT reported failure: a client-side
                     # timeout can still mean etcd committed the write server-side, which
@@ -459,7 +503,11 @@ class EtcdClientValidator(BaseValidator):
                     delete_check = self._etcd_delete(channel, canary_key, timeout=cleanup_timeout)
                     iter_checks.append(delete_check)
             final_checks = iter_checks
-            if put_check.passed and delete_check.passed:
+            # Only stop failover once PUT, GET (when attempted), and DELETE all passed: a
+            # target whose write succeeds but whose Range RPC fails must not end the loop just
+            # because its cleanup happened to succeed, since a later, still-untried target may
+            # be fully healthy.
+            if put_check.passed and get_check is not None and get_check.passed and delete_check.passed:
                 break
             if not delete_check.passed and i < len(targets) - 1:
                 reason = "after a failed PUT" if not put_check.passed else "after a successful PUT"

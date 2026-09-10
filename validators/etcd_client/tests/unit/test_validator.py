@@ -1073,6 +1073,178 @@ class TestEtcdClientValidatorRequiresDeep:
         # so the canary is not left behind even though target 1's cleanup failed.
         assert "key" not in stored
 
+    def test_charges_identity_setup_time_to_first_attempt_latency(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a single "uris" target (no failover needed) and identity-resolution/cert
+        # setup work above the target loop taking a full 11s: the reported latency for the
+        # (only, first) attempt must include that setup time, not just the loop body's own
+        # PUT/GET/DELETE time, since setup happens exactly once per call and isn't part of
+        # the failover time this timing scheme is meant to exclude.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379"}
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            stored: dict[str, bytes] = {}
+            fake_channel = _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            # time.monotonic() is called: once for func_start, once to compute the
+            # loop-deadline, and once more at the end to compute elapsed (there is no
+            # per-attempt reset since this is the first, and only, target). Simulating 11s
+            # between func_start and the final call charges that time to the reported
+            # latency even though none of it was spent inside the target loop itself.
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+                patch(
+                    "validators.etcd_client.validator.time.monotonic",
+                    side_effect=[0.0, 0.0, 11.0],
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL", result.checks
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert not latency_check.passed
+        assert "11.00" in latency_check.message
+
+    def test_gives_up_after_target_loop_deadline_is_exceeded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN "uris" advertises three unreachable targets and the overall target-loop
+        # deadline has already elapsed by the time the second one would be tried: failover
+        # must stop there rather than continuing to burn time on every remaining target,
+        # since a provider could otherwise publish an unbounded number of stale entries and
+        # block deep validation for an arbitrarily long time.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+            monkeypatch.setattr("validators.etcd_client.validator._MAX_TARGET_LOOP_DURATION_S", -1000.0)
+
+            databag = {
+                **VALID_REQUIRER_DATABAG,
+                "uris": "https://10.1.2.3:2379,https://10.1.2.4:2379,https://10.1.2.5:2379",
+            }
+            validator = _make_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            class _FakeRpcError(grpc.RpcError):
+                def details(self) -> str:
+                    return "unavailable"
+
+            targets_seen: list[str] = []
+
+            def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+                targets_seen.append(target)
+
+                def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                    def call(request: bytes, timeout: float = 0) -> bytes:
+                        raise _FakeRpcError()
+
+                    return call
+
+                channel = MagicMock()
+                channel.unary_unary.side_effect = unary_unary
+                channel.__enter__.return_value = channel
+                channel.__exit__.return_value = False
+                return channel
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch(
+                    "validators.etcd_client.validator.grpc.secure_channel",
+                    side_effect=make_channel_for_target,
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        # Only the first target was tried: the deadline (already in the past, per the
+        # negative _MAX_TARGET_LOOP_DURATION_S above) stopped the loop before target 2.
+        assert targets_seen == ["10.1.2.3:2379"]
+        assert result.status == "FAIL"
+        deadline_check = next(c for c in result.checks if c.name == "target_loop_deadline")
+        assert not deadline_check.passed
+        assert "1 of 3" in deadline_check.message
+
+    def test_retries_next_target_when_get_fails_but_delete_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN the first target's PUT succeeds but its GET verification fails, and its
+        # DELETE cleanup nonetheless succeeds: the retry loop must not stop there just
+        # because cleanup happened to succeed. Only a target whose PUT, GET, *and* DELETE
+        # all pass should end failover; a later, fully-healthy target must still be tried.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            targets_seen: list[str] = []
+            stored: dict[str, bytes] = {}
+
+            def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+                targets_seen.append(target)
+                if target == "10.1.2.3:2379":
+
+                    def unary_unary(
+                        method: str, request_serializer: Any = None, response_deserializer: Any = None
+                    ) -> Any:
+                        def call(request: bytes, timeout: float = 0) -> bytes:
+                            if method.endswith("/Put"):
+                                return b""
+                            if method.endswith("/Range"):
+                                # GET returns a mismatching value, so verification fails even
+                                # though the write itself succeeded.
+                                requested_key = _decode_message(request).get(1, [b""])[0]
+                                key_value_msg = _encode_bytes_field(1, requested_key) + _encode_bytes_field(  # type: ignore[arg-type]
+                                    5, b"wrong-value"
+                                )
+                                return _encode_bytes_field(2, key_value_msg)
+                            if method.endswith("/DeleteRange"):
+                                # Cleanup succeeds on this target despite the failed GET.
+                                return _encode_varint_field(2, 1)
+                            raise AssertionError(f"unexpected method {method}")
+
+                        return call
+
+                    channel = MagicMock()
+                    channel.unary_unary.side_effect = unary_unary
+                    channel.__enter__.return_value = channel
+                    channel.__exit__.return_value = False
+                    return channel
+                return _make_fake_kv_channel(stored, get_value=lambda: stored.get("value", b""))
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch(
+                    "validators.etcd_client.validator.grpc.secure_channel",
+                    side_effect=make_channel_for_target,
+                ),
+            ):
+                result = validator.validate(level="deep")
+
+        # The loop must have carried on to the second target instead of stopping right
+        # after the first target's successful cleanup.
+        assert targets_seen == ["10.1.2.3:2379", "10.1.2.4:2379"]
+        assert result.status == "PASS", result.checks
+        for name in ("put", "get", "delete"):
+            check = next(c for c in result.checks if c.name == name)
+            assert check.passed
+
     def test_preserves_cleanup_failure_from_superseded_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # GIVEN the first target's PUT fails and its own best-effort cleanup DELETE also
         # fails (so a canary key may be orphaned there), and a second target then completes
@@ -1630,6 +1802,24 @@ class TestEtcdClientValidatorGrpcTarget:
         assert not check.passed
         assert targets == []
         assert secret not in check.message
+
+    def test_escapes_control_characters_in_unparseable_uri_message(self) -> None:
+        # A malformed uri containing a raw newline (or other control character) outside any
+        # userinfo/query/fragment component must not have that character echoed verbatim into
+        # the failure message: an unescaped newline there could forge or split validator log
+        # output even though the uri itself is safely rejected.
+        # No "@" is present, so userinfo redaction (which would otherwise swallow this text
+        # wholesale) never triggers; the network-path-reference check runs before urlsplit()
+        # even sees the entry, so this exercises the escaping applied to redacted_entry itself.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        uri = "//evil\nLog-Line: forged-entry:2379"
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert "\n" not in check.message
+        assert "\\x0a" in check.message
 
     def test_rejects_unsupported_uri_scheme(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG)
