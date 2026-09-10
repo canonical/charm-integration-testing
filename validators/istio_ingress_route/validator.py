@@ -350,7 +350,7 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {display!r} has a scheme in 'external_host'; it must be a bare host[:port].",
+            message=f"URL {display!r} has a scheme in 'external_host'; omit the scheme.",
         )
     if not parsed.netloc or not parsed.hostname:
         return ValidationCheck(
