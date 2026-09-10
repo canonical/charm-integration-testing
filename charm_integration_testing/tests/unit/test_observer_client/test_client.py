@@ -95,3 +95,27 @@ class TestChooseHistoricalRevision:
             charm_name="traefik-k8s", stage="stable", current_revision=378, track="latest"
         )
         assert result is None
+
+    def test_returns_none_when_some_queries_fail_but_one_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN one result query fails transiently but another succeeds with no passing test
+        client = self._client()
+        monkeypatch.setattr(client, "query_artefacts_history", lambda **_: {"artefacts": [{"id": 1}]})
+        monkeypatch.setattr(
+            client,
+            "query_artefact_builds",
+            lambda **_: {"builds": [{"revision": 298, "test_executions": [{"id": 555}, {"id": 556}]}]},
+        )
+
+        def _partial(**kwargs: object) -> dict[str, object]:
+            if kwargs["execution_id"] == 555:
+                raise ObserverQueryError("transient failure")
+            return {"test_results": []}
+
+        monkeypatch.setattr(client, "query_test_results_for_execution", _partial)
+        monkeypatch.setattr(client, "_has_test_passed", lambda *_: False)
+
+        # THEN a partial failure with at least one success is not treated as an outage
+        result = client.choose_historical_revision_with_passing_test(
+            charm_name="traefik-k8s", stage="stable", current_revision=378, track="latest"
+        )
+        assert result is None
