@@ -135,28 +135,30 @@ def _redact_uri_for_message(uri: str) -> str:
     whether or not a "scheme://" separator is present, since this interface's "uris" field
     also accepts bare "host:port" entries without a scheme.
 
-    A genuine "://" scheme separator is located first (by plain substring search for the
-    full three-character delimiter, not a bare "//", and not a regex anchored against other
-    delimiters), so its prefix is never itself mistaken for part of the userinfo -- unlike a
-    bare "//", which can legitimately appear later in a malformed, scheme-less entry (e.g.
-    "admin:secret@host//path:2379") without denoting a scheme at all. Only the text *after*
-    that separator (or the whole string, if there is no "://") is then scanned for userinfo:
-    unconditionally up to the *last* "@" in that remainder, regardless of any "/", "?", "#",
-    or even embedded newline characters appearing before it (hence `re.DOTALL`, so "." can
-    cross a literal newline rather than leaving text after it unredacted). This means
-    malformed userinfo containing an embedded literal "@" (e.g. "admin@secret@host"), or
-    containing what looks like a path/query/fragment delimiter before its own terminating "@"
-    (e.g. "admin:secret?token@host" or "admin:secret?token/foo@host"), is always fully
-    redacted rather than leaking a prefix of it. Query/fragment stripping is applied last, on
-    whatever text remains (also with `re.DOTALL`, for the same embedded-newline reason), so it
-    never has a chance to run before the userinfo redaction.
+    A genuine scheme is located first via a regex anchored to the *start* of the string: only
+    a syntactically valid scheme (a letter followed by letters/digits/"+"/"."/"-") immediately
+    followed by "://" counts, not merely the first "://" substring appearing anywhere. A
+    malformed, scheme-less entry can otherwise contain userinfo followed by a "://" that isn't
+    a real scheme delimiter at all (e.g. "admin:secret@https://host:2379" or
+    "admin:secret://token@host:2379", where the "://" sits well past the start), and treating
+    that as a trusted scheme boundary would leave everything before it -- including the
+    credential -- unredacted. Only the text *after* a genuine scheme (or the whole string, if
+    there is none) is then scanned for userinfo: unconditionally up to the *last* "@" in that
+    remainder, regardless of any "/", "?", "#", or even embedded newline characters appearing
+    before it (hence `re.DOTALL`, so "." can cross a literal newline rather than leaving text
+    after it unredacted). This means malformed userinfo containing an embedded literal "@"
+    (e.g. "admin@secret@host"), or containing what looks like a path/query/fragment delimiter
+    before its own terminating "@" (e.g. "admin:secret?token@host" or
+    "admin:secret?token/foo@host"), is always fully redacted rather than leaking a prefix of
+    it. Query/fragment stripping is applied last, on whatever text remains (also with
+    `re.DOTALL`, for the same embedded-newline reason), so it never has a chance to run before
+    the userinfo redaction.
     """
-    scheme_sep = "://"
-    sep_index = uri.find(scheme_sep)
-    if sep_index == -1:
+    scheme_match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", uri)
+    if scheme_match is None:
         prefix, rest = "", uri
     else:
-        prefix, rest = uri[: sep_index + len(scheme_sep)], uri[sep_index + len(scheme_sep) :]
+        prefix, rest = scheme_match.group(0), uri[scheme_match.end() :]
     rest = re.sub(r".*@", "<redacted>@", rest, flags=re.DOTALL)
     sanitized = prefix + rest
     return re.sub(r"[?#].*$", "", sanitized, flags=re.DOTALL)
@@ -231,12 +233,13 @@ class EtcdClientValidator(BaseValidator):
         if not target_check.passed:
             return self._make_result(level=level, checks=checks)
 
-        # Latency is timed from here, not from the top of the function, so that Juju
-        # secret/relation-data resolution above - which can be slow for cross-model
-        # relations independent of etcd itself - is not counted against the probe's
-        # latency budget (see validators/postgresql_client/validator.py for the same
-        # pattern).
-        start_time = time.monotonic()
+        # Latency is timed inside _check_tcp_reachable/_check_read_write themselves (from
+        # only the final, winning target's own attempt), not wrapped around this call: a
+        # prior unreachable target consuming its full connect/RPC timeout before a later
+        # target succeeds must not be charged against the latency budget below, per the
+        # multi-target failover policy documented on those methods. Juju secret/relation-data
+        # resolution above -- which can be slow for cross-model relations independent of
+        # etcd itself -- is likewise excluded, since timing starts only once probing begins.
         if level == "simple":
             # Derived from the same `targets` list already parsed from "uris" above (not
             # re-parsed from the separate "endpoints" field), so L1 reachability can never
@@ -244,11 +247,12 @@ class EtcdClientValidator(BaseValidator):
             # a reachable "endpoints" value alongside a stale or unreachable "uris" value
             # would otherwise let simple validation PASS despite deep being unable to
             # connect to any advertised gRPC target.
-            checks.append(self._check_tcp_reachable(targets))
+            check, elapsed = self._check_tcp_reachable(targets)
+            checks.append(check)
         else:
-            checks.extend(self._check_read_write(data, targets))
+            rw_checks, elapsed = self._check_read_write(data, targets)
+            checks.extend(rw_checks)
 
-        elapsed = time.monotonic() - start_time
         latency_target = _SIMPLE_LATENCY_TARGET_S if level == "simple" else _DEEP_LATENCY_TARGET_S
         checks.append(self._check_latency(elapsed, latency_target))
 
@@ -285,7 +289,7 @@ class EtcdClientValidator(BaseValidator):
             )
         return ValidationCheck(name="tls_enabled", passed=True, message="OK")
 
-    def _check_tcp_reachable(self, targets: list[str]) -> ValidationCheck:
+    def _check_tcp_reachable(self, targets: list[str]) -> tuple[ValidationCheck, float]:
         """Best-effort L1 reachability: open a raw TCP connection to an advertised target.
 
         ``targets`` are the same already-parsed "host:port" gRPC authorities (from "uris")
@@ -298,9 +302,18 @@ class EtcdClientValidator(BaseValidator):
         A full mTLS handshake requires a client cert/key pair, which the interface
         never conveys (see module docstring), so this check is scoped to basic
         reachability rather than a completed TLS handshake.
+
+        Returns the check alongside the elapsed time of only the *final* attempt (the one
+        that produced the returned check), not the cumulative time across every attempt: a
+        prior unreachable target can otherwise consume its full connect timeout before a
+        later target succeeds quickly, and charging that failover time against the caller's
+        latency budget would fail validation over a scenario the multi-target policy above is
+        explicitly meant to tolerate.
         """
         last_check = ValidationCheck(name="connect", passed=False, message="No targets were provided to check.")
+        attempt_start = time.monotonic()
         for target in targets:
+            attempt_start = time.monotonic()
             # _pick_grpc_target() has already rejected any entry carrying userinfo (an "@"),
             # but redact defensively anyway: this message must never echo a credential verbatim.
             redacted_target = _redact_uri_for_message(target)
@@ -310,8 +323,11 @@ class EtcdClientValidator(BaseValidator):
             host = host.removeprefix("[").removesuffix("]")
             try:
                 with socket.create_connection((host, int(port_str)), timeout=_TCP_CONNECT_TIMEOUT_S):
-                    return ValidationCheck(
-                        name="connect", passed=True, message=f"TCP connection to '{redacted_target}' succeeded."
+                    return (
+                        ValidationCheck(
+                            name="connect", passed=True, message=f"TCP connection to '{redacted_target}' succeeded."
+                        ),
+                        time.monotonic() - attempt_start,
                     )
             except (OSError, ValueError) as exc:
                 # socket.create_connection raises ValueError (not OSError) for some malformed
@@ -323,22 +339,32 @@ class EtcdClientValidator(BaseValidator):
                 )
         # targets is always non-empty here (see _pick_grpc_target), so the loop above always
         # runs at least once and overwrites this placeholder before it can be returned.
-        return last_check
+        return last_check, time.monotonic() - attempt_start
 
-    def _check_read_write(self, data: dict[str, str], targets: list[str]) -> list[ValidationCheck]:
+    def _check_read_write(self, data: dict[str, str], targets: list[str]) -> tuple[list[ValidationCheck], float]:
         """L2: mTLS PUT/GET/DELETE of a canary key using a locally-provisioned client identity.
 
         ``targets`` are the gRPC "host:port" authorities already parsed (and format-checked
         at L1) by the caller from ``data["uris"]``, in the order they were advertised. Each is
         tried in turn until one completes a PUT, since "uris" enumerates cluster members and a
         single unreachable member should not fail the canary when another is reachable.
+
+        Returns the checks alongside the elapsed time of only the *final* target attempted
+        (the one whose checks are ultimately reported), not the cumulative time across every
+        attempt: a prior unreachable target can otherwise consume most of its RPC timeout
+        before a later target succeeds quickly, and charging that failover time against the
+        caller's latency budget would fail validation over a scenario the multi-target policy
+        above is explicitly meant to tolerate. Time spent before the target loop (identity
+        resolution, cert parsing) is comparatively small and constant regardless of failover,
+        so it is measured from function entry like any other early-return path here.
         """
+        func_start = time.monotonic()
         checks: list[ValidationCheck] = []
 
         cert_path, key_path, identity_check = self._resolve_client_identity()
         checks.append(identity_check)
         if not identity_check.passed:
-            return checks
+            return checks, time.monotonic() - func_start
 
         try:
             with open(cert_path, "rb") as fh:
@@ -351,7 +377,7 @@ class EtcdClientValidator(BaseValidator):
                     name="client_identity_read", passed=False, message=f"Could not read client identity: {exc}"
                 )
             )
-            return checks
+            return checks, time.monotonic() - func_start
 
         # The requirer's own contribution to this relation (its "prefix" ACL grant
         # and its published mtls-cert) lives on this application's own databag, not
@@ -362,7 +388,7 @@ class EtcdClientValidator(BaseValidator):
         identity_match_check = self._check_identity_matches_published_cert(cert_bytes, local_data)
         checks.append(identity_match_check)
         if not identity_match_check.passed:
-            return checks
+            return checks, time.monotonic() - func_start
 
         # The provider's "username" field is defined by the interface contract as the user
         # created from the client certificate's own common name, not an independent value:
@@ -371,7 +397,7 @@ class EtcdClientValidator(BaseValidator):
         username_check = self._check_username_matches_cert_cn(cert_bytes, data["username"])
         checks.append(username_check)
         if not username_check.passed:
-            return checks
+            return checks, time.monotonic() - func_start
 
         if "prefix" not in local_data:
             checks.append(
@@ -384,7 +410,7 @@ class EtcdClientValidator(BaseValidator):
                     ),
                 )
             )
-            return checks
+            return checks, time.monotonic() - func_start
         prefix = local_data["prefix"]
 
         try:
@@ -399,7 +425,7 @@ class EtcdClientValidator(BaseValidator):
                     name="client_credentials", passed=False, message=f"Invalid client identity material: {exc}"
                 )
             )
-            return checks
+            return checks, time.monotonic() - func_start
 
         canary_key = f"{prefix}validator-canary-{uuid.uuid4().hex[:12]}"
         canary_value = f"validator-probe-{uuid.uuid4().hex[:12]}"
@@ -411,7 +437,9 @@ class EtcdClientValidator(BaseValidator):
         # succeeded (see test_preserves_cleanup_failure_from_superseded_target).
         orphan_checks: list[ValidationCheck] = []
         final_checks: list[ValidationCheck] = []
+        target_start = func_start
         for i, target in enumerate(targets):
+            target_start = time.monotonic()
             iter_checks: list[ValidationCheck] = []
             with grpc.secure_channel(target, credentials) as channel:
                 put_check = self._etcd_put(channel, canary_key, canary_value)
@@ -443,7 +471,7 @@ class EtcdClientValidator(BaseValidator):
                 )
         checks.extend(orphan_checks)
         checks.extend(final_checks)
-        return checks
+        return checks, time.monotonic() - target_start
 
     def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
         """Locate a client cert/key pair to authenticate as, per the module docstring convention."""
@@ -707,7 +735,13 @@ class EtcdClientValidator(BaseValidator):
             deleted = fields.get(2, [0])[0]  # DeleteRangeResponse.deleted (field 2)
         except (IndexError, ValueError, TypeError) as exc:
             return ValidationCheck(name="delete", passed=False, message=f"Malformed DELETE response: {exc}")
-        if not deleted:
+        # DeleteRangeResponse.deleted is a varint (int64) field. _decode_message decodes wire
+        # type 0 (varint) as int and wire type 2 (length-delimited) as bytes, so a malformed
+        # response that encodes field 2 with the wrong wire type would decode "deleted" as a
+        # (possibly non-empty, truthy) bytes value instead. Require an actual positive int,
+        # not just truthiness, so that case is reported as a failed cleanup rather than
+        # silently accepted.
+        if not isinstance(deleted, int) or deleted <= 0:
             # A successful gRPC status alone doesn't mean the canary was actually removed:
             # etcd reports the true outcome via DeleteRangeResponse.deleted, which is 0 for a
             # no-op deletion (e.g. the key was already gone, or the request targeted the wrong

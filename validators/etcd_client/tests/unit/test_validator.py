@@ -365,6 +365,23 @@ class TestEtcdClientValidatorRequiresSimple:
         assert secret not in check.message
         assert "<redacted>" in check.message
 
+    def test_redacts_userinfo_when_uri_contains_a_scheme_separator_past_the_start(self) -> None:
+        # GIVEN a malformed uri whose userinfo segment itself embeds a "://" (e.g.
+        # "admin:secret@https://host:2379" or "admin:secret://token@host:2379"): a naive
+        # redaction that treats the *first* "://" anywhere in the string as a trusted scheme
+        # delimiter would leave everything before it -- including the credential -- outside
+        # the redacted remainder. Only a scheme matching at the *start* of the string counts.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "admin:" + secret + "@https://host:2379"
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
+        assert "<redacted>" in check.message
+
     def test_fails_endpoints_format_check_for_overlong_digit_port(self) -> None:
         # A port string with far more digits than any valid port (max 65535, 5 digits) must
         # fail cleanly as a normal FAIL, not crash validation into ERROR: int() itself raises
@@ -598,6 +615,43 @@ class TestEtcdClientValidatorRequiresSimple:
             call(("10.1.2.3", 2379), timeout=3.0),
             call(("10.1.2.4", 2379), timeout=3.0),
         ]
+
+    def test_latency_check_ignores_time_spent_on_a_prior_unreachable_target(self) -> None:
+        # GIVEN "uris" advertises two cluster members, the first of which is unreachable and
+        # would (in reality) consume most of its connect timeout before failing over: the
+        # "latency" check must be based only on the elapsed time of the target that actually
+        # produced the returned "connect" check (the second, successful one here), not the
+        # cumulative time spent across every attempt. Otherwise a single slow-to-fail member
+        # would fail simple validation's latency budget even though the multi-target failover
+        # policy is explicitly meant to tolerate exactly this scenario.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+
+        def fake_create_connection(address: Any, timeout: float = 0) -> MagicMock:
+            if address == ("10.1.2.3", 2379):
+                raise OSError("refused")
+            connection = MagicMock()
+            connection.__enter__ = MagicMock(return_value=MagicMock())
+            connection.__exit__ = MagicMock(return_value=False)
+            return connection
+
+        # time.monotonic() is called: once as the loop's default pre-assignment, once at the
+        # start of each target attempt, and once more when a successful attempt returns. The
+        # first (failed) target is simulated as having taken 10s -- far beyond the 0.5s simple
+        # latency budget -- while the second (successful) target only takes 0.05s.
+        with (
+            patch("validators.etcd_client.validator.socket.create_connection", side_effect=fake_create_connection),
+            patch(
+                "validators.etcd_client.validator.time.monotonic",
+                side_effect=[0.0, 0.0, 10.0, 10.05],
+            ),
+        ):
+            result = validator.validate(level="simple")
+
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert connect_check.passed
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed, latency_check.message
+        assert result.status == "PASS", result.checks
 
 
 class TestEtcdClientValidatorRequiresDeep:
@@ -1239,6 +1293,59 @@ class TestEtcdClientValidatorRequiresDeep:
         assert put_check.passed
         get_check = next(c for c in result.checks if c.name == "get")
         assert get_check.passed
+        delete_check = next(c for c in result.checks if c.name == "delete")
+        assert not delete_check.passed
+
+    def test_fails_delete_check_when_deleted_count_has_wrong_wire_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a malformed DeleteRangeResponse where field 2 ("deleted") is encoded as a
+        # non-empty length-delimited (bytes) value instead of the varint (int) the real
+        # DeleteRangeResponse.deleted field always is. A bare truthiness check on the decoded
+        # value would treat this non-empty bytes value as a passed cleanup; the "delete"
+        # check must instead require an actual positive int.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cert_path = os.path.join(tmp_dir, "client.pem")
+            key_path = os.path.join(tmp_dir, "client.key")
+            with open(cert_path, "w") as f:
+                f.write(VALID_CLIENT_CERT_PEM)
+            with open(key_path, "w") as f:
+                f.write(VALID_CLIENT_KEY_PEM)
+            monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+            monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+
+            validator = _make_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+            stored: dict[str, bytes] = {}
+
+            def unary_unary(method: str, request_serializer: Any = None, response_deserializer: Any = None) -> Any:
+                def call(request: bytes, timeout: float = 0) -> bytes:
+                    if method.endswith("/Put"):
+                        fields = _decode_message(request)
+                        stored["key"] = fields.get(1, [b""])[0]  # type: ignore[assignment]
+                        stored["value"] = fields.get(2, [b""])[0]  # type: ignore[assignment]
+                        return b""
+                    if method.endswith("/Range"):
+                        key_value_msg = _encode_bytes_field(1, stored["key"]) + _encode_bytes_field(5, stored["value"])
+                        return _encode_bytes_field(2, key_value_msg)
+                    if method.endswith("/DeleteRange"):
+                        # Field 2 encoded with wire type 2 (length-delimited), not the
+                        # varint wire type DeleteRangeResponse.deleted actually uses.
+                        return _encode_bytes_field(2, b"\x01")
+                    raise AssertionError(f"unexpected method {method}")
+
+                return call
+
+            fake_channel = MagicMock()
+            fake_channel.unary_unary.side_effect = unary_unary
+            fake_channel.__enter__.return_value = fake_channel
+            fake_channel.__exit__.return_value = False
+
+            with (
+                patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+                patch("validators.etcd_client.validator.grpc.secure_channel", return_value=fake_channel),
+            ):
+                result = validator.validate(level="deep")
+
+        assert result.status == "FAIL"
         delete_check = next(c for c in result.checks if c.name == "delete")
         assert not delete_check.passed
 
