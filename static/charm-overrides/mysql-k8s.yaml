@@ -18,18 +18,25 @@ overrides:
       replication-offer:
         optional: true
     constraints:
-      # database, mysql, and mysql-root are mutually exclusive (at most one can be used)
-      - len(endpoint[database]) + len(endpoint[mysql]) + len(endpoint[mysql-root])
-        <= 1
+      # database/mysql/mysql-root are mutually exclusive; a replica (requires:
+      # replication connected) serves no clients directly, so all must be 0 instead of 1.
+      - 'bool(endpoint[replication]) => len(endpoint[database]) + len(endpoint[mysql])
+        + len(endpoint[mysql-root]) == 0'
+      - 'not bool(endpoint[replication]) => len(endpoint[database]) + len(endpoint[mysql])
+        + len(endpoint[mysql-root]) == 1'
       # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'
 
-  # Track 8.4 has correct endpoint optionality, but we still need to enforce the replication constraint
+  # Track 8.4 has correct endpoint optionality upstream except for the replication case below.
   - provides:
       database:
         features: [mysql-server]
+        optional: true
     constraints:
+      # a replica (requires: replication connected) serves no clients directly
+      - 'bool(endpoint[replication]) => len(endpoint[database]) == 0'
+      - 'not bool(endpoint[replication]) => len(endpoint[database]) == 1'
       # replication must be same track/risk
       - 'bool(endpoint[replication]) => risks(charms(endpoint[replication])) == risks({self})
         and tracks(charms(endpoint[replication])) == tracks({self})'

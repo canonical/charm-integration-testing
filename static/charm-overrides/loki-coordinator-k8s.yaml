@@ -1,0 +1,12 @@
+---
+# Source: https://github.com/canonical/loki-coordinator-k8s-operator (uses
+# coordinated_workers.Coordinator from https://github.com/canonical/cos-coordinated-workers)
+#
+# Single generation across tracks 1, 2, 3.7: endpoint set is stable, no criteria blocks needed.
+overrides:
+  - provides:
+      loki-cluster:
+        optional: false  # coordinator.py::_on_collect_unit_status blocks without any worker
+    requires:
+      s3:
+        optional: false  # same handler blocks with "[s3] Missing S3 integration."

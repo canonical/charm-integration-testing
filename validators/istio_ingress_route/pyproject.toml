@@ -2,9 +2,9 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-prometheus-scrape"
+name = "validators-istio-ingress-route"
 version = "0.1.0"
-description = "Validator for prometheus_scrape interface"
+description = "Validator for the istio_ingress_route interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
@@ -21,14 +21,14 @@ dev = [
 ]
 
 [project.entry-points."endpoint_validators"]
-prometheus_scrape = "validators.prometheus_scrape:PrometheusScrapeValidator"
+istio_ingress_route = "validators.istio_ingress_route:IstioIngressRouteValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.prometheus_scrape"]
+packages = ["validators.istio_ingress_route"]
 
 [tool.setuptools.package-dir]
-"validators.prometheus_scrape" = "."
+"validators.istio_ingress_route" = "."
