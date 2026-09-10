@@ -82,6 +82,34 @@ _duplicate_original_ids: dict[int, int] = {}
 # is unknown. Pure test failures do NOT set this: they leave the state intact.
 _failed_state_test: pytest.Item | None = None
 
+# The scheduler's runtime belief about the environment's actual state, updated
+# as tests execute rather than assumed from the static plan. ``None`` means
+# "unknown" (a state-marked test failed; see ``_failed_state_test``). A
+# transition test that passes advances this to its ``provides`` state; one
+# that is skipped leaves it unchanged, since a skipped transition never ran.
+# Set from ``--current-state`` at the start of collection.
+_current_state: State | None = None
+
+# The full state graph and every known transition test, keyed by edge, built
+# once from ALL collected items (pre -k/-m filtering) in
+# ``pytest_collection_modifyitems``. Reused at runtime to find a bridging path
+# when a skipped transition leaves ``_current_state`` short of what the next
+# planned test requires.
+_full_graph: StateGraph | None = None
+_all_transitions: dict[StateTransition, list[pytest.Item]] = {}
+
+# Monotonically increasing counter used to give each runtime-injected recovery
+# bridge a unique name/nodeid, even if the same underlying transition test is
+# injected more than once in the same session (see ``_find_recovery_bridge``).
+_recovery_counter: int = 0
+
+# Edges whose transition test has already been skipped at runtime for the
+# state it departed from. Runtime recovery excludes these when searching for
+# a bridging path: retrying the exact same test that just skipped would only
+# skip again (the same fixture/condition caused it), which would otherwise
+# make the scheduler re-inject it forever chasing the same unreachable state.
+_skipped_transitions: set[StateTransition] = set()
+
 
 # ---------------------------------------------------------------------------
 # Plugin hooks
@@ -141,33 +169,58 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:  # type: ignore[misc]
-    """Detect failed state-marked tests and halt the state machine.
+    """Keep ``_current_state`` in sync with what actually happened, not the plan.
 
-    When any state-marked test fails at setup, call, or teardown time the
-    environment state is no longer known: a setup failure may leave the
-    environment partially configured, and a teardown failure may leave it in
-    an indeterminate state.  All subsequent state-marked tests are skipped to
-    prevent them from running against a broken or indeterminate environment.
+    * A state-marked test failing at setup, call, or teardown time means the
+      environment state is no longer known: a setup failure may leave it
+      partially configured, and a teardown failure may leave it indeterminate.
+      ``_current_state`` becomes ``None`` and all subsequent state-marked
+      tests are skipped (``pytest_runtest_setup``) until the run ends.
 
+    * A transition test passing at call time means the environment reached
+      its ``provides`` state: ``_current_state`` advances accordingly.
+
+    * A transition test being skipped means it never ran, so the environment
+      never left its ``requires`` state: ``_current_state`` is left as-is.
+      ``pytest_runtest_protocol`` uses this to try bridging to whatever the
+      next planned test actually needs.
+
+    Pure tests (``requires == provides``) never change ``_current_state``,
+    whether they pass, fail*, or skip (*except that a failure still halts
+    everything, since pure test failures can also leave things broken).
     Unmarked tests are never affected.
     """
-    global _failed_state_test
+    global _failed_state_test, _current_state
     outcome = yield
-    if _failed_state_test is not None:
-        return  # Already halted; no need to re-check.
+    if _current_state is None:
+        return  # Already unknown; no need to re-check.
     report = outcome.get_result()
+    try:
+        marker = read_state_marker(item)
+    except ValueError:
+        marker = None
+    if marker is None:
+        return
     if report.failed:
-        try:
-            marker = read_state_marker(item)
-        except ValueError:
-            marker = None
-        if marker is not None:
-            _failed_state_test = item
-            logger.error(
-                "State-marked test %r failed: environment state is unknown.  "
-                "All remaining state-marked tests will be skipped.",
-                item.nodeid,
-            )
+        _failed_state_test = item
+        _current_state = None
+        logger.error(
+            "State-marked test %r failed: environment state is unknown.  "
+            "All remaining state-marked tests will be skipped.",
+            item.nodeid,
+        )
+    elif report.when == "call" and report.passed and marker.is_transition:
+        _current_state = marker.provides
+    elif report.skipped and marker.is_transition:
+        for req_state in marker.requires:
+            if req_state == _current_state:
+                _skipped_transitions.add(StateTransition(from_state=req_state, to_state=marker.provides))
+        logger.warning(
+            "State-marked transition test %r was skipped: environment remains at %r.  "
+            "The scheduler will try to recover a path (avoiding this edge) to whatever the next test needs.",
+            item.nodeid,
+            _current_state.value,
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
@@ -179,29 +232,160 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     the previous run.
     """
     global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
+    global _current_state, _full_graph, _all_transitions, _recovery_counter, _skipped_transitions
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()
     _failed_state_test = None
+    _current_state = None
+    _full_graph = None
+    _all_transitions = {}
+    _recovery_counter = 0
+    _skipped_transitions.clear()
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """Skip state-marked tests after a transition failure.
+    """Skip state-marked tests whose required state was never reached.
 
-    Called before each test's setup phase.  If a previous transition test
-    has failed, this hook raises ``pytest.skip`` for every state-marked test
-    that follows, leaving unmarked tests unaffected.
+    Called before each test's setup phase. Skips *item* when:
+
+    * the environment state is unknown (a prior state-marked test failed), or
+    * the environment's actual current state (``_current_state``, which may
+      differ from what the static plan assumed if an earlier transition was
+      skipped) doesn't satisfy *item*'s ``requires``.  ``pytest_runtest_protocol``
+      already tried to bridge this gap by injecting a recovery transition
+      immediately before *item*; if that succeeded, ``_current_state`` will
+      already match by the time this hook runs. If not, *item* is skipped here,
+      and recovery is attempted again for whatever test follows it.
+
+    Unmarked tests are never affected.
     """
-    if _failed_state_test is None:
-        return
     if item is _failed_state_test:
         return  # Don't skip the failing test itself; let it report naturally.
     try:
         marker = read_state_marker(item)
     except ValueError:
         marker = None
-    if marker is not None:
-        pytest.skip(f"Skipped: state-marked test {_failed_state_test.nodeid!r} failed: environment state is unknown.")
+    if marker is None:
+        return
+    if _current_state is None:
+        failed_nodeid = _failed_state_test.nodeid if _failed_state_test is not None else "<unknown>"
+        pytest.skip(f"Skipped: state-marked test {failed_nodeid!r} failed: environment state is unknown.")
+    if _current_state not in marker.requires:
+        pytest.skip(
+            f"Skipped: environment is at state {_current_state.value!r}, but this test requires one of "
+            f"{[s.value for s in marker.requires]!r} and no recovery path could bridge the gap."
+        )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # type: ignore[misc]
+    """Recover the state machine before *nextitem* runs, if a gap opened up.
+
+    Runs after *item*'s entire setup/call/teardown protocol has finished
+    (the natural boundary between one item and the next in pytest's
+    ``session.items`` loop). If ``_current_state`` no longer satisfies
+    *nextitem*'s ``requires`` (typically because a transition test in
+    between was skipped rather than run), this looks for a bridging path in
+    the full state graph and, if one exists, splices freshly-built bridge
+    test item(s) into ``session.items`` right after *item* - i.e. before
+    *nextitem* - so the environment is corrected before *nextitem* starts.
+
+    If no bridging path exists, nothing is injected: ``pytest_runtest_setup``
+    will skip *nextitem* when its turn comes, and this hook runs again
+    afterwards for whatever test follows *nextitem*, repeating the same
+    recovery attempt against the new state of the plan. This way a run of
+    several unreachable tests in a row is skipped one at a time rather than
+    all at once, and any test further down the plan that the environment's
+    actual (unchanged) state still happens to satisfy keeps running normally.
+    """
+    yield
+    if nextitem is None or _current_state is None or _full_graph is None:
+        return
+    try:
+        marker = read_state_marker(nextitem)
+    except ValueError:
+        marker = None
+    if marker is None or _current_state in marker.requires:
+        return  # Unmarked test, or the environment already satisfies it.
+
+    bridge_items = _find_recovery_bridge(_current_state, marker.requires)
+    if bridge_items is None:
+        logger.warning(
+            "No recovery path from state %r to any of %r: %r will be skipped.",
+            _current_state.value,
+            [s.value for s in marker.requires],
+            nextitem.nodeid,
+        )
+        return
+
+    session_items = item.session.items
+    insert_at = session_items.index(item) + 1
+    session_items[insert_at:insert_at] = bridge_items
+    logger.warning(
+        "Recovering state machine: injecting %s to bridge %r towards %r before %r.",
+        [b.nodeid for b in bridge_items],
+        _current_state.value,
+        [s.value for s in marker.requires],
+        nextitem.nodeid,
+    )
+
+
+def _shortest_path_to_any(
+    graph: StateGraph,
+    from_state: State,
+    to_states: tuple[State, ...],
+    avoid: frozenset[StateTransition] = frozenset(),
+) -> list[tuple[StateTransition, pytest.Item]] | None:
+    """Return the cheapest of the shortest paths from *from_state* to any of *to_states*."""
+    best: list[tuple[StateTransition, pytest.Item]] | None = None
+    best_cost: int | None = None
+    for target in to_states:
+        path = graph.shortest_path(from_state, target, avoid=avoid)
+        if path is None:
+            continue
+        cost = sum(transition.cost for transition, _ in path)
+        if best_cost is None or cost < best_cost:
+            best, best_cost = path, cost
+    return best
+
+
+def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> list[pytest.Item] | None:
+    """Build fresh, uniquely-named bridge items for a path from *from_state* to *to_states*.
+
+    Returns ``None`` if no path exists in the full state graph (excluding any
+    edge whose transition test has already skipped once - see
+    ``_skipped_transitions``), or if the graph claims an edge exists but no
+    transition test was ever registered for it (should not happen in
+    practice; the graph is built directly from registered items).
+
+    Each edge's template item (the transition test registered for it) is
+    duplicated rather than reused directly: the same template may need to be
+    injected more than once across a run's recovery attempts, and reusing the
+    same ``pytest.Item`` object produces duplicate nodeids (see
+    ``_duplicate_item_for_repeat``).
+    """
+    global _recovery_counter
+    assert _full_graph is not None
+    path = _shortest_path_to_any(_full_graph, from_state, to_states, avoid=frozenset(_skipped_transitions))
+    if path is None:
+        return None
+    bridge_items: list[pytest.Item] = []
+    for transition, _graph_item in path:
+        candidates = _all_transitions.get(transition)
+        if not candidates:
+            return None
+        template_item = candidates[0]
+        _recovery_counter += 1
+        duplicate = _duplicate_item_for_repeat(
+            template_item,
+            occurrence=_recovery_counter,
+            base_name=f"{template_item.name}(recovered)",
+            base_nodeid=f"{template_item.nodeid}(recovered)",
+        )
+        _mark_as_injected(duplicate)
+        bridge_items.append(duplicate)
+    return bridge_items
 
 
 @pytest.hookimpl(trylast=True)
@@ -243,6 +427,18 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 t = StateTransition(from_state=req_state, to_state=marker.provides)
                 full_graph.register_transition(t, item)
                 all_transitions[t].append(item)
+
+    # Publish the graph, edge->item map, and starting state for runtime
+    # recovery (see pytest_runtest_protocol) before any early return below,
+    # so recovery works even when the user's selection is unmarked-only.
+    global _full_graph, _all_transitions, _current_state, _failed_state_test, _recovery_counter
+    global _skipped_transitions
+    _full_graph = full_graph
+    _all_transitions = dict(all_transitions)
+    _current_state = current_state
+    _failed_state_test = None
+    _recovery_counter = 0
+    _skipped_transitions = set()
 
     # ------------------------------------------------------------------
     # 2. Partition the USER-SELECTED items (post -k filter) into marked

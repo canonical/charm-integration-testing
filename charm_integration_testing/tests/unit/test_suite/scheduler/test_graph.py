@@ -322,3 +322,41 @@ class TestStateGraph:
             assert transition1.to_state == transition2.from_state
             assert transition2.to_state == transition3.from_state
             assert transition3.to_state == State.DEPLOYED_WITH_OLD_REVISION
+
+        def test_avoid_excludes_the_direct_edge(self) -> None:
+            # GIVEN a direct edge and a longer alternate path to the same target
+            graph = StateGraph()
+            direct = StateTransition(State.EMPTY_MODEL, State.DEPLOYED)
+            via_neighbor_1 = StateTransition(State.EMPTY_MODEL, State.NEIGHBOR_ONLY)
+            via_neighbor_2 = StateTransition(State.NEIGHBOR_ONLY, State.DEPLOYED)
+            graph.register_transition(direct, _ITEM)
+            graph.register_transition(via_neighbor_1, _ITEM)
+            graph.register_transition(via_neighbor_2, _ITEM)
+
+            # WHEN the direct edge is avoided
+            path = graph.shortest_path(State.EMPTY_MODEL, State.DEPLOYED, avoid=frozenset({direct}))
+
+            # THEN the longer alternate path is returned instead
+            assert path is not None
+            assert [t for t, _ in path] == [via_neighbor_1, via_neighbor_2]
+
+        def test_avoid_returns_none_when_it_removes_the_only_path(self) -> None:
+            graph = StateGraph()
+            only_edge = StateTransition(State.EMPTY_MODEL, State.DEPLOYED)
+            graph.register_transition(only_edge, _ITEM)
+
+            path = graph.shortest_path(State.EMPTY_MODEL, State.DEPLOYED, avoid=frozenset({only_edge}))
+
+            assert path is None
+
+        def test_avoid_does_not_affect_unrelated_edges(self) -> None:
+            graph = StateGraph()
+            t1 = StateTransition(State.EMPTY_MODEL, State.DEPLOYED)
+            unrelated = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+            graph.register_transition(t1, _ITEM)
+            graph.register_transition(unrelated, _ITEM)
+
+            path = graph.shortest_path(State.EMPTY_MODEL, State.DEPLOYED, avoid=frozenset({unrelated}))
+
+            assert path is not None
+            assert [t for t, _ in path] == [t1]

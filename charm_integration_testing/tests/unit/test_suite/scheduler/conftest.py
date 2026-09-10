@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 from test_suite.scheduler import plugin as _plugin_module
+from test_suite.scheduler.states import State
 
 
 class FakeItem:
@@ -72,14 +73,28 @@ def reset_injected_ids() -> Iterator[None]:
     """Clear all module-level plugin globals before and after every test.
 
     Prevents state leaking between unit tests that call the plugin hooks
-    directly.
+    directly. ``_current_state`` is set to a default valid state (mirroring
+    what ``pytest_collection_modifyitems`` always does before any test runs
+    in a real session) rather than left as ``None``, since ``None`` means
+    "environment state unknown" and would make every hook under test behave
+    as if a prior failure had already halted the run.
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._current_state = State.EMPTY_MODEL
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()
     yield
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._current_state = None
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()

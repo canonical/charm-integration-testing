@@ -55,12 +55,19 @@ class StateGraph:
                 states.add(transition.to_state)
         return frozenset(states)
 
-    def shortest_path(self, from_state: State, to_state: State) -> list[tuple[StateTransition, Any]] | None:
+    def shortest_path(
+        self, from_state: State, to_state: State, avoid: frozenset[StateTransition] = frozenset()
+    ) -> list[tuple[StateTransition, Any]] | None:
         """Find the minimum-cost path from *from_state* to *to_state*.
 
         Uses Dijkstra's algorithm. Returns the ordered list of
         ``(transition, pytest_item)`` pairs along the path, or ``None`` if no
         path exists.  Returns an empty list when ``from_state == to_state``.
+
+        *avoid* excludes specific edges from the search entirely (as if they
+        were not registered), used by the scheduler's runtime recovery to stop
+        offering an edge whose transition test just skipped rather than
+        looping on it forever.
 
         The returned shortest path is randomly chosen among all minimum-cost paths, if there are multiple.
         """
@@ -91,6 +98,8 @@ class StateGraph:
                 continue
 
             for transition, item in self._edges.get(state, []):
+                if transition in avoid:
+                    continue
                 new_cost = cost + transition.cost
                 neighbor = transition.to_state
                 found_dist = dist.get(neighbor, float("inf"))
