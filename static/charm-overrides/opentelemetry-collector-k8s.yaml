@@ -10,7 +10,10 @@
 #   blocks when this IS connected but unpaired; absent relation causes no BlockedStatus.
 # grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose.
 # require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration.
-# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration.
+# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration; must be
+#   integrated cross-model with exactly the same charms as the mesh-managed provides endpoints
+#   (per src/integrations.py setup_service_mesh(): receive-loki-logs, receive-traces,
+#   receive-profiles) are cross-model with; see issue GH-980.
 # Pipeline pairing: _get_missing_mandatory_relations() sets BlockedStatus if an incoming telemetry
 #   relation is connected without a matching outgoing backend. Modelled as implications.
 overrides:
@@ -50,6 +53,18 @@ overrides:
       - 'bool(endpoint[receive-traces]) => bool(endpoint[cloud-config]) or bool(endpoint[send-traces])'
       - 'bool(endpoint[grafana-dashboards-consumer]) => bool(endpoint[grafana-dashboards-provider])
         or bool(endpoint[cloud-config])'
+      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # charms() can't identify external-CMR peers (no in-domain charm id), so the equality
+      # above is vacuous when both sides are external; also check that at least one exists on
+      # both sides. (Not len()-equality: multiple managed endpoints can coalesce into one
+      # shared offer, so managed-side count can validly exceed provide-cmr-mesh's count.)
+      - 'bool(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
+      # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
+      # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
+      # empty). See GH-980.
+      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 
   # dev: CMR mesh + send-otlp/receive-otlp added as valid pipeline backends
   - criteria:
@@ -77,3 +92,15 @@ overrides:
         or bool(endpoint[cloud-config])'
       - 'bool(endpoint[receive-otlp]) => bool(endpoint[cloud-config]) or bool(endpoint[send-otlp])
         or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
+      - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # charms() can't identify external-CMR peers (no in-domain charm id), so the equality
+      # above is vacuous when both sides are external; also check that at least one exists on
+      # both sides. (Not len()-equality: multiple managed endpoints can coalesce into one
+      # shared offer, so managed-side count can validly exceed provide-cmr-mesh's count.)
+      - 'bool(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
+      # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
+      # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
+      # empty). See GH-980.
+      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

@@ -3,6 +3,10 @@
 # Remove after: https://github.com/canonical/grafana-k8s-operator/pull/591
 #
 # Tracks 1/2 predate these endpoints; block applies to 12.4+ and future tracks.
+#
+# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
+# mesh-managed provides endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py:
+# metrics-endpoint, profiling-endpoint) are cross-model with; see issue GH-980.
 overrides:
   - criteria:
       - none_of:
@@ -19,3 +23,15 @@ overrides:
     constraints:
       - 'bool(endpoint[require-cmr-mesh]) => bool(endpoint[service-mesh])'
       - 'bool(endpoint[provide-cmr-mesh]) => bool(endpoint[service-mesh])'
+      - 'charms(cross_model(endpoint[metrics-endpoint] | endpoint[profiling-endpoint]))
+        == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # charms() can't identify external-CMR peers (no in-domain charm id), so the equality
+      # above is vacuous when both sides are external; also check that at least one exists on
+      # both sides. (Not len()-equality: multiple managed endpoints can coalesce into one
+      # shared offer, so managed-side count can validly exceed provide-cmr-mesh's count.)
+      - 'bool(cross_model(endpoint[metrics-endpoint] | endpoint[profiling-endpoint]))
+        == bool(cross_model(endpoint[provide-cmr-mesh]))'
+      # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
+      # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
+      # empty). See GH-980.
+      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
