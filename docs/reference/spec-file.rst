@@ -36,7 +36,8 @@ Structure
            remote_application: vault
            remote_endpoint: vault-pki
            remote_model: pki-infra        # must match another model's name
-           offer_name: vault-pki-offer    # optional, defaults to <remote_app>-offer
+           offer_name: vault-pki-offer    # optional if url is omitted; required (and must match
+                                           # the offer name embedded in url) if url is set
 
          # Cross-model integration (external)
          - application: app-a
@@ -157,9 +158,10 @@ Integration
      - --
      - Controller hosting the remote model. When set, the remote model is identified as ``remote_controller/remote_model`` in the domain.
    * - ``offer_name``
-     - no
+     - conditional
      - ``<remote_application>-offer``
-     - CMR offer name.
+     - CMR offer name. Required for in-spec CMRs that also set ``url`` (and must match the
+       offer name embedded in ``url``); otherwise optional.
    * - ``url``
      - no
      - --
@@ -181,6 +183,11 @@ The spec is validated on load. The following rules are enforced:
 - Duplicate cross-model integrations (same local app, endpoint, remote model,
   remote app, remote endpoint) are rejected.
 - A cross-model integration cannot target the current model.
+- An in-spec cross-model integration that sets ``url`` must also set ``offer_name``,
+  and the two must agree: ``offer_name`` must equal the offer name embedded in ``url``
+  (the segment after the last ``.``).
+- Multiple cross-model integrations targeting the same application in the same
+  external model (not present in this spec) must declare the same ``offer_name``/``url``.
 
 Minimal example
 ---------------
