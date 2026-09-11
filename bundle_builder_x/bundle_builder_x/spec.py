@@ -253,6 +253,21 @@ class SpecFile(BaseModel):
                             f"Model '{model_name}': cross-model integration references model "
                             f"'{remote_model_key}' which has no 'controller' set"
                         )
+                    # In-spec CMR: an explicit url with no offer_name is ambiguous. Bundle Builder X
+                    # itself creates and names the Juju offer for in-spec CMRs (see
+                    # domain.integration_offer_name()), which may synthesize a name that shares
+                    # an offer with other cross-model integrations between the same charm pair.
+                    # An explicit url baked around a *different* offer name would then point at
+                    # an offer that's never actually created, so require offer_name whenever url
+                    # is given here to keep the two in agreement.
+                    if integration.url is not None and integration.offer_name is None:
+                        raise ValueError(
+                            f"Model '{model_name}': cross-model integration to in-spec model "
+                            f"'{remote_model_key}' provides an explicit 'url' but no 'offer_name'; "
+                            "the offer name Bundle Builder X assigns this integration must be known "
+                            "explicitly so the url can be guaranteed to point at it -- set 'offer_name' "
+                            "to match the offer name embedded in 'url'"
+                        )
                 else:
                     # External CMR: url is required
                     if integration.url is None:
