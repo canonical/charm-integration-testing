@@ -164,6 +164,16 @@ class JujuCmdBackend(JujuBackend):
             timeout,
         )
 
+    def wait_unhealthy(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        raise NotImplementedError
+
     def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         # Wait for an application to reach it's desired scale
         # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239

@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 
+import dataclasses
 from typing import Iterator
 
 import jubilant
@@ -187,6 +188,27 @@ def all_statuses_are_in(
         noncompliant_units=noncompliant_units,
         noncompliant_unit_agents=noncompliant_unit_agents,
     )
+
+
+def any_status_not_in(
+    status: jubilant.Status,
+    *application_args: str,
+    application_statuses: set[str] | None = None,
+    unit_statuses: set[str] | None = None,
+    unit_agent_statuses: set[str] | None = None,
+) -> tuple[bool, JujuWaitState]:
+    is_compliant, wait_state = all_statuses_are_in(
+        status,
+        *application_args,
+        application_statuses=application_statuses,
+        unit_statuses=unit_statuses,
+        unit_agent_statuses=unit_agent_statuses,
+    )
+    if is_compliant:
+        return False, dataclasses.replace(
+            wait_state, message=wait_state.message.replace("waiting for", "waiting to leave", 1)
+        )
+    return True, dataclasses.replace(wait_state, message=wait_state.message.replace("waiting for", "left", 1))
 
 
 def applications_are_scaled(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
