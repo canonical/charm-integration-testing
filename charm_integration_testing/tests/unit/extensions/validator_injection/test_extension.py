@@ -232,9 +232,9 @@ class TestValidatorInjectorExtension:
             def test_raises_when_runner_exits_nonzero(
                 self, extension: ValidatorInjectorExtension, juju: JujuStub
             ) -> None:
-                # GIVEN the venv is present, the runner crashes, and it's still present afterwards
-                # (i.e. a genuine validator failure, not a missing runner binary)
-                juju.exec_responses.extend([_ok(), _fail(stderr="crash"), _ok()])
+                # GIVEN the venv is present and the runner crashes (a genuine validator failure,
+                # not a missing runner binary)
+                juju.exec_responses.extend([_ok(), _fail(stderr="crash")])
 
                 # WHEN / THEN
                 with pytest.raises(RuntimeError, match="Validators failed"):
