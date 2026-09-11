@@ -186,12 +186,15 @@ def _extract_single_model(
         # Resolve the offer name/URL through the shared-offer resolver when this user-declared
         # CMR is backed by a DomainCharmIntegration (i.e. not an external CMR).
         backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
-        resolved_offer_name: str | None
+        resolved_offer_name: str
         if backing_integration is not None:
             resolved_offer_name = domain.integration_offer_name(backing_integration, model)
             resolved_url = domain.integration_offer_url(backing_integration, model)
         else:
-            resolved_offer_name = app_int.offer_name
+            # External CMR (no backing DomainCharmIntegration): app_int.offer_name is only
+            # non-None when the user explicitly declared one, so fall back to the same
+            # "<remote_application>-offer" default IntegrationSpec.resolved_offer_name() uses.
+            resolved_offer_name = app_int.offer_name or f"{remote_ep.application}-offer"
             resolved_url = app_int.url
 
         # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
