@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -16,6 +16,8 @@ from extensions import (
     IstioMeshExtension,
     LegoExtension,
     MetacontrollerExtension,
+    MysqlDatabaseReplicationExtension,
+    MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     S3IntegratorMinIOBackendExtension,
@@ -271,6 +273,8 @@ def juju_client(
             IstioMeshExtension(juju_backend, logger),
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
+            MysqlDatabaseReplicationExtension(juju_backend, logger),
+            MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
