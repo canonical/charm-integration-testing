@@ -12,6 +12,7 @@ import logging
 
 import pytest
 import z3  # type: ignore[import-untyped]
+
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.constraints_dsl import parse_constraint
