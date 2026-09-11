@@ -2,38 +2,11 @@
 # Source: https://github.com/canonical/loki-coordinator-k8s-operator (uses
 # coordinated_workers.Coordinator from https://github.com/canonical/cos-coordinated-workers)
 #
-# Endpoint set is stable across tracks 1, 2, 3.7, dev, except that require-cmr-mesh,
-# service-mesh (requires) and provide-cmr-mesh (provides) are only present on track 3.7 and dev
-# (not track 1 or plain track 2); older tracks predate the service_mesh integration. They are
-# already optional: true upstream.
-#
-# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
-# mesh-managed provides endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py
-# _charm_mesh_policies: logging, grafana-source) are cross-model with; see issue GH-980.
+# Single generation across tracks 1, 2, 3.7: endpoint set is stable, no criteria blocks needed.
 overrides:
-  - criteria:
-      - any_of:
-          - track: '1'
-          - track: '2'
-    provides:
+  - provides:
       loki-cluster:
         optional: false  # coordinator.py::_on_collect_unit_status blocks without any worker
     requires:
       s3:
         optional: false  # same handler blocks with "[s3] Missing S3 integration."
-  - criteria:
-      - any_of:
-          - track: '3.7'
-          - track: dev
-    provides:
-      loki-cluster:
-        optional: false  # coordinator.py::_on_collect_unit_status blocks without any worker
-    requires:
-      s3:
-        optional: false  # same handler blocks with "[s3] Missing S3 integration."
-    constraints:
-      - 'charms(cross_model(endpoint[logging] | endpoint[grafana-source])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
-      # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
-      # empty). See GH-980.
-      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
