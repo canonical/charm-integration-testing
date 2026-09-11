@@ -255,7 +255,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
                 )
         logger.warning(
             "State-marked transition test %r was skipped: environment remains at %r.  "
-            "The scheduler will try to recover a path (avoiding this edge) to whatever the next test needs.",
+            "The scheduler will try to recover without retrying this transition candidate.",
             item.nodeid,
             _current_state.value,
         )
