@@ -194,3 +194,35 @@ class TestBaseValidator:
 
         # THEN
         assert check == ValidationCheck(name="schema", passed=True, message="OK")
+
+    def test_resolve_secret_uses_explicit_data_instead_of_databag(self) -> None:
+        # GIVEN a relation whose remote databag has no secret, but an explicit
+        # (e.g. local app) databag is passed in instead
+        app = ApplicationStub()
+        relation = RelationStub(name="my-db", id=1, app=app, data={app: {}})
+        secrets = {"secret:db-creds": {"username": "secret-user", "password": "pw"}}
+        charm = make_charm_from_relation_and_secrets(relation, secrets)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        resolved = validator.resolve_secret(
+            "secret-uri", "username", "password", data={"secret-uri": "secret:db-creds"}
+        )
+
+        # THEN the explicit data was used instead of self.databag
+        assert resolved == {"username": "secret-user", "password": "pw"}
+        assert charm.model.requested_ids == ["secret:db-creds"]
+
+    def test_validate_schema_uses_explicit_data_instead_of_databag(self) -> None:
+        # GIVEN a relation whose remote databag is empty, but an explicit
+        # databag with the required fields is passed in instead
+        app = ApplicationStub()
+        relation = RelationStub(name="my-db", id=1, app=app, data={app: {}})
+        charm = make_charm_from_relation(relation)
+        validator = ConcreteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        check = validator.validate_schema(["host", "port"], data={"host": "10.0.0.10", "port": "5432"})
+
+        # THEN the explicit data was used instead of self.databag
+        assert check == ValidationCheck(name="schema", passed=True, message="OK")
