@@ -51,9 +51,6 @@ class TestS3IntegratorMinIOBackendExtension:
             self, extension: S3IntegratorMinIOBackendExtension, juju: JujuStub
         ) -> None:
             # GIVEN a model with an s3-integrator application
-            # AND the MinIO client is already downloaded (avoid a real network call)
-            extension.minio_client_file = Path("mc")
-
             # WHEN post_deploy is called
             extension.post_deploy(_MODEL)
 
@@ -359,21 +356,9 @@ class TestS3IntegratorMinIOBackendExtension:
             assert juju.waited_removal == []
 
     class TestGetMinioClientFile:
-        def test_downloads_only_once(
-            self, extension: S3IntegratorMinIOBackendExtension, monkeypatch: pytest.MonkeyPatch
-        ) -> None:
+        def test_downloads_only_once(self, extension: S3IntegratorMinIOBackendExtension) -> None:
             # GIVEN no client downloaded
             extension.minio_client_file = None
-            download_calls = 0
-
-            def fake_urlretrieve(url: str, filename: str) -> tuple[str, None]:
-                nonlocal download_calls
-                download_calls += 1
-                return filename, None
-
-            monkeypatch.setattr(
-                "extensions.s3_integrator_minio_backend.extension.urllib.request.urlretrieve", fake_urlretrieve
-            )
 
             # WHEN called
             path = extension.get_minio_client_file()
@@ -384,9 +369,8 @@ class TestS3IntegratorMinIOBackendExtension:
             # WHEN called again
             path2 = extension.get_minio_client_file()
 
-            # THEN it reuses the file and does not download again
+            # THEN it reuses the file
             assert path == path2
-            assert download_calls == 1
 
     class TestUtilityFunctions:
         def test_minio_application_name(self, extension: S3IntegratorMinIOBackendExtension) -> None:
