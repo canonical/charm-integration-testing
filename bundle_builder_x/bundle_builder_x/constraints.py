@@ -19,8 +19,6 @@ from .assertion_tags import (
     CharmMappedToSingleApplicationTag,
     CharmPayload,
     CharmRankBoundedTag,
-    CrossModelEndpointCountMatchesIntegrationsTag,
-    CrossModelEndpointIntegratedMatchesCountTag,
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
@@ -293,15 +291,17 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             )
             solver.assert_and_track(
                 endpoint.cross_model_count == cross_model_count_expr,
-                CrossModelEndpointCountMatchesIntegrationsTag(
+                EndpointCountMatchesIntegrationsTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
                     num_terms=cross_model_num_terms,
+                    cross_model=True,
                 ).encode(),
             )
             solver.assert_and_track(
                 endpoint.cross_model_integrated == (endpoint.cross_model_count >= 1),
-                CrossModelEndpointIntegratedMatchesCountTag(
-                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                EndpointIntegratedMatchesCountTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                    cross_model=True,
                 ).encode(),
             )
 
