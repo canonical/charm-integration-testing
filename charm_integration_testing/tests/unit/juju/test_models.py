@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 
 import pytest
-from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuModelHandle
+from juju import CharmChannel, JujuConsumedOfferInfo, JujuIntegrationApplication, JujuModelHandle, ParsedOfferUrl
 
 
 class TestCharmChannel:
@@ -224,4 +224,9 @@ class TestJujuConsumedOfferInfo:
             if params.should_be_none:
                 assert result is None
             else:
-                assert result == (params.expected_owner, params.expected_model, params.expected_offer_name)
+                assert params.expected_owner is not None
+                assert params.expected_model is not None
+                assert params.expected_offer_name is not None
+                assert result == ParsedOfferUrl(
+                    owner=params.expected_owner, model=params.expected_model, offer_name=params.expected_offer_name
+                )

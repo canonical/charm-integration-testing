@@ -601,12 +601,11 @@ class JubilantBackend(JujuCmdBackend):
         parsed_url = offer.parse_url()
         if parsed_url is None:
             return None
-        owner, offering_model, offer_name = parsed_url
         # Qualify with the owner explicitly (rather than relying on the currently authenticated
         # user matching), since the offering model may belong to a different owner than the
         # model that consumed the offer.
         qualified_offering_model = JujuModelHandle(
-            controller=offering_model.controller, model=f"{owner}/{offering_model.model}"
+            controller=parsed_url.model.controller, model=f"{parsed_url.owner}/{parsed_url.model.model}"
         )
 
         try:
@@ -616,7 +615,7 @@ class JubilantBackend(JujuCmdBackend):
             # unregistered controller), or may no longer exist.
             return None
 
-        offer_status = offering_status.offers.get(offer_name)
+        offer_status = offering_status.offers.get(parsed_url.offer_name)
         if offer_status is None:
             return None
         app_info = offering_status.apps.get(offer_status.app)
