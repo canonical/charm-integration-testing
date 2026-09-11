@@ -162,6 +162,19 @@ class TestDuplicateItemForRepeat:
         assert item.name == original_name
         assert item.nodeid == original_nodeid
 
+    def test_marking_duplicate_does_not_mutate_the_template(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN the duplicate is marked as injected (as _find_recovery_bridge does)
+        _mark_as_injected(duplicate)
+
+        # THEN the template item itself is not marked - own_markers/keywords
+        # must be independent copies, not shared references from copy.copy
+        assert duplicate.get_closest_marker("injected") is not None
+        assert item.get_closest_marker("injected") is None
+
     def test_different_occurrences_produce_different_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item duplicated for two different occurrence numbers
         item = make_item("test_foo")
@@ -1108,8 +1121,12 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._failed_state_test is None
 
     def test_skipped_transition_blacklists_its_edge(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a transition test that gets skipped at setup time
+        # GIVEN a transition test that gets skipped at setup time, registered
+        # as the sole candidate for its edge (mirroring what
+        # pytest_collection_modifyitems does for a real collection)
         item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
         _plugin_module._current_state = State.DEPLOYED
         call = SimpleNamespace(excinfo=None)
         report = _make_report(when="setup", skipped=True)
@@ -1117,7 +1134,68 @@ class TestPytestRuntestMakereport:
         _drive_makereport(item, call, report)
 
         # THEN its edge is recorded so recovery won't retry the same test forever
-        assert StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY) in _plugin_module._skipped_transitions
+        assert edge in _plugin_module._skipped_transitions
+
+    def test_skip_at_call_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that skips mid-call (e.g. the test body itself
+        # calls pytest.skip() after already performing some real action),
+        # rather than a fixture skipping before the test body ever ran
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", skipped=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown (halted), not as
+        # unchanged: recovery must not assume the pre-transition state still
+        # holds, since the test body may have already run real actions.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+        assert edge not in _plugin_module._skipped_transitions
+
+    def test_skip_at_teardown_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that skips during teardown
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="teardown", skipped=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown, same as a call-time skip
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+
+    def test_edge_not_blacklisted_while_an_untried_candidate_remains(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN two candidate tests registered for the same edge
+        first = make_item("test_downgrade_charm_v1", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        second = make_item("test_downgrade_charm_v2", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [first, second]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        # WHEN only the first candidate skips
+        _drive_makereport(first, call, report)
+
+        # THEN the edge is NOT blacklisted yet - the second candidate is
+        # still untried and may succeed as a recovery bridge
+        assert edge not in _plugin_module._skipped_transitions
+
+        # WHEN the second (and only remaining) candidate also skips
+        _plugin_module._current_state = State.DEPLOYED
+        _drive_makereport(second, call, report)
+
+        # THEN the edge is now blacklisted, since every candidate has skipped
+        assert edge in _plugin_module._skipped_transitions
 
     def test_skipped_pure_test_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a pure test that gets skipped

@@ -110,7 +110,18 @@ _recovery_counter: int = 0
 # a bridging path: retrying the exact same test that just skipped would only
 # skip again (the same fixture/condition caused it), which would otherwise
 # make the scheduler re-inject it forever chasing the same unreachable state.
+# An edge only lands here once every registered candidate for it (see
+# ``_all_transitions``) has skipped -- see ``_skipped_transition_item_ids``.
 _skipped_transitions: set[StateTransition] = set()
+
+# Per-edge set of object IDs of registered template items (chasing through
+# ``_duplicate_original_ids`` for duplicates) whose transition test has
+# already skipped at runtime for that edge. Multiple tests may cover the
+# same edge (``_all_transitions`` stores a list per edge); an edge is only
+# added to ``_skipped_transitions`` once every one of its candidates is in
+# here, so a different, not-yet-tried candidate for the same edge can still
+# be selected as a recovery bridge.
+_skipped_transition_item_ids: dict[StateTransition, set[int]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +180,27 @@ def pytest_itemcollected(item: pytest.Item) -> None:
     _all_collected.append(item)
 
 
+def _record_skipped_transition_candidate(edge: StateTransition, item: pytest.Item) -> None:
+    """Record that *item* (one of possibly several candidates for *edge*) has skipped.
+
+    Resolves *item* back to its original template's object ID via
+    ``_duplicate_original_ids`` (a runtime-injected bridge item is always a
+    duplicate; see ``_duplicate_item_for_repeat``) so it can be matched
+    against the template items registered for *edge* in ``_all_transitions``.
+
+    Only adds *edge* to ``_skipped_transitions`` (excluding it from future
+    recovery searches) once every registered candidate for it has skipped:
+    multiple tests may cover the same edge, and if an untried candidate
+    remains, it may still succeed as a recovery bridge.
+    """
+    original_id = _duplicate_original_ids.get(id(item), id(item))
+    skipped_ids = _skipped_transition_item_ids.setdefault(edge, set())
+    skipped_ids.add(original_id)
+    candidates = _all_transitions.get(edge, [])
+    if candidates and skipped_ids.issuperset(id(c) for c in candidates):
+        _skipped_transitions.add(edge)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:  # type: ignore[misc]
     """Keep ``_current_state`` in sync with what actually happened, not the plan.
@@ -182,10 +214,15 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     * A transition test passing at call time means the environment reached
       its ``provides`` state: ``_current_state`` advances accordingly.
 
-    * A transition test being skipped means it never ran, so the environment
-      never left its ``requires`` state: ``_current_state`` is left as-is.
-      ``pytest_runtest_protocol`` uses this to try bridging to whatever the
-      next planned test actually needs.
+    * A transition test skipped during *setup* means it never ran, so the
+      environment never left its ``requires`` state: ``_current_state`` is
+      left as-is. ``pytest_runtest_protocol`` uses this to try bridging to
+      whatever the next planned test actually needs.
+
+    * A transition test skipped during *call* or *teardown* is treated the
+      same as a failure, not as "unchanged": the test body (or its teardown)
+      may already have performed real actions before the skip was raised, so
+      the environment can no longer be assumed to still be at ``requires``.
 
     Pure tests (``requires == provides``) never change ``_current_state``,
     whether they pass, fail*, or skip (*except that a failure still halts
@@ -203,20 +240,30 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         marker = None
     if marker is None:
         return
-    if report.failed:
+    if report.failed or (report.skipped and marker.is_transition and report.when != "setup"):
         _failed_state_test = item
         _current_state = None
-        logger.error(
-            "State-marked test %r failed: environment state is unknown.  "
-            "All remaining state-marked tests will be skipped.",
-            item.nodeid,
-        )
+        if report.failed:
+            logger.error(
+                "State-marked test %r failed: environment state is unknown.  "
+                "All remaining state-marked tests will be skipped.",
+                item.nodeid,
+            )
+        else:
+            logger.error(
+                "State-marked transition test %r skipped at %s time: environment state is unknown.  "
+                "All remaining state-marked tests will be skipped.",
+                item.nodeid,
+                report.when,
+            )
     elif report.when == "call" and report.passed and marker.is_transition:
         _current_state = marker.provides
     elif report.skipped and marker.is_transition:
         for req_state in marker.requires:
             if req_state == _current_state:
-                _skipped_transitions.add(StateTransition(from_state=req_state, to_state=marker.provides))
+                _record_skipped_transition_candidate(
+                    StateTransition(from_state=req_state, to_state=marker.provides), item
+                )
         logger.warning(
             "State-marked transition test %r was skipped: environment remains at %r.  "
             "The scheduler will try to recover a path (avoiding this edge) to whatever the next test needs.",
@@ -235,6 +282,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     """
     global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
     global _current_state, _full_graph, _all_transitions, _recovery_counter, _skipped_transitions
+    global _skipped_transition_item_ids
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()
@@ -244,6 +292,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     _all_transitions = {}
     _recovery_counter = 0
     _skipped_transitions.clear()
+    _skipped_transition_item_ids.clear()
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -366,6 +415,11 @@ def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> li
     injected more than once across a run's recovery attempts, and reusing the
     same ``pytest.Item`` object produces duplicate nodeids (see
     ``_duplicate_item_for_repeat``).
+
+    When an edge has more than one registered candidate test, a candidate
+    that has not yet skipped at runtime is preferred over ``candidates[0]``
+    (see ``_skipped_transition_item_ids``), since an edge is only excluded
+    from the path search entirely once *every* candidate has skipped.
     """
     global _recovery_counter
     assert _full_graph is not None
@@ -377,7 +431,8 @@ def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> li
         candidates = _all_transitions.get(transition)
         if not candidates:
             return None
-        template_item = candidates[0]
+        already_skipped = _skipped_transition_item_ids.get(transition, set())
+        template_item = next((c for c in candidates if id(c) not in already_skipped), candidates[0])
         _recovery_counter += 1
         duplicate = _duplicate_item_for_repeat(
             template_item,
@@ -434,13 +489,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # recovery (see pytest_runtest_protocol) before any early return below,
     # so recovery works even when the user's selection is unmarked-only.
     global _full_graph, _all_transitions, _current_state, _failed_state_test, _recovery_counter
-    global _skipped_transitions
+    global _skipped_transitions, _skipped_transition_item_ids
     _full_graph = full_graph
     _all_transitions = dict(all_transitions)
     _current_state = current_state
     _failed_state_test = None
     _recovery_counter = 0
     _skipped_transitions = set()
+    _skipped_transition_item_ids = {}
 
     # ------------------------------------------------------------------
     # 2. Partition the USER-SELECTED items (post -k filter) into marked
@@ -578,12 +634,24 @@ def _duplicate_item_for_repeat(
     that step so it resolves and tears down its own fixtures instead of
     aliasing the original item's.
 
+    ``copy.copy`` only copies attribute *references*, not their contents, so
+    without further action the duplicate would share *item*'s mutable
+    ``own_markers`` list and ``keywords`` mapping (the latter bound back to
+    *item* itself). Marking the duplicate afterwards (e.g.
+    ``_mark_as_injected``'s ``add_marker`` call) would then also mutate
+    *item*, incorrectly labeling the template as injected too. Both are
+    replaced here with independent copies bound to the duplicate.
+
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
     pointing back to *item*'s original object ID (chasing through any prior
     duplication), so later per-occurrence logic can still identify which
     scheduled item a duplicate came from.
     """
     duplicate = copy.copy(item)
+    if hasattr(item, "own_markers"):
+        duplicate.own_markers = list(item.own_markers)
+    if hasattr(item, "keywords"):
+        duplicate.keywords = type(item.keywords)(duplicate)
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
     _label_occurrence(
         duplicate,

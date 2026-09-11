@@ -47,6 +47,21 @@ class FakeItem:
         if name is not None:
             self._added_marks[str(name)] = marker
 
+    def __copy__(self) -> "FakeItem":
+        """Return an independent copy, mirroring how the scheduler decouples real pytest.Items.
+
+        A plain ``copy.copy`` would share ``_added_marks`` by reference (the
+        real-Item equivalent of ``own_markers``/``keywords``), so marking the
+        copy via ``add_marker`` would also mutate the original -- exactly the
+        bug ``_duplicate_item_for_repeat`` guards against for real items. This
+        gives ``_added_marks`` its own dict so FakeItem exercises that
+        guarantee in unit tests too.
+        """
+        duplicate = FakeItem.__new__(FakeItem)
+        duplicate.__dict__.update(self.__dict__)
+        duplicate._added_marks = dict(self._added_marks)
+        return duplicate
+
 
 @pytest.fixture()
 def make_item() -> Callable[..., pytest.Item]:
@@ -92,6 +107,7 @@ def reset_injected_ids() -> Iterator[None]:
     _plugin_module._all_transitions = {}
     _plugin_module._recovery_counter = 0
     _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
     yield
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
@@ -102,3 +118,4 @@ def reset_injected_ids() -> Iterator[None]:
     _plugin_module._all_transitions = {}
     _plugin_module._recovery_counter = 0
     _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
