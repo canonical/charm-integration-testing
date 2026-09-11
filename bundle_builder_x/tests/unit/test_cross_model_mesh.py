@@ -283,17 +283,28 @@ class TestCrossModelExprDSL:
         model_a_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
         model_b_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-b"))
 
-        ctx = LoweringContext(charm_id=model_b_id, domain_charm=domain.charms[model_b_id], domain=domain)
-        expr = parse_constraint("len(cross_model(endpoint[backend])) == 0")
-        result = lower(expr, ctx)
+        ctx_a = LoweringContext(charm_id=model_a_id, domain_charm=domain.charms[model_a_id], domain=domain)
+        expr_a = parse_constraint("len(cross_model(endpoint[backend])) == 1")
+        result_a = lower(expr_a, ctx_a)
 
-        # THEN model-b's "consumer" (which has no CMR at all) does not inherit model-a's
-        # external CMR count just because they share an application name
+        ctx_b = LoweringContext(charm_id=model_b_id, domain_charm=domain.charms[model_b_id], domain=domain)
+        expr_b = parse_constraint("len(cross_model(endpoint[backend])) == 0")
+        result_b = lower(expr_b, ctx_b)
+
+        # THEN model-a's "consumer" (the one with the real external CMR) still reports it...
         solver = z3.Solver()
         add_constraints(solver, domain)
         solver.add(domain.charms[model_a_id].exists)
         solver.add(domain.charms[model_b_id].exists)
-        assert solver.check(result.expr) == z3.sat
+        assert solver.check(result_a.expr) == z3.sat
+
+        # ...and model-b's "consumer" (no CMR at all) does not inherit model-a's count just
+        # because they share an application name
+        solver2 = z3.Solver()
+        add_constraints(solver2, domain)
+        solver2.add(domain.charms[model_a_id].exists)
+        solver2.add(domain.charms[model_b_id].exists)
+        assert solver2.check(result_b.expr) == z3.sat
 
     def test_features_of_cross_model_endpoint_is_rejected(self) -> None:
         # GIVEN a plain endpoint reference wrapped in cross_model()
