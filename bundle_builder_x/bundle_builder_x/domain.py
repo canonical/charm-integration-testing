@@ -95,12 +95,13 @@ class DomainCharmEndpoint(BaseModel):
 
     count: z3.ArithRef
     integrated: z3.BoolRef
-    # cross_model_count/cross_model_integrated mirror count/integrated but only account for
-    # integrations whose peer lives in a different model (Domain.is_cross_model). Backs the
-    # cross_model() DSL filter so bool(cross_model(endpoint[x])), len(cross_model(endpoint[x]))
-    # etc. reflect only genuinely cross-model activity on x, not any local activity too.
+    # cross_model_count mirrors count but only accounts for integrations whose peer lives in a
+    # different model (Domain.is_cross_model). Backs the cross_model() DSL filter so
+    # len(cross_model(endpoint[x])) reflects only genuinely cross-model activity on x, not any
+    # local activity too. bool(cross_model(endpoint[x])) is lowered as cross_model_count >= 1
+    # directly (see dsl_lowering.py), rather than via a second tracked boolean, since count's own
+    # defining constraint already gives CEGIS everything it needs to expand on failure.
     cross_model_count: z3.ArithRef
-    cross_model_integrated: z3.BoolRef
     # One Z3 Bool per feature declared on this endpoint in the charm spec.
     # Each bool is constrained to equal `endpoint.integrated` in add_charm_metadata_constraints.
     features: dict[str, z3.BoolRef] = Field(default_factory=dict)
@@ -555,9 +556,6 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
                     cross_model_count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_cross_model_count"),
-                    cross_model_integrated=z3.Bool(
-                        f"charm_{charm.name}_{charm_id}_endpoint_{name}_cross_model_integrated"
-                    ),
                     features={
                         f: z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_feature_{f}")
                         for f in endpoint.features

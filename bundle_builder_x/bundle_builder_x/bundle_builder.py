@@ -16,7 +16,6 @@ from .assertion_tags import (
     AssertionTag,
     CharmEndpointNonOptionalTag,
     EndpointCountMatchesIntegrationsTag,
-    EndpointIntegratedMatchesCountTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -65,7 +64,6 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.APPLICATION_INTEGRATION_EXISTS: 1,
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: 2,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
-    Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT: 3,
     Assertions.PEER_CHANNEL_MISMATCH: 4,
     Assertions.SUBORDINATE_BASE_MISMATCH: 5,
 }
@@ -428,16 +426,6 @@ class BundleBuilder:
                 expanded=self._expand_for_endpoint(
                     count_tag.charm.charm_id,
                     count_tag.charm.endpoint,
-                    domain,
-                )
-            )
-
-        elif tag.kind == Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT:
-            integrated_tag = cast(EndpointIntegratedMatchesCountTag, tag)
-            return AssertionHandlingResult(
-                expanded=self._expand_for_endpoint(
-                    integrated_tag.charm.charm_id,
-                    integrated_tag.charm.endpoint,
                     domain,
                 )
             )

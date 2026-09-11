@@ -823,7 +823,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
         case BoolFunc(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
             integrateds: list[z3.ExprRef] = [
-                ctx.domain_charm.endpoints[ref.name].cross_model_integrated
+                ctx.domain_charm.endpoints[ref.name].cross_model_count >= 1
                 if ref.cross_model_only
                 else ctx.domain_charm.endpoints[ref.name].integrated
                 for ref in endpoints
