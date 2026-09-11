@@ -248,6 +248,53 @@ class TestCrossModelExprDSL:
         solver2.add(z3.Not(remote_integration.exists))
         assert solver2.check(result.expr) == z3.unsat
 
+    def test_external_cmr_count_does_not_leak_to_same_named_app_in_another_model(self) -> None:
+        # GIVEN two unrelated models that both happen to name their application "consumer",
+        # where only model-a's "consumer" has a real external CMR (remote model not in the domain)
+        consumer = _make_charm(
+            "consumer-app",
+            {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", optional=True)},
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve", model=ModelRef(name="external-model")
+                            ),
+                            offer_name="external-offer",
+                        )
+                    ],
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+            }
+        )
+        model_a_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        model_b_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-b"))
+
+        ctx = LoweringContext(charm_id=model_b_id, domain_charm=domain.charms[model_b_id], domain=domain)
+        expr = parse_constraint("len(cross_model(endpoint[backend])) == 0")
+        result = lower(expr, ctx)
+
+        # THEN model-b's "consumer" (which has no CMR at all) does not inherit model-a's
+        # external CMR count just because they share an application name
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[model_a_id].exists)
+        solver.add(domain.charms[model_b_id].exists)
+        assert solver.check(result.expr) == z3.sat
+
     def test_features_of_cross_model_endpoint_is_rejected(self) -> None:
         # GIVEN a plain endpoint reference wrapped in cross_model()
         domain = _make_domain(
