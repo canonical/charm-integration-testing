@@ -283,8 +283,10 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
-            # Mirror the two constraints above, scoped to cross-model integrations only.
-            # Backs the cross_model() DSL filter (see dsl_lowering.py).
+            # Mirror the count constraint above, scoped to cross-model integrations only. Backs
+            # the cross_model() DSL filter (see dsl_lowering.py); its bool() lowering compares
+            # cross_model_count >= 1 directly rather than tracking a second boolean, since this
+            # constraint already gives CEGIS what it needs to expand on failure.
             cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
             cross_model_count_expr = z3.Sum(
                 [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
@@ -294,13 +296,6 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 EndpointCountMatchesIntegrationsTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
                     num_terms=cross_model_num_terms,
-                    cross_model=True,
-                ).encode(),
-            )
-            solver.assert_and_track(
-                endpoint.cross_model_integrated == (endpoint.cross_model_count >= 1),
-                EndpointIntegratedMatchesCountTag(
-                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
                     cross_model=True,
                 ).encode(),
             )

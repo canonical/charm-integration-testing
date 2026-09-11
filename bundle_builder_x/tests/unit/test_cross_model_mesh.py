@@ -101,8 +101,9 @@ class TestCrossModelExprDSL:
         expr = parse_constraint("bool(cross_model(endpoint[backend]))")
         result = lower(expr, ctx)
 
-        # cross_model_integrated is linked to the actual integration existence via
-        # add_constraints (constraints.py), so it must be present on both solvers.
+        # bool(cross_model(x)) lowers to cross_model_count >= 1, and cross_model_count is linked
+        # to actual integration existence via add_constraints (constraints.py), so it must be
+        # present on both solvers.
         solver = z3.Solver()
         add_constraints(solver, domain)
         solver.add(workload_integration.exists)
