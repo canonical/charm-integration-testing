@@ -32,8 +32,6 @@ class Assertions(str, Enum):
     CHARM_RANK_BOUNDED = "charm_rank_bounded"
     SUBORDINATE_BASE_MISMATCH = "subordinate_base_mismatch"
     INTEGRATION_FEATURE_MISMATCH = "integration_feature_mismatch"
-    CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "cross_model_endpoint_count_matches_integrations"
-    CROSS_MODEL_ENDPOINT_INTEGRATED_MATCHES_COUNT = "cross_model_endpoint_integrated_matches_count"
 
 
 class AssertionTag(BaseModel):
@@ -138,28 +136,18 @@ class EndpointCountMatchesIntegrationsTag(AssertionTag):
     kind: Assertions = Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS
     charm: CharmEndpointPayload
     num_terms: int
+    # True for the cross_model()-scoped mirror constraint backing
+    # DomainCharmEndpoint.cross_model_count (see constraints.py); False for the plain,
+    # all-integrations count. Kept as a discriminator on the same tag/kind, rather than a
+    # separate Assertions member, since dispatch handles both identically.
+    cross_model: bool = False
 
 
 class EndpointIntegratedMatchesCountTag(AssertionTag):
     kind: Assertions = Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT
     charm: CharmEndpointPayload
-
-
-class CrossModelEndpointCountMatchesIntegrationsTag(AssertionTag):
-    """Mirrors EndpointCountMatchesIntegrationsTag, scoped to cross-model integrations only.
-
-    Backs DomainCharmEndpoint.cross_model_count, which the cross_model() DSL filter reads via
-    len()/bool() so those reducers only see genuinely cross-model activity on an endpoint.
-    """
-
-    kind: Assertions = Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS
-    charm: CharmEndpointPayload
-    num_terms: int
-
-
-class CrossModelEndpointIntegratedMatchesCountTag(AssertionTag):
-    kind: Assertions = Assertions.CROSS_MODEL_ENDPOINT_INTEGRATED_MATCHES_COUNT
-    charm: CharmEndpointPayload
+    # See EndpointCountMatchesIntegrationsTag.cross_model.
+    cross_model: bool = False
 
 
 class CharmEndpointNonOptionalTag(AssertionTag):
@@ -251,6 +239,4 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
     Assertions.SUBORDINATE_BASE_MISMATCH: SubordinateBaseMismatchTag,
     Assertions.INTEGRATION_FEATURE_MISMATCH: IntegrationFeatureMismatchTag,
-    Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS: CrossModelEndpointCountMatchesIntegrationsTag,
-    Assertions.CROSS_MODEL_ENDPOINT_INTEGRATED_MATCHES_COUNT: CrossModelEndpointIntegratedMatchesCountTag,
 }
