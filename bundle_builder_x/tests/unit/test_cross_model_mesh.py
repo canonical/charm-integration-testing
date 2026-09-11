@@ -12,7 +12,6 @@ import logging
 
 import pytest
 import z3  # type: ignore[import-untyped]
-
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.constraints import add_constraints
 from bundle_builder_x.constraints_dsl import parse_constraint
@@ -26,9 +25,11 @@ from bundle_builder_x.domain import (
     add_charm_to_domain,
     pair_charms_in_domain,
 )
+from bundle_builder_x.domain_builder import classify_integrations
 from bundle_builder_x.dsl_lowering import DSLLoweringError, LoweringContext, lower
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
+from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
 _CHANNEL = CharmChannel(track="1", risk="stable", branch="")
@@ -489,6 +490,101 @@ class TestCrossModelMeshOfferSharing:
         workload_offer = domain.integration_offer_name(workload_integration, model)
         assert workload_offer == "my-custom-workload-offer"
         assert mesh_offer == "my-custom-workload-offer"
+
+    def test_second_in_spec_cmr_without_explicit_offer_name_does_not_spuriously_conflict(self) -> None:
+        # GIVEN two REAL user-declared (in-spec) CMRs between the same charm pair, going through
+        # the actual spec-to-domain pipeline (classify_integrations) rather than hand-constructed
+        # DomainApplicationIntegration objects: one with an explicit offer_name, the other with
+        # none at all (so IntegrationSpec.resolved_offer_name() would default it to
+        # "provider-app-offer"). Before the fix, classify_integrations eagerly materialized that
+        # default into DomainApplicationIntegration.offer_name, so domain.py's conflict detector
+        # (_matching_user_app_integration_field) saw two distinct non-None "user-declared" values
+        # and raised, even though the second one was never actually declared by the user.
+        consumer_ref = ModelRef(name="model-a", controller="foo")
+        provider_ref = ModelRef(name="model-b", controller="foo")
+        consumer_spec = ModelSpec(
+            name="model-a",
+            controller="foo",
+            applications={"consumer": AppSpec(charm="consumer-app")},
+            integrations=[
+                IntegrationSpec(
+                    application="consumer",
+                    endpoint="backend",
+                    remote_application="provider",
+                    remote_endpoint="serve",
+                    remote_model="model-b",
+                    remote_controller="foo",
+                    offer_name="my-custom-workload-offer",
+                ),
+                IntegrationSpec(
+                    application="consumer",
+                    endpoint="backend-alt",
+                    remote_application="provider",
+                    remote_endpoint="serve-alt",
+                    remote_model="model-b",
+                    remote_controller="foo",
+                    # no offer_name: must NOT be treated as a conflicting user-declared value
+                ),
+            ],
+        )
+        provider_spec = ModelSpec(
+            name="model-b", controller="foo", applications={"provider": AppSpec(charm="provider-app")}
+        )
+        application_integrations = classify_integrations(
+            consumer_spec, {"model-a": consumer_spec, "model-b": provider_spec}
+        )
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=application_integrations,
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer = _make_charm(
+            "consumer-app",
+            {
+                "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+                "backend-alt": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload-alt"),
+            },
+        )
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+                "serve-alt": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload-alt"),
+            },
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [backend_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+        [backend_alt_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload-alt"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(backend_integration.exists)
+        solver.add(backend_alt_integration.exists)
+
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN resolving the offer name does not raise a spurious conflict, and both
+        # integrations reuse the one genuinely user-declared offer name.
+        assert domain.integration_offer_name(backend_integration, model) == "my-custom-workload-offer"
+        assert domain.integration_offer_name(backend_alt_integration, model) == "my-custom-workload-offer"
 
     def test_discovered_mesh_companion_reuses_explicit_user_cmr_url(self) -> None:
         # GIVEN the same setup as above, but the user's explicit CMR also declares an external

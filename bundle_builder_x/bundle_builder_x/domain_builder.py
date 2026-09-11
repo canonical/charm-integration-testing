@@ -58,7 +58,12 @@ def classify_integrations(
             raise ValueError("cross-model integration must have a remote_model")
         remote_model = ModelRef(name=remote_model_name, controller=integration.remote_controller)
         remote_model_key = remote_model.key
-        offer_name = integration.resolved_offer_name()
+        # Keep the user-supplied offer_name if provided; otherwise leave as None so that
+        # domain.py's offer-sharing/conflict-detection logic can tell a genuinely user-declared
+        # name apart from one that merely defaults to "<remote_application>-offer" (resolved_offer_name()
+        # would collapse that distinction, since it always returns a non-None value).
+        # extract.py falls back to the same default when no user or shared value is found.
+        offer_name = integration.offer_name
 
         # Keep the user-supplied URL if provided; otherwise leave as None.
         # extract.py synthesizes the correct URL once it knows the endpoint role
