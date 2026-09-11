@@ -294,6 +294,34 @@ class TestCrossModelExprDSL:
         with pytest.raises(DSLLoweringError, match="both filtered and unfiltered"):
             lower(expr, ctx)
 
+    @pytest.mark.parametrize("op", ["&", "-"])
+    def test_mixing_filtered_and_unfiltered_same_endpoint_is_rejected_for_intersection_and_difference(
+        self, op: str
+    ) -> None:
+        # GIVEN the same mixed expression as above but combined with "&" or "-" instead of "|".
+        # Unlike "|" (which keeps both refs in its output, letting the post-hoc check see the
+        # conflicting tags), "&"/"-" filter by _EndpointRef equality directly: "&" would otherwise
+        # silently produce an empty set (wrongly evaluating len() to 0), and "-" would silently
+        # keep the unfiltered endpoint's full count -- neither surfaces the conflict in its own
+        # output, so it must be checked on the operands before combining.
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+            }
+        )
+        consumer, _provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+
+        expr = parse_constraint(f"len(endpoint[backend] {op} cross_model(endpoint[backend])) == 1")
+        with pytest.raises(DSLLoweringError, match="both filtered and unfiltered"):
+            lower(expr, ctx)
+
 
 class TestCrossModelMeshOfferSharing:
     def test_cross_model_pairing_shares_offer_with_companion_relation(self) -> None:
@@ -530,6 +558,71 @@ class TestCrossModelMeshOfferSharing:
         # THEN resolving the offer name fails loudly instead of silently picking an arbitrary one
         with pytest.raises(ValueError, match="Conflicting user-declared"):
             domain.integration_offer_name(workload_integration, model)
+
+    def test_explicitly_declared_mesh_cmr_with_conflicting_offer_name_raises_on_extraction(self) -> None:
+        # GIVEN a spec that explicitly declares BOTH the real workload CMR AND the
+        # cross_model_mesh companion CMR between the same charm pair, each under its own
+        # (different) user-supplied offer name. This is the extraction-time counterpart to
+        # test_conflicting_user_declared_offer_names_for_same_pair_raise: since the real relation
+        # and the mesh relation are both fully user-declared here (not solver-discovered), the
+        # per-model extraction loop resolves their offer names directly from
+        # application_integrations rather than via the solver-discovered-companion path -- so the
+        # conflict must be caught there too, not just for discovered companions.
+        consumer_ref = ModelRef(name="model-a", controller="foo")
+        provider_ref = ModelRef(name="model-b", controller="foo")
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve", model=provider_ref
+                            ),
+                            offer_name="offer-one",
+                        ),
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="require-cmr-mesh"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="provide-cmr-mesh", model=provider_ref
+                            ),
+                            offer_name="offer-two",
+                        ),
+                    ],
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN extracting the solution fails loudly instead of silently emitting the mesh
+        # relation and the real relation under two different (conflicting) offers
+        with pytest.raises(ValueError, match="Conflicting user-declared"):
+            extract_solution(model, domain, logging.getLogger("test"))
 
     def test_two_unrelated_cross_model_endpoints_still_share_one_offer(self) -> None:
         # GIVEN two charms in different models, related on TWO distinct, ordinary (non-mesh)
