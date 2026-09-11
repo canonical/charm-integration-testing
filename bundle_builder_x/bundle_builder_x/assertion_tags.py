@@ -146,8 +146,6 @@ class EndpointCountMatchesIntegrationsTag(AssertionTag):
 class EndpointIntegratedMatchesCountTag(AssertionTag):
     kind: Assertions = Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT
     charm: CharmEndpointPayload
-    # See EndpointCountMatchesIntegrationsTag.cross_model.
-    cross_model: bool = False
 
 
 class CharmEndpointNonOptionalTag(AssertionTag):
