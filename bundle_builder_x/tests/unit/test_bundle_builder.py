@@ -558,6 +558,51 @@ class TestExpandForEndpointContainerScope:
         assert len(fake.find_charms_calls) == 1
 
 
+class TestAddCharmForCharmIdDedup:
+    """BundleBuilder._add_charm_for_charm_id: per-parent candidate dedup is scoped by model."""
+
+    def _domain_with_existing_local_candidate(self) -> tuple[Domain, int, Charm, ModelRef, ModelRef]:
+        """A charm needing "backend" already has one candidate spec added in its own model."""
+        domain = Domain()
+        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
+        domain.models[m1] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        domain.models[m2] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        charm_id = add_charm_to_domain(
+            _make_charm("consumer", {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload")}),
+            domain,
+            m1,
+        )
+        provider = _make_charm("provider", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")})
+        existing_id = add_charm_to_domain(provider, domain, m1)
+        domain.charms[charm_id].charms_added.append(existing_id)
+        return domain, charm_id, provider, m1, m2
+
+    def test_same_spec_can_be_added_in_a_different_model(self) -> None:
+        # GIVEN a candidate spec already added for charm_id in its own model
+        domain, charm_id, provider, _m1, m2 = self._domain_with_existing_local_candidate()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+
+        # WHEN adding the same spec again, but in a different model
+        added = builder._add_charm_for_charm_id(provider, charm_id, domain, m2)
+
+        # THEN it is not deduped away, so it can satisfy a cross-model-only requirement
+        assert added is True
+        assert any(c.spec == provider and c.model == m2 for c in domain.charms)
+
+    def test_same_spec_in_the_same_model_is_still_deduped(self) -> None:
+        # GIVEN a candidate spec already added for charm_id in its own model
+        domain, charm_id, provider, m1, _m2 = self._domain_with_existing_local_candidate()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        charms_before = len(domain.charms)
+
+        # WHEN adding the same spec again in the SAME model
+        added = builder._add_charm_for_charm_id(provider, charm_id, domain, m1)
+
+        # THEN the redundant instance is still deduped away
+        assert added is False
+        assert len(domain.charms) == charms_before
+
+
 class TestOptimizeSolution:
     """BundleBuilder._optimize_solution."""
 

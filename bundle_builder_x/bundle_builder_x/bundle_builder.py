@@ -1009,9 +1009,14 @@ class BundleBuilder:
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
-        # Dedup per parent charm_id: one candidate instance is enough during expansion.
+        # Dedup per (parent charm_id, model): one candidate instance per model is enough
+        # during expansion. Scoping by model too lets a spec already added locally still be
+        # added in a different model, e.g. to satisfy a cross-model-only requirement.
         # Additional instances needed only for optimization are added after satisfiability.
-        if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
+        if any(
+            domain.charms[added_id].spec == charm and domain.charms[added_id].model == model_ref
+            for added_id in parent_charm.charms_added
+        ):
             return False
 
         # Traverse the dependency chain to detect cycles
