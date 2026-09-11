@@ -334,11 +334,14 @@ def extract_solution(
             f"(interface: {interface})"
         )
 
-        # Synthesize URL for discovered CMRs (REQUIRES side only)
-        url: str | None = None
-        prov_mc = domain.models.get(prov_model_ref)
-        if prov_mc is not None and prov_mc.ref.controller is not None:
-            url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
+        # Reuse the URL from a user-declared CMR sharing this offer (e.g. an external CMR whose
+        # URL can't be re-derived from controller info), falling back to synthesis otherwise
+        # (REQUIRES side only).
+        url = domain.integration_offer_url(integration, z3_model)
+        if url is None:
+            prov_mc = domain.models.get(prov_model_ref)
+            if prov_mc is not None and prov_mc.ref.controller is not None:
+                url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
 
         # Add REQUIRES side to the requiring model's bundle
         if req_model_ref in bundles:
