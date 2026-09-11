@@ -925,3 +925,150 @@ class TestCrossModelMeshCompanionOverrideConstraint:
 
         # THEN satisfiable: both sets contain exactly {provider-app}
         assert solver.check() == z3.sat
+
+
+class TestCrossModelMeshExternalCmrCountParityConstraint:
+    """The static/charm-overrides files add a second guard alongside the ``charms()`` equality
+    (see :class:`TestCrossModelMeshCompanionOverrideConstraint`): ``charms()`` can't represent
+    an external-CMR peer (there's no in-domain charm id for a model outside the domain), so the
+    equality is vacuously true whenever both sides are external CMRs -- even if they connect to
+    unrelated peers. A count-based check closes that gap, since ``len()``/``bool()`` DO fold in
+    external-CMR contributions (via cross_model_count, same mechanism as plain endpoint.count).
+
+    An exact ``len() == len()`` count-parity check over-constrains charms with more than one
+    managed endpoint: multiple managed endpoints can legitimately coalesce onto a SINGLE shared
+    Juju offer to the same remote peer, while provide-cmr-mesh only needs ONE relation to that
+    peer overall (e.g. alertmanager-k8s's alerting + grafana-source both integrated with one
+    remote model, alongside a single provide-cmr-mesh relation to that same model). A
+    ``bool() == bool()`` parity check -- "does at least one cross-model integration exist on
+    both sides" -- avoids that false rejection while still catching the original vacuous-accept
+    mismatch (one side entirely local, the other genuinely cross-model).
+    """
+
+    def _managed_pair_domain(self) -> tuple[Domain, int, int]:
+        # Two managed endpoints (workload_a, workload_b) plus provide-cmr-mesh/require-cmr-mesh,
+        # split across two models so every integration between them is cross-model.
+        provider = _make_charm(
+            "provider-app",
+            {
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+                "serve-a": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_a"),
+                "serve-b": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_b"),
+            },
+        )
+        consumer = _make_charm(
+            "consumer-app",
+            {
+                "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
+                "backend-a": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload_a"),
+                "backend-b": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload_b"),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+            }
+        )
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-b"))
+        pair_charms_in_domain(domain, provider_id, consumer_id)
+        return domain, provider_id, consumer_id
+
+    def _count_parity_expr(self, provider_id: int, domain: Domain) -> z3.BoolRef:
+        ctx = LoweringContext(charm_id=provider_id, domain_charm=domain.charms[provider_id], domain=domain)
+        expr = parse_constraint(
+            "len(cross_model(endpoint[serve-a] | endpoint[serve-b])) == len(cross_model(endpoint[provide-cmr-mesh]))"
+        )
+        return lower(expr, ctx).expr
+
+    def _bool_parity_expr(self, provider_id: int, domain: Domain) -> z3.BoolRef:
+        ctx = LoweringContext(charm_id=provider_id, domain_charm=domain.charms[provider_id], domain=domain)
+        expr = parse_constraint(
+            "bool(cross_model(endpoint[serve-a] | endpoint[serve-b])) == bool(cross_model(endpoint[provide-cmr-mesh]))"
+        )
+        return lower(expr, ctx).expr
+
+    def test_len_parity_incorrectly_rejects_two_managed_endpoints_coalesced_onto_one_offer(self) -> None:
+        # GIVEN both managed endpoints (serve-a, serve-b) are cross-model-integrated with the
+        # SAME remote peer alongside a single provide-cmr-mesh relation to that same peer -- a
+        # valid configuration where the two managed relations coalesce onto one shared offer.
+        domain, provider_id, _ = self._managed_pair_domain()
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_a_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_a"
+        ]
+        [workload_b_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_b"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_a_integration.exists)
+        solver.add(workload_b_integration.exists)
+        solver.add(self._count_parity_expr(provider_id, domain))
+
+        # THEN unsatisfiable: 2 managed relations != 1 mesh relation, even though this is a
+        # perfectly valid coalesced-offer configuration. This is the false-rejection bug.
+        assert solver.check() == z3.unsat
+
+    def test_bool_parity_accepts_two_managed_endpoints_coalesced_onto_one_offer(self) -> None:
+        # GIVEN the same valid coalesced-offer configuration as above
+        domain, provider_id, _ = self._managed_pair_domain()
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_a_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_a"
+        ]
+        [workload_b_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_b"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_a_integration.exists)
+        solver.add(workload_b_integration.exists)
+        solver.add(self._bool_parity_expr(provider_id, domain))
+
+        # THEN satisfiable: both sides have at least one cross-model integration
+        assert solver.check() == z3.sat
+
+    def test_bool_parity_still_rejects_vacuous_mismatch(self) -> None:
+        # GIVEN only the managed endpoints are cross-model-integrated; provide-cmr-mesh has no
+        # integration at all (the original bug this constraint exists to catch).
+        domain, provider_id, _ = self._managed_pair_domain()
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_a_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_a"
+        ]
+        [workload_b_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_b"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(z3.Not(mesh_integration.exists))
+        solver.add(workload_a_integration.exists)
+        solver.add(workload_b_integration.exists)
+        solver.add(self._bool_parity_expr(provider_id, domain))
+
+        # THEN unsatisfiable: managed side is cross-model, mesh side is not -- still correctly
+        # rejected, confirming the bool() swap doesn't regress the original fix.
+        assert solver.check() == z3.unsat
