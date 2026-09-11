@@ -211,9 +211,9 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
       failure instead: the test body/teardown may have already acted, so the
       environment can no longer be assumed to still be at ``requires``.
 
-    Pure tests (``requires == provides``) never change ``_current_state``,
-    whether they pass, fail*, or skip (*except that a failure still halts
-    everything, since pure test failures can also leave things broken).
+    Pure tests (``requires == provides``) leave ``_current_state`` unchanged
+    when they pass or skip; a failure still halts everything and sets it to
+    ``None``, since pure test failures can leave the environment broken too.
     Unmarked tests are never affected.
     """
     global _failed_state_test, _failed_state_reason, _current_state
@@ -290,7 +290,8 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
     Called before each test's setup phase. Skips *item* when:
 
-    * the environment state is unknown (a prior state-marked test failed), or
+    * the environment state is unknown (a prior state-marked test failed, or
+      a transition test skipped during call/teardown time), or
     * the environment's actual current state (``_current_state``, which may
       differ from what the static plan assumed if an earlier transition was
       skipped) doesn't satisfy *item*'s ``requires``.  ``pytest_runtest_protocol``
@@ -634,7 +635,11 @@ def _duplicate_item_for_repeat(
     and ``stash`` (used elsewhere in the suite to record per-item pass/fail/
     skip state, e.g. ``resource_tracking``); marking or reporting on the
     duplicate would then incorrectly mutate *item* too. All three are
-    replaced here with independent copies bound to the duplicate.
+    replaced here with independent copies bound to the duplicate. The
+    ``keywords`` mapping is rebuilt after relabeling (it seeds itself from
+    the node's ``name`` at construction) and repopulated with *item*'s own
+    entries so the duplicate doesn't lose markers/keywords the template
+    already had beyond its own (now stale) name.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
     pointing back to *item*'s original object ID (chasing through any prior
@@ -644,8 +649,6 @@ def _duplicate_item_for_repeat(
     duplicate = copy.copy(item)
     if hasattr(item, "own_markers"):
         duplicate.own_markers = list(item.own_markers)
-    if hasattr(item, "keywords"):
-        duplicate.keywords = type(item.keywords)(duplicate)
     if hasattr(item, "stash"):
         duplicate.stash = type(item.stash)()
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
@@ -655,6 +658,16 @@ def _duplicate_item_for_repeat(
         base_nodeid if base_nodeid is not None else item.nodeid,
         occurrence,
     )
+    if hasattr(item, "keywords"):
+        new_keywords = type(item.keywords)(duplicate)
+        # Private attribute access mirrors the existing ``_nodeid`` precedent
+        # above: pytest exposes no public way to enumerate a node's own
+        # keyword entries. Skip *item*'s own (now stale) name entry; the
+        # fresh mapping above already seeded *duplicate*'s current name.
+        for key, value in getattr(item.keywords, "_markers", {}).items():
+            if key != item.name:
+                new_keywords[key] = value
+        duplicate.keywords = new_keywords
     initrequest = getattr(duplicate, "_initrequest", None)
     if callable(initrequest):
         initrequest()

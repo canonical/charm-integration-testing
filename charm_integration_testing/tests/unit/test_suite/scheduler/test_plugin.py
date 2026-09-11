@@ -206,6 +206,24 @@ class TestDuplicateItemForRepeat:
         # outcome must not contaminate the template or other occurrences
         assert key not in item.stash
 
+    def test_duplicate_keywords_carry_over_template_entries_under_the_new_name(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a template with a marker already registered in its keywords
+        # (mirrors what real pytest.Item.add_marker does)
+        item = make_item("test_foo")
+        item.add_marker(pytest.mark.slow)
+
+        # WHEN duplicated for a later occurrence
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's keywords carry over the template's own entry
+        assert duplicate.keywords["slow"] == item.keywords["slow"]
+        # AND the keywords mapping reflects the duplicate's own (relabeled)
+        # name, not a stale entry seeded from the template's original name
+        assert duplicate.name in duplicate.keywords
+        assert item.name not in duplicate.keywords or item.name == duplicate.name
+
     def test_different_occurrences_produce_different_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item duplicated for two different occurrence numbers
         item = make_item("test_foo")
@@ -1128,6 +1146,7 @@ class TestPytestRuntestMakereport:
 
     def test_pure_test_pass_does_not_change_current_state(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a pure test (requires == provides) at the current state
+        _plugin_module._current_state = State.EMPTY_MODEL
         item = make_item("test_validate", requires=State.EMPTY_MODEL)
         call = SimpleNamespace(excinfo=None)
         report = _make_report(when="call", failed=False)

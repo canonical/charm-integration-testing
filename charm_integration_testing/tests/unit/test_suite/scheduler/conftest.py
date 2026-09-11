@@ -13,6 +13,29 @@ from test_suite.scheduler import plugin as _plugin_module
 from test_suite.scheduler.states import State
 
 
+class FakeKeywords:
+    """Minimal mimic of pytest's private ``NodeKeywords``.
+
+    Just enough to exercise the scheduler's keywords-copying logic in
+    ``_duplicate_item_for_repeat``: seeds itself with ``{node.name: True}``
+    at construction time, like the real one, and stores further entries in
+    a plain dict.
+    """
+
+    def __init__(self, node: "FakeItem") -> None:
+        self.node = node
+        self._markers: dict[str, Any] = {node.name: True}
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._markers[key] = value
+
+    def __getitem__(self, key: str) -> Any:
+        return self._markers[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._markers
+
+
 class FakeItem:
     """Minimal pytest.Item substitute that carries real pytest markers.
 
@@ -30,6 +53,9 @@ class FakeItem:
         # Real pytest.Item instances carry a per-node Stash; mirrored here so
         # tests can exercise _duplicate_item_for_repeat's stash-isolation fix.
         self.stash: pytest.Stash = pytest.Stash()
+        # Mirrors real pytest.Item.keywords, so tests can exercise
+        # _duplicate_item_for_repeat's keywords-copying logic.
+        self.keywords: FakeKeywords = FakeKeywords(self)
 
     @property
     def nodeid(self) -> str:
@@ -49,6 +75,7 @@ class FakeItem:
         name = getattr(marker, "name", None)
         if name is not None:
             self._added_marks[str(name)] = marker
+            self.keywords[str(name)] = marker
 
     def __copy__(self) -> "FakeItem":
         """Return an independent copy so ``add_marker`` on one doesn't leak into the other.
