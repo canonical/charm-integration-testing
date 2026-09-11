@@ -58,14 +58,14 @@ def _mesh_pair_charms() -> tuple[Charm, Charm]:
         "consumer-app",
         {
             "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh"),
-            "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+            "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", optional=True),
         },
     )
     provider = _make_charm(
         "provider-app",
         {
             "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
-            "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+            "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
         },
     )
     return consumer, provider
