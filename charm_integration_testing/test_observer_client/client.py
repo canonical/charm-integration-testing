@@ -318,6 +318,14 @@ class TestObserverClient:
 
         self.logger.debug(f"Found {len(artefacts)} artefacts in history")
 
+        # Track whether any per-execution result query failed and whether at least one succeeded. If
+        # no passing revision is found and *every* result query failed (none succeeded), we cannot
+        # tell "no history" from a Test Observer outage, so we must not return None (which callers
+        # treat as a definitive "no passing revision"). A partial failure with at least one success
+        # is treated as a legitimate "no passing revision".
+        result_query_failed = False
+        result_query_succeeded = False
+
         for artefact in artefacts:
             artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
             if artefact_id is None:
@@ -357,6 +365,7 @@ class TestObserverClient:
                     self.logger.debug(f"Querying test results for execution {execution_id}")
                     try:
                         test_results_payload = self.query_test_results_for_execution(execution_id=execution_id)
+                        result_query_succeeded = True
                         if self._has_test_passed(test_results_payload, test_name):
                             self.logger.info(
                                 f"Found historical revision {revision} with passing {test_name} "
@@ -365,8 +374,16 @@ class TestObserverClient:
                             return revision
                     except TestObserverQueryError as exc:
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
+                        result_query_failed = True
                         continue
 
+        if result_query_failed and not result_query_succeeded:
+            # Every candidate execution's result query failed; surface the outage instead of a
+            # None that callers would treat as a definitive "no historical passing revision".
+            raise TestObserverQueryError(
+                f"Could not determine a historical revision with passing {test_name} for {charm_name}: "
+                "all candidate test-result queries failed (Test Observer may be unavailable)."
+            )
         self.logger.info(f"No historical revision found with passing {test_name}")
         return None
 
