@@ -587,6 +587,87 @@ class TestCrossModelMeshOfferSharing:
         assert domain.integration_offer_name(backend_integration, model) == "my-custom-workload-offer"
         assert domain.integration_offer_name(backend_alt_integration, model) == "my-custom-workload-offer"
 
+    def test_extraction_keeps_explicit_offer_name_and_url_in_agreement(self) -> None:
+        # GIVEN an in-spec CMR with BOTH an explicit offer_name and an explicit url (the only
+        # combination SpecFile validation now allows for in-spec CMRs -- see
+        # test_in_spec_cmr_explicit_url_without_offer_name_rejected in test_spec.py -- precisely
+        # because Bundle Builder X itself creates and names the Juju offer for in-spec CMRs, and
+        # an unpinned offer_name could silently diverge from whatever offer name is embedded in
+        # an independently-authored url), going through the real classify_integrations pipeline.
+        consumer_ref = ModelRef(name="model-a", controller="foo")
+        provider_ref = ModelRef(name="model-b", controller="foo")
+        consumer_spec = ModelSpec(
+            name="model-a",
+            controller="foo",
+            applications={"consumer": AppSpec(charm="consumer-app")},
+            integrations=[
+                IntegrationSpec(
+                    application="consumer",
+                    endpoint="backend",
+                    remote_application="provider",
+                    remote_endpoint="serve",
+                    remote_model="model-b",
+                    remote_controller="foo",
+                    offer_name="my-pinned-offer",
+                    url="foo:admin/model-b.my-pinned-offer",
+                ),
+            ],
+        )
+        provider_spec = ModelSpec(
+            name="model-b", controller="foo", applications={"provider": AppSpec(charm="provider-app")}
+        )
+        application_integrations = classify_integrations(
+            consumer_spec, {"model-a": consumer_spec, "model-b": provider_spec}
+        )
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=application_integrations,
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer = _make_charm(
+            "consumer-app", {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload")}
+        )
+        provider = _make_charm(
+            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [backend_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(backend_integration.exists)
+
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN both the domain-level accessors and the final extracted bundle agree: the offer
+        # name used to name/group the Juju offer matches the offer name embedded in the url used
+        # to consume it, rather than silently diverging as they would if offer_name were left
+        # unset and re-synthesized independently of url.
+        assert domain.integration_offer_name(backend_integration, model) == "my-pinned-offer"
+        assert domain.integration_offer_url(backend_integration, model) == "foo:admin/model-b.my-pinned-offer"
+
+        solution = extract_solution(model, domain, logging.getLogger("test"))
+        [consumer_bundle] = [b for b in solution.bundles if b.model == consumer_ref.key]
+        [cmr] = consumer_bundle.cross_model_integrations
+        assert cmr.offer_name == "my-pinned-offer"
+        assert cmr.url == "foo:admin/model-b.my-pinned-offer"
+
     def test_discovered_mesh_companion_reuses_explicit_user_cmr_url(self) -> None:
         # GIVEN the same setup as above, but the user's explicit CMR also declares an external
         # URL (e.g. a cross-controller offer whose URL can't be re-derived from controller info
