@@ -1592,16 +1592,9 @@ class TestCollectUnsatDiagnostics:
 
 
 class TestCrossModelEndpointAssertionTags:
-    """Round-trip and dispatch coverage for the cross_model_mesh-motivated ``cross_model`` flag.
+    """Round-trip and dispatch coverage for EndpointCountMatchesIntegrationsTag(cross_model=True).
 
-    EndpointCountMatchesIntegrationsTag backs DomainCharmEndpoint.cross_model_count (read by the
-    cross_model() DSL filter) when constructed with cross_model=True. Unlike its non-cross-model
-    use, this had no dedicated encode/decode or dispatch coverage; a registry/payload mismatch
-    here would only surface during real CEGIS expansion, not in the unit suite.
-
-    There's no cross-model equivalent of EndpointIntegratedMatchesCountTag: bool(cross_model(x))
-    lowers to `cross_model_count >= 1` directly (see dsl_lowering.py), so a solver failure surfaces
-    through cross_model_count's own tracked constraint rather than a second tracked boolean.
+    Backs DomainCharmEndpoint.cross_model_count, read by the cross_model() DSL filter.
     """
 
     def test_cross_model_endpoint_count_tag_round_trips_through_encode_decode(self) -> None:

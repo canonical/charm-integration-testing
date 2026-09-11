@@ -259,12 +259,6 @@ def _lower_as_endpoints(expr: AnyExpr, ctx: LoweringContext) -> _EndpointNames:
 def _check_consistent_cross_model_tags(endpoints: _EndpointNames, expr: AnyExpr) -> None:
     """Reject a RelationSet where the same endpoint name is both cross_model()-filtered and
     unfiltered (e.g. ``endpoint[x] | cross_model(endpoint[x])``).
-
-    Set operators (``|``, ``&``, ``-``) compare ``_EndpointRef`` entries by ``(name,
-    cross_model_only)``, so mixing tags for the same endpoint name breaks their intended set
-    semantics: a union would count that endpoint twice (once per tag) in ``len()``, while an
-    intersection would incorrectly evaluate to empty even though both operands describe the same
-    endpoint.
     """
     seen: dict[str, bool] = {}
     for ref in endpoints:
@@ -948,11 +942,8 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             if dsl_type == DSLType.RELATION_SET:
                 l_eps = _lower_as_endpoints(left, ctx)
                 r_eps = _lower_as_endpoints(right, ctx)
-                # Check both operands together (not just each operand alone, and not just the
-                # final result) for endpoint names tagged inconsistently by cross_model(): "&"
-                # and "-" filter by _EndpointRef equality directly, so a name/tag mismatch would
-                # otherwise silently disappear from the output (& -> empty, - -> unfiltered count
-                # kept) instead of surfacing in the checked result list.
+                # Check both operands' endpoint names for a cross_model()-tag mismatch before &/-
+                # can filter it out of the result.
                 _check_consistent_cross_model_tags(l_eps + r_eps, expr)
                 match op:
                     case "|":
