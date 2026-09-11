@@ -2017,7 +2017,7 @@ class TestJubilantBackend:
             # AND the offering model was queried qualified with its owner (not just the bare model
             # name), since the offering model's owner may differ from the current user
             assert client.requested_models == [
-                JujuModelHandle(controller="other-controller", model="admin/other-model")
+                JujuModelHandle(controller="other-controller", model="other-model", owner="admin")
             ]
 
         def test_returns_none_for_unparseable_offer_url(self) -> None:

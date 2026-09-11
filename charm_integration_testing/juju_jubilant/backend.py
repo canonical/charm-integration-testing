@@ -604,9 +604,7 @@ class JubilantBackend(JujuCmdBackend):
         # Qualify with the owner explicitly (rather than relying on the currently authenticated
         # user matching), since the offering model may belong to a different owner than the
         # model that consumed the offer.
-        qualified_offering_model = JujuModelHandle(
-            controller=parsed_url.model.controller, model=f"{parsed_url.owner}/{parsed_url.model.model}"
-        )
+        qualified_offering_model = dataclasses.replace(parsed_url.model, owner=parsed_url.owner)
 
         try:
             offering_status = self.status(qualified_offering_model)

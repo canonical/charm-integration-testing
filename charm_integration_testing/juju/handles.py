@@ -27,12 +27,22 @@ class JujuControllerHandle:
 
 @dataclass(frozen=True)
 class JujuModelHandle:
+    """Identifies a model by controller and bare (unqualified) model name.
+
+    ``owner`` is optional and only needed to directly address a model whose owner differs from
+    the currently authenticated user (e.g. a cross-model relation's offering model, via ``uri``).
+    It's not part of the model's identity for comparison/tracking purposes elsewhere in this
+    framework, where models are otherwise identified by their bare name alone.
+    """
+
     model: str
     controller: str
+    owner: str | None = None
 
     @property
     def uri(self) -> str:
-        return f"{self.controller}:{self.model}"
+        qualified_model = f"{self.owner}/{self.model}" if self.owner is not None else self.model
+        return f"{self.controller}:{qualified_model}"
 
     @property
     def resource_id(self) -> str:
