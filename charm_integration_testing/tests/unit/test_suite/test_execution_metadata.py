@@ -379,6 +379,9 @@ class _RecordCharmInfoBackend(NullJujuBackend):
         # Keyed by offer URL, simulating a successful status-based resolution of the charm
         # behind a consumed offer. Offers absent here simulate resolution failure (None).
         self._resolved_offer_applications = resolved_offer_applications or {}
+        # Counts calls to resolve_consumed_offer_application, so tests can assert on the
+        # per-recording-pass memoization in record_charm_info_execution_metadata_instantaneous.
+        self.resolve_calls: list[str] = []
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         return self._applications
@@ -390,6 +393,7 @@ class _RecordCharmInfoBackend(NullJujuBackend):
         return self._integrations
 
     def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        self.resolve_calls.append(offer.url)
         return self._resolved_offer_applications.get(offer.url)
 
 
@@ -495,6 +499,43 @@ def test_record_charm_info_execution_metadata_ignores_unintegrated_consumed_offe
     )
 
     assert not any(category == "integration" for category, _ in recorded)
+
+
+def test_record_charm_info_execution_metadata_resolves_each_consumed_offer_at_most_once() -> None:
+    # GIVEN the same consumed offer alias is referenced by two separate integrations (distinct
+    # requirer endpoints on the same local application, so both integrations are distinguishable
+    # in the recorded output while still exercising the shared consumed-offer alias)
+    offer_url = "other-controller:admin/other-model.postgresql-k8s"
+    applications = {"data-integrator": JujuApplicationInfo(charm="data-integrator", revision=2)}
+    consumed_offers = {"postgresql-k8s": JujuConsumedOfferInfo(url=offer_url, endpoints=frozenset({"database"}))}
+    integrations = {
+        JujuIntegration(
+            provider=JujuIntegrationApplication(application="postgresql-k8s", endpoint="database"),
+            requirer=JujuIntegrationApplication(application="data-integrator", endpoint="postgresql-1"),
+            interface="postgresql_client",
+        ),
+        JujuIntegration(
+            provider=JujuIntegrationApplication(application="postgresql-k8s", endpoint="database"),
+            requirer=JujuIntegrationApplication(application="data-integrator", endpoint="postgresql-2"),
+            interface="postgresql_client",
+        ),
+    }
+    backend = _RecordCharmInfoBackend(
+        applications,
+        consumed_offers=consumed_offers,
+        integrations=integrations,
+        resolved_offer_applications={offer_url: JujuApplicationInfo(charm="postgresql-k8s", revision=5)},
+    )
+
+    # WHEN recording execution metadata for both integrations
+    recorded = _record_metadata(backend)
+
+    # THEN both integrations are recorded with the resolved charm...
+    assert ("integration", "postgresql-k8s:database/postgresql_client/data-integrator:postgresql-1") in recorded
+    assert ("integration", "postgresql-k8s:database/postgresql_client/data-integrator:postgresql-2") in recorded
+    # ...but the offer is only status-resolved once for the whole recording pass, not once per
+    # integration that references it
+    assert backend.resolve_calls == [offer_url]
 
 
 def test_record_charm_info_execution_metadata_raises_for_unknown_application() -> None:

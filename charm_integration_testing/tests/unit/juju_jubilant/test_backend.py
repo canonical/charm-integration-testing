@@ -1972,12 +1972,18 @@ class TestJubilantBackend:
             ) -> None:
                 super().__init__(client=self)
                 self.requested_models: list[JujuModelHandle] = []
+                # The exact URI string JubilantClient.model() would hand to jubilant.Juju(model=...),
+                # since JujuModelHandle equality intentionally ignores owner (it's addressing-only,
+                # not part of a model's identity), so asserting on the handle alone wouldn't catch a
+                # regression that dropped the owner from the actual CLI-facing address.
+                self.requested_uris: list[str] = []
                 self._status = status
                 self._cli_error = cli_error
 
             def model(self, model: JujuModelHandle | None) -> Any:
                 assert model is not None
                 self.requested_models.append(model)
+                self.requested_uris.append(model.uri)
                 return self
 
             def status(self) -> Any:
@@ -2019,6 +2025,9 @@ class TestJubilantBackend:
             assert client.requested_models == [
                 JujuModelHandle(controller="other-controller", model="other-model", owner="admin")
             ]
+            # AND the actual address handed to the Juju CLI includes the owner (JujuModelHandle
+            # equality intentionally ignores owner, so this checks the real addressing behavior)
+            assert client.requested_uris == ["other-controller:admin/other-model"]
 
         def test_returns_none_for_unparseable_offer_url(self) -> None:
             # GIVEN a consumed offer with a malformed URL

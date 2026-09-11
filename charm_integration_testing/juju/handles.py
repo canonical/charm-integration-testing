@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _UNSAFE_PATH_CHARS = re.compile(r"[^a-zA-Z0-9_\-]")
 
@@ -37,7 +37,7 @@ class JujuModelHandle:
 
     model: str
     controller: str
-    owner: str | None = None
+    owner: str | None = field(default=None, compare=False)
 
     @property
     def uri(self) -> str:
