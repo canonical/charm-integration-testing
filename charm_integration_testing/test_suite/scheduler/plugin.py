@@ -78,18 +78,28 @@ _injected_item_ids: set[int] = set()
 _duplicate_original_ids: dict[int, int] = {}
 
 # Set to the first state-marked item (transition or pure) that fails at
-# setup, call, or teardown time.  Once non-None, all subsequent state-marked
-# tests are skipped because the environment state is unknown: any state-marked
-# failure -- not just a transition test's -- also sets ``_current_state`` to
-# ``None``, since a pure test failure can leave the environment broken too.
+# setup, call, or teardown time, or a transition test that skips during call
+# or teardown (see ``_failed_state_reason`` for which of the two happened).
+# Once non-None, all subsequent state-marked tests are skipped because the
+# environment state is unknown: any state-marked failure -- not just a
+# transition test's -- also sets ``_current_state`` to ``None``, since a pure
+# test failure can leave the environment broken too.
 _failed_state_test: pytest.Item | None = None
+
+# Human-readable reason paired with ``_failed_state_test``, distinguishing an
+# actual failure from a call/teardown-time skip so skip messages downstream
+# don't misreport an unrun test as having "failed".
+_failed_state_reason: str | None = None
 
 # The scheduler's runtime belief about the environment's actual state, updated
 # as tests execute rather than assumed from the static plan. ``None`` means
-# "unknown" (a state-marked test failed; see ``_failed_state_test``). A
-# transition test that passes advances this to its ``provides`` state; one
-# that is skipped leaves it unchanged, since a skipped transition never ran.
-# Set from ``--current-state`` at the start of collection.
+# "unknown" (a state-marked test failed, or a transition test skipped during
+# call/teardown rather than setup; see ``_failed_state_test``). A transition
+# test that passes advances this to its ``provides`` state; one that is
+# skipped *during setup* leaves it unchanged, since it never ran (a setup
+# skip happens before the test body starts; see
+# ``pytest_runtest_makereport``). Set from ``--current-state`` at the start
+# of collection.
 _current_state: State | None = None
 
 # The full state graph and every known transition test, keyed by edge, built
@@ -229,7 +239,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     everything, since pure test failures can also leave things broken).
     Unmarked tests are never affected.
     """
-    global _failed_state_test, _current_state
+    global _failed_state_test, _failed_state_reason, _current_state
     outcome = yield
     if _current_state is None:
         return  # Already unknown; no need to re-check.
@@ -244,12 +254,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         _failed_state_test = item
         _current_state = None
         if report.failed:
+            _failed_state_reason = "failed"
             logger.error(
                 "State-marked test %r failed: environment state is unknown.  "
                 "All remaining state-marked tests will be skipped.",
                 item.nodeid,
             )
         else:
+            _failed_state_reason = f"skipped at {report.when} time"
             logger.error(
                 "State-marked transition test %r skipped at %s time: environment state is unknown.  "
                 "All remaining state-marked tests will be skipped.",
@@ -282,11 +294,12 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     """
     global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
     global _current_state, _full_graph, _all_transitions, _recovery_counter, _skipped_transitions
-    global _skipped_transition_item_ids
+    global _skipped_transition_item_ids, _failed_state_reason
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()
     _failed_state_test = None
+    _failed_state_reason = None
     _current_state = None
     _full_graph = None
     _all_transitions = {}
@@ -321,7 +334,8 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         return
     if _current_state is None:
         failed_nodeid = _failed_state_test.nodeid if _failed_state_test is not None else "<unknown>"
-        pytest.skip(f"Skipped: state-marked test {failed_nodeid!r} failed: environment state is unknown.")
+        reason = _failed_state_reason or "failed"
+        pytest.skip(f"Skipped: state-marked test {failed_nodeid!r} {reason}: environment state is unknown.")
     if _current_state not in marker.requires:
         pytest.skip(
             f"Skipped: environment is at state {_current_state.value!r}, but this test requires one of "
@@ -489,11 +503,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # recovery (see pytest_runtest_protocol) before any early return below,
     # so recovery works even when the user's selection is unmarked-only.
     global _full_graph, _all_transitions, _current_state, _failed_state_test, _recovery_counter
-    global _skipped_transitions, _skipped_transition_item_ids
+    global _skipped_transitions, _skipped_transition_item_ids, _failed_state_reason
     _full_graph = full_graph
     _all_transitions = dict(all_transitions)
     _current_state = current_state
     _failed_state_test = None
+    _failed_state_reason = None
     _recovery_counter = 0
     _skipped_transitions = set()
     _skipped_transition_item_ids = {}
@@ -578,9 +593,16 @@ def _mark_as_injected(item: pytest.Item) -> None:
     Adds the ``injected`` marker and prefixes the item's display name and
     node ID's trailing test-name segment with ``[injected]`` so it is
     visually distinct in ``pytest -v`` output.  Calling this function more
-    than once on the same item is safe.
+    than once on the same item is safe, and so is calling it on a duplicate
+    that already inherited the ``injected`` marker (and its name/nodeid
+    prefix) from the template it was copied from -- e.g. a template that was
+    already used as a static bridge earlier in the plan and is later
+    duplicated again for runtime recovery -- since re-prefixing an
+    already-prefixed name would otherwise stack up as ``[injected]
+    [injected] ...``.
     """
-    if id(item) in _injected_item_ids:
+    if id(item) in _injected_item_ids or item.get_closest_marker("injected") is not None:
+        _injected_item_ids.add(id(item))
         return
     _injected_item_ids.add(id(item))
     item.add_marker(pytest.mark.injected)

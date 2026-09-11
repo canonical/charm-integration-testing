@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from types import SimpleNamespace
@@ -118,6 +119,25 @@ class TestMarkAsInjected:
         # THEN neither the name nor the nodeid changes (prefix not doubled)
         assert item.name == name_after_first
         assert item.nodeid == nodeid_after_first
+
+    def test_does_not_double_prefix_a_copy_of_an_already_injected_item(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a template item that was already marked as injected (e.g. it
+        # was used as a static bridge earlier in the plan) and then copied --
+        # as _find_recovery_bridge does when reusing the same template for a
+        # later runtime recovery -- so the copy inherits the "injected"
+        # marker and the "[injected] " prefix already baked into its name
+        template = make_item("test_foo")
+        _mark_as_injected(template)
+        duplicate = copy.copy(template)
+
+        # WHEN the duplicate is marked as injected again
+        _mark_as_injected(duplicate)
+
+        # THEN the prefix is not stacked a second time
+        assert duplicate.name == template.name
+        assert duplicate.nodeid == template.nodeid
 
 
 # ---------------------------------------------------------------------------
@@ -1155,6 +1175,7 @@ class TestPytestRuntestMakereport:
         # holds, since the test body may have already run real actions.
         assert _plugin_module._current_state is None
         assert _plugin_module._failed_state_test is item
+        assert _plugin_module._failed_state_reason == "skipped at call time"
         assert edge not in _plugin_module._skipped_transitions
 
     def test_skip_at_teardown_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
@@ -1170,6 +1191,7 @@ class TestPytestRuntestMakereport:
         # THEN the environment is treated as unknown, same as a call-time skip
         assert _plugin_module._current_state is None
         assert _plugin_module._failed_state_test is item
+        assert _plugin_module._failed_state_reason == "skipped at teardown time"
 
     def test_edge_not_blacklisted_while_an_untried_candidate_remains(
         self, make_item: Callable[..., pytest.Item]
@@ -1279,6 +1301,26 @@ class TestPytestRuntestSetup:
             pytest_runtest_setup(subsequent)
 
         assert "test_deploy" in str(exc_info.value)
+
+    def test_skip_message_reports_a_skip_not_a_failure_when_that_is_what_happened(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the environment became unknown because a transition test
+        # skipped mid-call, not because anything actually failed
+        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._failed_state_test = skipped
+        _plugin_module._failed_state_reason = "skipped at call time"
+        _plugin_module._current_state = None
+
+        subsequent = make_item("test_integration", requires=State.DEPLOYED)
+
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            pytest_runtest_setup(subsequent)
+
+        # THEN the message says it was skipped, not that it "failed"
+        message = str(exc_info.value)
+        assert "skipped at call time" in message
+        assert "failed" not in message
 
     def test_skips_when_current_state_does_not_satisfy_requires(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no failure, but the environment is at a state this test doesn't accept
@@ -1429,7 +1471,7 @@ class TestShortestPathToAny:
 
 
 class TestFindRecoveryBridge:
-    def test_returns_none_when_full_graph_unset(self) -> None:
+    def test_raises_when_full_graph_unset(self) -> None:
         _plugin_module._full_graph = None
         with pytest.raises(AssertionError):
             _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))

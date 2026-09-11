@@ -102,6 +102,7 @@ def reset_injected_ids() -> Iterator[None]:
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._failed_state_reason = None
     _plugin_module._current_state = State.EMPTY_MODEL
     _plugin_module._full_graph = None
     _plugin_module._all_transitions = {}
@@ -113,6 +114,7 @@ def reset_injected_ids() -> Iterator[None]:
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._failed_state_reason = None
     _plugin_module._current_state = None
     _plugin_module._full_graph = None
     _plugin_module._all_transitions = {}
