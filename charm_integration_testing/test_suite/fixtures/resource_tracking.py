@@ -61,20 +61,25 @@ def _resource_tracking_overrides_client(
 
 
 @pytest.fixture(scope="session")
-def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str], frozenset[str]]:
+def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str | None], frozenset[str]]:
     """Session-scoped accumulator of resolved skip sets, keyed by
-    ``(controller, model, application, track)``.
+    ``(controller, model, application, track, ubuntu_version)``.
 
-    Each ``(controller, model, application, track)`` is resolved once, the first
-    time it is seen, and cached for the rest of the run.  Keying by controller
-    and model -- not by bare application name -- lets an application that moves
-    between tracks (e.g. an upgrade/downgrade test) contribute every track's
-    skips, keeps a retaining track's opt-out from leaking into an unrelated model
-    that never runs that track, and never conflates two same-named models on
-    different controllers (model names are only unique within a controller).
-    Caching makes the map immune to transient ``list_applications`` failures on
-    later visits and gives the end-of-suite report a stable, fully-accumulated
-    map even after applications are torn down.
+    Each ``(controller, model, application, track, ubuntu_version)`` is resolved
+    once, the first time it is seen, and cached for the rest of the run.  Keying
+    by controller and model -- not by bare application name -- lets an
+    application that moves between tracks (e.g. an upgrade/downgrade test)
+    contribute every track's skips, keeps a retaining track's opt-out from
+    leaking into an unrelated model that never runs that track, and never
+    conflates two same-named models on different controllers (model names are
+    only unique within a controller). The Ubuntu base is part of the key too,
+    since an override can be scoped to a specific ``ubuntu_version`` and an
+    application observed on the same track but a different base (or with an
+    unresolved base on an earlier visit) must not reuse a skip set resolved for
+    a different base. Caching makes the map immune to transient
+    ``list_applications`` failures on later visits and gives the end-of-suite
+    report a stable, fully-accumulated map even after applications are torn
+    down.
     """
     return {}
 
@@ -84,7 +89,7 @@ def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    _resource_tracking_skip_cache: dict[tuple[str, str, str, str], frozenset[str]],
+    _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str | None], frozenset[str]],
     logger: logging.Logger,
 ) -> dict[tuple[str, str, str], frozenset[str]]:
     """Map each ``(controller, model, application)`` to the kinds it opts out of tracking.
@@ -96,14 +101,15 @@ def resource_tracking_skips_by_application(
     ``juju_client.list_applications`` rather than from hard-coded target/neighbor
     options, so charms pulled in as dependencies are resolved the same way.
 
-    Each application's channel is resolved per controller, model and track and
-    cached, so a model that cannot be queried on some later visit does not lose
-    skip coverage already established.  The returned map is scoped to
-    ``(controller, model, application)`` and unions the skips of every track the
-    application was seen on *within that model*: because all of a model's states
-    share one namespace, a resource kind retained by any track exercised there
-    must be opted out for the whole model, while a different model (on the same
-    or another controller) that never runs that track keeps tracking the kind.
+    Each application's channel and Ubuntu base are resolved per controller,
+    model, track and base, and cached, so a model that cannot be queried on some
+    later visit does not lose skip coverage already established.  The returned
+    map is scoped to ``(controller, model, application)`` and unions the skips of
+    every track/base combination the application was seen on *within that
+    model*: because all of a model's states share one namespace, a resource kind
+    retained by any track or base exercised there must be opted out for the
+    whole model, while a different model (on the same or another controller)
+    that never runs that track/base keeps tracking the kind.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
     if overrides_client is not None:
@@ -119,7 +125,7 @@ def resource_tracking_skips_by_application(
                 if info.channel is None:
                     continue
                 channel = CharmChannel.model_validate(str(info.channel))
-                key = (handle.controller, handle.model, application, channel.explicit_track)
+                key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
                 if key in _resource_tracking_skip_cache:
                     continue
                 resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
@@ -127,7 +133,7 @@ def resource_tracking_skips_by_application(
                     _resource_tracking_skip_cache[key] = resolved
 
     skips_by_scope: dict[tuple[str, str, str], frozenset[str]] = {}
-    for (controller, model, application, _track), resolved in _resource_tracking_skip_cache.items():
+    for (controller, model, application, _track, _base), resolved in _resource_tracking_skip_cache.items():
         scope = (controller, model, application)
         skips_by_scope[scope] = skips_by_scope.get(scope, frozenset()) | resolved
     return skips_by_scope
