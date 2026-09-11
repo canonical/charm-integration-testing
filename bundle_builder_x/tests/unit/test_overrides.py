@@ -61,8 +61,8 @@ class TestResourceTrackingOverrides:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN the skip applies to track 14 but not to track 16
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14")) == frozenset({"pvc"})
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("16")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14"), None) == frozenset({"pvc"})
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("16"), None) == frozenset()
 
     def test_missing_section_yields_no_skips(self, tmp_path: Path) -> None:
         # GIVEN an override file with no resource_tracking section
@@ -70,14 +70,14 @@ class TestResourceTrackingOverrides:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN no skips are reported
-        assert client.get_charm_resource_tracking_skips("mysql-k8s", _ch("8")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("mysql-k8s", _ch("8"), None) == frozenset()
 
     def test_no_overrides_directory_yields_no_skips(self) -> None:
         # GIVEN a client without an overrides directory
         client = OverridesClient()
 
         # THEN no skips are reported
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14"), None) == frozenset()
 
 
 class TestGetCharmEndpointRemovable:
@@ -90,8 +90,8 @@ class TestGetCharmEndpointRemovable:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN that endpoint is reported non-removable, and other endpoints are unaffected
-        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding") is False
-        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "config-server") is True
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding", None) is False
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "config-server", None) is True
 
     def test_missing_override_defaults_to_removable(self, tmp_path: Path) -> None:
         # GIVEN an override file with no removable declarations
@@ -99,14 +99,14 @@ class TestGetCharmEndpointRemovable:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN the endpoint defaults to removable
-        assert client.get_charm_endpoint_removable("mysql-k8s", _ch("8"), "database") is True
+        assert client.get_charm_endpoint_removable("mysql-k8s", _ch("8"), "database", None) is True
 
     def test_no_overrides_directory_defaults_to_removable(self) -> None:
         # GIVEN a client without an overrides directory
         client = OverridesClient()
 
         # THEN the endpoint defaults to removable
-        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding") is True
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding", None) is True
 
 
 class TestGetCharmPriority:
