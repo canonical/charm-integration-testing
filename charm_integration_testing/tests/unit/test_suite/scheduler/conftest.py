@@ -48,14 +48,10 @@ class FakeItem:
             self._added_marks[str(name)] = marker
 
     def __copy__(self) -> "FakeItem":
-        """Return an independent copy, mirroring how the scheduler decouples real pytest.Items.
+        """Return an independent copy so ``add_marker`` on one doesn't leak into the other.
 
-        A plain ``copy.copy`` would share ``_added_marks`` by reference (the
-        real-Item equivalent of ``own_markers``/``keywords``), so marking the
-        copy via ``add_marker`` would also mutate the original -- exactly the
-        bug ``_duplicate_item_for_repeat`` guards against for real items. This
-        gives ``_added_marks`` its own dict so FakeItem exercises that
-        guarantee in unit tests too.
+        Mirrors the ``own_markers``/``keywords`` sharing bug
+        ``_duplicate_item_for_repeat`` guards against for real items.
         """
         duplicate = FakeItem.__new__(FakeItem)
         duplicate.__dict__.update(self.__dict__)
@@ -88,15 +84,12 @@ def reset_injected_ids() -> Iterator[None]:
     """Clear all module-level plugin globals before and after every test.
 
     Prevents state leaking between unit tests that call the plugin hooks
-    directly. ``_current_state`` is set to an arbitrary valid state
-    (``State.EMPTY_MODEL``, chosen only because it is a real, non-terminal
-    member of ``State`` -- it does not mirror the plugin's actual
-    ``--current-state`` default of ``State.NO_BUNDLE``) rather than left as
-    ``None``, since ``None`` means "environment state unknown" and would make
-    every hook under test behave as if a prior failure had already halted the
-    run. Tests that depend on the exact starting state should set
-    ``_plugin_module._current_state`` explicitly rather than relying on this
-    default.
+    directly. ``_current_state`` defaults to ``State.EMPTY_MODEL`` (an
+    arbitrary non-terminal state, not the plugin's actual ``--current-state``
+    default of ``State.NO_BUNDLE``) rather than ``None``, since ``None``
+    means "unknown" and would make every hook under test behave as if a
+    prior failure had already halted the run. Tests that depend on the exact
+    starting state should set ``_plugin_module._current_state`` explicitly.
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()

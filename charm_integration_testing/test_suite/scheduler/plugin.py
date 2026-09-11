@@ -77,28 +77,20 @@ _injected_item_ids: set[int] = set()
 # still identify which scheduled item a duplicate came from.
 _duplicate_original_ids: dict[int, int] = {}
 
-# Set to the first state-marked item (transition or pure) that fails at
-# setup, call, or teardown time, or a transition test that skips during call
-# or teardown (see ``_failed_state_reason`` for which of the two happened).
-# Once non-None, all subsequent state-marked tests are skipped because the
-# environment state is unknown: any state-marked failure -- not just a
-# transition test's -- also sets ``_current_state`` to ``None``, since a pure
-# test failure can leave the environment broken too.
+# Set to the first state-marked item that fails, or a transition test that
+# skips at call/teardown time (see ``_failed_state_reason``). Once non-None,
+# all subsequent state-marked tests are skipped as "environment unknown".
 _failed_state_test: pytest.Item | None = None
 
-# Human-readable reason paired with ``_failed_state_test``, distinguishing an
-# actual failure from a call/teardown-time skip so skip messages downstream
-# don't misreport an unrun test as having "failed".
+# Paired with ``_failed_state_test``: "failed" or "skipped at <phase> time",
+# so downstream skip messages don't misreport an unrun test as having failed.
 _failed_state_reason: str | None = None
 
 # The scheduler's runtime belief about the environment's actual state, updated
 # as tests execute rather than assumed from the static plan. ``None`` means
-# "unknown" (a state-marked test failed, or a transition test skipped during
-# call/teardown rather than setup; see ``_failed_state_test``). A transition
-# test that passes advances this to its ``provides`` state; one that is
-# skipped *during setup* leaves it unchanged, since it never ran (a setup
-# skip happens before the test body starts; see
-# ``pytest_runtest_makereport``). Set from ``--current-state`` at the start
+# "unknown" (see ``_failed_state_test``). A transition test that passes
+# advances this to its ``provides`` state; one skipped *during setup* leaves
+# it unchanged, since it never ran. Set from ``--current-state`` at the start
 # of collection.
 _current_state: State | None = None
 
@@ -115,22 +107,15 @@ _all_transitions: dict[StateTransition, list[pytest.Item]] = {}
 # injected more than once in the same session (see ``_find_recovery_bridge``).
 _recovery_counter: int = 0
 
-# Edges whose transition test has already been skipped at runtime for the
-# state it departed from. Runtime recovery excludes these when searching for
-# a bridging path: retrying the exact same test that just skipped would only
-# skip again (the same fixture/condition caused it), which would otherwise
-# make the scheduler re-inject it forever chasing the same unreachable state.
-# An edge only lands here once every registered candidate for it (see
-# ``_all_transitions``) has skipped -- see ``_skipped_transition_item_ids``.
+# Edges excluded from runtime recovery search because every registered
+# candidate test for them (see ``_all_transitions``/``_skipped_transition_item_ids``)
+# has already skipped: retrying would only skip again, chasing an
+# unreachable state forever.
 _skipped_transitions: set[StateTransition] = set()
 
-# Per-edge set of object IDs of registered template items (chasing through
-# ``_duplicate_original_ids`` for duplicates) whose transition test has
-# already skipped at runtime for that edge. Multiple tests may cover the
-# same edge (``_all_transitions`` stores a list per edge); an edge is only
-# added to ``_skipped_transitions`` once every one of its candidates is in
-# here, so a different, not-yet-tried candidate for the same edge can still
-# be selected as a recovery bridge.
+# Per-edge object IDs (resolved through ``_duplicate_original_ids``) of
+# template items that have skipped at runtime. An edge only moves into
+# ``_skipped_transitions`` once all of its candidates are recorded here.
 _skipped_transition_item_ids: dict[StateTransition, set[int]] = {}
 
 
@@ -191,17 +176,10 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
 
 def _record_skipped_transition_candidate(edge: StateTransition, item: pytest.Item) -> None:
-    """Record that *item* (one of possibly several candidates for *edge*) has skipped.
+    """Record that *item*, one of possibly several candidates for *edge*, has skipped.
 
-    Resolves *item* back to its original template's object ID via
-    ``_duplicate_original_ids`` (a runtime-injected bridge item is always a
-    duplicate; see ``_duplicate_item_for_repeat``) so it can be matched
-    against the template items registered for *edge* in ``_all_transitions``.
-
-    Only adds *edge* to ``_skipped_transitions`` (excluding it from future
-    recovery searches) once every registered candidate for it has skipped:
-    multiple tests may cover the same edge, and if an untried candidate
-    remains, it may still succeed as a recovery bridge.
+    Only excludes *edge* from future recovery searches once every candidate
+    registered for it has skipped, since an untried one may still work.
     """
     original_id = _duplicate_original_ids.get(id(item), id(item))
     skipped_ids = _skipped_transition_item_ids.setdefault(edge, set())
@@ -229,10 +207,9 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
       left as-is. ``pytest_runtest_protocol`` uses this to try bridging to
       whatever the next planned test actually needs.
 
-    * A transition test skipped during *call* or *teardown* is treated the
-      same as a failure, not as "unchanged": the test body (or its teardown)
-      may already have performed real actions before the skip was raised, so
-      the environment can no longer be assumed to still be at ``requires``.
+    * A transition test skipped during *call* or *teardown* is treated like a
+      failure instead: the test body/teardown may have already acted, so the
+      environment can no longer be assumed to still be at ``requires``.
 
     Pure tests (``requires == provides``) never change ``_current_state``,
     whether they pass, fail*, or skip (*except that a failure still halts
@@ -431,9 +408,9 @@ def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> li
     ``_duplicate_item_for_repeat``).
 
     When an edge has more than one registered candidate test, a candidate
-    that has not yet skipped at runtime is preferred over ``candidates[0]``
-    (see ``_skipped_transition_item_ids``), since an edge is only excluded
-    from the path search entirely once *every* candidate has skipped.
+    that has not yet skipped at runtime is preferred over ``candidates[0]``,
+    since an edge is only excluded from the path search once every candidate
+    has skipped.
     """
     global _recovery_counter
     assert _full_graph is not None
@@ -592,14 +569,10 @@ def _mark_as_injected(item: pytest.Item) -> None:
 
     Adds the ``injected`` marker and prefixes the item's display name and
     node ID's trailing test-name segment with ``[injected]`` so it is
-    visually distinct in ``pytest -v`` output.  Calling this function more
-    than once on the same item is safe, and so is calling it on a duplicate
-    that already inherited the ``injected`` marker (and its name/nodeid
-    prefix) from the template it was copied from -- e.g. a template that was
-    already used as a static bridge earlier in the plan and is later
-    duplicated again for runtime recovery -- since re-prefixing an
-    already-prefixed name would otherwise stack up as ``[injected]
-    [injected] ...``.
+    visually distinct in ``pytest -v`` output.  Safe to call more than once
+    on the same item, or on a duplicate that already inherited the marker
+    from its template (e.g. a template reused as a bridge more than once) --
+    otherwise the prefix would stack up as ``[injected] [injected] ...``.
     """
     if id(item) in _injected_item_ids or item.get_closest_marker("injected") is not None:
         _injected_item_ids.add(id(item))
@@ -656,12 +629,9 @@ def _duplicate_item_for_repeat(
     that step so it resolves and tears down its own fixtures instead of
     aliasing the original item's.
 
-    ``copy.copy`` only copies attribute *references*, not their contents, so
-    without further action the duplicate would share *item*'s mutable
-    ``own_markers`` list and ``keywords`` mapping (the latter bound back to
-    *item* itself). Marking the duplicate afterwards (e.g.
-    ``_mark_as_injected``'s ``add_marker`` call) would then also mutate
-    *item*, incorrectly labeling the template as injected too. Both are
+    ``copy.copy`` only copies attribute references, so without further action
+    the duplicate would share *item*'s mutable ``own_markers``/``keywords``
+    and marking it afterwards would incorrectly mutate *item* too; both are
     replaced here with independent copies bound to the duplicate.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,

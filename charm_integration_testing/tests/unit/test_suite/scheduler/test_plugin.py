@@ -123,11 +123,8 @@ class TestMarkAsInjected:
     def test_does_not_double_prefix_a_copy_of_an_already_injected_item(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN a template item that was already marked as injected (e.g. it
-        # was used as a static bridge earlier in the plan) and then copied --
-        # as _find_recovery_bridge does when reusing the same template for a
-        # later runtime recovery -- so the copy inherits the "injected"
-        # marker and the "[injected] " prefix already baked into its name
+        # GIVEN a template already marked as injected (e.g. reused from an
+        # earlier static bridge), then copied for a later runtime recovery
         template = make_item("test_foo")
         _mark_as_injected(template)
         duplicate = copy.copy(template)
@@ -1157,9 +1154,8 @@ class TestPytestRuntestMakereport:
         assert edge in _plugin_module._skipped_transitions
 
     def test_skip_at_call_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a transition test that skips mid-call (e.g. the test body itself
-        # calls pytest.skip() after already performing some real action),
-        # rather than a fixture skipping before the test body ever ran
+        # GIVEN a transition test that skips mid-call, rather than a fixture
+        # skipping before the test body ever ran
         item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
         _plugin_module._all_transitions = {edge: [item]}
