@@ -183,12 +183,8 @@ def _extract_single_model(
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
 
-        # Resolve the offer name/URL through the same charm-pair-shared resolver used for
-        # solver-discovered companions, when this user-declared CMR is backed by a
-        # DomainCharmIntegration (i.e. not an external CMR). This is what surfaces a conflict
-        # if e.g. this CMR and a sibling cross_model_mesh CMR between the same charm pair were
-        # both explicitly declared with different offer names -- otherwise each would just keep
-        # its own declared offer_name/url, silently producing two Juju offers for one pair.
+        # Resolve the offer name/URL through the shared-offer resolver when this user-declared
+        # CMR is backed by a DomainCharmIntegration (i.e. not an external CMR).
         backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
         resolved_offer_name: str | None
         if backing_integration is not None:
@@ -366,9 +362,7 @@ def extract_solution(
             f"(interface: {interface})"
         )
 
-        # Reuse the URL from a user-declared CMR sharing this offer (e.g. an external CMR whose
-        # URL can't be re-derived from controller info), falling back to synthesis otherwise
-        # (REQUIRES side only).
+        # Reuse a user-declared CMR's URL sharing this offer, if any; otherwise synthesize one.
         url = domain.integration_offer_url(integration, z3_model)
         if url is None:
             prov_mc = domain.models.get(prov_model_ref)
