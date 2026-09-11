@@ -270,6 +270,30 @@ class TestCrossModelExprDSL:
         with pytest.raises(DSLLoweringError, match="features\\(\\)"):
             lower(expr, ctx)
 
+    def test_mixing_filtered_and_unfiltered_same_endpoint_is_rejected(self) -> None:
+        # GIVEN a RelationSet expression that unions a plain endpoint reference with a
+        # cross_model()-filtered reference to the *same* endpoint name.
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                ),
+            }
+        )
+        consumer, _provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, ModelRef(name="model-a"))
+        ctx = LoweringContext(charm_id=consumer_id, domain_charm=domain.charms[consumer_id], domain=domain)
+
+        # THEN lowering fails loudly instead of silently double-counting (len) or emptying (&),
+        # since set operators distinguish cross_model()-filtered refs from unfiltered ones of the
+        # same endpoint.
+        expr = parse_constraint("len(endpoint[backend] | cross_model(endpoint[backend])) == 1")
+        with pytest.raises(DSLLoweringError, match="both filtered and unfiltered"):
+            lower(expr, ctx)
+
 
 class TestCrossModelMeshOfferSharing:
     def test_cross_model_pairing_shares_offer_with_companion_relation(self) -> None:
@@ -378,6 +402,134 @@ class TestCrossModelMeshOfferSharing:
         workload_offer = domain.integration_offer_name(workload_integration, model)
         assert workload_offer == "my-custom-workload-offer"
         assert mesh_offer == "my-custom-workload-offer"
+
+    def test_discovered_mesh_companion_reuses_explicit_user_cmr_url(self) -> None:
+        # GIVEN the same setup as above, but the user's explicit CMR also declares an external
+        # URL (e.g. a cross-controller offer whose URL can't be re-derived from controller info
+        # alone).
+        consumer_ref = ModelRef(name="model-a", controller="foo")
+        provider_ref = ModelRef(name="model-b", controller="foo")
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve", model=provider_ref
+                            ),
+                            offer_name="my-custom-workload-offer",
+                            url="foo:admin/model-b.my-custom-workload-offer",
+                        )
+                    ],
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer, provider = _mesh_pair_charms()
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [mesh_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "cross_model_mesh"
+        ]
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(mesh_integration.exists)
+        solver.add(workload_integration.exists)
+
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN the discovered mesh companion reuses the user's explicit URL too, not just the
+        # offer name -- otherwise it would get re-synthesized from prov_mc and could point at a
+        # different (or no) URL than the real, user-declared CMR.
+        assert domain.integration_offer_url(mesh_integration, model) == "foo:admin/model-b.my-custom-workload-offer"
+
+    def test_conflicting_user_declared_offer_names_for_same_pair_raise(self) -> None:
+        # GIVEN two distinct, explicit user CMRs between the same charm pair (different
+        # endpoints) that declare two DIFFERENT offer names. Since this codebase merges every
+        # cross-model integration between the same charm pair onto a single Juju offer, these
+        # two user-declared names cannot both be honored.
+        consumer = _make_charm(
+            "consumer-app",
+            {
+                "backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+                "backend-alt": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload_alt"),
+            },
+        )
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+                "serve-alt": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_alt"),
+            },
+        )
+        consumer_ref = ModelRef(name="model-a")
+        provider_ref = ModelRef(name="model-b")
+        domain = _make_domain(
+            {
+                consumer_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"consumer": DomainApplication(charm="consumer-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve", model=provider_ref
+                            ),
+                            offer_name="offer-one",
+                        ),
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="consumer", endpoint="backend-alt"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="provider", endpoint="serve-alt", model=provider_ref
+                            ),
+                            offer_name="offer-two",
+                        ),
+                    ],
+                ),
+                provider_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        consumer_id = add_charm_to_domain(consumer, domain, consumer_ref)
+        provider_id = add_charm_to_domain(provider, domain, provider_ref)
+        pair_charms_in_domain(domain, consumer_id, provider_id)
+
+        [workload_integration] = [i for i in domain.charm_integrations if domain.integration_interface(i) == "workload"]
+        [workload_alt_integration] = [
+            i for i in domain.charm_integrations if domain.integration_interface(i) == "workload_alt"
+        ]
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(workload_integration.exists)
+        solver.add(workload_alt_integration.exists)
+        assert solver.check() == z3.sat
+        model = solver.model()
+
+        # THEN resolving the offer name fails loudly instead of silently picking an arbitrary one
+        with pytest.raises(ValueError, match="Conflicting user-declared"):
+            domain.integration_offer_name(workload_integration, model)
 
     def test_two_unrelated_cross_model_endpoints_still_share_one_offer(self) -> None:
         # GIVEN two charms in different models, related on TWO distinct, ordinary (non-mesh)

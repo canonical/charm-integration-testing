@@ -252,7 +252,31 @@ def _lower_as_endpoints(expr: AnyExpr, ctx: LoweringContext) -> _EndpointNames:
         raise DSLLoweringError(
             f"Expected endpoint name list (RelationSet), got {type(result).__name__} for {type(expr).__name__}"
         )
+    _check_consistent_cross_model_tags(result, expr)
     return result
+
+
+def _check_consistent_cross_model_tags(endpoints: _EndpointNames, expr: AnyExpr) -> None:
+    """Reject a RelationSet where the same endpoint name is both cross_model()-filtered and
+    unfiltered (e.g. ``endpoint[x] | cross_model(endpoint[x])``).
+
+    Set operators (``|``, ``&``, ``-``) compare ``_EndpointRef`` entries by ``(name,
+    cross_model_only)``, so mixing tags for the same endpoint name breaks their intended set
+    semantics: a union would count that endpoint twice (once per tag) in ``len()``, while an
+    intersection would incorrectly evaluate to empty even though both operands describe the same
+    endpoint.
+    """
+    seen: dict[str, bool] = {}
+    for ref in endpoints:
+        prior = seen.get(ref.name)
+        if prior is not None and prior != ref.cross_model_only:
+            raise DSLLoweringError(
+                f"Endpoint {ref.name!r} appears both filtered and unfiltered by cross_model() in "
+                f"the same RelationSet expression ({type(expr).__name__}); this is not well-defined "
+                "for set operators (|, &, -) since they distinguish cross_model()-filtered refs "
+                "from unfiltered ones of the same endpoint"
+            )
+        seen[ref.name] = ref.cross_model_only
 
 
 def _lower_as_features(expr: AnyExpr, ctx: LoweringContext) -> _FeatureSet:

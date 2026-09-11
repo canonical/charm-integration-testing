@@ -229,22 +229,73 @@ class Domain(BaseModel):
         prov_charm = self.charms[anchor.provides_charm_id]
         return f"{prov_charm.spec.name}-{anchor.provides_endpoint}-{interface}-offer".replace("_", "-")
 
+    def integration_offer_url(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None
+    ) -> str | None:
+        """Return the user-declared SAAS URL shared by ``integration``'s pair, if any.
+
+        Mirrors :meth:`integration_offer_name`: if a sibling integration in the same
+        provides -> requires group was user-specified with an explicit ``url`` (e.g. an
+        external CMR), that URL should be reused for a solver-discovered companion riding the
+        same offer, instead of always re-synthesizing one from the providing model's controller
+        info -- which may differ from (or be unavailable for) the real, user-declared CMR.
+        Returns ``None`` if no integration in the group declared an explicit URL.
+        """
+        return self._matching_user_app_integration_field(integration, z3_model, "url")
+
     def _user_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None) -> str | None:
         """Return the user-declared offer name shared by ``integration``'s pair, if any.
 
+        See :meth:`_matching_user_app_integrations` for how the group of user-declared
+        application integrations sharing this offer is found. Raises ``ValueError`` if more
+        than one distinct offer name is declared across that group, since this codebase merges
+        all cross-model integrations between the same charm pair onto a single offer and cannot
+        satisfy two conflicting user-declared names for it.
+        """
+        return self._matching_user_app_integration_field(integration, z3_model, "offer_name")
+
+    def _matching_user_app_integration_field(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None, field: str
+    ) -> str | None:
+        """Return the sole distinct, non-``None`` value of ``field`` among user-declared
+        application integrations sharing ``integration``'s offer, or ``None`` if none declared one.
+
+        Raises ``ValueError`` if more than one distinct non-``None`` value is found, since this
+        codebase merges every cross-model integration between the same charm pair onto a single
+        Juju offer and cannot satisfy conflicting user-declared values for it.
+        """
+        values = {
+            getattr(app_int, field)
+            for app_int in self._matching_user_app_integrations(integration, z3_model)
+            if getattr(app_int, field) is not None
+        }
+        if len(values) > 1:
+            prov_charm = self.charms[integration.provides_charm_id]
+            req_charm = self.charms[integration.requires_charm_id]
+            raise ValueError(
+                f"Conflicting user-declared {field!r} values {sorted(values)!r} found across cross-model "
+                f"integrations between '{prov_charm.spec.name}' and '{req_charm.spec.name}'; all cross-model "
+                "integrations between the same charm pair share one Juju offer, so their declared "
+                f"{field!r} must agree."
+            )
+        return next(iter(values), None)
+
+    def _matching_user_app_integrations(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
+    ) -> list[DomainApplicationIntegration]:
+        """Return every user-declared ``DomainApplicationIntegration`` sharing ``integration``'s offer.
+
         Scans every active integration in the same provides -> requires group as
-        ``integration`` (not just the anchor) for one that some model's
+        ``integration`` (not just the anchor) for ones that some model's
         ``application_integrations`` maps to (via ``charm_integration_ids``) with an active
-        mapping variable; that application integration already carries a resolved (never-None)
-        ``offer_name`` for cross-model pairs. Checking the whole group, not just the anchor, is
-        necessary because the anchor is chosen by endpoint-name ordering and may itself be a
-        purely solver-discovered integration (e.g. a cross_model_mesh endpoint) even when a
-        sibling integration in the same group is the real, user-declared CMR. Returns None if no
-        integration in the group is user-declared, or if ``z3_model`` is unavailable to evaluate
-        mapping activity.
+        mapping variable. Checking the whole group, not just the anchor, is necessary because the
+        anchor is chosen by endpoint-name ordering and may itself be a purely solver-discovered
+        integration (e.g. a cross_model_mesh endpoint) even when a sibling integration in the same
+        group is the real, user-declared CMR. Returns an empty list if no integration in the group
+        is user-declared, or if ``z3_model`` is unavailable to evaluate mapping activity.
         """
         if z3_model is None:
-            return None
+            return []
         group_idxs = {
             i
             for i, other in enumerate(self.charm_integrations)
@@ -254,14 +305,15 @@ class Domain(BaseModel):
             and z3_model.evaluate(other.exists, model_completion=True)
         }
         if not group_idxs:
-            return None
+            return []
+        matches = []
         for idx in sorted(group_idxs):
             for mc in self.models.values():
                 for app_int in mc.application_integrations:
                     mapping_var = app_int.charm_integration_ids.get(idx)
                     if mapping_var is not None and z3_model.evaluate(mapping_var, model_completion=True):
-                        return app_int.offer_name
-        return None
+                        matches.append(app_int)
+        return matches
 
     def _offer_sharing_anchor(
         self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
