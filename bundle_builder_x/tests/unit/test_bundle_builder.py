@@ -18,6 +18,8 @@ from bundle_builder_x.assertion_tags import (
     CharmEndpointPayload,
     CharmPayload,
     CharmRankBoundedTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
+    CrossModelEndpointIntegratedMatchesCountTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -1588,3 +1590,100 @@ class TestCollectUnsatDiagnostics:
         assert "nrpe:general-info" in str(error)
         assert "ubuntu@22.04" in str(error)
         assert "ubuntu@24.04" in str(error)
+
+
+class TestCrossModelEndpointAssertionTags:
+    """Round-trip and dispatch coverage for the cross_model_mesh-motivated assertion tags.
+
+    CrossModelEndpointCountMatchesIntegrationsTag/CrossModelEndpointIntegratedMatchesCountTag
+    back DomainCharmEndpoint.cross_model_count/cross_model_integrated (read by the cross_model()
+    DSL filter). Unlike their non-cross-model siblings, these had no dedicated encode/decode or
+    dispatch coverage; a registry/payload mismatch here would only surface during real CEGIS
+    expansion, not in the unit suite.
+    """
+
+    def test_cross_model_endpoint_count_tag_round_trips_through_encode_decode(self) -> None:
+        # GIVEN a tag as it would be attached to a Z3 assertion
+        tag = CrossModelEndpointCountMatchesIntegrationsTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=3, endpoint="backend"),
+            num_terms=2,
+        )
+
+        # WHEN it's encoded (as when added to the solver) and decoded back (as when read from an
+        # unsat core)
+        decoded = AssertionTag.decode(tag.encode())
+
+        # THEN the round trip reproduces the exact same tag
+        assert decoded == tag
+        assert isinstance(decoded, CrossModelEndpointCountMatchesIntegrationsTag)
+
+    def test_cross_model_endpoint_integrated_tag_round_trips_through_encode_decode(self) -> None:
+        # GIVEN a tag as it would be attached to a Z3 assertion
+        tag = CrossModelEndpointIntegratedMatchesCountTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=3, endpoint="backend"),
+        )
+
+        # WHEN it's encoded and decoded back
+        decoded = AssertionTag.decode(tag.encode())
+
+        # THEN the round trip reproduces the exact same tag
+        assert decoded == tag
+        assert isinstance(decoded, CrossModelEndpointIntegratedMatchesCountTag)
+
+    def _domain_with_unresolved_cross_model_endpoint(self) -> tuple[Domain, int]:
+        """A single charm, in a single model, with an unlimited unresolved REQUIRES endpoint."""
+        domain = Domain()
+        m1 = ModelRef(name="m1")
+        domain.models[m1] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={"consumer": DomainApplication(charm="consumer-app")},
+        )
+        charm_id = add_charm_to_domain(
+            _make_charm(
+                "consumer-app",
+                {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", limit=None)},
+            ),
+            domain,
+            m1,
+        )
+        return domain, charm_id
+
+    def test_handle_failed_assertion_expands_domain_for_cross_model_count_tag(self) -> None:
+        # GIVEN a domain with an unresolved endpoint, and Charmhub able to find a candidate
+        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
+        provider = _make_charm(
+            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
+        )
+        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = CrossModelEndpointCountMatchesIntegrationsTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
+            num_terms=1,
+        )
+
+        # WHEN the tag is dispatched as a failed assertion
+        result = builder._handle_failed_assertion(tag, domain)
+
+        # THEN it's routed to the same endpoint-expansion logic as the non-cross-model sibling
+        # tag, discovering a new candidate charm rather than being silently ignored
+        assert result.expanded is True
+
+    def test_handle_failed_assertion_expands_domain_for_cross_model_integrated_tag(self) -> None:
+        # GIVEN the same setup
+        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
+        provider = _make_charm(
+            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
+        )
+        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = CrossModelEndpointIntegratedMatchesCountTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
+        )
+
+        # WHEN the tag is dispatched as a failed assertion
+        result = builder._handle_failed_assertion(tag, domain)
+
+        # THEN it's routed to the same endpoint-expansion logic, discovering a new candidate charm
+        assert result.expanded is True

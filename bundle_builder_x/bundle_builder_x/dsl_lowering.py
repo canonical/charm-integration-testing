@@ -948,6 +948,12 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             if dsl_type == DSLType.RELATION_SET:
                 l_eps = _lower_as_endpoints(left, ctx)
                 r_eps = _lower_as_endpoints(right, ctx)
+                # Check both operands together (not just each operand alone, and not just the
+                # final result) for endpoint names tagged inconsistently by cross_model(): "&"
+                # and "-" filter by _EndpointRef equality directly, so a name/tag mismatch would
+                # otherwise silently disappear from the output (& -> empty, - -> unfiltered count
+                # kept) instead of surfacing in the checked result list.
+                _check_consistent_cross_model_tags(l_eps + r_eps, expr)
                 match op:
                     case "|":
                         return l_eps + [e for e in r_eps if e not in l_eps]

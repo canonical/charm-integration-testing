@@ -7,7 +7,23 @@ import z3  # type: ignore[import-untyped]
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
 from .charm import EndpointType
-from .domain import Domain, ModelRef
+from .domain import Domain, DomainApplicationIntegration, DomainCharmIntegration, ModelRef
+
+
+def _active_charm_integration_for_app_int(
+    app_int: DomainApplicationIntegration, domain: Domain, model: z3.ModelRef
+) -> DomainCharmIntegration | None:
+    """Return the ``DomainCharmIntegration`` currently backing ``app_int``, if any.
+
+    A user-declared cross-model ``app_int`` is linked (via ``charm_integration_ids``) to every
+    candidate charm integration it could resolve to; only one is actually active in a given
+    solution. Returns ``None`` for external CMRs (no in-domain charm integration exists to link
+    to) or if none of the candidates evaluate as active.
+    """
+    for idx, mapping_var in app_int.charm_integration_ids.items():
+        if model.evaluate(mapping_var, model_completion=True):
+            return domain.charm_integrations[idx]
+    return None
 
 
 def _extract_single_model(
@@ -166,17 +182,33 @@ def _extract_single_model(
         remote_model_ref = remote_ep.model
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
+
+        # Resolve the offer name/URL through the same charm-pair-shared resolver used for
+        # solver-discovered companions, when this user-declared CMR is backed by a
+        # DomainCharmIntegration (i.e. not an external CMR). This is what surfaces a conflict
+        # if e.g. this CMR and a sibling cross_model_mesh CMR between the same charm pair were
+        # both explicitly declared with different offer names -- otherwise each would just keep
+        # its own declared offer_name/url, silently producing two Juju offers for one pair.
+        backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
+        resolved_offer_name: str | None
+        if backing_integration is not None:
+            resolved_offer_name = domain.integration_offer_name(backing_integration, model)
+            resolved_url = domain.integration_offer_url(backing_integration, model)
+        else:
+            resolved_offer_name = app_int.offer_name
+            resolved_url = app_int.url
+
         # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
         # For PROVIDES: always None; the mirror pass synthesizes the URL when creating
         # the REQUIRES entry.
         url: str | None
         if charm_ep.type == EndpointType.REQUIRES:
-            if app_int.url is not None:
-                url = app_int.url
+            if resolved_url is not None:
+                url = resolved_url
             else:
                 remote_mc = domain.models.get(remote_model_ref)
                 url = (
-                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{app_int.offer_name}"
+                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{resolved_offer_name}"
                     if remote_mc is not None
                     and remote_mc.ref.controller is not None
                     and remote_model_ref.name is not None
@@ -194,7 +226,7 @@ def _extract_single_model(
                 remote_model=remote_model_ref.key,
                 remote_application=remote_ep.application,
                 remote_endpoint=remote_ep.endpoint,
-                offer_name=app_int.offer_name,
+                offer_name=resolved_offer_name,
                 url=url,
             )
         )
