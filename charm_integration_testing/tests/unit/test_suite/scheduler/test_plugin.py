@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from types import SimpleNamespace
@@ -17,8 +18,11 @@ from test_suite.scheduler.plugin import (
     _build_execution_plan,
     _disambiguate_repeated_items,
     _duplicate_item_for_repeat,
+    _find_recovery_bridge,
     _mark_as_injected,
+    _shortest_path_to_any,
     _UnreachableStateError,
+    pytest_runtest_protocol,
     pytest_runtest_setup,
     pytest_sessionfinish,
 )
@@ -116,6 +120,22 @@ class TestMarkAsInjected:
         assert item.name == name_after_first
         assert item.nodeid == nodeid_after_first
 
+    def test_does_not_double_prefix_a_copy_of_an_already_injected_item(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a template already marked as injected (e.g. reused from an
+        # earlier static bridge), then copied for a later runtime recovery
+        template = make_item("test_foo")
+        _mark_as_injected(template)
+        duplicate = copy.copy(template)
+
+        # WHEN the duplicate is marked as injected again
+        _mark_as_injected(duplicate)
+
+        # THEN the prefix is not stacked a second time
+        assert duplicate.name == template.name
+        assert duplicate.nodeid == template.nodeid
+
 
 # ---------------------------------------------------------------------------
 # Tests for _duplicate_item_for_repeat and _disambiguate_repeated_items
@@ -158,6 +178,51 @@ class TestDuplicateItemForRepeat:
         # THEN the original item's name/nodeid are untouched
         assert item.name == original_name
         assert item.nodeid == original_nodeid
+
+    def test_marking_duplicate_does_not_mutate_the_template(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN the duplicate is marked as injected (as _find_recovery_bridge does)
+        _mark_as_injected(duplicate)
+
+        # THEN the template item itself is not marked - own_markers/keywords
+        # must be independent copies, not shared references from copy.copy
+        assert duplicate.get_closest_marker("injected") is not None
+        assert item.get_closest_marker("injected") is None
+
+    def test_duplicate_has_independent_stash(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN per-item state is recorded on the duplicate's stash (as the
+        # suite's own pytest_runtest_makereport hook does for pass/fail/skip)
+        key: pytest.StashKey[str] = pytest.StashKey()
+        duplicate.stash[key] = "skipped"
+
+        # THEN the template's stash is unaffected - a recovery occurrence's
+        # outcome must not contaminate the template or other occurrences
+        assert key not in item.stash
+
+    def test_duplicate_keywords_carry_over_template_entries_under_the_new_name(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a template with a marker already registered in its keywords
+        # (mirrors what real pytest.Item.add_marker does)
+        item = make_item("test_foo")
+        item.add_marker(pytest.mark.slow)
+
+        # WHEN duplicated for a later occurrence
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's keywords carry over the template's own entry
+        assert duplicate.keywords["slow"] == item.keywords["slow"]
+        # AND the keywords mapping reflects the duplicate's own (relabeled)
+        # name, not a stale entry seeded from the template's original name
+        assert duplicate.name in duplicate.keywords
+        assert item.name not in duplicate.keywords or item.name == duplicate.name
 
     def test_different_occurrences_produce_different_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item duplicated for two different occurrence numbers
@@ -976,9 +1041,13 @@ class TestBuildExecutionPlan:
 # ---------------------------------------------------------------------------
 
 
-def _make_report(when: str = "call", failed: bool = False) -> Any:
-    """Return a minimal test report substitute."""
-    return SimpleNamespace(when=when, failed=failed)
+def _make_report(when: str = "call", failed: bool = False, skipped: bool = False) -> Any:
+    """Return a minimal test report substitute.
+
+    Mirrors the mutually-exclusive ``failed``/``skipped``/``passed`` triad
+    that real ``pytest.TestReport`` objects expose.
+    """
+    return SimpleNamespace(when=when, failed=failed, skipped=skipped, passed=not failed and not skipped)
 
 
 def _drive_makereport(item: pytest.Item, call: Any, report: Any) -> None:
@@ -1017,11 +1086,16 @@ class TestPytestRuntestMakereport:
         # WHEN the hook runs
         _drive_makereport(item, call, report)
 
-        # THEN the item is recorded as the failed state test
+        # THEN the item is recorded as the failed state test, and the
+        # environment state becomes unknown
         assert _plugin_module._failed_state_test is item
+        assert _plugin_module._current_state is None
 
     def test_does_not_set_for_unmarked_item_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN an item with no state marker
+        # GIVEN an item with no state marker, with the current state set explicitly
+        # (rather than relying on the reset_injected_ids fixture's default) so this
+        # assertion stays valid even if that default changes.
+        _plugin_module._current_state = State.EMPTY_MODEL
         item = make_item("test_something")
         call = SimpleNamespace(excinfo=SimpleNamespace(type=AssertionError, value=AssertionError()))
         report = _make_report(when="call", failed=True)
@@ -1031,6 +1105,7 @@ class TestPytestRuntestMakereport:
 
         # THEN no failure is recorded - unmarked tests never halt the state machine
         assert _plugin_module._failed_state_test is None
+        assert _plugin_module._current_state == State.EMPTY_MODEL
 
     def test_does_not_set_when_report_not_failed(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a state-marked item but a passing report
@@ -1043,9 +1118,10 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._failed_state_test is None
 
     def test_does_not_overwrite_once_already_set(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a first test has already failed
+        # GIVEN a first test has already failed (state unknown)
         first = make_item("test_first", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         _plugin_module._failed_state_test = first
+        _plugin_module._current_state = None
 
         # WHEN a second state-marked test also fails
         second = make_item("test_second", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
@@ -1056,6 +1132,144 @@ class TestPytestRuntestMakereport:
         # THEN the original failing test is preserved
         assert _plugin_module._failed_state_test is first
 
+    def test_transition_pass_at_call_advances_current_state(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test departing from the current state
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", failed=False)
+
+        # WHEN it passes at call time
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is now believed to be at its 'provides' state
+        assert _plugin_module._current_state == State.DEPLOYED
+
+    def test_pure_test_pass_does_not_change_current_state(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a pure test (requires == provides) at the current state
+        _plugin_module._current_state = State.EMPTY_MODEL
+        item = make_item("test_validate", requires=State.EMPTY_MODEL)
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", failed=False)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._current_state == State.EMPTY_MODEL
+
+    def test_skipped_transition_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that gets skipped at setup time
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        # WHEN it is skipped
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is still believed to be at 'requires': the
+        # transition never ran, so it never changed anything.
+        assert _plugin_module._current_state == State.DEPLOYED
+        assert _plugin_module._failed_state_test is None
+
+    def test_skipped_transition_blacklists_its_edge(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that gets skipped at setup time, registered
+        # as the sole candidate for its edge (mirroring what
+        # pytest_collection_modifyitems does for a real collection)
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        _drive_makereport(item, call, report)
+
+        # THEN its edge is recorded so recovery won't retry the same test forever
+        assert edge in _plugin_module._skipped_transitions
+
+    def test_skip_at_call_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that skips mid-call, rather than a fixture
+        # skipping before the test body ever ran
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", skipped=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown (halted), not as
+        # unchanged: recovery must not assume the pre-transition state still
+        # holds, since the test body may have already run real actions.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+        assert _plugin_module._failed_state_reason == "skipped at call time"
+        assert edge not in _plugin_module._skipped_transitions
+
+    def test_skip_at_teardown_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that skips during teardown
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="teardown", skipped=True)
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown, same as a call-time skip
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+        assert _plugin_module._failed_state_reason == "skipped at teardown time"
+
+    def test_edge_not_blacklisted_while_an_untried_candidate_remains(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN two candidate tests registered for the same edge
+        first = make_item("test_downgrade_charm_v1", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        second = make_item("test_downgrade_charm_v2", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [first, second]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        # WHEN only the first candidate skips
+        _drive_makereport(first, call, report)
+
+        # THEN the edge is NOT blacklisted yet - the second candidate is
+        # still untried and may succeed as a recovery bridge
+        assert edge not in _plugin_module._skipped_transitions
+
+        # WHEN the second (and only remaining) candidate also skips
+        _plugin_module._current_state = State.DEPLOYED
+        _drive_makereport(second, call, report)
+
+        # THEN the edge is now blacklisted, since every candidate has skipped
+        assert edge in _plugin_module._skipped_transitions
+
+    def test_skipped_pure_test_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a pure test that gets skipped
+        item = make_item("test_validate", requires=State.DEPLOYED)
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="setup", skipped=True)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._current_state == State.DEPLOYED
+
+    def test_failure_at_setup_sets_state_unknown(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a state-marked item that fails during setup (e.g. a fixture)
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        call = SimpleNamespace(excinfo=SimpleNamespace(type=RuntimeError, value=RuntimeError()))
+        report = _make_report(when="setup", failed=True)
+
+        _drive_makereport(item, call, report)
+
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+
 
 # ---------------------------------------------------------------------------
 # Tests for pytest_runtest_setup (halting downstream tests)
@@ -1064,9 +1278,10 @@ class TestPytestRuntestMakereport:
 
 class TestPytestRuntestSetup:
     def test_skips_state_marked_test_after_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a previous test has failed
+        # GIVEN a previous test has failed (state unknown)
         failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         _plugin_module._failed_state_test = failed
+        _plugin_module._current_state = None
 
         # AND a subsequent state-marked test
         subsequent = make_item("test_integration", requires=State.DEPLOYED)
@@ -1079,6 +1294,7 @@ class TestPytestRuntestSetup:
         # GIVEN the failed item is the same item being set up
         failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         _plugin_module._failed_state_test = failed
+        _plugin_module._current_state = None
 
         # THEN setup is allowed to proceed (no skip raised)
         pytest_runtest_setup(failed)  # must not raise
@@ -1087,6 +1303,7 @@ class TestPytestRuntestSetup:
         # GIVEN a previous test has failed
         failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         _plugin_module._failed_state_test = failed
+        _plugin_module._current_state = None
 
         # AND an unmarked test
         unmarked = make_item("test_smoke")  # no state marker kwargs
@@ -1095,7 +1312,7 @@ class TestPytestRuntestSetup:
         pytest_runtest_setup(unmarked)  # must not raise
 
     def test_does_nothing_when_no_prior_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN no prior failure
+        # GIVEN no prior failure, and the current state matches what's required
         item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
 
         # THEN setup proceeds normally
@@ -1105,6 +1322,7 @@ class TestPytestRuntestSetup:
         # GIVEN a named failing test
         failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         _plugin_module._failed_state_test = failed
+        _plugin_module._current_state = None
 
         subsequent = make_item("test_integration", requires=State.DEPLOYED)
 
@@ -1112,6 +1330,51 @@ class TestPytestRuntestSetup:
             pytest_runtest_setup(subsequent)
 
         assert "test_deploy" in str(exc_info.value)
+
+    def test_skip_message_reports_a_skip_not_a_failure_when_that_is_what_happened(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the environment became unknown because a transition test
+        # skipped mid-call, not because anything actually failed
+        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._failed_state_test = skipped
+        _plugin_module._failed_state_reason = "skipped at call time"
+        _plugin_module._current_state = None
+
+        subsequent = make_item("test_integration", requires=State.DEPLOYED)
+
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            pytest_runtest_setup(subsequent)
+
+        # THEN the message says it was skipped, not that it "failed"
+        message = str(exc_info.value)
+        assert "skipped at call time" in message
+        assert "failed" not in message
+
+    def test_skips_when_current_state_does_not_satisfy_requires(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN no failure, but the environment is at a state this test doesn't accept
+        # (e.g. a preceding transition was skipped and no recovery bridge was found)
+        _plugin_module._current_state = State.EMPTY_MODEL
+        item = make_item("test_upgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            pytest_runtest_setup(item)
+
+        assert "empty_model" in str(exc_info.value)
+        assert "deployed" in str(exc_info.value)
+
+    def test_does_not_skip_when_current_state_satisfies_one_of_multiple_requires(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a test accepting multiple states and the environment at one of them
+        _plugin_module._current_state = State.NEIGHBOR_ONLY
+        item = make_item(
+            "test_controller_restart",
+            requires=[State.DEPLOYED, State.NEIGHBOR_ONLY],
+            provides=State.NEIGHBOR_ONLY,
+        )
+
+        pytest_runtest_setup(item)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -1143,3 +1406,279 @@ class TestPytestSessionFinish:
         assert _plugin_module._duplicate_original_ids  # non-empty before
         pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
         assert _plugin_module._duplicate_original_ids == {}
+
+    def test_clears_current_state(self) -> None:
+        _plugin_module._current_state = State.DEPLOYED
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._current_state is None
+
+    def test_clears_full_graph_and_all_transitions(self, make_item: Callable[..., pytest.Item]) -> None:
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._full_graph is None
+        assert _plugin_module._all_transitions == {}
+
+    def test_clears_recovery_counter(self) -> None:
+        _plugin_module._recovery_counter = 5
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._recovery_counter == 0
+
+    def test_clears_skipped_transitions(self) -> None:
+        _plugin_module._skipped_transitions = {StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)}
+        pytest_sessionfinish(session=SimpleNamespace(), exitstatus=0)  # type: ignore[arg-type]
+        assert _plugin_module._skipped_transitions == set()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for runtime state-machine recovery tests
+# ---------------------------------------------------------------------------
+
+
+class FakeSession:
+    """Minimal pytest.Session substitute exposing a mutable ``items`` list."""
+
+    def __init__(self, items: list[pytest.Item]) -> None:
+        self.items = items
+
+
+def _with_session(item: pytest.Item, items: list[pytest.Item]) -> pytest.Item:
+    """Attach a FakeSession(items) to *item* and return it for chaining."""
+    cast(Any, item).session = FakeSession(items)
+    return item
+
+
+def _drive_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> None:
+    """Drive pytest_runtest_protocol (a hookwrapper generator) to completion."""
+    gen = cast(Generator[None, Any, None], pytest_runtest_protocol(item, nextitem))
+    next(gen)  # advance to the yield
+    try:
+        gen.send(None)
+    except StopIteration:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Tests for _shortest_path_to_any
+# ---------------------------------------------------------------------------
+
+
+class TestShortestPathToAny:
+    def test_returns_path_to_single_reachable_target(self, make_item: Callable[..., pytest.Item]) -> None:
+        graph, _ = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
+
+        path = _shortest_path_to_any(graph, State.EMPTY_MODEL, (State.DEPLOYED,))
+
+        assert path is not None
+        assert [t.to_state for t, _ in path] == [State.DEPLOYED]
+
+    def test_returns_none_when_no_target_reachable(self, make_item: Callable[..., pytest.Item]) -> None:
+        graph, _ = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
+
+        path = _shortest_path_to_any(graph, State.EMPTY_MODEL, (State.NEIGHBOR_ONLY,))
+
+        assert path is None
+
+    def test_prefers_cheaper_of_two_reachable_targets(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a direct 1-hop edge to DEPLOYED and a 2-hop path to NEIGHBOR_ONLY
+        graph, _ = _graph_and_all(
+            (State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, make_item("test_scale")),
+        )
+
+        path = _shortest_path_to_any(graph, State.EMPTY_MODEL, (State.NEIGHBOR_ONLY, State.DEPLOYED))
+
+        # THEN the cheaper (1-hop) path to DEPLOYED is chosen
+        assert path is not None
+        assert [t.to_state for t, _ in path] == [State.DEPLOYED]
+
+
+# ---------------------------------------------------------------------------
+# Tests for _find_recovery_bridge
+# ---------------------------------------------------------------------------
+
+
+class TestFindRecoveryBridge:
+    def test_raises_when_full_graph_unset(self) -> None:
+        _plugin_module._full_graph = None
+        with pytest.raises(AssertionError):
+            _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))
+
+    def test_builds_fresh_duplicate_for_the_template_item(self, make_item: Callable[..., pytest.Item]) -> None:
+        template = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+
+        bridge_items = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))
+
+        assert bridge_items is not None
+        assert len(bridge_items) == 1
+        assert bridge_items[0] is not template  # a fresh duplicate, not the original
+        assert bridge_items[0].nodeid != template.nodeid  # unique nodeid
+
+    def test_marks_bridge_items_as_injected(self, make_item: Callable[..., pytest.Item]) -> None:
+        template = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+
+        (bridge_item,) = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))  # type: ignore[misc]
+
+        assert bridge_item.get_closest_marker("injected") is not None
+
+    def test_returns_none_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+
+        bridge_items = _find_recovery_bridge(State.EMPTY_MODEL, (State.NEIGHBOR_ONLY,))
+
+        assert bridge_items is None
+
+    def test_repeated_recovery_of_same_edge_gets_distinct_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the same edge is recovered twice within one session (e.g. two
+        # separate skips both needing the same bridging transition test)
+        template = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+
+        (first,) = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))  # type: ignore[misc]
+        (second,) = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))  # type: ignore[misc]
+
+        assert first.nodeid != second.nodeid
+
+    def test_returns_none_when_graph_edge_has_no_registered_item(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a graph edge with no corresponding entry in all_transitions
+        # (defensive: should not happen since both are built together, but
+        # the lookup must not raise if it ever does)
+        graph = StateGraph()
+        graph.register_transition(StateTransition(State.EMPTY_MODEL, State.DEPLOYED), make_item("test_deploy"))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = {}
+
+        bridge_items = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))
+
+        assert bridge_items is None
+
+    def test_excludes_edge_that_already_skipped(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the only edge into DEPLOYED is already in _skipped_transitions
+        # (its transition test just skipped once)
+        template = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._skipped_transitions = {StateTransition(State.EMPTY_MODEL, State.DEPLOYED)}
+
+        # THEN no bridge is offered: retrying the same test would just skip again
+        bridge_items = _find_recovery_bridge(State.EMPTY_MODEL, (State.DEPLOYED,))
+
+        assert bridge_items is None
+
+    def test_does_not_exclude_a_different_unskipped_edge(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN one skipped edge and a distinct, still-usable edge to the same target
+        graph, all_transitions = _graph_and_all(
+            (State.EMPTY_MODEL, State.NEIGHBOR_ONLY, make_item("test_skipped_edge")),
+            (State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")),
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, make_item("test_scale")),
+        )
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._skipped_transitions = {StateTransition(State.EMPTY_MODEL, State.NEIGHBOR_ONLY)}
+
+        bridge_items = _find_recovery_bridge(State.EMPTY_MODEL, (State.NEIGHBOR_ONLY,))
+
+        # THEN the longer, still-available path via DEPLOYED is used instead
+        assert bridge_items is not None
+        assert len(bridge_items) == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests for pytest_runtest_protocol (runtime state-machine recovery)
+# ---------------------------------------------------------------------------
+
+
+class TestPytestRuntestProtocolRecovery:
+    def test_does_nothing_when_nextitem_is_none(self, make_item: Callable[..., pytest.Item]) -> None:
+        item = _with_session(make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED), [])
+        _plugin_module._current_state = State.DEPLOYED
+
+        _drive_runtest_protocol(item, None)  # must not raise
+
+    def test_does_nothing_when_current_state_already_satisfies_nextitem(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        nextitem = make_item("test_teardown", requires=State.DEPLOYED)
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _with_session(item, [item, nextitem])
+        _plugin_module._current_state = State.DEPLOYED  # already matches nextitem's requires
+
+        _drive_runtest_protocol(item, nextitem)
+
+        # No bridge was injected: the plan is unchanged.
+        assert item.session.items == [item, nextitem]
+
+    def test_does_nothing_for_unmarked_nextitem(self, make_item: Callable[..., pytest.Item]) -> None:
+        nextitem = make_item("test_smoke")  # no state marker
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _with_session(item, [item, nextitem])
+        _plugin_module._current_state = State.DEPLOYED
+
+        _drive_runtest_protocol(item, nextitem)
+
+        assert item.session.items == [item, nextitem]
+
+    def test_injects_bridge_when_gap_exists_and_path_found(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN test_downgrade_charm was skipped, leaving the environment at
+        # DEPLOYED, and the next planned test (test_upgrade_charm) requires
+        # NEIGHBOR_ONLY - reachable from DEPLOYED via test_scale.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN a bridge item was inserted between the two, and it is a fresh,
+        # injected duplicate of the bridging transition test.
+        items = skipped_downgrade.session.items
+        assert items[0] is skipped_downgrade
+        assert items[-1] is nextitem
+        assert len(items) == 3
+        injected = items[1]
+        assert injected is not bridge_template
+        assert injected.get_closest_marker("injected") is not None
+
+    def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN no transition exists from the current state to what nextitem needs
+        graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(item, [item, nextitem])
+
+        _drive_runtest_protocol(item, nextitem)
+
+        # THEN nothing is injected; nextitem's own pytest_runtest_setup will skip it.
+        assert item.session.items == [item, nextitem]
+
+    def test_does_nothing_when_current_state_unknown(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a prior failure already halted the state machine
+        _plugin_module._current_state = None
+        item = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        nextitem = make_item("test_integration", requires=State.DEPLOYED)
+        _with_session(item, [item, nextitem])
+
+        _drive_runtest_protocol(item, nextitem)
+
+        assert item.session.items == [item, nextitem]

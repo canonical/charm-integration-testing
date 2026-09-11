@@ -10,6 +10,30 @@ from typing import Any, cast
 
 import pytest
 from test_suite.scheduler import plugin as _plugin_module
+from test_suite.scheduler.states import State
+
+
+class FakeKeywords:
+    """Minimal mimic of pytest's private ``NodeKeywords``.
+
+    Just enough to exercise the scheduler's keywords-copying logic in
+    ``_duplicate_item_for_repeat``: seeds itself with ``{node.name: True}``
+    at construction time, like the real one, and stores further entries in
+    a plain dict.
+    """
+
+    def __init__(self, node: "FakeItem") -> None:
+        self.node = node
+        self._markers: dict[str, Any] = {node.name: True}
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._markers[key] = value
+
+    def __getitem__(self, key: str) -> Any:
+        return self._markers[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._markers
 
 
 class FakeItem:
@@ -26,6 +50,12 @@ class FakeItem:
         self._added_marks: dict[str, Any] = {}
         # Build a real pytest Mark so read_state_marker sees genuine kwargs.
         self._state_mark = pytest.mark.state(**state_marker_kwargs).mark if state_marker_kwargs else None
+        # Real pytest.Item instances carry a per-node Stash; mirrored here so
+        # tests can exercise _duplicate_item_for_repeat's stash-isolation fix.
+        self.stash: pytest.Stash = pytest.Stash()
+        # Mirrors real pytest.Item.keywords, so tests can exercise
+        # _duplicate_item_for_repeat's keywords-copying logic.
+        self.keywords: FakeKeywords = FakeKeywords(self)
 
     @property
     def nodeid(self) -> str:
@@ -45,6 +75,18 @@ class FakeItem:
         name = getattr(marker, "name", None)
         if name is not None:
             self._added_marks[str(name)] = marker
+            self.keywords[str(name)] = marker
+
+    def __copy__(self) -> "FakeItem":
+        """Return an independent copy so ``add_marker`` on one doesn't leak into the other.
+
+        Mirrors the ``own_markers``/``keywords`` sharing bug
+        ``_duplicate_item_for_repeat`` guards against for real items.
+        """
+        duplicate = FakeItem.__new__(FakeItem)
+        duplicate.__dict__.update(self.__dict__)
+        duplicate._added_marks = dict(self._added_marks)
+        return duplicate
 
 
 @pytest.fixture()
@@ -72,14 +114,33 @@ def reset_injected_ids() -> Iterator[None]:
     """Clear all module-level plugin globals before and after every test.
 
     Prevents state leaking between unit tests that call the plugin hooks
-    directly.
+    directly. ``_current_state`` defaults to ``State.EMPTY_MODEL`` (an
+    arbitrary non-terminal state, not the plugin's actual ``--current-state``
+    default of ``State.NO_BUNDLE``) rather than ``None``, since ``None``
+    means "unknown" and would make every hook under test behave as if a
+    prior failure had already halted the run. Tests that depend on the exact
+    starting state should set ``_plugin_module._current_state`` explicitly.
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._failed_state_reason = None
+    _plugin_module._current_state = State.EMPTY_MODEL
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
     yield
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._failed_state_reason = None
+    _plugin_module._current_state = None
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
