@@ -61,7 +61,7 @@ def _resource_tracking_overrides_client(
 
 
 @pytest.fixture(scope="session")
-def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str | None], frozenset[str]]:
+def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str], frozenset[str]]:
     """Session-scoped accumulator of resolved skip sets, keyed by
     ``(controller, model, application, track, ubuntu_version)``.
 
@@ -74,12 +74,13 @@ def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str | None
     conflates two same-named models on different controllers (model names are
     only unique within a controller). The Ubuntu base is part of the key too,
     since an override can be scoped to a specific ``ubuntu_version`` and an
-    application observed on the same track but a different base (or with an
-    unresolved base on an earlier visit) must not reuse a skip set resolved for
-    a different base. Caching makes the map immune to transient
-    ``list_applications`` failures on later visits and gives the end-of-suite
-    report a stable, fully-accumulated map even after applications are torn
-    down.
+    application observed on the same track but a different base must not reuse
+    a skip set resolved for a different base. Applications whose base has not
+    yet been resolved are skipped entirely (not cached) so a later visit can
+    still resolve and cache them once the base is known. Caching makes the map
+    immune to transient ``list_applications`` failures on later visits and
+    gives the end-of-suite report a stable, fully-accumulated map even after
+    applications are torn down.
     """
     return {}
 
@@ -89,7 +90,7 @@ def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
     juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str | None], frozenset[str]],
+    _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> dict[tuple[str, str, str], frozenset[str]]:
     """Map each ``(controller, model, application)`` to the kinds it opts out of tracking.
@@ -122,7 +123,7 @@ def resource_tracking_skips_by_application(
                 logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
                 continue
             for application, info in applications.items():
-                if info.channel is None:
+                if info.channel is None or info.base is None:
                     continue
                 channel = CharmChannel.model_validate(str(info.channel))
                 key = (handle.controller, handle.model, application, channel.explicit_track, info.base)

@@ -22,6 +22,11 @@ from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.overrides import CharmGlobalOverrides, CharmOverridesCriteria, OverridesClient
 
+# Sentinel Ubuntu version used to probe base-agnostic override blocks. It deliberately
+# never matches a real ``ubuntu_version`` criterion, so passing it exercises the same
+# "no base restriction" path a resolved-but-unlisted base would.
+_UNSCOPED_UBUNTU_VERSION = "unscoped"
+
 
 def _referenced_ubuntu_versions(criteria: CharmOverridesCriteria) -> set[str]:
     """Recursively collect every explicit ubuntu_version referenced by a criteria block."""
@@ -84,7 +89,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
     all_channels = bool(metafunc.config.getoption("--all-channels"))
     client = CharmhubClient()
-    params: list[tuple[str, CharmChannel, str | None]] = []
+    params: list[tuple[str, CharmChannel, str]] = []
     ids: list[str] = []
     unmatched: list[str] = []
     for f in _get_override_files(overrides_dir, modified_since):
@@ -97,8 +102,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         # Some overrides only apply to a specific Ubuntu base (e.g. kubernetes-worker's
         # legacy-charm blocks), so channel alone isn't enough to determine first-met
         # coverage. Exercise every base referenced anywhere in this charm's overrides,
-        # plus `None` for base-agnostic matching, against every published channel.
-        ubuntu_versions: set[str | None] = {None}
+        # plus a sentinel that matches no override's declared base, against every
+        # published channel, to also cover base-agnostic override blocks.
+        ubuntu_versions: set[str] = {_UNSCOPED_UBUNTU_VERSION}
         for entry in global_overrides.overrides:
             for criterion in entry.criteria:
                 ubuntu_versions |= _referenced_ubuntu_versions(criterion)
@@ -107,7 +113,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         for override in global_overrides.overrides:
             matched = sorted(
                 (cv for cv in remaining if override.meets(*cv)),
-                key=lambda cv: (cv[0], cv[1] or ""),
+                key=lambda cv: (cv[0], cv[1]),
             )
             remaining = {cv for cv in remaining if cv not in matched}
             if not matched:
