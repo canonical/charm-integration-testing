@@ -55,6 +55,10 @@ overrides:
         or bool(endpoint[cloud-config])'
       - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
         | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # charms() can't identify external-CMR peers (no in-domain charm id), so the equality
+      # above is vacuous when both sides are external; also check counts match.
+      - 'len(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == len(cross_model(endpoint[provide-cmr-mesh]))'
       # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
       # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
       # empty). See GH-980.
@@ -88,6 +92,10 @@ overrides:
         or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
       - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
         | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # charms() can't identify external-CMR peers (no in-domain charm id), so the equality
+      # above is vacuous when both sides are external; also check counts match.
+      - 'len(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
+        | endpoint[receive-profiles])) == len(cross_model(endpoint[provide-cmr-mesh]))'
       # cross_model_mesh only makes sense to describe a genuine CMR; without this, a purely
       # local provide-cmr-mesh relation would vacuously satisfy the equality above (both sides
       # empty). See GH-980.
