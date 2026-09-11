@@ -158,6 +158,15 @@ class JujuBackend(ABC):
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        """Resolve the application backing a consumed offer.
+
+        Returns None if the offer's URL can't be parsed, or if the offering application can no
+        longer be resolved (e.g. unreachable controller, removed offer). Backends that can't
+        cheaply resolve this may leave this unimplemented and rely on the default.
+        """
+        return None
+
     @abstractmethod
     def list_offers(self, model: JujuModelHandle) -> set[str]:
         """Return the names of all offers defined in *model*."""

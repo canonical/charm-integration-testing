@@ -13,6 +13,7 @@ import pytest
 import yaml
 from juju import (
     CharmChannel,
+    JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuIntegrationApplication,
     JujuModelHandle,
@@ -1953,6 +1954,121 @@ class TestJubilantBackend:
                     endpoints=frozenset(["database"]),
                 )
             }
+
+    class TestResolveConsumedOfferApplication:
+        class OfferingStatusStub:
+            def __init__(self, offers: dict[str, jubilant.statustypes.OfferStatus], apps: dict[str, Any]) -> None:
+                self.offers = offers
+                self.apps = apps
+
+        class RecordingClient(JubilantClientStub):
+            """Records every model requested via ``model()``, so tests can assert the owner-
+            qualified model reference used to query the offering model's status."""
+
+            def __init__(
+                self,
+                status: "TestJubilantBackend.TestResolveConsumedOfferApplication.OfferingStatusStub | None" = None,
+                cli_error: jubilant.CLIError | None = None,
+            ) -> None:
+                super().__init__(client=self)
+                self.requested_models: list[JujuModelHandle] = []
+                # The exact URI string JubilantClient.model() would hand to jubilant.Juju(model=...),
+                # since JujuModelHandle equality intentionally ignores owner (it's addressing-only,
+                # not part of a model's identity), so asserting on the handle alone wouldn't catch a
+                # regression that dropped the owner from the actual CLI-facing address.
+                self.requested_uris: list[str] = []
+                self._status = status
+                self._cli_error = cli_error
+
+            def model(self, model: JujuModelHandle | None) -> Any:
+                assert model is not None
+                self.requested_models.append(model)
+                self.requested_uris.append(model.uri)
+                return self
+
+            def status(self) -> Any:
+                if self._cli_error is not None:
+                    raise self._cli_error
+                return self._status
+
+        OFFER = JujuConsumedOfferInfo(
+            url="other-controller:admin/other-model.postgresql-k8s", endpoints=frozenset({"database"})
+        )
+
+        def test_resolves_application_via_owner_qualified_offering_model_status(self) -> None:
+            # GIVEN a consumed offer whose offering model reports the backing application
+            offering_status = self.OfferingStatusStub(
+                offers={
+                    "postgresql-k8s": jubilant.statustypes.OfferStatus(
+                        app="postgresql-k8s", endpoints={}, charm="ch:amd64/postgresql-k8s-495"
+                    )
+                },
+                apps={
+                    "postgresql-k8s": jubilant.statustypes.AppStatus(
+                        charm="postgresql-k8s",
+                        charm_origin="charmhub",
+                        charm_name="postgresql-k8s",
+                        charm_rev=495,
+                        exposed=False,
+                    )
+                },
+            )
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN resolving the application behind the offer
+            result = JubilantBackend(client).resolve_consumed_offer_application(self.OFFER)
+
+            # THEN the resolved application matches the offering model's status
+            assert result == JujuApplicationInfo(charm="postgresql-k8s", revision=495)
+            # AND the offering model was queried qualified with its owner (not just the bare model
+            # name), since the offering model's owner may differ from the current user
+            assert client.requested_models == [
+                JujuModelHandle(controller="other-controller", model="other-model", owner="admin")
+            ]
+            # AND the actual address handed to the Juju CLI includes the owner (JujuModelHandle
+            # equality intentionally ignores owner, so this checks the real addressing behavior)
+            assert client.requested_uris == ["other-controller:admin/other-model"]
+
+        def test_returns_none_for_unparseable_offer_url(self) -> None:
+            # GIVEN a consumed offer with a malformed URL
+            offer = JujuConsumedOfferInfo(url="not-a-valid-url", endpoints=frozenset({"database"}))
+            client = self.RecordingClient()
+
+            # WHEN/THEN resolution fails gracefully, without ever querying a model
+            assert JubilantBackend(client).resolve_consumed_offer_application(offer) is None
+            assert client.requested_models == []
+
+        def test_returns_none_when_offer_missing_from_offering_status(self) -> None:
+            # GIVEN the offering model's status no longer lists the offer (e.g. it was removed)
+            offering_status = self.OfferingStatusStub(offers={}, apps={})
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN/THEN resolution fails gracefully
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
+
+        def test_returns_none_when_offering_application_missing_from_offering_status(self) -> None:
+            # GIVEN the offer references an application no longer present in the offering model
+            offering_status = self.OfferingStatusStub(
+                offers={
+                    "postgresql-k8s": jubilant.statustypes.OfferStatus(
+                        app="postgresql-k8s", endpoints={}, charm="ch:amd64/postgresql-k8s-495"
+                    )
+                },
+                apps={},
+            )
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN/THEN resolution fails gracefully
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
+
+        def test_returns_none_when_offering_model_unreachable(self) -> None:
+            # GIVEN the offering controller/model can't be reached
+            client = self.RecordingClient(
+                cli_error=jubilant.CLIError(returncode=1, cmd=["juju", "status"], output="", stderr="ERROR timeout")
+            )
+
+            # WHEN/THEN resolution fails gracefully rather than propagating the CLI error
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
 
     class TestListIntegrations:
         class CliStub:
