@@ -570,8 +570,10 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
 
     # test_downgrade_charm and test_upgrade_charm reach their target revision via juju refresh,
     # which Juju rejects across incompatible bases (this framework does not use --force-series).
-    # Skip when the downgrade revision cannot run on the base the target is deployed on. The target
-    # base is resolved the same way the bundle builder resolves it; when --target-revision is
+    # Skip when the downgrade revision cannot run on the base the target is deployed on. Only the
+    # Ubuntu base gates a cross-revision refresh, so we resolve the base alone and deliberately omit
+    # platform/juju_version: bases are platform-independent, and adding platform/assumes filtering
+    # here would raise unrelated mismatches instead of a base skip. When --target-revision is
     # "default" the concrete revision is unknown, so fall back to the channel rather than skipping
     # the guard. Runs for both explicit and Test-Observer-resolved downgrade revisions.
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
