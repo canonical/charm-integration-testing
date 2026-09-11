@@ -625,7 +625,7 @@ class TestClassifyIntegrations:
         assert len(cmr_ints) == 1
         assert cmr_ints[0].url == "lxd:admin/monitoring.prometheus-scrape-offer"
 
-    def test_default_offer_name(self) -> None:
+    def test_default_offer_name_is_left_unresolved(self) -> None:
         # GIVEN a CMR without an explicit offer_name
         model_spec = ModelSpec(
             applications={"my-app": AppSpec(charm="my-charm")},
@@ -644,10 +644,14 @@ class TestClassifyIntegrations:
         # WHEN classifying
         result = classify_integrations(model_spec, {"model-a": model_spec})
 
-        # THEN offer_name defaults to <remote_application>-offer
-        cmr_ints = [i for i in result if i.offer_name is not None]
-        assert len(cmr_ints) == 1
-        assert cmr_ints[0].offer_name == "prometheus-offer"
+        # THEN offer_name stays None here rather than eagerly resolving to the
+        # "<remote_application>-offer" default: domain.py's offer-sharing/conflict-detection
+        # logic (_matching_user_app_integration_field) needs to distinguish a genuinely
+        # user-declared offer_name from an absent one, and extract.py applies the same
+        # "<remote_application>-offer" default later, only once no user- or shared-offer value
+        # is found.
+        assert len(result) == 1
+        assert result[0].offer_name is None
 
 
 class TestApplicationsFromSpec:
