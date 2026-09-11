@@ -68,6 +68,7 @@ from .constraints_dsl import (
     CharmsExpr,
     CompareExpr,
     ConfigExpr,
+    CrossModelExpr,
     DSLType,
     EndpointExpr,
     FeaturesExpr,
@@ -97,8 +98,17 @@ from .domain import Domain, DomainCharm
 # Internal lowering value types
 # ---------------------------------------------------------------------------
 
-# RelationSet: a list of endpoint names belonging to the current charm.
-_EndpointNames: TypeAlias = list[str]
+
+# RelationSet: a list of endpoint refs belonging to the current charm. Each ref carries a
+# cross_model_only tag set by cross_model(), so downstream reducers (bool(), len(), charms())
+# know to read the cross-model-scoped z3 variables instead of the plain ones.
+@dataclass(frozen=True)
+class _EndpointRef:
+    name: str
+    cross_model_only: bool = False
+
+
+_EndpointNames: TypeAlias = list[_EndpointRef]
 
 # SET_STR from features(): a per-feature Z3 Bool dict.
 _FeatureSet: TypeAlias = dict[str, z3.BoolRef]
@@ -242,7 +252,25 @@ def _lower_as_endpoints(expr: AnyExpr, ctx: LoweringContext) -> _EndpointNames:
         raise DSLLoweringError(
             f"Expected endpoint name list (RelationSet), got {type(result).__name__} for {type(expr).__name__}"
         )
+    _check_consistent_cross_model_tags(result, expr)
     return result
+
+
+def _check_consistent_cross_model_tags(endpoints: _EndpointNames, expr: AnyExpr) -> None:
+    """Reject a RelationSet where the same endpoint name is both cross_model()-filtered and
+    unfiltered (e.g. ``endpoint[x] | cross_model(endpoint[x])``).
+    """
+    seen: dict[str, bool] = {}
+    for ref in endpoints:
+        prior = seen.get(ref.name)
+        if prior is not None and prior != ref.cross_model_only:
+            raise DSLLoweringError(
+                f"Endpoint {ref.name!r} appears both filtered and unfiltered by cross_model() in "
+                f"the same RelationSet expression ({type(expr).__name__}); this is not well-defined "
+                "for set operators (|, &, -) since they distinguish cross_model()-filtered refs "
+                "from unfiltered ones of the same endpoint"
+            )
+        seen[ref.name] = ref.cross_model_only
 
 
 def _lower_as_features(expr: AnyExpr, ctx: LoweringContext) -> _FeatureSet:
@@ -255,15 +283,26 @@ def _lower_as_features(expr: AnyExpr, ctx: LoweringContext) -> _FeatureSet:
     return result
 
 
-def _charm_set_for_endpoints(charm_id: int, endpoint_names: _EndpointNames, domain: Domain) -> z3.ExprRef:
-    """Build a Z3 Set(Int) of peer charm IDs integrated on the given endpoints."""
+def _charm_set_for_endpoints(charm_id: int, endpoint_refs: _EndpointNames, domain: Domain) -> z3.ExprRef:
+    """Build a Z3 Set(Int) of peer charm IDs integrated on the given endpoints.
+
+    Endpoints tagged cross_model_only (via cross_model()) only contribute peers reached over a
+    genuine cross-model integration (Domain.is_cross_model); this is a pre-existing limitation
+    for external CMR peers, which have no DomainCharm/id to add to the set.
+    """
+    endpoint_names = {ref.name for ref in endpoint_refs}
+    cross_model_only_names = {ref.name for ref in endpoint_refs if ref.cross_model_only}
     result: z3.ExprRef = z3.EmptySet(z3.IntSort())
     for integration in domain.charm_integrations:
         if integration.requires_charm_id == charm_id and integration.requires_endpoint in endpoint_names:
             peer_id = integration.provides_charm_id
+            matched_endpoint = integration.requires_endpoint
         elif integration.provides_charm_id == charm_id and integration.provides_endpoint in endpoint_names:
             peer_id = integration.requires_charm_id
+            matched_endpoint = integration.provides_endpoint
         else:
+            continue
+        if matched_endpoint in cross_model_only_names and not domain.is_cross_model(integration):
             continue
         result = z3.If(integration.exists, z3.SetAdd(result, z3.IntVal(peer_id)), result)
 
@@ -285,7 +324,7 @@ def _reachable_set(charm_id: int, endpoint_name: str, spec: object, domain: Doma
     in at most the number of proxy-capable charm instances.
     """
     # Seed: charms directly connected to this endpoint
-    result: z3.ExprRef = _charm_set_for_endpoints(charm_id, [endpoint_name], domain)
+    result: z3.ExprRef = _charm_set_for_endpoints(charm_id, [_EndpointRef(name=endpoint_name)], domain)
 
     # Iterate to fixed point. Non-proxy charms can only appear in the initial
     # seed, so they do not contribute to the maximum proxy-chain depth.
@@ -672,7 +711,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
         case EndpointExpr(name=name):
             if name not in ctx.domain_charm.endpoints:
                 raise DSLLoweringError(f"Endpoint {name!r} not found on charm {ctx.domain_charm.spec.name!r}")
-            return [name]
+            return [_EndpointRef(name=name)]
 
         case ConfigExpr(key=key):
             cfg = ctx.domain_charm.config.get(key)
@@ -767,13 +806,27 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
 
         case LenExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
-            counts = [ctx.domain_charm.endpoints[ep].count for ep in endpoints]
+            counts = [
+                ctx.domain_charm.endpoints[ref.name].cross_model_count
+                if ref.cross_model_only
+                else ctx.domain_charm.endpoints[ref.name].count
+                for ref in endpoints
+            ]
             return z3.Sum(counts + [z3.IntVal(0)])
 
         case BoolFunc(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
-            integrateds: list[z3.ExprRef] = [ctx.domain_charm.endpoints[ep].integrated for ep in endpoints]
+            integrateds: list[z3.ExprRef] = [
+                ctx.domain_charm.endpoints[ref.name].cross_model_count >= 1
+                if ref.cross_model_only
+                else ctx.domain_charm.endpoints[ref.name].integrated
+                for ref in endpoints
+            ]
             return z3.Or(integrateds) if integrateds else z3.BoolVal(False)
+
+        case CrossModelExpr(arg=arg):
+            endpoints = _lower_as_endpoints(arg, ctx)
+            return [_EndpointRef(name=ref.name, cross_model_only=True) for ref in endpoints]
 
         case CharmsExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
@@ -784,7 +837,14 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
 
         case FeaturesExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
-            return _merge_feature_dicts(ctx.domain_charm.endpoints[ep].features for ep in endpoints)
+            cross_model_only_names = [ref.name for ref in endpoints if ref.cross_model_only]
+            if cross_model_only_names:
+                raise DSLLoweringError(
+                    f"features() cannot be applied to cross_model()-filtered endpoints "
+                    f"({sorted(cross_model_only_names)}): features are declared per-endpoint, "
+                    "not per-relation-instance, so cross_model() filtering has no effect on them."
+                )
+            return _merge_feature_dicts(ctx.domain_charm.endpoints[ref.name].features for ref in endpoints)
 
         case TracksExpr(arg=arg):
             charm_set = _lower_as_z3(arg, ctx)
@@ -882,6 +942,9 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             if dsl_type == DSLType.RELATION_SET:
                 l_eps = _lower_as_endpoints(left, ctx)
                 r_eps = _lower_as_endpoints(right, ctx)
+                # Check both operands' endpoint names for a cross_model()-tag mismatch before &/-
+                # can filter it out of the result.
+                _check_consistent_cross_model_tags(l_eps + r_eps, expr)
                 match op:
                     case "|":
                         return l_eps + [e for e in r_eps if e not in l_eps]

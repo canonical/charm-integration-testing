@@ -224,11 +224,11 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
-    # Build a lookup of cross-model integration counts per (application, endpoint).
+    # Build a lookup of cross-model integration counts per (model, application, endpoint).
     # Only covers external CMRs - in-domain CMRs have their endpoint count handled
     # through DomainCharmIntegration.exists (forced True by the user-CMR mapping constraint).
-    cmr_counts: dict[tuple[str, str], int] = {}
-    for mc in domain.models.values():
+    cmr_counts: dict[tuple[ModelRef, str, str], int] = {}
+    for model_ref, mc in domain.models.items():
         for app_int in mc.application_integrations:
             # Identify external CMR: one endpoint has a model that is NOT in the domain
             ep1_model = app_int.endpoint_1.model
@@ -238,24 +238,29 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             if (ep1_model if ep1_model != ModelRef() else ep2_model) in domain.models:
                 continue  # in-domain CMR - endpoint count flows through integration.exists
             local_ep = app_int.endpoint_1 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_2
-            key = (local_ep.application, local_ep.endpoint)
+            key = (model_ref, local_ep.application, local_ep.endpoint)
             cmr_counts[key] = cmr_counts.get(key, 0) + 1
 
     # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
             integrations_using_endpoint: list[z3.BoolRef] = []
+            cross_model_integrations_using_endpoint: list[z3.BoolRef] = []
             for integration in domain.charm_integrations:
                 if (integration.requires_charm_id == charm_id and integration.requires_endpoint == endpoint_name) or (
                     integration.provides_charm_id == charm_id and integration.provides_endpoint == endpoint_name
                 ):
                     integrations_using_endpoint.append(integration.exists)
+                    if domain.is_cross_model(integration):
+                        cross_model_integrations_using_endpoint.append(integration.exists)
 
             # Add cross-model contributions: for each (app, endpoint) that has CMR
-            # integrations, add +N when the application-to-charm mapping is active.
+            # integrations in this charm's own model, add +N when the
+            # application-to-charm mapping is active.
+            # External CMRs contribute to both the plain count and the cross-model-only count.
             cmr_terms: list[z3.ArithRef] = []
-            for (app, ep), ext_count in cmr_counts.items():
-                if ep != endpoint_name:
+            for (cmr_model_ref, app, ep), ext_count in cmr_counts.items():
+                if ep != endpoint_name or cmr_model_ref != charm.model:
                     continue
                 mapping_var = app_to_charm.get((app, charm_id))
                 if mapping_var is not None:
@@ -275,6 +280,21 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 endpoint.integrated == (endpoint.count >= 1),
                 EndpointIntegratedMatchesCountTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                ).encode(),
+            )
+
+            # Mirror the count constraint above, scoped to cross-model integrations only. Backs
+            # the cross_model() DSL filter (see dsl_lowering.py).
+            cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
+            cross_model_count_expr = z3.Sum(
+                [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
+            )
+            solver.assert_and_track(
+                endpoint.cross_model_count == cross_model_count_expr,
+                EndpointCountMatchesIntegrationsTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                    num_terms=cross_model_num_terms,
+                    cross_model=True,
                 ).encode(),
             )
 

@@ -7,7 +7,23 @@ import z3  # type: ignore[import-untyped]
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
 from .charm import EndpointType
-from .domain import Domain, ModelRef
+from .domain import Domain, DomainApplicationIntegration, DomainCharmIntegration, ModelRef
+
+
+def _active_charm_integration_for_app_int(
+    app_int: DomainApplicationIntegration, domain: Domain, model: z3.ModelRef
+) -> DomainCharmIntegration | None:
+    """Return the ``DomainCharmIntegration`` currently backing ``app_int``, if any.
+
+    A user-declared cross-model ``app_int`` is linked (via ``charm_integration_ids``) to every
+    candidate charm integration it could resolve to; only one is actually active in a given
+    solution. Returns ``None`` for external CMRs (no in-domain charm integration exists to link
+    to) or if none of the candidates evaluate as active.
+    """
+    for idx, mapping_var in app_int.charm_integration_ids.items():
+        if model.evaluate(mapping_var, model_completion=True):
+            return domain.charm_integrations[idx]
+    return None
 
 
 def _extract_single_model(
@@ -166,17 +182,32 @@ def _extract_single_model(
         remote_model_ref = remote_ep.model
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
+
+        # Resolve the offer name/URL through the shared-offer resolver when this user-declared
+        # CMR is backed by a DomainCharmIntegration (i.e. not an external CMR).
+        backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
+        resolved_offer_name: str
+        if backing_integration is not None:
+            resolved_offer_name = domain.integration_offer_name(backing_integration, model)
+            resolved_url = domain.integration_offer_url(backing_integration, model)
+        else:
+            # External CMR (no backing DomainCharmIntegration): app_int.offer_name is only
+            # non-None when the user explicitly declared one, so fall back to the same
+            # "<remote_application>-offer" default IntegrationSpec.resolved_offer_name() uses.
+            resolved_offer_name = app_int.offer_name or f"{remote_ep.application}-offer"
+            resolved_url = app_int.url
+
         # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
         # For PROVIDES: always None; the mirror pass synthesizes the URL when creating
         # the REQUIRES entry.
         url: str | None
         if charm_ep.type == EndpointType.REQUIRES:
-            if app_int.url is not None:
-                url = app_int.url
+            if resolved_url is not None:
+                url = resolved_url
             else:
                 remote_mc = domain.models.get(remote_model_ref)
                 url = (
-                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{app_int.offer_name}"
+                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{resolved_offer_name}"
                     if remote_mc is not None
                     and remote_mc.ref.controller is not None
                     and remote_model_ref.name is not None
@@ -194,7 +225,7 @@ def _extract_single_model(
                 remote_model=remote_model_ref.key,
                 remote_application=remote_ep.application,
                 remote_endpoint=remote_ep.endpoint,
-                offer_name=app_int.offer_name,
+                offer_name=resolved_offer_name,
                 url=url,
             )
         )
@@ -326,7 +357,7 @@ def extract_solution(
             continue
 
         interface = domain.integration_interface(integration)
-        offer_name = domain.integration_offer_name(integration)
+        offer_name = domain.integration_offer_name(integration, z3_model)
 
         logger.info(
             f"Discovered CMR: {prov_model_ref.key}.{prov_app}:{integration.provides_endpoint} "
@@ -334,11 +365,12 @@ def extract_solution(
             f"(interface: {interface})"
         )
 
-        # Synthesize URL for discovered CMRs (REQUIRES side only)
-        url: str | None = None
-        prov_mc = domain.models.get(prov_model_ref)
-        if prov_mc is not None and prov_mc.ref.controller is not None:
-            url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
+        # Reuse a user-declared CMR's URL sharing this offer, if any; otherwise synthesize one.
+        url = domain.integration_offer_url(integration, z3_model)
+        if url is None:
+            prov_mc = domain.models.get(prov_model_ref)
+            if prov_mc is not None and prov_mc.ref.controller is not None:
+                url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
 
         # Add REQUIRES side to the requiring model's bundle
         if req_model_ref in bundles:

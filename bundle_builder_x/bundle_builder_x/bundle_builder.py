@@ -427,6 +427,7 @@ class BundleBuilder:
                     count_tag.charm.charm_id,
                     count_tag.charm.endpoint,
                     domain,
+                    require_cross_model=count_tag.cross_model,
                 )
             )
 
@@ -460,20 +461,29 @@ class BundleBuilder:
         charm_id: int,
         endpoint_name: str,
         domain: Domain,
+        *,
+        require_cross_model: bool = False,
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
         The owning model is tried before other models (which are skipped entirely for
-        container-scoped endpoints). Existing compatible charms are reused first.
-        Application charms expose every direct alternative; transitive dependencies add
-        only the first viable candidate to keep the CEGIS domain small.
+        container-scoped endpoints), so a cheap local integration is always preferred over a
+        cross-model one -- unless ``require_cross_model`` is set (the failed assertion is
+        specifically about cross-model activity on this endpoint), in which case the owning
+        model is skipped entirely: a local candidate would satisfy the plain endpoint count but
+        not the cross-model-only one, so trying it first only wastes a CEGIS iteration. Existing
+        compatible charms are reused first. Application charms expose every direct alternative;
+        transitive dependencies add only the first viable candidate to keep the CEGIS domain small.
         """
         owning_model = domain.charms[charm_id].model
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         is_container_scoped = endpoint.scope == EndpointScope.CONTAINER
-        models = (
-            [owning_model] if is_container_scoped else [owning_model, *(m for m in domain.models if m != owning_model)]
-        )
+        if is_container_scoped:
+            models = [] if require_cross_model else [owning_model]
+        elif require_cross_model:
+            models = [m for m in domain.models if m != owning_model]
+        else:
+            models = [owning_model, *(m for m in domain.models if m != owning_model)]
 
         # Exhaust the owning model before considering any other model, so a cheap local
         # integration is always preferred over a cross-model one.
@@ -1009,9 +1019,14 @@ class BundleBuilder:
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
-        # Dedup per parent charm_id: one candidate instance is enough during expansion.
+        # Dedup per (parent charm_id, model): one candidate instance per model is enough
+        # during expansion. Scoping by model too lets a spec already added locally still be
+        # added in a different model, e.g. to satisfy a cross-model-only requirement.
         # Additional instances needed only for optimization are added after satisfiability.
-        if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
+        if any(
+            domain.charms[added_id].spec == charm and domain.charms[added_id].model == model_ref
+            for added_id in parent_charm.charms_added
+        ):
             return False
 
         # Traverse the dependency chain to detect cycles
@@ -1026,8 +1041,11 @@ class BundleBuilder:
                 continue
             visited.add(ancestor_id)
 
-            # If the charm we're trying to add is already this ancestor charm, it would create a cycle
-            if domain.charms[ancestor_id].spec == charm:
+            # If the charm we're trying to add is already this ancestor charm, it would create a
+            # cycle -- unless the new instance is in a different model, in which case it's a
+            # distinct application, not a recursive re-add of the same instance (e.g. a
+            # cross-model-only requirement satisfied by another instance of the same spec).
+            if domain.charms[ancestor_id].spec == charm and domain.charms[ancestor_id].model == model_ref:
                 return False
 
             # Continue traversing: find parents that added this ancestor

@@ -18,6 +18,7 @@ from bundle_builder_x.assertion_tags import (
     CharmEndpointPayload,
     CharmPayload,
     CharmRankBoundedTag,
+    EndpointCountMatchesIntegrationsTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -555,6 +556,106 @@ class TestExpandForEndpointContainerScope:
 
         # THEN Charmhub is only queried once, for the owning model (m1) — never for m2
         assert len(fake.find_charms_calls) == 1
+
+
+class TestAddCharmForCharmIdDedup:
+    """BundleBuilder._add_charm_for_charm_id: per-parent candidate dedup is scoped by model."""
+
+    def _domain_with_existing_local_candidate(self) -> tuple[Domain, int, Charm, ModelRef, ModelRef]:
+        """A charm needing "backend" already has one candidate spec added in its own model."""
+        domain = Domain()
+        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
+        domain.models[m1] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        domain.models[m2] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        charm_id = add_charm_to_domain(
+            _make_charm("consumer", {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload")}),
+            domain,
+            m1,
+        )
+        provider = _make_charm("provider", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")})
+        existing_id = add_charm_to_domain(provider, domain, m1)
+        domain.charms[charm_id].charms_added.append(existing_id)
+        return domain, charm_id, provider, m1, m2
+
+    def test_same_spec_can_be_added_in_a_different_model(self) -> None:
+        # GIVEN a candidate spec already added for charm_id in its own model
+        domain, charm_id, provider, _m1, m2 = self._domain_with_existing_local_candidate()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+
+        # WHEN adding the same spec again, but in a different model
+        added = builder._add_charm_for_charm_id(provider, charm_id, domain, m2)
+
+        # THEN it is not deduped away, so it can satisfy a cross-model-only requirement
+        assert added is True
+        assert any(c.spec == provider and c.model == m2 for c in domain.charms)
+
+    def test_same_spec_in_the_same_model_is_still_deduped(self) -> None:
+        # GIVEN a candidate spec already added for charm_id in its own model
+        domain, charm_id, provider, m1, _m2 = self._domain_with_existing_local_candidate()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        charms_before = len(domain.charms)
+
+        # WHEN adding the same spec again in the SAME model
+        added = builder._add_charm_for_charm_id(provider, charm_id, domain, m1)
+
+        # THEN the redundant instance is still deduped away
+        assert added is False
+        assert len(domain.charms) == charms_before
+
+    def _domain_with_ancestor_of_matching_spec(self) -> tuple[Domain, Charm, int, ModelRef, ModelRef]:
+        """A charm ("recursive-charm") has already added a dependency ("leaf-charm") that in
+        turn needs an endpoint; the candidate to satisfy that endpoint happens to share
+        recursive-charm's own spec (e.g. a charm type that can appear more than once in a
+        dependency chain, such as a database peer)."""
+        recursive_spec = _make_charm(
+            "recursive-charm",
+            {
+                "out": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload"),
+                "in": CharmEndpoint(type=EndpointType.REQUIRES, interface="dep", optional=True),
+            },
+        )
+        leaf_spec = _make_charm(
+            "leaf-charm",
+            {
+                "in": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload"),
+                "out": CharmEndpoint(type=EndpointType.PROVIDES, interface="dep"),
+            },
+        )
+        domain = Domain()
+        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
+        domain.models[m1] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        domain.models[m2] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        ancestor_id = add_charm_to_domain(recursive_spec, domain, m1)
+        leaf_id = add_charm_to_domain(leaf_spec, domain, m1)
+        domain.charms[ancestor_id].charms_added.append(leaf_id)
+        return domain, recursive_spec, leaf_id, m1, m2
+
+    def test_same_spec_as_an_ancestor_is_still_rejected_as_a_cycle_in_the_same_model(self) -> None:
+        # GIVEN leaf-charm's ancestor already has recursive-charm's spec, in the SAME model
+        domain, recursive_spec, leaf_id, m1, _m2 = self._domain_with_ancestor_of_matching_spec()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+        charms_before = len(domain.charms)
+
+        # WHEN trying to add recursive-charm again, in the SAME model as the existing ancestor
+        added = builder._add_charm_for_charm_id(recursive_spec, leaf_id, domain, m1)
+
+        # THEN it is rejected: this really would be a circular dependency (same instance)
+        assert added is False
+        assert len(domain.charms) == charms_before
+
+    def test_same_spec_as_an_ancestor_is_allowed_in_a_different_model(self) -> None:
+        # GIVEN leaf-charm's ancestor already has recursive-charm's spec, but only in model m1
+        domain, recursive_spec, leaf_id, _m1, m2 = self._domain_with_ancestor_of_matching_spec()
+        builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
+
+        # WHEN adding recursive-charm's spec again, in a DIFFERENT model (m2) -- e.g. to satisfy
+        # a cross-model-only requirement -- this is a distinct application instance, not a
+        # recursive re-add of the ancestor, so the model-scoped dedup fix must not be defeated
+        # by the (model-unaware) cycle check.
+        added = builder._add_charm_for_charm_id(recursive_spec, leaf_id, domain, m2)
+
+        assert added is True
+        assert any(c.spec == recursive_spec and c.model == m2 for c in domain.charms)
 
 
 class TestOptimizeSolution:
@@ -1588,3 +1689,100 @@ class TestCollectUnsatDiagnostics:
         assert "nrpe:general-info" in str(error)
         assert "ubuntu@22.04" in str(error)
         assert "ubuntu@24.04" in str(error)
+
+
+class TestCrossModelEndpointAssertionTags:
+    """Round-trip and dispatch coverage for EndpointCountMatchesIntegrationsTag(cross_model=True).
+
+    Backs DomainCharmEndpoint.cross_model_count, read by the cross_model() DSL filter.
+    """
+
+    def test_cross_model_endpoint_count_tag_round_trips_through_encode_decode(self) -> None:
+        # GIVEN a tag as it would be attached to a Z3 assertion
+        tag = EndpointCountMatchesIntegrationsTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=3, endpoint="backend"),
+            num_terms=2,
+            cross_model=True,
+        )
+
+        # WHEN it's encoded (as when added to the solver) and decoded back (as when read from an
+        # unsat core)
+        decoded = AssertionTag.decode(tag.encode())
+
+        # THEN the round trip reproduces the exact same tag
+        assert decoded == tag
+        assert isinstance(decoded, EndpointCountMatchesIntegrationsTag)
+        assert decoded.cross_model is True
+
+    def _domain_with_unresolved_cross_model_endpoint(self) -> tuple[Domain, int]:
+        """A single charm, with an unlimited unresolved REQUIRES endpoint, plus a second empty
+        model so a genuinely cross-model candidate can be added."""
+        domain = Domain()
+        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
+        domain.models[m1] = DomainModel(
+            arch="amd64",
+            platform="kubernetes",
+            juju_version=_JUJU,
+            applications={"consumer": DomainApplication(charm="consumer-app")},
+        )
+        domain.models[m2] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        charm_id = add_charm_to_domain(
+            _make_charm(
+                "consumer-app",
+                {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", limit=None)},
+            ),
+            domain,
+            m1,
+        )
+        return domain, charm_id
+
+    def test_handle_failed_assertion_expands_domain_for_cross_model_count_tag(self) -> None:
+        # GIVEN a domain with an unresolved endpoint (plus a second, empty model), and Charmhub
+        # able to find a candidate charm that would also be compatible locally
+        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
+        provider = _make_charm(
+            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
+        )
+        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = EndpointCountMatchesIntegrationsTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
+            num_terms=1,
+            cross_model=True,
+        )
+
+        # WHEN the tag is dispatched as a failed assertion
+        result = builder._handle_failed_assertion(tag, domain)
+
+        # THEN it's routed to endpoint-expansion logic that specifically forces the new
+        # candidate into a DIFFERENT model (not the cheaper, locally-compatible owning model),
+        # so the resulting integration genuinely satisfies the cross-model-only requirement
+        # instead of silently adding a same-model candidate that would leave it unsatisfied.
+        assert result.expanded is True
+        [new_integration] = domain.charm_integrations
+        assert domain.is_cross_model(new_integration)
+
+    def test_handle_failed_assertion_for_cross_model_count_tag_does_not_add_a_local_candidate(self) -> None:
+        # GIVEN the same setup, but with only ONE model in the domain (no remote model to expand
+        # into at all)
+        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
+        [m2] = [m for m in domain.models if m != domain.charms[charm_id].model]
+        del domain.models[m2]
+        provider = _make_charm(
+            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
+        )
+        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = EndpointCountMatchesIntegrationsTag(
+            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
+            num_terms=1,
+            cross_model=True,
+        )
+
+        # WHEN the tag is dispatched as a failed assertion
+        result = builder._handle_failed_assertion(tag, domain)
+
+        # THEN expansion correctly reports no progress, rather than silently adding a local
+        # candidate that could never satisfy the cross-model-only requirement
+        assert result.expanded is False
+        assert len(domain.charms) == 1
