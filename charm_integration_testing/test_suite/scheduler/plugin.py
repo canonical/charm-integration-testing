@@ -631,7 +631,9 @@ def _duplicate_item_for_repeat(
 
     ``copy.copy`` only copies attribute references, so without further action
     the duplicate would share *item*'s mutable ``own_markers``/``keywords``
-    and marking it afterwards would incorrectly mutate *item* too; both are
+    and ``stash`` (used elsewhere in the suite to record per-item pass/fail/
+    skip state, e.g. ``resource_tracking``); marking or reporting on the
+    duplicate would then incorrectly mutate *item* too. All three are
     replaced here with independent copies bound to the duplicate.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
@@ -644,6 +646,8 @@ def _duplicate_item_for_repeat(
         duplicate.own_markers = list(item.own_markers)
     if hasattr(item, "keywords"):
         duplicate.keywords = type(item.keywords)(duplicate)
+    if hasattr(item, "stash"):
+        duplicate.stash = type(item.stash)()
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
     _label_occurrence(
         duplicate,

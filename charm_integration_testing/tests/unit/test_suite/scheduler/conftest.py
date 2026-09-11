@@ -27,6 +27,9 @@ class FakeItem:
         self._added_marks: dict[str, Any] = {}
         # Build a real pytest Mark so read_state_marker sees genuine kwargs.
         self._state_mark = pytest.mark.state(**state_marker_kwargs).mark if state_marker_kwargs else None
+        # Real pytest.Item instances carry a per-node Stash; mirrored here so
+        # tests can exercise _duplicate_item_for_repeat's stash-isolation fix.
+        self.stash: pytest.Stash = pytest.Stash()
 
     @property
     def nodeid(self) -> str:

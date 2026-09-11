@@ -192,6 +192,20 @@ class TestDuplicateItemForRepeat:
         assert duplicate.get_closest_marker("injected") is not None
         assert item.get_closest_marker("injected") is None
 
+    def test_duplicate_has_independent_stash(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN per-item state is recorded on the duplicate's stash (as the
+        # suite's own pytest_runtest_makereport hook does for pass/fail/skip)
+        key: pytest.StashKey[str] = pytest.StashKey()
+        duplicate.stash[key] = "skipped"
+
+        # THEN the template's stash is unaffected - a recovery occurrence's
+        # outcome must not contaminate the template or other occurrences
+        assert key not in item.stash
+
     def test_different_occurrences_produce_different_nodeids(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item duplicated for two different occurrence numbers
         item = make_item("test_foo")
