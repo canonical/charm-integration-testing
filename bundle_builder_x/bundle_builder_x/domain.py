@@ -95,12 +95,8 @@ class DomainCharmEndpoint(BaseModel):
 
     count: z3.ArithRef
     integrated: z3.BoolRef
-    # cross_model_count mirrors count but only accounts for integrations whose peer lives in a
-    # different model (Domain.is_cross_model). Backs the cross_model() DSL filter so
-    # len(cross_model(endpoint[x])) reflects only genuinely cross-model activity on x, not any
-    # local activity too. bool(cross_model(endpoint[x])) is lowered as cross_model_count >= 1
-    # directly (see dsl_lowering.py), rather than via a second tracked boolean, since count's own
-    # defining constraint already gives CEGIS everything it needs to expand on failure.
+    # cross_model_count mirrors count, counting only integrations whose peer lives in a different
+    # model. Backs the cross_model() DSL filter.
     cross_model_count: z3.ArithRef
     # One Z3 Bool per feature declared on this endpoint in the charm spec.
     # Each bool is constrained to equal `endpoint.integrated` in add_charm_metadata_constraints.
@@ -206,21 +202,10 @@ class Domain(BaseModel):
         return self.charms[integration.requires_charm_id].spec.endpoints[integration.requires_endpoint].interface
 
     def integration_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None) -> str:
-        """Return the Juju offer name backing a cross-model integration.
+        """Return the Juju offer name shared by every cross-model integration between this charm pair.
 
-        All cross-model integrations between the same pair of charms share one Juju offer,
-        matching normal Juju CMR practice (an offer can expose multiple endpoints, related to
-        independently). This also happens to be what makes e.g. istio-beacon-k8s's
-        cross_model_mesh metadata land on the same offer as the workload relation it describes
-        (see docs/explanation/cross-model-mesh.md in canonical/service-mesh) -- with no
-        interface-specific knowledge needed here, since every cross-model pairing is grouped by
-        charm pair unconditionally.
-
-        If the anchor integration was user-specified (an explicit CMR in the input spec, with
-        its own resolved offer name), that name is reused verbatim instead of being synthesized:
-        otherwise a solver-discovered companion (e.g. a cross_model_mesh endpoint) would land on
-        a different offer than the real, user-declared CMR it is meant to ride alongside,
-        producing two Juju offers for the same application pair instead of one.
+        Reuses a user-declared offer name for the pair if one exists, otherwise synthesizes one
+        from the providing charm, endpoint, and interface.
         """
         anchor = self._offer_sharing_anchor(integration, z3_model)
         user_offer_name = self._user_offer_name(integration, z3_model)
@@ -233,26 +218,11 @@ class Domain(BaseModel):
     def integration_offer_url(
         self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None
     ) -> str | None:
-        """Return the user-declared SAAS URL shared by ``integration``'s pair, if any.
-
-        Mirrors :meth:`integration_offer_name`: if a sibling integration in the same
-        provides -> requires group was user-specified with an explicit ``url`` (e.g. an
-        external CMR), that URL should be reused for a solver-discovered companion riding the
-        same offer, instead of always re-synthesizing one from the providing model's controller
-        info -- which may differ from (or be unavailable for) the real, user-declared CMR.
-        Returns ``None`` if no integration in the group declared an explicit URL.
-        """
+        """Return the user-declared SAAS URL shared by ``integration``'s charm pair, if any."""
         return self._matching_user_app_integration_field(integration, z3_model, "url")
 
     def _user_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None) -> str | None:
-        """Return the user-declared offer name shared by ``integration``'s pair, if any.
-
-        See :meth:`_matching_user_app_integrations` for how the group of user-declared
-        application integrations sharing this offer is found. Raises ``ValueError`` if more
-        than one distinct offer name is declared across that group, since this codebase merges
-        all cross-model integrations between the same charm pair onto a single offer and cannot
-        satisfy two conflicting user-declared names for it.
-        """
+        """Return the user-declared offer name shared by ``integration``'s charm pair, if any."""
         return self._matching_user_app_integration_field(integration, z3_model, "offer_name")
 
     def _matching_user_app_integration_field(
@@ -260,10 +230,7 @@ class Domain(BaseModel):
     ) -> str | None:
         """Return the sole distinct, non-``None`` value of ``field`` among user-declared
         application integrations sharing ``integration``'s offer, or ``None`` if none declared one.
-
-        Raises ``ValueError`` if more than one distinct non-``None`` value is found, since this
-        codebase merges every cross-model integration between the same charm pair onto a single
-        Juju offer and cannot satisfy conflicting user-declared values for it.
+        Raises ``ValueError`` if more than one distinct value is found.
         """
         values = {
             getattr(app_int, field)
@@ -286,14 +253,7 @@ class Domain(BaseModel):
     ) -> list[DomainApplicationIntegration]:
         """Return every user-declared ``DomainApplicationIntegration`` sharing ``integration``'s offer.
 
-        Scans every active integration in the same provides -> requires group as
-        ``integration`` (not just the anchor) for ones that some model's
-        ``application_integrations`` maps to (via ``charm_integration_ids``) with an active
-        mapping variable. Checking the whole group, not just the anchor, is necessary because the
-        anchor is chosen by endpoint-name ordering and may itself be a purely solver-discovered
-        integration (e.g. a cross_model_mesh endpoint) even when a sibling integration in the same
-        group is the real, user-declared CMR. Returns an empty list if no integration in the group
-        is user-declared, or if ``z3_model`` is unavailable to evaluate mapping activity.
+        Empty if none are user-declared or ``z3_model`` is unavailable.
         """
         if z3_model is None:
             return []
@@ -319,20 +279,9 @@ class Domain(BaseModel):
     def _offer_sharing_anchor(
         self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
     ) -> DomainCharmIntegration:
-        """Return the canonical integration whose name all cross-model integrations between the
-        same two charms as ``integration``, in the same provides -> requires direction, should
-        share as their Juju offer name.
-
-        Matching is directional (same provides_charm_id/requires_charm_id), not just the same
-        unordered charm pair: a Juju offer is hosted by one application (the provider), so two
-        charms that provide *different* endpoints to each other (a mutually-required pair, e.g.
-        a cyclic relation) need two separate offers, one per direction - merging them would make
-        both directions collide on one offer name and corrupt the SAAS/offer-URL mapping.
-
-        If ``z3_model`` is given, only integrations the solver actually activated are considered;
-        otherwise (e.g. in tests exercising offer-naming in isolation) all declared integrations
-        between the pair are candidates. Ties are broken deterministically by endpoint name, so
-        every integration between the pair (in this direction) resolves to the same anchor.
+        """Return the canonical integration whose name every cross-model integration between the
+        same two charms as ``integration``, in the same provides -> requires direction, shares as
+        its Juju offer name. Ties are broken by endpoint name for determinism.
         """
         candidates = [
             other

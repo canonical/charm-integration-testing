@@ -256,8 +256,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
 
             # Add cross-model contributions: for each (app, endpoint) that has CMR
             # integrations, add +N when the application-to-charm mapping is active.
-            # External CMRs (the only kind tracked here) are inherently cross-model, so they
-            # contribute to both the plain count and the cross-model-only count.
+            # External CMRs contribute to both the plain count and the cross-model-only count.
             cmr_terms: list[z3.ArithRef] = []
             for (app, ep), ext_count in cmr_counts.items():
                 if ep != endpoint_name:
@@ -284,9 +283,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
             )
 
             # Mirror the count constraint above, scoped to cross-model integrations only. Backs
-            # the cross_model() DSL filter (see dsl_lowering.py); its bool() lowering compares
-            # cross_model_count >= 1 directly rather than tracking a second boolean, since this
-            # constraint already gives CEGIS what it needs to expand on failure.
+            # the cross_model() DSL filter (see dsl_lowering.py).
             cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
             cross_model_count_expr = z3.Sum(
                 [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
