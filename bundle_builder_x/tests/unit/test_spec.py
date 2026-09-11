@@ -853,6 +853,72 @@ class TestSpecFileEdgeCases:
                 ]
             )
 
+    def test_in_spec_cmr_offer_name_disagreeing_with_url_rejected(self) -> None:
+        # GIVEN an in-spec CMR whose offer_name names a different offer than the one embedded
+        # in its url
+        # THEN it is rejected: extraction preserves both values verbatim, so the emitted
+        # relation would be named after one offer while its url points at another.
+        with pytest.raises(ValueError, match="does not match the offer name embedded in 'url'"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e",
+                                remote_model="m-b",
+                                remote_application="rapp",
+                                remote_endpoint="re",
+                                offer_name="offer-one",
+                                url="my-ctrl:admin/m-b.offer-two",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(name="m-b", controller="lxd", applications={"rapp": AppSpec(charm="rc")}),
+                ]
+            )
+
+    def test_external_cmrs_to_same_application_with_disagreeing_offer_name_rejected(self) -> None:
+        # GIVEN two external CMRs (e.g. a primary CMR and its cross_model() companion) that both
+        # target the same remote application in the same external model, but declare offer_name
+        # values that disagree
+        # THEN it is rejected: Bundle Builder X does not create or group offers for external
+        # CMRs, so each integration would otherwise keep its own conflicting value, producing two
+        # SAAS entries for what is meant to be a single external offer.
+        with pytest.raises(ValueError, match="disagreeing offer_name/url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="offer-one",
+                                url="ctrl:admin/ext.offer-one",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re2",
+                                offer_name="offer-two",
+                                url="ctrl:admin/ext.offer-two",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
     def test_in_spec_cmr_explicit_url_preserved(self) -> None:
         # GIVEN an in-spec CMR with an explicit url and offer_name provided alongside a
         # resolvable remote model
