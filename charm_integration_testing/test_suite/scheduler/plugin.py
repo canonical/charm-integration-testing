@@ -397,7 +397,7 @@ def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> li
     """Build fresh, uniquely-named bridge items for a path from *from_state* to *to_states*.
 
     Returns ``None`` if no path exists in the full state graph (excluding any
-    edge whose transition test has already skipped once - see
+    edge whose candidate transition tests have all already skipped - see
     ``_skipped_transitions``), or if the graph claims an edge exists but no
     transition test was ever registered for it (should not happen in
     practice; the graph is built directly from registered items).
