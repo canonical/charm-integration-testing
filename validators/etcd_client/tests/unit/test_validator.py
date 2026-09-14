@@ -298,6 +298,21 @@ class TestEtcdClientValidatorRequiresSimple:
         assert not check.passed
         assert secret not in check.message
 
+    def test_redacts_credential_in_port_position_from_invalid_endpoints_message(self) -> None:
+        # A malformed "endpoints" entry with no "@" at all can still carry a credential where
+        # a port is expected (e.g. "admin:hunter2"); it must not be echoed verbatim either.
+        secret = "hunter2"
+        bad_endpoint = "admin:" + secret
+        databag = {**VALID_REQUIRER_DATABAG, "endpoints": bad_endpoint}
+        validator = _make_validator(databag)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "endpoints_format")
+        assert not check.passed
+        assert secret not in check.message
+
     def test_redacts_userinfo_containing_an_embedded_at_sign(self) -> None:
         # A userinfo segment containing a literal embedded "@" (e.g. "admin@secret@host")
         # must be fully redacted, not just up to the first "@".
@@ -1824,6 +1839,33 @@ class TestEtcdClientValidatorGrpcTarget:
         assert targets == []
         assert secret not in check.message
         assert "token" not in check.message
+
+    def test_redacts_credential_in_port_position_without_at_sign(self) -> None:
+        # A malformed uri with no "@" at all can still carry a credential where a port is
+        # expected, e.g. "https://admin:hunter2": urlsplit() parses "admin" as the hostname and
+        # fails to cast "hunter2" to a port, but "admin:hunter2" is really an unterminated
+        # "user:password" pair. The trailing non-numeric component must not be echoed verbatim.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "https://admin:" + secret
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
+
+    def test_redacts_credential_in_port_position_without_scheme_or_at_sign(self) -> None:
+        # Same as above but for a bare (scheme-less) "host:port"-style entry.
+        validator = _make_validator(VALID_REQUIRER_DATABAG)
+        secret = "hunter2"
+        uri = "admin:" + secret
+
+        targets, check = validator._pick_grpc_target(uri)
+
+        assert not check.passed
+        assert targets == []
+        assert secret not in check.message
 
     def test_redacts_userinfo_from_scheme_less_uri_message(self) -> None:
         # A bare "host:port"-style uris entry (no "//" scheme separator) can still carry

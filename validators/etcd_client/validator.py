@@ -179,13 +179,27 @@ def _redact_uri_for_message(uri: str) -> str:
     it. Query/fragment stripping is applied last, on whatever text remains (also with
     `re.DOTALL`, for the same embedded-newline reason), so it never has a chance to run before
     the userinfo redaction.
+
+    A credential can also end up in the *port* position rather than behind a terminating "@":
+    e.g. "https://admin:hunter2" has no "@" at all, so urlsplit() parses "admin" as the
+    hostname and fails to cast "hunter2" to a port, but "admin:hunter2" is really an
+    unterminated "user:password" pair. Since a genuine host:port pair's trailing component is
+    always purely ASCII digits, any entry whose trailing ":"-delimited segment (after any
+    bracketed IPv6 host, e.g. "[::1]:2379") is non-numeric is treated as a possible credential
+    and the whole remainder is withheld, rather than risking a password that merely looks like
+    a malformed port.
     """
     scheme_match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", uri)
     if scheme_match is None:
         prefix, rest = "", uri
     else:
         prefix, rest = scheme_match.group(0), uri[scheme_match.end() :]
-    rest = re.sub(r".*@", "<redacted>@", rest, flags=re.DOTALL)
+    if "@" in rest:
+        rest = re.sub(r".*@", "<redacted>@", rest, flags=re.DOTALL)
+    else:
+        after_bracket = rest[rest.rfind("]") + 1 :] if "]" in rest else rest
+        if ":" in after_bracket and not after_bracket.rsplit(":", 1)[-1].isdigit():
+            rest = "<redacted>"
     sanitized = prefix + rest
     sanitized = re.sub(r"[?#].*$", "", sanitized, flags=re.DOTALL)
     # A malformed "uris" entry that fails parsing is still rejected, but its (redacted) text is
