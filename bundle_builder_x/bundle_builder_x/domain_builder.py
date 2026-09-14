@@ -60,9 +60,12 @@ def classify_integrations(
         remote_model_key = remote_model.key
         # Keep the user-supplied offer_name if provided; otherwise leave as None so that
         # domain.py's offer-sharing/conflict-detection logic can tell a genuinely user-declared
-        # name apart from one that merely defaults to "<remote_application>-offer" (resolved_offer_name()
-        # would collapse that distinction, since it always returns a non-None value).
-        # extract.py falls back to the same default when no user or shared value is found.
+        # name apart from one that merely defaults to a synthesized name (resolved_offer_name()
+        # would collapse that distinction, since it always returns a non-None value). For in-spec
+        # CMRs, domain.integration_offer_name() synthesizes "<providing_charm>-<providing_endpoint>-
+        # <interface>-offer" when no user/shared name is found; extract.py's external-CMR branch
+        # instead falls back to "<remote_application>-offer" (there being no domain-known charm
+        # metadata to derive a more specific name from).
         offer_name = integration.offer_name
 
         # Keep the user-supplied URL if provided; otherwise leave as None.
