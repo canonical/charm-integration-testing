@@ -2,34 +2,33 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-parca-store"
+name = "validators-istio-ingress-route"
 version = "0.1.0"
-description = "Validator for parca_store (gRPC) interface"
+description = "Validator for the istio_ingress_route interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "grpcio>=1.60.0",
     "validators-base",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "types-grpcio>=1.83.0.20260730,<2",
+    "cryptography>=42.0.0",
     "validators-test-utils",
 ]
 
 [project.entry-points."endpoint_validators"]
-parca_store = "validators.parca_store:ParcaStoreValidator"
+istio_ingress_route = "validators.istio_ingress_route:IstioIngressRouteValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.parca_store"]
+packages = ["validators.istio_ingress_route"]
 
 [tool.setuptools.package-dir]
-"validators.parca_store" = "."
+"validators.istio_ingress_route" = "."
