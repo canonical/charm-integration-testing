@@ -91,16 +91,24 @@ class BaseValidator(ABC):
     def relation_exists(self) -> bool:
         return self.relation.app in self.relation.data
 
-    def resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:
-        if uri := self.databag.get(uri_key):
+    def resolve_secret(self, uri_key: str, *fields: str, data: dict[str, str] | None = None) -> dict[str, str]:
+        """Resolve credentials from *data* (default ``self.databag``) or the Juju secret it references."""
+        source = self.databag if data is None else data
+        if uri := source.get(uri_key):
             return self.charm.model.get_secret(id=uri).get_content()
-        return {f: self.databag[f] for f in fields if f in self.databag}
+        return {f: source[f] for f in fields if f in source}
 
-    def validate_schema(self, required_fields: list[str], creds: dict[str, str] | None = None) -> ValidationCheck:
-        data = self.databag.copy()
+    def validate_schema(
+        self,
+        required_fields: list[str],
+        creds: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> ValidationCheck:
+        """Check *required_fields* are present in *data* (default ``self.databag``), merged with *creds*."""
+        merged = dict(self.databag if data is None else data)
         if creds:
-            data.update(creds)
-        missing = [f for f in required_fields if not data.get(f)]
+            merged.update(creds)
+        missing = [f for f in required_fields if not merged.get(f)]
         return ValidationCheck(
             name="schema",
             passed=not missing,
