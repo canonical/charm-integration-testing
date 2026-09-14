@@ -2456,7 +2456,7 @@ version = "1.83.0.20260730"
 description = "Typing stubs for grpcio"
 optional = false
 python-versions = ">=3.10"
-groups = ["main", "dev"]
+groups = ["main"]
 files = [
     {file = "types_grpcio-1.83.0.20260730-py3-none-any.whl", hash = "sha256:400e0517d088e90ecfe302a96f09728cb9c72508d835fa0793fce552cd4e1477"},
     {file = "types_grpcio-1.83.0.20260730.tar.gz", hash = "sha256:e2b0532526a563dbb39aa6ee39fe0961488116ac1afec3065607532c93299b64"},
@@ -2752,11 +2752,12 @@ develop = true
 [package.dependencies]
 cryptography = ">=42.0.0"
 grpcio = ">=1.60.0"
+types-grpcio = {version = ">=1.83.0.20260730,<2", optional = true}
 validators-base = "*"
 validators-test-utils = {version = "*", optional = true}
 
 [package.extras]
-dev = ["validators-test-utils"]
+dev = ["types-grpcio (>=1.83.0.20260730,<2)", "validators-test-utils"]
 
 [package.source]
 type = "directory"
@@ -3531,4 +3532,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "1b45ff53214eb46c500373dc6bae622f4abf3b10c14a2d701d75001d8205ef56"
+content-hash = "3fe609b36938a1d5298b418d0fb43e7243b5444ca50337c7a1ffe0e9df59197e"
