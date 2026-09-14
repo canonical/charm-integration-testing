@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from test_suite.test_logs_privacy_check import test_logs_privacy_check
+from test_suite.test_logs_privacy_check import UNRECOGNIZED_OUTPUT_MARKER, test_logs_privacy_check
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ def test_logs_privacy_check_scans_archives_and_tolerates_bad_bytes(
     log_file.write_text("nothing interesting here")
 
     version_check = MagicMock(returncode=0)
-    scan_result = MagicMock(returncode=0, stdout="No secrets found.", stderr="")
+    scan_result = MagicMock(returncode=0, stdout=json.dumps({"level": "info-0", "msg": "no secrets found"}), stderr="")
     calls: list[list[str]] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -114,3 +114,42 @@ def test_logs_privacy_check_redacts_secrets_in_logs_and_failure(
     assert secret_value not in str(excinfo.value)
     assert "PrivateKey" in caplog.text
     assert "PrivateKey" in str(excinfo.value)
+
+
+def test_logs_privacy_check_redacts_unrecognized_output_lines(
+    tmp_path: Path,
+    logger: logging.Logger,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any TruffleHog output line that isn't a recognized finding object (valid JSON with
+    a ``DetectorName`` field) must be replaced with a constant marker, never passed through
+    verbatim. This covers both invalid JSON and JSON that lacks ``DetectorName`` -- we
+    can't assume either is free of secret material (e.g. a future TruffleHog schema change,
+    or an error line that unexpectedly echoes scanned content).
+    """
+    log_file = tmp_path / "unit-target-0.log"
+    log_file.write_text("some log line")
+
+    not_json_line = "some plain-text diagnostic line that happens to include token=abc123"
+    json_without_detector = json.dumps({"level": "error", "msg": "could not read chunk", "secret_looking": "abc123"})
+    stdout = f"{not_json_line}\n{json_without_detector}\n"
+
+    version_check = MagicMock(returncode=0)
+    scan_result = MagicMock(returncode=0, stdout=stdout, stderr="")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        if cmd[:2] == ["trufflehog", "--version"]:
+            return version_check
+        return scan_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        test_logs_privacy_check(tmp_path, logger)
+
+    assert "abc123" not in caplog.text
+    assert not_json_line not in caplog.text
+    assert json_without_detector not in caplog.text
+    assert caplog.text.count(UNRECOGNIZED_OUTPUT_MARKER) == 2

@@ -16,24 +16,28 @@ import pytest
 TRUFFLEHOG_NO_FINDINGS = 0
 TRUFFLEHOG_FINDINGS_DETECTED = 183
 
+UNRECOGNIZED_OUTPUT_MARKER = "[unrecognized TruffleHog output line - redacted for safety]"
+
 
 def _redact_finding_line(line: str) -> str:
     """Summarize a single line of TruffleHog's ``--json`` output without its secret value.
 
     TruffleHog emits one JSON object per line: either a finding (with a ``Raw``/``RawV2``
-    field holding the actual matched secret) or a diagnostic/progress log line. Only
-    TruffleHog's own pre-redacted fields (detector name, source location, verification
-    status, and its truncated ``Redacted`` value) are surfaced; the raw secret is never
-    included. Non-JSON or non-finding lines are passed through unchanged since they don't
-    carry secret material.
+    field holding the actual matched secret) or a diagnostic/progress log line.
+
+    Finding objects (valid JSON with a ``DetectorName`` field) are summarized to include only the
+    name (i.e. not reveal the secret itself in the TruffleHog report)
+
+    Lines that can't be properly parsed are replaced with a constant marker to avoid accidentally
+    leaking secrets.
     """
     try:
         data: dict[str, Any] = json.loads(line)
     except json.JSONDecodeError:
-        return line
+        return UNRECOGNIZED_OUTPUT_MARKER
 
     if "DetectorName" not in data:
-        return line
+        return UNRECOGNIZED_OUTPUT_MARKER
 
     source: dict[str, Any] = next(iter(data.get("SourceMetadata", {}).get("Data", {}).values()), {})
     location = f"{source.get('file', 'unknown file')}:{source.get('line', '?')}"
