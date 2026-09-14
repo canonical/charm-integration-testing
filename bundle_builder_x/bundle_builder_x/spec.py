@@ -306,8 +306,14 @@ class SpecFile(BaseModel):
                     # declares. If two of them disagree about the offer backing the same
                     # remote application, that is almost certainly a mistake -- catch it here
                     # rather than silently emitting two conflicting SAAS entries for one app.
+                    # Mirror extract.py's actual default synthesis for external CMRs
+                    # (`app_int.offer_name or f"{remote_ep.application}-offer"`) rather than
+                    # deriving a default from the url: an integration that omits offer_name
+                    # keeps its own url but is emitted under the "<remote_application>-offer"
+                    # name regardless of what offer_name the url happens to embed, so the
+                    # resolved value used for comparison here must match that, not the url.
                     external_key = (remote_model_key, integration.remote_application)
-                    resolved_offer_name = integration.offer_name or _offer_name_from_url(integration.url)
+                    resolved_offer_name = integration.offer_name or f"{integration.remote_application}-offer"
                     prior = seen_external_cmr_targets.get(external_key)
                     if prior is not None and prior != (resolved_offer_name, integration.url):
                         raise ValueError(
