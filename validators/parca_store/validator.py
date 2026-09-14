@@ -3,7 +3,7 @@
 
 import socket
 
-import grpc  # type: ignore[import-untyped]
+import grpc
 
 from validators.base import (
     BaseValidator,
