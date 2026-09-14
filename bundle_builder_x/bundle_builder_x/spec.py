@@ -177,6 +177,7 @@ class SpecFile(BaseModel):
             seen_local: set[tuple[str, str, str, str]] = set()
             seen_cmrs: set[tuple[str, str, str, str, str]] = set()
             seen_external_cmr_urls: dict[str, str] = {}
+            seen_external_cmr_offer_names: dict[str, str] = {}
             for integration in model_spec.integrations:
                 if not integration.is_cross_model:
                     # Local integration: both apps must be in this model
@@ -324,7 +325,24 @@ class SpecFile(BaseModel):
                             f"({prior_offer_name!r} vs {resolved_offer_name!r}); integrations "
                             "consuming the same offer must agree on its offer_name"
                         )
+                    # The converse also matters: bundle.py keys each requiring model's emitted
+                    # SAAS entries by offer_name alone (Bundle.export()'s
+                    # ``saas_entries[cmr.offer_name] = {"url": cmr.url}``), so two integrations
+                    # that resolve to the *same* offer_name but declare *different* urls would
+                    # silently collide -- the later one's url would overwrite the first's in the
+                    # emitted bundle, and both relations would end up consuming whichever offer
+                    # won that race. Reject this the same way, regardless of which side (url or
+                    # offer_name) was declared explicitly vs. left to default.
+                    prior_url = seen_external_cmr_offer_names.get(resolved_offer_name)
+                    if prior_url is not None and prior_url != integration.url:
+                        raise ValueError(
+                            f"Model '{model_name}': multiple cross-model integrations resolve to "
+                            f"offer_name '{resolved_offer_name}' with disagreeing url "
+                            f"({prior_url!r} vs {integration.url!r}); integrations sharing an "
+                            "offer_name must consume the same offer"
+                        )
                     seen_external_cmr_urls[integration.url] = resolved_offer_name
+                    seen_external_cmr_offer_names[resolved_offer_name] = integration.url
         return self
 
     @classmethod
