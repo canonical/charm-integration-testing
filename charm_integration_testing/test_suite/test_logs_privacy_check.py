@@ -39,7 +39,10 @@ def _redact_finding_line(line: str) -> str:
     if not isinstance(data, dict) or "DetectorName" not in data:
         return UNRECOGNIZED_OUTPUT_MARKER
 
-    source: dict[str, Any] = next(iter(data.get("SourceMetadata", {}).get("Data", {}).values()), {})
+    source_metadata = data.get("SourceMetadata")
+    metadata_data = source_metadata.get("Data") if isinstance(source_metadata, dict) else None
+    first_source = next(iter(metadata_data.values()), None) if isinstance(metadata_data, dict) else None
+    source: dict[str, Any] = first_source if isinstance(first_source, dict) else {}
     location = f"{source.get('file', 'unknown file')}:{source.get('line', '?')}"
     return (
         f"Detector={data.get('DetectorName', 'unknown')} "

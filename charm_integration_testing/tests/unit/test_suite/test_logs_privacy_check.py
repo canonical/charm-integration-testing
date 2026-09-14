@@ -192,3 +192,52 @@ def test_logs_privacy_check_redacts_non_object_json_lines(
     assert json_string_line not in caplog.text
     assert json_array_line not in caplog.text
     assert caplog.text.count(UNRECOGNIZED_OUTPUT_MARKER) == 2
+
+
+def test_logs_privacy_check_handles_malformed_nested_metadata(
+    tmp_path: Path,
+    logger: logging.Logger,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recognized finding object (has ``DetectorName``) with malformed/unexpected nested
+    ``SourceMetadata`` must still be summarized without raising, falling back to placeholder
+    location values instead of crashing. dict.get(key, default) only applies the default
+    when the key is absent, not when it's present but null/wrong-typed, so each nesting
+    level must be validated before being descended into.
+    """
+    log_file = tmp_path / "unit-target-0.log"
+    log_file.write_text("some log line")
+
+    secret_value = "-----BEGIN PRIVATE KEY-----\nTOTALLY-SECRET-KEY-MATERIAL\n-----END PRIVATE KEY-----"
+    findings = [
+        {"DetectorName": "PrivateKey", "Raw": secret_value, "Redacted": "redacted-1", "SourceMetadata": None},
+        {"DetectorName": "PrivateKey", "Raw": secret_value, "Redacted": "redacted-2", "SourceMetadata": {"Data": None}},
+        {
+            "DetectorName": "PrivateKey",
+            "Raw": secret_value,
+            "Redacted": "redacted-3",
+            "SourceMetadata": {"Data": {"Filesystem": "not-a-dict"}},
+        },
+    ]
+    stdout = "\n".join(json.dumps(finding) for finding in findings) + "\n"
+
+    version_check = MagicMock(returncode=0)
+    scan_result = MagicMock(returncode=183, stdout=stdout, stderr="")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        if cmd[:2] == ["trufflehog", "--version"]:
+            return version_check
+        return scan_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            test_logs_privacy_check(tmp_path, logger)
+
+    assert secret_value not in caplog.text
+    assert secret_value not in str(excinfo.value)
+    assert "Detector=PrivateKey" in caplog.text
+    assert "unknown file:?" in caplog.text
