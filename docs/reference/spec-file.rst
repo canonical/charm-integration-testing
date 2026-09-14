@@ -188,8 +188,14 @@ The spec is validated on load. The following rules are enforced:
 - An in-spec cross-model integration that sets ``url`` must also set ``offer_name``,
   and the two must agree: ``offer_name`` must equal the offer name embedded in ``url``
   (the segment after the last ``.``).
-- Multiple cross-model integrations targeting the same application in the same
-  external model (not present in this spec) must declare the same ``offer_name``/``url``.
+- External cross-model integrations (remote model not present in this spec) must agree
+  on ``offer_name`` for any two integrations that declare the exact same ``url`` (they
+  consume the same offer), and conversely must not resolve to the same ``offer_name``
+  while declaring different ``url`` values (a single remote application may legitimately
+  expose multiple distinct offers, but Bundle Builder X keys each requiring model's
+  emitted SAAS entries by ``offer_name`` alone, so reusing a name across different urls
+  would silently make one relation consume the wrong offer). An omitted ``offer_name``
+  defaults to ``<remote_application>-offer`` for this comparison.
 
 Minimal example
 ---------------

@@ -955,6 +955,43 @@ class TestSpecFileEdgeCases:
                 ]
             )
 
+    def test_external_cmrs_sharing_an_offer_name_with_disagreeing_url_rejected(self) -> None:
+        # GIVEN two external CMRs that resolve to the same offer_name, but declare different urls
+        # THEN it is rejected: Bundle.export() keys each requiring model's SAAS entries by
+        # offer_name alone, so two different urls sharing one offer_name would silently collide
+        # -- the later url would overwrite the first in the emitted bundle, and both relations
+        # would end up consuming whichever offer won that race.
+        with pytest.raises(ValueError, match="disagreeing url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="shared-name",
+                                url="ctrl:admin/ext-a.shared-name",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext2",
+                                remote_application="rapp2",
+                                remote_endpoint="re2",
+                                offer_name="shared-name",
+                                url="ctrl:admin/ext-b.shared-name",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
     def test_external_cmrs_to_same_application_with_offer_name_omitted_on_one_side_rejected(self) -> None:
         # GIVEN two external CMRs targeting the same remote application, where one declares an
         # explicit offer_name matching its url and the other omits offer_name entirely (even
