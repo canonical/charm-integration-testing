@@ -919,6 +919,45 @@ class TestSpecFileEdgeCases:
                 ]
             )
 
+    def test_external_cmrs_to_same_application_with_offer_name_omitted_on_one_side_rejected(self) -> None:
+        # GIVEN two external CMRs targeting the same remote application, where one declares an
+        # explicit offer_name matching its url and the other omits offer_name entirely (even
+        # though it shares the exact same url)
+        # THEN it is rejected: extraction resolves the omitted offer_name via the
+        # "<remote_application>-offer" default (see extract.py), *not* by reading the url, so the
+        # two integrations would be emitted under different offer names despite pointing at the
+        # same url -- this must be caught using the same defaulting rule extraction uses, not one
+        # derived from the url.
+        with pytest.raises(ValueError, match="disagreeing offer_name/url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="custom-offer",
+                                url="ctrl:admin/ext.custom-offer",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re2",
+                                url="ctrl:admin/ext.custom-offer",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
     def test_in_spec_cmr_explicit_url_preserved(self) -> None:
         # GIVEN an in-spec CMR with an explicit url and offer_name provided alongside a
         # resolvable remote model
