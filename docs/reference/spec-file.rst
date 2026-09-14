@@ -159,9 +159,11 @@ Integration
      - Controller hosting the remote model. When set, the remote model is identified as ``remote_controller/remote_model`` in the domain.
    * - ``offer_name``
      - conditional
-     - ``<remote_application>-offer``
+     - synthesized (see below)
      - CMR offer name. Required for in-spec CMRs that also set ``url`` (and must match the
-       offer name embedded in ``url``); otherwise optional.
+       offer name embedded in ``url``); otherwise optional. If omitted for an in-spec CMR,
+       Bundle Builder X synthesizes ``<providing_charm>-<providing_endpoint>-<interface>-offer``;
+       if omitted for an external CMR, it defaults to ``<remote_application>-offer``.
    * - ``url``
      - no
      - --

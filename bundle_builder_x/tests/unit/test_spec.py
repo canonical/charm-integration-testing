@@ -881,14 +881,50 @@ class TestSpecFileEdgeCases:
                 ]
             )
 
-    def test_external_cmrs_to_same_application_with_disagreeing_offer_name_rejected(self) -> None:
-        # GIVEN two external CMRs (e.g. a primary CMR and its cross_model() companion) that both
-        # target the same remote application in the same external model, but declare offer_name
-        # values that disagree
-        # THEN it is rejected: Bundle Builder X does not create or group offers for external
-        # CMRs, so each integration would otherwise keep its own conflicting value, producing two
-        # SAAS entries for what is meant to be a single external offer.
-        with pytest.raises(ValueError, match="disagreeing offer_name/url"):
+    def test_external_cmrs_to_same_application_with_distinct_offers_accepted(self) -> None:
+        # GIVEN two external CMRs targeting the same remote application, but each consuming a
+        # genuinely distinct offer (different urls, each internally consistent with its own
+        # offer_name)
+        # THEN it is accepted: a single remote application can legitimately expose multiple
+        # distinct offers (e.g. different endpoint subsets under different offer names), so this
+        # is not a conflict merely because the remote application is shared.
+        spec = SpecFile(
+            models=[
+                ModelSpec(
+                    name="m-a",
+                    controller="lxd",
+                    applications={"app": AppSpec(charm="c")},
+                    integrations=[
+                        IntegrationSpec(
+                            application="app",
+                            endpoint="e1",
+                            remote_model="ext",
+                            remote_application="rapp",
+                            remote_endpoint="re1",
+                            offer_name="offer-one",
+                            url="ctrl:admin/ext.offer-one",
+                        ),
+                        IntegrationSpec(
+                            application="app",
+                            endpoint="e2",
+                            remote_model="ext",
+                            remote_application="rapp",
+                            remote_endpoint="re2",
+                            offer_name="offer-two",
+                            url="ctrl:admin/ext.offer-two",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        assert len(spec.models_by_name["m-a"].integrations) == 2
+
+    def test_external_cmrs_sharing_a_url_with_disagreeing_offer_name_rejected(self) -> None:
+        # GIVEN two external CMRs that declare the exact same url (i.e. they consume the same
+        # underlying offer), but different offer_name values
+        # THEN it is rejected: bundle.py keys emitted SAAS entries by offer_name, so the same
+        # offer would otherwise be emitted twice under two different names.
+        with pytest.raises(ValueError, match="disagreeing offer_name"):
             SpecFile(
                 models=[
                     ModelSpec(
@@ -903,7 +939,7 @@ class TestSpecFileEdgeCases:
                                 remote_application="rapp",
                                 remote_endpoint="re1",
                                 offer_name="offer-one",
-                                url="ctrl:admin/ext.offer-one",
+                                url="ctrl:admin/ext.shared-offer",
                             ),
                             IntegrationSpec(
                                 application="app",
@@ -912,7 +948,7 @@ class TestSpecFileEdgeCases:
                                 remote_application="rapp",
                                 remote_endpoint="re2",
                                 offer_name="offer-two",
-                                url="ctrl:admin/ext.offer-two",
+                                url="ctrl:admin/ext.shared-offer",
                             ),
                         ],
                     ),
@@ -928,7 +964,7 @@ class TestSpecFileEdgeCases:
         # two integrations would be emitted under different offer names despite pointing at the
         # same url -- this must be caught using the same defaulting rule extraction uses, not one
         # derived from the url.
-        with pytest.raises(ValueError, match="disagreeing offer_name/url"):
+        with pytest.raises(ValueError, match="disagreeing offer_name"):
             SpecFile(
                 models=[
                     ModelSpec(
