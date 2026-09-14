@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -69,4 +70,47 @@ def test_logs_privacy_check_scans_archives_and_tolerates_bad_bytes(
     test_logs_privacy_check(tmp_path, logger)
 
     scan_cmd = calls[-1]
-    assert scan_cmd == ["trufflehog", "filesystem", str(tmp_path)]
+    assert scan_cmd == ["trufflehog", "filesystem", str(tmp_path), "--no-update", "--json", "--fail"]
+
+
+def test_logs_privacy_check_redacts_secrets_in_logs_and_failure(
+    tmp_path: Path,
+    logger: logging.Logger,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When TruffleHog finds a secret, neither the logged output nor the failure message
+    should contain the raw secret value; only TruffleHog's own pre-redacted summary should
+    appear.
+    """
+    log_file = tmp_path / "unit-target-0.log"
+    log_file.write_text("some log line")
+
+    secret_value = "-----BEGIN PRIVATE KEY-----\nTOTALLY-SECRET-KEY-MATERIAL\n-----END PRIVATE KEY-----"
+    finding = {
+        "SourceMetadata": {"Data": {"Filesystem": {"file": str(log_file), "line": 1}}},
+        "DetectorName": "PrivateKey",
+        "Verified": False,
+        "Raw": secret_value,
+        "RawV2": "",
+        "Redacted": "-----BEGIN PRIVATE KEY-----\nTOTALLY",
+    }
+    version_check = MagicMock(returncode=0)
+    scan_result = MagicMock(returncode=183, stdout=json.dumps(finding) + "\n", stderr="")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        if cmd[:2] == ["trufflehog", "--version"]:
+            return version_check
+        return scan_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            test_logs_privacy_check(tmp_path, logger)
+
+    assert secret_value not in caplog.text
+    assert secret_value not in str(excinfo.value)
+    assert "PrivateKey" in caplog.text
+    assert "PrivateKey" in str(excinfo.value)
