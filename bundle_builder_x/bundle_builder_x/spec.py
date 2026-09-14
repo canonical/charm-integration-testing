@@ -176,7 +176,7 @@ class SpecFile(BaseModel):
             model_name = model_spec.key
             seen_local: set[tuple[str, str, str, str]] = set()
             seen_cmrs: set[tuple[str, str, str, str, str]] = set()
-            seen_external_cmr_targets: dict[tuple[str, str], tuple[str, str]] = {}
+            seen_external_cmr_urls: dict[str, str] = {}
             for integration in model_spec.integrations:
                 if not integration.is_cross_model:
                     # Local integration: both apps must be in this model
@@ -299,30 +299,32 @@ class SpecFile(BaseModel):
                             f"Model '{model_name}': cross-model integration to external model "
                             f"'{remote_model_key}' requires a 'url' field"
                         )
-                    # Multiple integrations may target the same external application (e.g. a
-                    # cross_model() companion endpoint alongside the CMR that triggered it);
-                    # Bundle Builder X does not create or group offers for external CMRs, so
-                    # each such integration keeps whatever offer_name/url it individually
-                    # declares. If two of them disagree about the offer backing the same
-                    # remote application, that is almost certainly a mistake -- catch it here
-                    # rather than silently emitting two conflicting SAAS entries for one app.
+                    # A single remote application can legitimately expose multiple distinct
+                    # offers (different endpoint subsets under different offer names), so two
+                    # integrations to the same (remote_model, remote_application) with different
+                    # urls are not necessarily a conflict -- they may simply consume two
+                    # different offers. What *is* a conflict is two integrations whose urls
+                    # agree (i.e. they consume the very same offer, e.g. a cross_model()
+                    # companion endpoint alongside the CMR that triggered it) but whose
+                    # offer_name resolves differently; bundle.py keys the emitted SAAS entries by
+                    # offer_name, so this would silently mean the same offer is emitted twice
+                    # under different names. Key the check by url, not by remote application.
                     # Mirror extract.py's actual default synthesis for external CMRs
                     # (`app_int.offer_name or f"{remote_ep.application}-offer"`) rather than
                     # deriving a default from the url: an integration that omits offer_name
                     # keeps its own url but is emitted under the "<remote_application>-offer"
                     # name regardless of what offer_name the url happens to embed, so the
                     # resolved value used for comparison here must match that, not the url.
-                    external_key = (remote_model_key, integration.remote_application)
                     resolved_offer_name = integration.offer_name or f"{integration.remote_application}-offer"
-                    prior = seen_external_cmr_targets.get(external_key)
-                    if prior is not None and prior != (resolved_offer_name, integration.url):
+                    prior_offer_name = seen_external_cmr_urls.get(integration.url)
+                    if prior_offer_name is not None and prior_offer_name != resolved_offer_name:
                         raise ValueError(
-                            f"Model '{model_name}': multiple cross-model integrations target external "
-                            f"application '{integration.remote_application}' in model '{remote_model_key}' "
-                            f"with disagreeing offer_name/url ({prior} vs "
-                            f"{(resolved_offer_name, integration.url)}); they must agree on a single offer"
+                            f"Model '{model_name}': multiple cross-model integrations declare url "
+                            f"'{integration.url}' with disagreeing offer_name "
+                            f"({prior_offer_name!r} vs {resolved_offer_name!r}); integrations "
+                            "consuming the same offer must agree on its offer_name"
                         )
-                    seen_external_cmr_targets[external_key] = (resolved_offer_name, integration.url)
+                    seen_external_cmr_urls[integration.url] = resolved_offer_name
         return self
 
     @classmethod
