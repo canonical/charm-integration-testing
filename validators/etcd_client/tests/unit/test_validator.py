@@ -448,30 +448,18 @@ class TestEtcdClientValidatorRequiresSimple:
         check = next(c for c in result.checks if c.name == "tls_ca_validity_period")
         assert not check.passed
 
-    @pytest.mark.parametrize("disabled_value", ["disabled", "false", "False"])
-    def test_fails_tls_enabled_check_when_tls_not_advertised(self, disabled_value: str) -> None:
-        databag = {**VALID_REQUIRER_DATABAG, "tls": disabled_value}
+    def test_passes_when_tls_field_absent_from_databag(self) -> None:
+        # Real charmed-etcd never populates the "tls" boolean (only "tls-ca"); since
+        # this interface is mTLS-only, "tls-ca" presence already implies TLS is
+        # mandatory, so a missing "tls" field must not fail schema validation.
+        databag = {k: v for k, v in VALID_REQUIRER_DATABAG.items() if k != "tls"}
         validator = _make_validator(databag)
 
         result = validator.validate(level="simple")
 
-        assert result.status == "FAIL"
-        check = next(c for c in result.checks if c.name == "tls_enabled")
-        assert not check.passed
-
-    @pytest.mark.parametrize("typo_value", ["flase", "no", "0", "enable"])
-    def test_fails_tls_enabled_check_for_unrecognized_value(self, typo_value: str) -> None:
-        # An allowlist (not a denylist) must be used for "tls": an unrecognized spelling
-        # like a typo of "enabled"/"true" must be treated as not-enabled rather than
-        # silently passing just because it doesn't match one of the known-disabled strings.
-        databag = {**VALID_REQUIRER_DATABAG, "tls": typo_value}
-        validator = _make_validator(databag)
-
-        result = validator.validate(level="simple")
-
-        assert result.status == "FAIL"
-        check = next(c for c in result.checks if c.name == "tls_enabled")
-        assert not check.passed
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert schema_check.passed
+        assert not any(c.name == "tls_enabled" for c in result.checks)
 
     def test_fails_uris_format_check_for_whitespace_in_hostname(self) -> None:
         databag = {**VALID_REQUIRER_DATABAG, "uris": "https://bad host:2379"}

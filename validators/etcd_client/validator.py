@@ -141,7 +141,7 @@ _DEFAULT_CLIENT_KEY_PATH = "/etc/validators/etcd-client/client.key"
 ETCD_CLIENT_CERT_PATH_ENV = "VALIDATOR_ETCD_CLIENT_CERT_PATH"
 ETCD_CLIENT_KEY_PATH_ENV = "VALIDATOR_ETCD_CLIENT_KEY_PATH"
 
-_REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "tls", "version"]
+_REQUIRER_FIELDS = ["endpoints", "uris", "username", "tls-ca", "version"]
 # "prefix" is checked separately from validate_schema() (see _validate_provides): an
 # intentionally empty prefix (root of the keyspace) is a valid value, so its presence
 # must be checked by key rather than truthiness, unlike "mtls-cert" which must be non-empty.
@@ -211,6 +211,13 @@ class EtcdClientValidator(BaseValidator):
     resolved). The matching private key is never conveyed over the relation by
     design and must be supplied out-of-band (see ``ETCD_CLIENT_KEY_PATH_ENV``)
     for live connectivity/read-write checks.
+
+    The provider's response model also defines a boolean ``tls`` field (same
+    secret group as ``tls-ca``), but the real ``charmed-etcd`` charm never
+    populates it -- only ``tls-ca`` is ever set. Since this interface is
+    mTLS-only (there is no non-TLS mode to distinguish), ``tls-ca``'s presence
+    already implies TLS is mandatory, so ``tls`` is treated as optional,
+    informational-only data rather than a required schema field.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -238,11 +245,6 @@ class EtcdClientValidator(BaseValidator):
             return self._make_result(level=level, checks=checks)
 
         data = self.databag | creds
-
-        tls_check = self._check_tls_enabled(data["tls"])
-        checks.append(tls_check)
-        if not tls_check.passed:
-            return self._make_result(level=level, checks=checks)
 
         endpoints_check = self._check_endpoints_format(data["endpoints"])
         checks.append(endpoints_check)
@@ -298,30 +300,6 @@ class EtcdClientValidator(BaseValidator):
             **self.resolve_secret("secret-user", "username", "uris"),
             **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
-
-    # Explicit allowlist rather than a denylist of "disabled" spellings: a denylist would
-    # silently treat any typo or unrecognized value (e.g. "flase", "no", "0") as enabled, since
-    # it isn't one of the specific rejected spellings.
-    _TLS_ENABLED_VALUES = ("enabled", "true", "True")
-
-    def _check_tls_enabled(self, tls: str) -> ValidationCheck:
-        """Verify the provider actually advertises TLS as enabled on this relation.
-
-        A missing, disabled, or unrecognized ``tls`` value would mean this validator's
-        mTLS-only probe (and charmed-etcd's own TLS-only posture) is being run against a
-        relation that never claimed to support it, so schema presence alone (a non-empty
-        string) is not enough.
-        """
-        if tls.strip() not in self._TLS_ENABLED_VALUES:
-            return ValidationCheck(
-                name="tls_enabled",
-                passed=False,
-                message=(
-                    f"Relation advertises tls='{tls}', which is not a recognized enabled value; "
-                    "this interface is only usable over TLS."
-                ),
-            )
-        return ValidationCheck(name="tls_enabled", passed=True, message="OK")
 
     def _check_tcp_reachable(self, targets: list[str]) -> tuple[ValidationCheck, float]:
         """Best-effort L1 reachability: open a raw TCP connection to an advertised target.
