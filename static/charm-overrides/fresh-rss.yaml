@@ -1,0 +1,4 @@
+---
+# fresh-rss is intentionally excluded from bundle building.
+# The latest supported base is 18.04, and the Charmhub-linked repository no longer exists.
+listed: false
