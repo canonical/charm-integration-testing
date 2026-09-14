@@ -32,11 +32,11 @@ def _redact_finding_line(line: str) -> str:
     leaking secrets.
     """
     try:
-        data: dict[str, Any] = json.loads(line)
+        data = json.loads(line)
     except json.JSONDecodeError:
         return UNRECOGNIZED_OUTPUT_MARKER
 
-    if "DetectorName" not in data:
+    if not isinstance(data, dict) or "DetectorName" not in data:
         return UNRECOGNIZED_OUTPUT_MARKER
 
     source: dict[str, Any] = next(iter(data.get("SourceMetadata", {}).get("Data", {}).values()), {})
