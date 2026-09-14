@@ -160,3 +160,7 @@ Unioning
 istio
 ConfigMap
 istiod's
+SAAS
+synthesized
+synthesizes
+urls
