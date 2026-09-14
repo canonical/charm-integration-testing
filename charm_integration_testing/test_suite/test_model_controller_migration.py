@@ -20,6 +20,12 @@ def test_model_controller_migration(
 ) -> None:
     temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
 
+    # Model migration is broken in juju >= 4.0.0: the client requires a MigrationTarget v8
+    # facade the 4.0.14 server doesn't implement, blocking all password-authenticated migration.
+    # See https://github.com/juju/juju/issues/23281
+    if juju_client.version(target_model_ref).major >= 4:
+        pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
+
     # Validate all applications and relations before migration
     juju_client.validate_model(model=target_model_ref, level="deep")
 
