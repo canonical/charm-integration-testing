@@ -56,6 +56,10 @@ class FakeItem:
         # Mirrors real pytest.Item.keywords, so tests can exercise
         # _duplicate_item_for_repeat's keywords-copying logic.
         self.keywords: FakeKeywords = FakeKeywords(self)
+        # Mirrors real pytest.Item.user_properties (populated via
+        # record_property), so tests can exercise
+        # _duplicate_item_for_repeat's user_properties-isolation fix.
+        self.user_properties: list[tuple[str, object]] = []
 
     @property
     def nodeid(self) -> str:

@@ -631,10 +631,12 @@ def _duplicate_item_for_repeat(
     aliasing the original item's.
 
     ``copy.copy`` only copies attribute references, so without further action
-    the duplicate would share *item*'s mutable ``own_markers``/``keywords``
-    and ``stash`` (used elsewhere in the suite to record per-item pass/fail/
-    skip state, e.g. ``resource_tracking``); marking or reporting on the
-    duplicate would then incorrectly mutate *item* too. All three are
+    the duplicate would share *item*'s mutable ``own_markers``/``keywords``,
+    ``stash`` (used elsewhere in the suite to record per-item pass/fail/
+    skip state, e.g. ``resource_tracking``), and ``user_properties`` (used by
+    the ``execution_metadata``/``record_property`` fixture to attach JUnit
+    metadata); marking, reporting on, or recording metadata for the
+    duplicate would then incorrectly mutate *item* too. All four are
     replaced here with independent copies bound to the duplicate. The
     ``keywords`` mapping is rebuilt after relabeling (it seeds itself from
     the node's ``name`` at construction) and repopulated with *item*'s own
@@ -651,6 +653,8 @@ def _duplicate_item_for_repeat(
         duplicate.own_markers = list(item.own_markers)
     if hasattr(item, "stash"):
         duplicate.stash = type(item.stash)()
+    if hasattr(item, "user_properties"):
+        duplicate.user_properties = list(item.user_properties)
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
     _label_occurrence(
         duplicate,

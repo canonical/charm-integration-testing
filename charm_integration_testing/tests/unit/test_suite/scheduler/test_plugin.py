@@ -206,6 +206,21 @@ class TestDuplicateItemForRepeat:
         # outcome must not contaminate the template or other occurrences
         assert key not in item.stash
 
+    def test_duplicate_has_independent_user_properties(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # WHEN JUnit metadata is recorded on the duplicate (as the suite's
+        # execution_metadata fixture does via record_property, which appends
+        # to item.user_properties)
+        duplicate.user_properties.append(("category", "value"))
+
+        # THEN the template's user_properties list is unaffected - a
+        # recovery occurrence's metadata must not leak onto the template or
+        # other occurrences
+        assert ("category", "value") not in item.user_properties
+
     def test_duplicate_keywords_carry_over_template_entries_under_the_new_name(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
