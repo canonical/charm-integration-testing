@@ -23,6 +23,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    ParsedOfferUrl,
 )
 from .version import JujuVersion
 
@@ -48,5 +49,6 @@ __all__ = [
     "JujuVersion",
     "JujuWaitState",
     "JujuWaitTimeoutError",
+    "ParsedOfferUrl",
     "warn_performance",
 ]

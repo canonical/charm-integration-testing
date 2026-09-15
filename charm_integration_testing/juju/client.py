@@ -312,6 +312,10 @@ class JujuClient:
         self.logger.info("Getting list of consumed offers.")
         return self.backend.list_consumed_offers(model)
 
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        self.logger.info(f"Resolving application behind consumed offer '{offer.url}'.")
+        return self.backend.resolve_consumed_offer_application(offer)
+
     def application_revision(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
         applications = self.backend.list_applications(model)
