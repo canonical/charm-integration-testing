@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import textwrap
 
+from pytest import Pytester
 
-def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: object) -> None:
+
+def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
 
     By the time ``pytest_runtest_protocol``'s hookwrapper resumes after
