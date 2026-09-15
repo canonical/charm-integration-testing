@@ -51,6 +51,8 @@ class JujuApplicationInfo:
     charm: str
     revision: int
     channel: CharmChannel | None = None
+    # Ubuntu base the application is deployed on (e.g. "22.04"), when known.
+    base: str | None = None
 
 
 @dataclass(frozen=True)

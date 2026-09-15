@@ -1920,6 +1920,55 @@ class TestJubilantBackend:
             assert app_info.revision == 1
             assert app_info.channel == CharmChannel(track="1.0", risk="stable", branch="")
 
+        def test_with_base(self) -> None:
+            # GIVEN
+            class ModelStatusWithBase:
+                def __init__(self) -> None:
+                    self.apps = {
+                        "my-app": jubilant.statustypes.AppStatus(
+                            charm="my-charm",
+                            charm_origin="charmhub",
+                            charm_name="my-charm",
+                            charm_rev=1,
+                            exposed=False,
+                            base=jubilant.statustypes.FormattedBase(name="ubuntu", channel="22.04"),
+                        )
+                    }
+
+            class StatusStubClientWithBase:
+                def status(self) -> ModelStatusWithBase:
+                    return ModelStatusWithBase()
+
+            class ModelStubWithBase:
+                def __init__(self) -> None:
+                    self.client = StatusStubClientWithBase()
+
+                def status(self) -> ModelStatusWithBase:
+                    return self.client.status()
+
+            client = JubilantClientStub(client=ModelStubWithBase())
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications(TEST_MODEL)
+
+            # THEN
+            assert len(applications) == 1
+            app_info = applications["my-app"]
+            assert app_info.charm == "my-charm"
+            assert app_info.revision == 1
+            assert app_info.base == "22.04"
+
+        def test_without_base(self) -> None:
+            # GIVEN a status where jubilant did not resolve a base (e.g. app still settling)
+            client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications(TEST_MODEL)
+
+            # THEN base is None rather than silently propagating a stale/wrong value
+            app_info = applications["my-app"]
+            assert app_info.base is None
+
     class TestListConsumedOffers:
         class Client(JubilantClientStub):
             def __init__(self) -> None:
