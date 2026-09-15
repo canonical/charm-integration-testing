@@ -85,14 +85,10 @@ class JujuIntegration:
 class ParsedOfferUrl:
     """The parts of a consumed offer's URL (``controller:user/model.offer-name``).
 
-    ``model``'s ``JujuModelHandle.model`` is the bare model name (without the owner), matching how
-    models are otherwise identified/compared throughout this framework (e.g. against models already
-    tracked without an owner prefix). Callers that need to directly address the offering model (e.g.
-    for a status query) should qualify it with ``owner``, since Juju CLI addressing may require it
-    when the model's owner differs from the currently authenticated user.
+    ``model`` carries the owner parsed from the URL, so callers can address the offering model
+    directly via ``model.uri``.
     """
 
-    owner: str
     model: JujuModelHandle
     offer_name: str
 
@@ -119,5 +115,5 @@ class JujuConsumedOfferInfo:
         if not controller or not owner or not model or not offer_name:
             return None
         return ParsedOfferUrl(
-            owner=owner, model=JujuModelHandle(controller=controller, model=model), offer_name=offer_name
+            model=JujuModelHandle(controller=controller, model=model, owner=owner), offer_name=offer_name
         )
