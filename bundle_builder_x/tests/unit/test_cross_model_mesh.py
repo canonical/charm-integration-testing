@@ -1226,3 +1226,72 @@ class TestCrossModelMeshExternalCmrCountParityConstraint:
         # THEN unsatisfiable: managed side is cross-model, mesh side is not -- still correctly
         # rejected, confirming the bool() swap doesn't regress the original fix.
         assert solver.check() == z3.unsat
+
+    def _external_managed_domain(self, *, include_mesh_cmr: bool) -> tuple[Domain, int]:
+        """A provider with a genuinely external CMR (remote model outside the domain) on its
+        managed endpoint, and optionally a second one on provide-cmr-mesh."""
+        integrations = [
+            DomainApplicationIntegration(
+                endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve-a"),
+                endpoint_2=DomainApplicationEndpoint(
+                    application="consumer", endpoint="backend-a", model=ModelRef(name="external-model")
+                ),
+                offer_name="external-serve-offer",
+            )
+        ]
+        if include_mesh_cmr:
+            integrations.append(
+                DomainApplicationIntegration(
+                    endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="provide-cmr-mesh"),
+                    endpoint_2=DomainApplicationEndpoint(
+                        application="consumer", endpoint="require-cmr-mesh", model=ModelRef(name="external-model")
+                    ),
+                    offer_name="external-mesh-offer",
+                )
+            )
+        provider = _make_charm(
+            "provider-app",
+            {
+                "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh"),
+                "serve-a": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_a"),
+                "serve-b": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload_b", optional=True),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=integrations,
+                ),
+            }
+        )
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+        return domain, provider_id
+
+    def test_bool_parity_rejects_real_external_cmr_without_mesh_companion(self) -> None:
+        # GIVEN a genuinely external CMR (remote model outside the domain) on the managed
+        # endpoint, but none at all on provide-cmr-mesh.
+        domain, provider_id = self._external_managed_domain(include_mesh_cmr=False)
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[provider_id].exists)
+        solver.add(self._bool_parity_expr(provider_id, domain))
+
+        # THEN unsatisfiable: cmr_counts correctly attributes the external CMR to serve-a only.
+        assert solver.check() == z3.unsat
+
+    def test_bool_parity_accepts_real_external_cmr_with_mesh_companion(self) -> None:
+        # GIVEN a genuinely external CMR on both the managed endpoint and provide-cmr-mesh
+        domain, provider_id = self._external_managed_domain(include_mesh_cmr=True)
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[provider_id].exists)
+        solver.add(self._bool_parity_expr(provider_id, domain))
+
+        # THEN satisfiable: both sides report a genuine external CMR.
+        assert solver.check() == z3.sat
