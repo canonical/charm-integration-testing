@@ -23,6 +23,10 @@
 # Optional provides:
 #   grafana-dashboard (grafana-dashboard): Grafana not discoverable on machine
 #     platform via Charmhub search API.
+#
+# listed: false -- required `dashboard` endpoint's only provider, ceph-mon, is
+# globally delisted (SQT-1081); missed from that sweep. See issue GH-814.
+listed: false
 overrides:
   - assumes: [unsupported-openstack]
     requires:
