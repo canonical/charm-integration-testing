@@ -36,7 +36,8 @@ Structure
            remote_application: vault
            remote_endpoint: vault-pki
            remote_model: pki-infra        # must match another model's name
-           offer_name: vault-pki-offer    # optional, defaults to <remote_app>-offer
+           offer_name: vault-pki-offer    # optional if url is omitted; required (and must match
+                                           # the offer name embedded in url) if url is set
 
          # Cross-model integration (external)
          - application: app-a
@@ -157,9 +158,15 @@ Integration
      - --
      - Controller hosting the remote model. When set, the remote model is identified as ``remote_controller/remote_model`` in the domain.
    * - ``offer_name``
-     - no
-     - ``<remote_application>-offer``
-     - CMR offer name.
+     - conditional
+     - synthesized (see below)
+     - CMR offer name. Required for in-spec CMRs that also set ``url`` (and must match the
+       offer name embedded in ``url``); otherwise optional. If omitted for an in-spec CMR,
+       Bundle Builder X reuses any explicit ``offer_name`` already declared by another active
+       cross-model integration between the same provider/requirer charm pair; only if the pair
+       has no declared name does it synthesize
+       ``<providing_charm>-<providing_endpoint>-<interface>-offer``. If omitted for an external
+       CMR, it defaults to ``<remote_application>-offer``.
    * - ``url``
      - no
      - --
@@ -181,6 +188,31 @@ The spec is validated on load. The following rules are enforced:
 - Duplicate cross-model integrations (same local app, endpoint, remote model,
   remote app, remote endpoint) are rejected.
 - A cross-model integration cannot target the current model.
+- An in-spec cross-model integration that sets ``url`` must also set ``offer_name``,
+  and the two must agree: ``offer_name`` must equal the offer name embedded in ``url``
+  (the segment after the last ``.``).
+- Cross-model integrations that declare an explicit ``url`` -- whether in-spec or
+  external -- must agree on ``offer_name`` for any two integrations that declare the
+  exact same ``url`` (they consume the same offer), and conversely must not resolve to
+  the same ``offer_name`` while declaring different ``url`` values (a single remote
+  application may legitimately expose multiple distinct offers, but Bundle Builder X
+  keys each requiring model's emitted SAAS entries by ``offer_name`` alone, so reusing a
+  name across different urls would silently make one relation consume the wrong offer).
+  An external CMR that omits ``offer_name`` defaults to ``<remote_application>-offer``
+  for this comparison. In-spec CMRs that omit ``url`` are not covered by this
+  spec-validation-time check -- this includes both an in-spec CMR that omits
+  ``offer_name`` too (whose name is only resolved once Bundle Builder X selects a
+  charm-pair anchor at build time) and one that declares ``offer_name`` explicitly
+  without a ``url`` (whose declared name is retained, but not yet checked against
+  other CMRs here since this check is keyed by ``url``) -- see below.
+- After Bundle Builder X resolves every cross-model integration's offer_name and url
+  (including in-spec CMRs that omitted both and rely on synthesis), the same
+  bidirectional agreement rule is re-checked once more for the fully-resolved values in
+  each requiring model. This catches cases the spec-validation-time check above cannot
+  see -- for example, two different instances of the same provider charm, endpoint, and
+  interface each synthesizing the same default offer_name while pointing at different
+  provider models -- and rejects the build rather than silently emitting a bundle with
+  one relation consuming the wrong offer.
 
 Minimal example
 ---------------

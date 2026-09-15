@@ -95,6 +95,9 @@ class DomainCharmEndpoint(BaseModel):
 
     count: z3.ArithRef
     integrated: z3.BoolRef
+    # cross_model_count mirrors count, counting only integrations whose peer lives in a different
+    # model. Backs the cross_model() DSL filter.
+    cross_model_count: z3.ArithRef
     # One Z3 Bool per feature declared on this endpoint in the charm spec.
     # Each bool is constrained to equal `endpoint.integrated` in add_charm_metadata_constraints.
     features: dict[str, z3.BoolRef] = Field(default_factory=dict)
@@ -198,10 +201,99 @@ class Domain(BaseModel):
     def integration_interface(self, integration: DomainCharmIntegration) -> str:
         return self.charms[integration.requires_charm_id].spec.endpoints[integration.requires_endpoint].interface
 
-    def integration_offer_name(self, integration: DomainCharmIntegration) -> str:
-        prov_charm = self.charms[integration.provides_charm_id]
-        interface = self.integration_interface(integration)
-        return f"{prov_charm.spec.name}-{integration.provides_endpoint}-{interface}-offer".replace("_", "-")
+    def integration_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None) -> str:
+        """Return the Juju offer name shared by every cross-model integration between this charm pair.
+
+        Reuses a user-declared offer name for the pair if one exists, otherwise synthesizes one
+        from the providing charm, endpoint, and interface.
+        """
+        anchor = self._offer_sharing_anchor(integration, z3_model)
+        user_offer_name = self._user_offer_name(integration, z3_model)
+        if user_offer_name is not None:
+            return user_offer_name
+        interface = self.integration_interface(anchor)
+        prov_charm = self.charms[anchor.provides_charm_id]
+        return f"{prov_charm.spec.name}-{anchor.provides_endpoint}-{interface}-offer".replace("_", "-")
+
+    def integration_offer_url(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None = None
+    ) -> str | None:
+        """Return the user-declared SAAS URL shared by ``integration``'s charm pair, if any."""
+        return self._matching_user_app_integration_field(integration, z3_model, "url")
+
+    def _user_offer_name(self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None) -> str | None:
+        """Return the user-declared offer name shared by ``integration``'s charm pair, if any."""
+        return self._matching_user_app_integration_field(integration, z3_model, "offer_name")
+
+    def _matching_user_app_integration_field(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None, field: str
+    ) -> str | None:
+        """Return the sole distinct, non-``None`` value of ``field`` among user-declared
+        application integrations sharing ``integration``'s offer, or ``None`` if none declared one.
+        Raises ``ValueError`` if more than one distinct value is found.
+        """
+        values = {
+            getattr(app_int, field)
+            for app_int in self._matching_user_app_integrations(integration, z3_model)
+            if getattr(app_int, field) is not None
+        }
+        if len(values) > 1:
+            prov_charm = self.charms[integration.provides_charm_id]
+            req_charm = self.charms[integration.requires_charm_id]
+            raise ValueError(
+                f"Conflicting user-declared {field!r} values {sorted(values)!r} found across cross-model "
+                f"integrations between '{prov_charm.spec.name}' and '{req_charm.spec.name}'; all cross-model "
+                "integrations between the same charm pair share one Juju offer, so their declared "
+                f"{field!r} must agree."
+            )
+        return next(iter(values), None)
+
+    def _matching_user_app_integrations(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
+    ) -> list[DomainApplicationIntegration]:
+        """Return every user-declared ``DomainApplicationIntegration`` sharing ``integration``'s offer.
+
+        Empty if none are user-declared or ``z3_model`` is unavailable.
+        """
+        if z3_model is None:
+            return []
+        group_idxs = {
+            i
+            for i, other in enumerate(self.charm_integrations)
+            if self.is_cross_model(other)
+            and other.provides_charm_id == integration.provides_charm_id
+            and other.requires_charm_id == integration.requires_charm_id
+            and z3_model.evaluate(other.exists, model_completion=True)
+        }
+        if not group_idxs:
+            return []
+        matches = []
+        for idx in sorted(group_idxs):
+            for mc in self.models.values():
+                for app_int in mc.application_integrations:
+                    mapping_var = app_int.charm_integration_ids.get(idx)
+                    if mapping_var is not None and z3_model.evaluate(mapping_var, model_completion=True):
+                        matches.append(app_int)
+        return matches
+
+    def _offer_sharing_anchor(
+        self, integration: DomainCharmIntegration, z3_model: z3.ModelRef | None
+    ) -> DomainCharmIntegration:
+        """Return the canonical integration whose name every cross-model integration between the
+        same two charms as ``integration``, in the same provides -> requires direction, shares as
+        its Juju offer name. Ties are broken by endpoint name for determinism.
+        """
+        candidates = [
+            other
+            for other in self.charm_integrations
+            if self.is_cross_model(other)
+            and other.provides_charm_id == integration.provides_charm_id
+            and other.requires_charm_id == integration.requires_charm_id
+            and (z3_model is None or z3_model.evaluate(other.exists, model_completion=True))
+        ]
+        if not candidates:
+            return integration
+        return min(candidates, key=lambda o: (o.provides_endpoint, o.requires_endpoint))
 
 
 def _refresh_application_integration_mappings(domain: Domain) -> None:
@@ -412,6 +504,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
                 name: DomainCharmEndpoint(
                     count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_count"),
                     integrated=z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_integrated"),
+                    cross_model_count=z3.Int(f"charm_{charm.name}_{charm_id}_endpoint_{name}_cross_model_count"),
                     features={
                         f: z3.Bool(f"charm_{charm.name}_{charm_id}_endpoint_{name}_feature_{f}")
                         for f in endpoint.features
