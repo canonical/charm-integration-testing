@@ -176,8 +176,16 @@ class SpecFile(BaseModel):
             model_name = model_spec.key
             seen_local: set[tuple[str, str, str, str]] = set()
             seen_cmrs: set[tuple[str, str, str, str, str]] = set()
-            seen_external_cmr_urls: dict[str, str] = {}
-            seen_external_cmr_offer_names: dict[str, str] = {}
+            # Track by url and by offer_name across *all* CMRs with an explicit url (both
+            # in-spec and external): Bundle.export() keys every requiring model's emitted SAAS
+            # entries by offer_name alone (``saas_entries[cmr.offer_name] = {"url": cmr.url}``),
+            # so a collision is possible regardless of whether the CMR is in-spec or external.
+            # In-spec CMRs that omit url (and therefore offer_name, since url requires it) are
+            # not covered here: their offer_name is only resolved later, at Domain-build time,
+            # via integration_offer_name()'s charm-pair anchor sharing, which isn't available
+            # during this spec-level validation pass.
+            seen_cmr_urls: dict[str, str] = {}
+            seen_cmr_offer_names: dict[str, str] = {}
             for integration in model_spec.integrations:
                 if not integration.is_cross_model:
                     # Local integration: both apps must be in this model
@@ -293,6 +301,19 @@ class SpecFile(BaseModel):
                                 f"that does not match the offer name embedded in 'url' "
                                 f"({url_offer_name!r}); the two must agree"
                             )
+                    # An in-spec CMR with an explicit url always has offer_name too (enforced
+                    # above), so its resolved offer_name/url pair is known here and must be
+                    # checked against every other CMR (in-spec or external) sharing this
+                    # requiring model, the same way external CMRs are checked below -- see
+                    # seen_cmr_urls/seen_cmr_offer_names for why this must be bidirectional.
+                    if integration.url is not None and integration.offer_name is not None:
+                        self._check_cmr_offer_consistency(
+                            model_name=model_name,
+                            url=integration.url,
+                            resolved_offer_name=integration.offer_name,
+                            seen_cmr_urls=seen_cmr_urls,
+                            seen_cmr_offer_names=seen_cmr_offer_names,
+                        )
                 else:
                     # External CMR: url is required
                     if integration.url is None:
@@ -317,33 +338,50 @@ class SpecFile(BaseModel):
                     # name regardless of what offer_name the url happens to embed, so the
                     # resolved value used for comparison here must match that, not the url.
                     resolved_offer_name = integration.offer_name or f"{integration.remote_application}-offer"
-                    prior_offer_name = seen_external_cmr_urls.get(integration.url)
-                    if prior_offer_name is not None and prior_offer_name != resolved_offer_name:
-                        raise ValueError(
-                            f"Model '{model_name}': multiple cross-model integrations declare url "
-                            f"'{integration.url}' with disagreeing offer_name "
-                            f"({prior_offer_name!r} vs {resolved_offer_name!r}); integrations "
-                            "consuming the same offer must agree on its offer_name"
-                        )
-                    # The converse also matters: bundle.py keys each requiring model's emitted
-                    # SAAS entries by offer_name alone (Bundle.export()'s
-                    # ``saas_entries[cmr.offer_name] = {"url": cmr.url}``), so two integrations
-                    # that resolve to the *same* offer_name but declare *different* urls would
-                    # silently collide -- the later one's url would overwrite the first's in the
-                    # emitted bundle, and both relations would end up consuming whichever offer
-                    # won that race. Reject this the same way, regardless of which side (url or
-                    # offer_name) was declared explicitly vs. left to default.
-                    prior_url = seen_external_cmr_offer_names.get(resolved_offer_name)
-                    if prior_url is not None and prior_url != integration.url:
-                        raise ValueError(
-                            f"Model '{model_name}': multiple cross-model integrations resolve to "
-                            f"offer_name '{resolved_offer_name}' with disagreeing url "
-                            f"({prior_url!r} vs {integration.url!r}); integrations sharing an "
-                            "offer_name must consume the same offer"
-                        )
-                    seen_external_cmr_urls[integration.url] = resolved_offer_name
-                    seen_external_cmr_offer_names[resolved_offer_name] = integration.url
+                    self._check_cmr_offer_consistency(
+                        model_name=model_name,
+                        url=integration.url,
+                        resolved_offer_name=resolved_offer_name,
+                        seen_cmr_urls=seen_cmr_urls,
+                        seen_cmr_offer_names=seen_cmr_offer_names,
+                    )
         return self
+
+    @staticmethod
+    def _check_cmr_offer_consistency(
+        *,
+        model_name: str,
+        url: str,
+        resolved_offer_name: str,
+        seen_cmr_urls: dict[str, str],
+        seen_cmr_offer_names: dict[str, str],
+    ) -> None:
+        """Reject a CMR (in-spec or external) whose url/offer_name conflicts with a prior one.
+
+        Bundle.export() keys each requiring model's emitted SAAS entries by offer_name alone
+        (``saas_entries[cmr.offer_name] = {"url": cmr.url}``), so both directions matter:
+        the same url must always resolve to the same offer_name (else the same offer would be
+        emitted twice under different names), and the same offer_name must always resolve to
+        the same url (else the later url silently overwrites the first in the emitted bundle).
+        """
+        prior_offer_name = seen_cmr_urls.get(url)
+        if prior_offer_name is not None and prior_offer_name != resolved_offer_name:
+            raise ValueError(
+                f"Model '{model_name}': multiple cross-model integrations declare url "
+                f"'{url}' with disagreeing offer_name "
+                f"({prior_offer_name!r} vs {resolved_offer_name!r}); integrations "
+                "consuming the same offer must agree on its offer_name"
+            )
+        prior_url = seen_cmr_offer_names.get(resolved_offer_name)
+        if prior_url is not None and prior_url != url:
+            raise ValueError(
+                f"Model '{model_name}': multiple cross-model integrations resolve to "
+                f"offer_name '{resolved_offer_name}' with disagreeing url "
+                f"({prior_url!r} vs {url!r}); integrations sharing an "
+                "offer_name must consume the same offer"
+            )
+        seen_cmr_urls[url] = resolved_offer_name
+        seen_cmr_offer_names[resolved_offer_name] = url
 
     @classmethod
     def load(cls, path: str | Path) -> SpecFile:

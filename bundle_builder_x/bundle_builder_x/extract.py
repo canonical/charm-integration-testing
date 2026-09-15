@@ -198,8 +198,10 @@ def _extract_single_model(
             resolved_url = app_int.url
 
         # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
-        # For PROVIDES: always None; the mirror pass synthesizes the URL when creating
-        # the REQUIRES entry.
+        # For PROVIDES: not exported by Bundle.export() (which only reads .url for the
+        # REQUIRES side), but still preserve any resolved (user-declared) URL here so the
+        # mirror pass below can reuse it instead of re-synthesizing one from the provider
+        # model, which would silently discard an explicit user-declared URL.
         url: str | None
         if charm_ep.type == EndpointType.REQUIRES:
             if resolved_url is not None:
@@ -214,7 +216,7 @@ def _extract_single_model(
                     else None
                 )
         else:
-            url = None
+            url = resolved_url
         cross_model_integrations.append(
             CrossModelIntegration(
                 local=ApplicationEndpoint(
@@ -253,8 +255,9 @@ def _mirror_cmr_entries(
 ) -> None:
     """Add mirrored CMR entries to the remote bundle for all CMRs with ``from_role``.
 
-    For PROVIDES→REQUIRES mirrors: synthesizes the saas URL from the source bundle's
-    controller/admin/model.
+    For PROVIDES→REQUIRES mirrors: reuses the source (PROVIDES-side) entry's resolved URL
+    if one was preserved (e.g. a user-declared URL), otherwise synthesizes the saas URL from
+    the source bundle's controller/admin/model.
     For REQUIRES→PROVIDES mirrors: URL is always None (PROVIDES entries are never exported).
     """
     for model_ref, bundle in list(bundles.items()):
@@ -280,7 +283,7 @@ def _mirror_cmr_entries(
             if remote_bundle.applications.get(cmr.remote_application) is None:
                 continue
             if to_role == EndpointType.REQUIRES:
-                url = (
+                url = cmr.url or (
                     f"{bundle.controller}:{bundle.admin}/{model_ref.name}.{cmr.offer_name}"
                     if bundle.controller is not None and model_ref.name is not None
                     else None
