@@ -16,6 +16,12 @@ import textwrap
 
 from pytest import Pytester
 
+# Enables the `pytester` fixture used below to run real, isolated pytest
+# sessions against the scheduler plugin. Declared here (a test module) rather
+# than in conftest.py, since pytest_plugins in a non-top-level conftest is no
+# longer supported.
+pytest_plugins = ["pytester"]
+
 
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
