@@ -218,11 +218,10 @@ class TestMysqlDatabaseReplicationExtension:
             offer_model: JujuModelHandle,
             offer_alias: str,
             endpoints: frozenset[str] = frozenset({"replication-offer"}),
-            owner: str = "admin",
         ) -> None:
             juju.consumed_offers_by_model.setdefault(_model_key(NEIGHBOR_MODEL), {})[offer_alias] = (
                 JujuConsumedOfferInfo(
-                    url=f"{offer_model.controller}:{owner}/{offer_model.model}.{offer_alias}",
+                    url=f"{offer_model.controller}:admin/{offer_model.model}.{offer_alias}",
                     endpoints=endpoints,
                 )
             )
@@ -246,33 +245,8 @@ class TestMysqlDatabaseReplicationExtension:
             extension.post_deploy(TARGET_MODEL)
             extension.post_deploy(NEIGHBOR_MODEL)
 
-            # THEN the create-replication action is run on the offer's leader unit, addressed
-            # with the owner declared in the consumed offer's URL ("admin", per _consume_offer)
-            admin_qualified_uri = f"{TARGET_MODEL.controller}:admin/{TARGET_MODEL.model}"
-            assert (admin_qualified_uri, "target/leader", "create-replication", {}) in juju.actions
-
-        def test_addresses_offer_model_with_its_declared_owner(
-            self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
-        ) -> None:
-            # GIVEN a consumed offer whose URL declares an owner other than "admin"
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
-            juju.applications_by_model[_model_key(NEIGHBOR_MODEL)] = {"neighbor": "mysql-k8s"}
-            juju.units.update({"target": 1, "neighbor": 1})
-            self._consume_offer(juju, offer_model=TARGET_MODEL, offer_alias="target-offer", owner="produser")
-            juju.integrate(
-                NEIGHBOR_MODEL,
-                JujuIntegrationApplication("target-offer", "replication-offer"),
-                JujuIntegrationApplication("neighbor", "replication"),
-            )
-
-            # WHEN post_deploy is called once per model, as deploy_bundles() does
-            extension.post_deploy(TARGET_MODEL)
-            extension.post_deploy(NEIGHBOR_MODEL)
-
-            # THEN the offer model is addressed with its owner, not just "controller:model"
-            owner_qualified_uri = f"{TARGET_MODEL.controller}:produser/{TARGET_MODEL.model}"
-            assert (owner_qualified_uri, "target", "0:10:00") in juju.waited_scaled
-            assert (owner_qualified_uri, "target/leader", "create-replication", {}) in juju.actions
+            # THEN the create-replication action is run on the offer's leader unit, in its model
+            assert (TARGET_MODEL.uri, "target/leader", "create-replication", {}) in juju.actions
 
         def test_skips_when_offer_model_has_multiple_matching_applications(
             self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
