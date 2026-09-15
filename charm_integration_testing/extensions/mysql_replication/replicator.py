@@ -18,23 +18,6 @@ class CharmInfo:
     create_replication_message: str = "Ready to create replication"
 
 
-def _parse_offer_model(url: str) -> JujuModelHandle | None:
-    """Parse a Juju offer URL, e.g. ``controller:user/model.offer-name``, into its model.
-
-    Returns ``None`` if the URL doesn't have the expected shape.
-    """
-    if ":" not in url or "/" not in url:
-        return None
-    controller, rest = url.split(":", 1)
-    _, model_and_offer = rest.split("/", 1)
-    if "." not in model_and_offer:
-        return None
-    model, _offer_name = model_and_offer.rsplit(".", 1)
-    if not controller or not model:
-        return None
-    return JujuModelHandle(controller=controller, model=model)
-
-
 class MysqlReplicator:
     juju: JujuBackend
     logger: logging.Logger
@@ -100,7 +83,8 @@ class MysqlReplicator:
                 if self.charm_info.offer_endpoint not in offer_info.endpoints:
                     continue
 
-                offer_model = _parse_offer_model(offer_info.url)
+                parsed_offer_url = offer_info.parse_url()
+                offer_model = parsed_offer_url.model if parsed_offer_url is not None else None
                 if offer_model is None or offer_model not in applications_by_model:
                     continue
 
