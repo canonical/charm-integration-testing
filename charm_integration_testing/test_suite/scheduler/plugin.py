@@ -411,6 +411,12 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     session_items = item.session.items
     insert_at = session_items.index(item) + 1
     session_items[insert_at:insert_at] = bridge_items
+    # Keep session.testscollected in sync with the now-longer item list.
+    # Reporters (e.g. the terminal reporter's progress percentage) size the
+    # run from this count, set once at collection time; without bumping it
+    # here, injecting items after collection understates it and produces
+    # inconsistent totals/percentages over 100%.
+    item.session.testscollected += len(bridge_items)
     # Reconcile pytest's setup stack with the item that will actually run
     # next (the bridge), not the original nextitem the just-finished
     # teardown assumed - see the docstring note above.

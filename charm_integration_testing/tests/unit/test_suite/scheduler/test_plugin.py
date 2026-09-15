@@ -1534,6 +1534,7 @@ class FakeSession:
     def __init__(self, items: list[pytest.Item]) -> None:
         self.items = items
         self._setupstate = FakeSetupState()
+        self.testscollected = len(items)
 
 
 def _with_session(item: pytest.Item, items: list[pytest.Item]) -> pytest.Item:
@@ -1748,6 +1749,31 @@ class TestPytestRuntestProtocolRecovery:
         injected = items[1]
         assert injected is not bridge_template
         assert injected.get_closest_marker("injected") is not None
+
+    def test_keeps_testscollected_in_sync_with_injected_bridge_items(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the same recovery scenario as above (a bridge gets injected)
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+        collected_before = skipped_downgrade.session.testscollected
+
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN session.testscollected grows by exactly the number of items
+        # injected, keeping it in sync with the now-longer session.items -
+        # otherwise reporters that size the run from this count (e.g. the
+        # terminal reporter's progress percentage) understate the total and
+        # report inconsistent/over-100% progress (see PR discussion).
+        items = skipped_downgrade.session.items
+        assert skipped_downgrade.session.testscollected == collected_before + (len(items) - 2)
 
     def test_reconciles_setup_state_towards_the_injected_bridge(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN the same recovery scenario as above (a bridge gets injected)

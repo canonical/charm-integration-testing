@@ -12,6 +12,7 @@ mocked.
 
 from __future__ import annotations
 
+import re
 import textwrap
 
 from pytest import Pytester
@@ -93,3 +94,9 @@ def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown
     # rest of the plan run cleanly - no AssertionError from pytest's own
     # SetupState, and no error outcome for the injected item.
     result.assert_outcomes(passed=3, skipped=1)
+    # AND the terminal reporter's progress percentages stay within 0-100%,
+    # proving session.testscollected was kept in sync with the injected
+    # bridge item rather than understating the now-longer item list.
+    percentages = [int(m) for m in re.findall(r"\[\s*(\d+)%\]", "\n".join(result.outlines))]
+    assert percentages, "expected at least one progress percentage in output"
+    assert max(percentages) == 100
