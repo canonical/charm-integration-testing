@@ -1,4 +1,5 @@
 ---
+# jenkins doesn't support a base newer than 20.04, so it is considered obsolete
 overrides:
   - assumes: [unsupported-obsolete]
     provides:
