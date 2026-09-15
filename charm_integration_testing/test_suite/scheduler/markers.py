@@ -19,6 +19,21 @@ A single marker, ``@pytest.mark.state``, is used to annotate every test:
 
   The scheduler may automatically inject these tests into the execution plan
   to bridge gaps between states: in addition to running them as normal tests.
+
+Fixture convention for recoverable setup skips
+-----------------------------------------------
+When a transition test is skipped during *setup* (as opposed to *call* or
+*teardown*), the scheduler assumes the environment never left its
+``requires`` state and may still try to bridge to it later (see
+``pytest_runtest_makereport`` in ``plugin.py``). This assumption only holds
+if every fixture used by a state-marked test that can perform ``pytest.skip``
+does so *before* any fixture in the same setup chain performs a real,
+state-mutating side effect (e.g. a Juju deploy/refresh/scale action).
+Fixture authors adding new state-marked tests should keep any
+environment-mutating fixture logic in the test body (as the existing
+transition tests do) rather than in fixtures, or otherwise ensure
+skip-checking fixtures run first, so the setup-skip recovery assumption
+above is not silently violated.
 """
 
 from __future__ import annotations

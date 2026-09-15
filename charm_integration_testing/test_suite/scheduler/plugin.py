@@ -205,7 +205,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     * A transition test skipped during *setup* means it never ran, so the
       environment never left its ``requires`` state: ``_current_state`` is
       left as-is. ``pytest_runtest_protocol`` uses this to try bridging to
-      whatever the next planned test actually needs.
+      whatever the next planned test actually needs. This relies on the
+      fixture convention documented in ``markers.py``: state-mutating side
+      effects belong in the test body, not in fixtures, so a setup-time skip
+      is never preceded by a fixture that already changed the environment.
 
     * A transition test skipped during *call* or *teardown* is treated like a
       failure instead: the test body/teardown may have already acted, so the

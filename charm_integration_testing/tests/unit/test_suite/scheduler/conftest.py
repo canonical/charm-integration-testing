@@ -50,8 +50,13 @@ class FakeItem:
     def __init__(self, name: str, **state_marker_kwargs: object) -> None:
         self.name = name
         self._nodeid = f"fake_tests/{name}.py::{name}"
-        # Markers added via add_marker, keyed by name for fast lookup.
-        self._added_marks: dict[str, Any] = {}
+        # Mirrors real pytest.Item.own_markers: a plain list, shared by
+        # reference across a bare copy.copy() the same way pytest's own
+        # attribute is, until _duplicate_item_for_repeat explicitly isolates
+        # it. Deliberately *not* isolated in __copy__ below, so tests
+        # actually exercise that production isolation logic rather than
+        # relying on the fake to isolate it itself.
+        self.own_markers: list[Any] = []
         # Build a real pytest Mark so read_state_marker sees genuine kwargs.
         self._state_mark = pytest.mark.state(**state_marker_kwargs).mark if state_marker_kwargs else None
         # Real pytest.Item instances carry a per-node Stash; mirrored here so
@@ -75,30 +80,20 @@ class FakeItem:
         return self._nodeid
 
     def get_closest_marker(self, marker_name: str) -> Any:
-        """Return a previously added marker or the state marker by name."""
-        if marker_name in self._added_marks:
-            return self._added_marks[marker_name]
+        """Return a previously added marker (most recent first) or the state marker by name."""
+        for mark in reversed(self.own_markers):
+            if getattr(mark, "name", None) == marker_name:
+                return mark
         if marker_name == "state":
             return self._state_mark
         return None
 
     def add_marker(self, marker: Any) -> None:
         """Store *marker* so it can be retrieved by get_closest_marker."""
+        self.own_markers.append(marker)
         name = getattr(marker, "name", None)
         if name is not None:
-            self._added_marks[str(name)] = marker
             self.keywords[str(name)] = marker
-
-    def __copy__(self) -> "FakeItem":
-        """Return an independent copy so ``add_marker`` on one doesn't leak into the other.
-
-        Mirrors the ``own_markers``/``keywords`` sharing bug
-        ``_duplicate_item_for_repeat`` guards against for real items.
-        """
-        duplicate = FakeItem.__new__(FakeItem)
-        duplicate.__dict__.update(self.__dict__)
-        duplicate._added_marks = dict(self._added_marks)
-        return duplicate
 
 
 @pytest.fixture()
