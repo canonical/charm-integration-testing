@@ -411,4 +411,46 @@ def extract_solution(
     _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.REQUIRES, to_role=EndpointType.PROVIDES)
     _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.PROVIDES, to_role=EndpointType.REQUIRES)
 
+    _validate_resolved_cmr_offer_consistency(bundles)
+
     return Solution(bundles=list(bundles.values()))
+
+
+def _validate_resolved_cmr_offer_consistency(bundles: dict[ModelRef, Bundle]) -> None:
+    """Reject any two resolved CMRs whose url/offer_name disagree.
+
+    ``spec.py``'s ``_check_cmr_offer_consistency`` already performs this same bidirectional
+    check before solving, but it can only see CMRs that declare ``url``/``offer_name``
+    explicitly in the spec -- an in-spec CMR that omits both has its offer_name synthesized
+    only later, by ``domain.integration_offer_name()``, once a charm-pair anchor is chosen.
+    That synthesis has no instance-qualifying component (it depends only on the providing
+    charm's name/endpoint/interface), so two different provider charm instances sharing
+    those three values will synthesize the exact same default offer_name despite pointing at
+    different provider models/urls. Since ``Bundle.export()`` keys each requiring model's
+    emitted SAAS entries by ``offer_name`` alone (``saas_entries[cmr.offer_name] = {"url":
+    cmr.url}``), such a collision would otherwise silently drop one relation's URL. Re-running
+    the same consistency check here, after every CMR (in-spec, external, or synthesized) has
+    a concrete resolved offer_name/url, catches what the pre-solve check structurally cannot.
+    """
+    for model_ref, bundle in bundles.items():
+        seen_urls: dict[str, str] = {}
+        seen_offer_names: dict[str, str] = {}
+        for cmr in bundle.cross_model_integrations:
+            if cmr.local_role != EndpointType.REQUIRES or cmr.url is None:
+                continue
+            prior_offer_name = seen_urls.get(cmr.url)
+            if prior_offer_name is not None and prior_offer_name != cmr.offer_name:
+                raise ValueError(
+                    f"Model '{model_ref.key}': resolved cross-model integrations to url "
+                    f"{cmr.url!r} disagreeing offer_name ({prior_offer_name!r} vs. "
+                    f"{cmr.offer_name!r})"
+                )
+            prior_url = seen_offer_names.get(cmr.offer_name)
+            if prior_url is not None and prior_url != cmr.url:
+                raise ValueError(
+                    f"Model '{model_ref.key}': resolved cross-model integrations named "
+                    f"offer_name {cmr.offer_name!r} disagreeing url ({prior_url!r} vs. "
+                    f"{cmr.url!r})"
+                )
+            seen_urls[cmr.url] = cmr.offer_name
+            seen_offer_names[cmr.offer_name] = cmr.url

@@ -5,6 +5,7 @@
 
 import logging
 
+import pytest
 import yaml
 import z3  # type: ignore[import-untyped]
 
@@ -591,6 +592,75 @@ class TestExtractSingleModel:
         # THEN the extracted value is one of the declared allowed values
         result = solution.bundles[0].applications["worker"].resources["temporal-worker-image"]
         assert result in allowed_values
+
+    def test_two_distinct_provider_instances_synthesizing_same_offer_name_rejected(self) -> None:
+        # GIVEN two provider models, each with an instance of the same charm/endpoint/interface,
+        # and one consumer model with two applications, each with an in-spec CMR to a different
+        # provider instance -- both CMRs omit offer_name/url, so extraction must synthesize them
+        from bundle_builder_x.domain import add_charm_to_domain, pair_charms_in_domain
+
+        provider = _make_charm(
+            "postgresql-k8s",
+            endpoints={"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="postgresql", optional=True)},
+        )
+        requirer = _make_charm(
+            "app",
+            endpoints={"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql", optional=True)},
+        )
+        cmr_a = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="app-a", endpoint="db"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="pg", endpoint="database", model=ModelRef(name="provider-a")
+            ),
+        )
+        cmr_b = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="app-b", endpoint="db"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="pg", endpoint="database", model=ModelRef(name="provider-b")
+            ),
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="provider-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"pg": DomainApplication(charm="postgresql-k8s")},
+                    ref=ModelRef(controller="lxd"),
+                ),
+                ModelRef(name="provider-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"pg": DomainApplication(charm="postgresql-k8s")},
+                    ref=ModelRef(controller="lxd"),
+                ),
+                ModelRef(name="consumer-model"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "app-a": DomainApplication(charm="app"),
+                        "app-b": DomainApplication(charm="app"),
+                    },
+                    application_integrations=[cmr_a, cmr_b],
+                ),
+            }
+        )
+
+        provider_a_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-a"))
+        provider_b_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-b"))
+        requirer_a_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        requirer_b_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_a_id, requirer_a_id)
+        pair_charms_in_domain(domain, provider_b_id, requirer_b_id)
+
+        # WHEN extracting
+        model = _solve(domain)
+
+        # THEN extraction rejects the collision instead of silently overwriting one CMR's url
+        with pytest.raises(ValueError, match="disagreeing url"):
+            extract_solution(model, domain, logger=_LOGGER)
 
 
 class TestExtractMultiModel:
