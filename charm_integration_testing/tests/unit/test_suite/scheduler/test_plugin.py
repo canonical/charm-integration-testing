@@ -1483,11 +1483,28 @@ class TestPytestSessionFinish:
 # ---------------------------------------------------------------------------
 
 
+class FakeSetupState:
+    """Minimal pytest.SetupState substitute recording teardown_exact calls.
+
+    Real ``pytest_runtest_protocol`` calls ``teardown_exact`` twice per item:
+    once implicitly (via pytest's own protocol, not modeled here) towards the
+    original nextitem, and once explicitly by our hook towards the bridge's
+    first item when a bridge is injected. Only the latter is exercised here.
+    """
+
+    def __init__(self) -> None:
+        self.teardown_exact_calls: list[pytest.Item] = []
+
+    def teardown_exact(self, nextitem: pytest.Item) -> None:
+        self.teardown_exact_calls.append(nextitem)
+
+
 class FakeSession:
     """Minimal pytest.Session substitute exposing a mutable ``items`` list."""
 
     def __init__(self, items: list[pytest.Item]) -> None:
         self.items = items
+        self._setupstate = FakeSetupState()
 
 
 def _with_session(item: pytest.Item, items: list[pytest.Item]) -> pytest.Item:
@@ -1702,6 +1719,30 @@ class TestPytestRuntestProtocolRecovery:
         injected = items[1]
         assert injected is not bridge_template
         assert injected.get_closest_marker("injected") is not None
+
+    def test_reconciles_setup_state_towards_the_injected_bridge(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the same recovery scenario as above (a bridge gets injected)
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN pytest's setup stack is reconciled towards the bridge's first
+        # item, not the original nextitem - otherwise, if the bridge belongs
+        # to a different module than the original nextitem, pytest's own
+        # SetupState.setup would assert on stale retained collector scope
+        # (see PR discussion; reproduced with a pytester-based integration
+        # test in test_plugin_integration.py).
+        injected = skipped_downgrade.session.items[1]
+        setupstate = cast(FakeSetupState, skipped_downgrade.session._setupstate)
+        assert setupstate.teardown_exact_calls == [injected]
 
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs

@@ -12,6 +12,10 @@ import pytest
 from test_suite.scheduler import plugin as _plugin_module
 from test_suite.scheduler.states import State
 
+# Enables the `pytester` fixture used by test_plugin_integration.py to run
+# real, isolated pytest sessions against the scheduler plugin.
+pytest_plugins = ["pytester"]
+
 
 class FakeKeywords:
     """Minimal mimic of pytest's private ``NodeKeywords``.

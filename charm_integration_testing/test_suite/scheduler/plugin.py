@@ -248,17 +248,32 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     elif report.when == "call" and report.passed and marker.is_transition:
         _current_state = marker.provides
     elif report.skipped and marker.is_transition:
+        candidate_recorded = False
         for req_state in marker.requires:
             if req_state == _current_state:
                 _record_skipped_transition_candidate(
                     StateTransition(from_state=req_state, to_state=marker.provides), item
                 )
-        logger.warning(
-            "State-marked transition test %r was skipped: environment remains at %r.  "
-            "The scheduler will try to recover without retrying this transition candidate.",
-            item.nodeid,
-            _current_state.value,
-        )
+                candidate_recorded = True
+        if candidate_recorded:
+            logger.warning(
+                "State-marked transition test %r was skipped: environment remains at %r.  "
+                "The scheduler will try to recover without retrying this transition candidate.",
+                item.nodeid,
+                _current_state.value,
+            )
+        else:
+            # _current_state didn't satisfy any of marker.requires (this is
+            # pytest_runtest_setup's own skip - see there), so no candidate
+            # was recorded above: this test may still be tried again later
+            # if the environment reaches one of its requires states.
+            logger.warning(
+                "State-marked transition test %r was skipped: environment remains at %r.  "
+                "The scheduler may still attempt this transition later if the environment "
+                "reaches a state it requires.",
+                item.nodeid,
+                _current_state.value,
+            )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
@@ -341,6 +356,18 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     several unreachable tests in a row is skipped one at a time rather than
     all at once, and any test further down the plan that the environment's
     actual (unchanged) state still happens to satisfy keeps running normally.
+
+    By the time this hookwrapper resumes after ``yield``, pytest has already
+    torn *item* down using the *original* ``nextitem`` argument (via
+    ``SetupState.teardown_exact``), which retains any collector scope (e.g. a
+    module-scoped fixture) shared between *item* and that original
+    ``nextitem``. If the bridge belongs to a different module than the
+    original ``nextitem``, that retained scope is no longer valid for
+    whatever now actually runs next, and pytest's own ``SetupState.setup``
+    asserts on it (``previous item was not torn down properly``). Calling
+    ``teardown_exact`` again, this time towards the bridge's first item, cuts
+    the stack down to only what the bridge actually shares with *item*
+    before returning control to pytest.
     """
     yield
     if nextitem is None or _current_state is None or _full_graph is None:
@@ -365,6 +392,10 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     session_items = item.session.items
     insert_at = session_items.index(item) + 1
     session_items[insert_at:insert_at] = bridge_items
+    # Reconcile pytest's setup stack with the item that will actually run
+    # next (the bridge), not the original nextitem the just-finished
+    # teardown assumed - see the docstring note above.
+    item.session._setupstate.teardown_exact(bridge_items[0])
     logger.warning(
         "Recovering state machine: injecting %s to bridge %r towards %r before %r.",
         [b.nodeid for b in bridge_items],
