@@ -200,8 +200,16 @@ The spec is validated on load. The following rules are enforced:
   name across different urls would silently make one relation consume the wrong offer).
   An external CMR that omits ``offer_name`` defaults to ``<remote_application>-offer``
   for this comparison. In-spec CMRs that omit ``url`` (and therefore ``offer_name``) are
-  not covered by this check, since their offer name is only resolved once Bundle Builder
-  X selects a charm-pair anchor at build time.
+  not covered by this spec-validation-time check, since their offer name is only
+  resolved once Bundle Builder X selects a charm-pair anchor at build time -- see below.
+- After Bundle Builder X resolves every cross-model integration's offer_name and url
+  (including in-spec CMRs that omitted both and rely on synthesis), the same
+  bidirectional agreement rule is re-checked once more for the fully-resolved values in
+  each requiring model. This catches cases the spec-validation-time check above cannot
+  see -- for example, two different instances of the same provider charm, endpoint, and
+  interface each synthesizing the same default offer_name while pointing at different
+  provider models -- and rejects the build rather than silently emitting a bundle with
+  one relation consuming the wrong offer.
 
 Minimal example
 ---------------
