@@ -71,6 +71,7 @@ rst
 sitemapindex
 subproject
 subprojects
+SAAS
 SVG
 tex
 texlive
@@ -159,3 +160,11 @@ Unioning
 istio
 ConfigMap
 istiod's
+SAAS
+synthesized
+synthesizes
+synthesize
+synthesizing
+urls
+url
+requirer

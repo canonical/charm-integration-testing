@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "types-grpcio>=1.83.0.20260730,<2",
     "validators-test-utils",
 ]
 

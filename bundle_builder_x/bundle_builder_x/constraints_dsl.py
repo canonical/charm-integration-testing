@@ -289,10 +289,15 @@ class CrossModelExpr(BaseModel):
 
     Returns a RelationSet (like endpoint[x] itself), tagging the selected endpoints so that
     downstream reducers (bool(), len(), charms()) read cross-model-scoped counts instead of
-    plain ones. Backed by Domain.is_cross_model(): only integrations whose peer charm is
-    assigned to a different model count as cross-model. Unlike bool(endpoint[x]), which is
-    True for any active integration (local or cross-model), bool(cross_model(endpoint[x]))
-    is True only for cross-model ones.
+    plain ones. Unlike bool(endpoint[x]), which is True for any active integration (local or
+    cross-model), bool(cross_model(endpoint[x])) is True only for cross-model ones.
+
+    For charms() specifically, only in-domain integrations count: an integration counts as
+    cross-model when Domain.is_cross_model() reports its peer charm is assigned to a different
+    model. External CMR peers have no DomainCharm/id to add to the resulting charm set, so they
+    are excluded (see _charm_set_for_endpoints in dsl_lowering.py). bool() and len(), by
+    contrast, also include external CMR contributions (tracked separately as cmr_counts in
+    constraints.py), since those only need a count, not a charm identity.
     """
 
     model_config = ConfigDict(frozen=True)
