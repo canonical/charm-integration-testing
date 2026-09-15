@@ -65,9 +65,10 @@ class StateGraph:
         path exists.  Returns an empty list when ``from_state == to_state``.
 
         *avoid* excludes specific edges from the search entirely (as if they
-        were not registered), used by the scheduler's runtime recovery to stop
-        offering an edge whose transition test just skipped rather than
-        looping on it forever.
+        were not registered). The scheduler's runtime recovery uses this to
+        stop offering an edge once every one of its registered transition
+        test candidates has skipped, rather than looping on it forever; an
+        edge with an untried candidate remaining is still offered.
 
         The returned shortest path is randomly chosen among all minimum-cost paths, if there are multiple.
         """
