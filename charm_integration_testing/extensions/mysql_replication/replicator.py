@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import dataclasses
 import logging
 from datetime import timedelta
 
@@ -85,11 +84,7 @@ class MysqlReplicator:
                     continue
 
                 parsed_offer_url = offer_info.parse_url()
-                offer_model = (
-                    dataclasses.replace(parsed_offer_url.model, owner=parsed_offer_url.owner)
-                    if parsed_offer_url is not None
-                    else None
-                )
+                offer_model = parsed_offer_url.model if parsed_offer_url is not None else None
                 if offer_model is None or offer_model not in applications_by_model:
                     continue
 
