@@ -20,7 +20,6 @@ from extensions import (
     MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
-    S3IntegratorMinIOBackendExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
@@ -261,8 +260,6 @@ def juju_client(
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
-    minio_client_file: Path | None,
-    minio_server_file: Path | None,
     ubuntu_pro_token: str | None,
     uv_file: Path | None,
     validators_path: Path | None,
@@ -280,7 +277,6 @@ def juju_client(
             MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
@@ -662,22 +658,6 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     # Ensures parents path exists for the output when calling .write_text
     ppath.parent.mkdir(parents=True, exist_ok=True)
     return ppath
-
-
-@pytest.fixture
-def minio_client_file() -> Path | None:
-    file_path = os.environ.get("MINIO_CLIENT_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
-def minio_server_file() -> Path | None:
-    file_path = os.environ.get("MINIO_SERVER_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
 
 
 @pytest.fixture

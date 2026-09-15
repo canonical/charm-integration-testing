@@ -31,7 +31,7 @@ class KafkaClientValidator(BaseValidator):
         self._ca_file_path: str | None = None
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        if self.role != "requires":
+        if self.role not in ("requires", "provides"):
             return self._skipped_result_due_to_role(level, self.role)
         if level not in ("simple", "deep"):
             return self._skipped_result_due_to_level(level)
@@ -50,17 +50,19 @@ class KafkaClientValidator(BaseValidator):
             return error_result
 
         # --- 2. Resolve credentials ---
-        creds = self._resolve_credentials()
+        source = self._connection_databag()
+        creds = self._resolve_credentials(source)
 
         # --- 3. Schema check ---
-        schema_check = self.validate_schema(
-            ["endpoints", "topic", "consumer-group-prefix", "username", "password"], creds
-        )
+        # consumer-group-prefix is only set by the requirer when it opts into the
+        # "consumer" role, so it must not be treated as required (see
+        # data_interfaces.py: KafkaProvidesData.set_consumer_group_prefix).
+        schema_check = self.validate_schema(["endpoints", "topic", "username", "password"], creds, data=source)
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="simple", checks=checks)
 
-        data = self.databag | creds
+        data = source | creds
 
         # --- 4. Endpoint format check ---
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
@@ -118,17 +120,24 @@ class KafkaClientValidator(BaseValidator):
             return error_result
 
         # --- 2. Resolve credentials ---
-        creds = self._resolve_credentials()
+        source = self._connection_databag()
+        creds = self._resolve_credentials(source)
 
         # --- 3. Schema check ---
+        # consumer-group-prefix is only set by the requirer when it opts into the
+        # "consumer" role (see data_interfaces.py:
+        # KafkaProvidesData.set_consumer_group_prefix), so "simple" leaves it
+        # optional. Deep validation always consumes the canary message to
+        # confirm the round trip, which requires a group covered by the
+        # granted ACLs, so it is required here.
         schema_check = self.validate_schema(
-            ["endpoints", "topic", "consumer-group-prefix", "username", "password"], creds
+            ["endpoints", "topic", "username", "password", "consumer-group-prefix"], creds, data=source
         )
         checks.append(schema_check)
         if not schema_check.passed:
             return self._make_result(level="deep", checks=checks)
 
-        data = self.databag | creds
+        data = source | creds
 
         # --- 4. Endpoint format check ---
         endpoint_check = self._check_bootstrap_servers(data["endpoints"])
@@ -280,11 +289,26 @@ class KafkaClientValidator(BaseValidator):
             )
         return None
 
-    def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve credentials from relation databag or Juju secrets."""
+    def _connection_databag(self) -> dict[str, str]:
+        """Return the databag holding kafka_client connection fields for the current role.
+
+        The interface is app scoped. On the requirer side, the connection fields
+        (endpoints, topic, credentials, ...) live on the remote provider app's
+        databag, which ``BaseValidator.databag`` already exposes (``relation.app``
+        is always the *other* application). On the provider side we publish those
+        same fields ourselves, so we must read our own app's databag instead.
+        """
+        if self.role == "provides":
+            if self.charm.app not in self.relation.data:
+                return {}
+            return dict(self.relation.data[self.charm.app])
+        return self.databag
+
+    def _resolve_credentials(self, data: dict[str, str]) -> dict[str, str]:
+        """Resolve credentials from the given databag or the Juju secrets it references."""
         return {
-            **self.resolve_secret("secret-user", "username", "password"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
+            **self.resolve_secret("secret-user", "username", "password", data=data),
+            **self.resolve_secret("secret-tls", "tls", "tls-ca", data=data),
         }
 
     def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:

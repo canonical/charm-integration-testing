@@ -589,6 +589,7 @@ class JubilantBackend(JujuCmdBackend):
             charm=app_info.charm,
             revision=app_info.charm_rev,
             channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+            base=app_info.base.channel if app_info.base else None,
         )
 
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:

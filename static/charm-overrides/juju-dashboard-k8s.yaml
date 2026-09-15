@@ -1,0 +1,34 @@
+---
+# juju-dashboard-k8s: web UI for the Juju controller (k8s variant).
+# Source: https://github.com/canonical/juju-dashboard-charm (k8s-charm/)
+#
+# controller (requires, interface juju-dashboard): src/charm.py blocks when
+#   this relation is absent ("Awaiting controller relation." /
+#   "Missing controller integration"), so it is not optional.
+#
+# latest/ and 0.14/: only nginx-route is present, so ingress is not overridden.
+# 0.15+, 0.16+, and future tracks: ingress and nginx-route are alternatives.
+#
+# dashboard (provides, interface http): optional for bundle building
+#   (canonical/charm-integration-testing#434).
+overrides:
+  # latest/ + 0.14/: nginx-route only, no ingress endpoint - nginx-route stays required
+  - criteria:
+      - any_of:
+          - track: latest
+          - track: "0.14"
+    provides:
+      dashboard:
+        optional: true
+
+  # 0.15/, 0.16/, and any future track (fallback): ingress + nginx-route
+  - requires:
+      ingress:
+        optional: true
+      nginx-route:
+        optional: true
+    provides:
+      dashboard:
+        optional: true
+    constraints:
+      - 'len(endpoint[ingress]) + len(endpoint[nginx-route]) == 1'
