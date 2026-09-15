@@ -162,8 +162,11 @@ Integration
      - synthesized (see below)
      - CMR offer name. Required for in-spec CMRs that also set ``url`` (and must match the
        offer name embedded in ``url``); otherwise optional. If omitted for an in-spec CMR,
-       Bundle Builder X synthesizes ``<providing_charm>-<providing_endpoint>-<interface>-offer``;
-       if omitted for an external CMR, it defaults to ``<remote_application>-offer``.
+       Bundle Builder X reuses any explicit ``offer_name`` already declared by another active
+       cross-model integration between the same provider/requirer charm pair; only if the pair
+       has no declared name does it synthesize
+       ``<providing_charm>-<providing_endpoint>-<interface>-offer``. If omitted for an external
+       CMR, it defaults to ``<remote_application>-offer``.
    * - ``url``
      - no
      - --
@@ -188,14 +191,17 @@ The spec is validated on load. The following rules are enforced:
 - An in-spec cross-model integration that sets ``url`` must also set ``offer_name``,
   and the two must agree: ``offer_name`` must equal the offer name embedded in ``url``
   (the segment after the last ``.``).
-- External cross-model integrations (remote model not present in this spec) must agree
-  on ``offer_name`` for any two integrations that declare the exact same ``url`` (they
-  consume the same offer), and conversely must not resolve to the same ``offer_name``
-  while declaring different ``url`` values (a single remote application may legitimately
-  expose multiple distinct offers, but Bundle Builder X keys each requiring model's
-  emitted SAAS entries by ``offer_name`` alone, so reusing a name across different urls
-  would silently make one relation consume the wrong offer). An omitted ``offer_name``
-  defaults to ``<remote_application>-offer`` for this comparison.
+- Cross-model integrations that declare an explicit ``url`` -- whether in-spec or
+  external -- must agree on ``offer_name`` for any two integrations that declare the
+  exact same ``url`` (they consume the same offer), and conversely must not resolve to
+  the same ``offer_name`` while declaring different ``url`` values (a single remote
+  application may legitimately expose multiple distinct offers, but Bundle Builder X
+  keys each requiring model's emitted SAAS entries by ``offer_name`` alone, so reusing a
+  name across different urls would silently make one relation consume the wrong offer).
+  An external CMR that omits ``offer_name`` defaults to ``<remote_application>-offer``
+  for this comparison. In-spec CMRs that omit ``url`` (and therefore ``offer_name``) are
+  not covered by this check, since their offer name is only resolved once Bundle Builder
+  X selects a charm-pair anchor at build time.
 
 Minimal example
 ---------------

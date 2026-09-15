@@ -358,6 +358,81 @@ class TestExtractSingleModel:
             for r in neighbor_yaml["relations"]
         )
 
+    def test_user_cmr_defined_on_provider_side_preserves_explicit_url(self) -> None:
+        # GIVEN the same provider-side CMR as above, but this time the user declared an
+        # explicit `url` in the spec (e.g. pointing at a non-default offer alias/user).
+        from bundle_builder_x.domain import add_charm_to_domain, pair_charms_in_domain
+
+        provider = _make_charm(
+            "prometheus-k8s",
+            endpoints={
+                "self-metrics-endpoint": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="prometheus_scrape", optional=True
+                ),
+            },
+        )
+        requirer = _make_charm(
+            "prometheus-k8s",
+            endpoints={
+                "metrics-endpoint": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="prometheus_scrape", optional=True
+                ),
+            },
+        )
+        cmr_integration = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="target", endpoint="self-metrics-endpoint"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="neighbor",
+                endpoint="metrics-endpoint",
+                model=ModelRef(name="neighbor-model", controller="neighbor-controller"),
+            ),
+            offer_name="neighbor-offer",
+            url="target-controller:custom-user/target-model.neighbor-offer",
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="target-model", controller="target-controller"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    ref=ModelRef(name="target-model", controller="target-controller"),
+                    applications={"target": DomainApplication(charm="prometheus-k8s")},
+                    application_integrations=[cmr_integration],
+                ),
+                ModelRef(name="neighbor-model", controller="neighbor-controller"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    ref=ModelRef(name="neighbor-model", controller="neighbor-controller"),
+                    applications={"neighbor": DomainApplication(charm="prometheus-k8s")},
+                ),
+            }
+        )
+        provider_id = add_charm_to_domain(
+            provider, domain, ModelRef(name="target-model", controller="target-controller")
+        )
+        requirer_id = add_charm_to_domain(
+            requirer, domain, ModelRef(name="neighbor-model", controller="neighbor-controller")
+        )
+        pair_charms_in_domain(domain, provider_id, requirer_id)
+
+        # WHEN extracting
+        model = _solve(domain)
+        solution = extract_solution(model, domain, logger=_LOGGER)
+
+        # THEN the mirrored REQUIRES-side CMR on the neighbor (consumer) bundle preserves the
+        # user's explicit URL rather than discarding it and re-synthesizing a default one.
+        neighbor_bundle = next(b for b in solution.bundles if "neighbor-model" in (b.model or ""))
+        requires_cmrs = [c for c in neighbor_bundle.cross_model_integrations if c.local_role == EndpointType.REQUIRES]
+        assert len(requires_cmrs) == 1
+        assert requires_cmrs[0].url == "target-controller:custom-user/target-model.neighbor-offer"
+
+        neighbor_yaml = yaml.safe_load(neighbor_bundle.export())
+        assert (
+            neighbor_yaml["saas"]["neighbor-offer"]["url"]
+            == "target-controller:custom-user/target-model.neighbor-offer"
+        )
+
     def test_config_values_extracted_correctly(self) -> None:
         # GIVEN a charm with a fixed config value
         from bundle_builder_x.domain import add_charm_to_domain
