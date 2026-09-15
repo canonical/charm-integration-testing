@@ -202,6 +202,7 @@ def _resolve_deployed_charm(
         charm_track=channel.track or None,
         charm_risk=channel.risk or None,
         charm_revision=info.revision,
+        ubuntu_version=info.base,
     )
 
 
