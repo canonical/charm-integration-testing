@@ -466,12 +466,9 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        The owning model is tried before other models (which are skipped entirely for
-        container-scoped endpoints), so a cheap local integration is always preferred over a
-        cross-model one -- unless ``require_cross_model`` is set (the failed assertion is
-        specifically about cross-model activity on this endpoint), in which case the owning
-        model is skipped entirely: a local candidate would satisfy the plain endpoint count but
-        not the cross-model-only one, so trying it first only wastes a CEGIS iteration. Existing
+        The owning model is preferred over other models (a cheap local integration beats a
+        cross-model one), unless ``require_cross_model`` is set, in which case it's skipped
+        entirely since a local candidate can't satisfy a cross-model-only assertion. Existing
         compatible charms are reused first. Application charms expose every direct alternative;
         transitive dependencies add only the first viable candidate to keep the CEGIS domain small.
         """
@@ -485,8 +482,6 @@ class BundleBuilder:
         else:
             models = [owning_model, *(m for m in domain.models if m != owning_model)]
 
-        # Exhaust the owning model before considering any other model, so a cheap local
-        # integration is always preferred over a cross-model one.
         for model_ref in models:
             if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, model_ref):
                 return True
@@ -1019,9 +1014,8 @@ class BundleBuilder:
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
-        # Dedup per (parent charm_id, model): one candidate instance per model is enough
-        # during expansion. Scoping by model too lets a spec already added locally still be
-        # added in a different model, e.g. to satisfy a cross-model-only requirement.
+        # Dedup per (parent charm_id, model): one instance per model is enough during
+        # expansion (scoping by model lets a cross-model requirement add a distinct instance).
         # Additional instances needed only for optimization are added after satisfiability.
         if any(
             domain.charms[added_id].spec == charm and domain.charms[added_id].model == model_ref
@@ -1041,10 +1035,8 @@ class BundleBuilder:
                 continue
             visited.add(ancestor_id)
 
-            # If the charm we're trying to add is already this ancestor charm, it would create a
-            # cycle -- unless the new instance is in a different model, in which case it's a
-            # distinct application, not a recursive re-add of the same instance (e.g. a
-            # cross-model-only requirement satisfied by another instance of the same spec).
+            # Same charm+model as an ancestor would be a cycle; a different model means a
+            # distinct application instance (e.g. for a cross-model-only requirement).
             if domain.charms[ancestor_id].spec == charm and domain.charms[ancestor_id].model == model_ref:
                 return False
 

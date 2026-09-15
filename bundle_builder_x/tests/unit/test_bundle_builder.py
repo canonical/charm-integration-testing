@@ -648,10 +648,9 @@ class TestAddCharmForCharmIdDedup:
         domain, recursive_spec, leaf_id, _m1, m2 = self._domain_with_ancestor_of_matching_spec()
         builder = BundleBuilder(charmhub_client=_FakeCharmhubClient())
 
-        # WHEN adding recursive-charm's spec again, in a DIFFERENT model (m2) -- e.g. to satisfy
-        # a cross-model-only requirement -- this is a distinct application instance, not a
-        # recursive re-add of the ancestor, so the model-scoped dedup fix must not be defeated
-        # by the (model-unaware) cycle check.
+        # WHEN adding recursive-charm's spec again, in a DIFFERENT model (m2), this is a
+        # distinct application instance, not a recursive re-add of the ancestor -- the
+        # model-scoped dedup fix must not be defeated by the (model-unaware) cycle check.
         added = builder._add_charm_for_charm_id(recursive_spec, leaf_id, domain, m2)
 
         assert added is True
@@ -1754,10 +1753,8 @@ class TestCrossModelEndpointAssertionTags:
         # WHEN the tag is dispatched as a failed assertion
         result = builder._handle_failed_assertion(tag, domain)
 
-        # THEN it's routed to endpoint-expansion logic that specifically forces the new
-        # candidate into a DIFFERENT model (not the cheaper, locally-compatible owning model),
-        # so the resulting integration genuinely satisfies the cross-model-only requirement
-        # instead of silently adding a same-model candidate that would leave it unsatisfied.
+        # THEN it forces the new candidate into a DIFFERENT model (not the cheaper,
+        # locally-compatible owning model), so the requirement is genuinely satisfied.
         assert result.expanded is True
         [new_integration] = domain.charm_integrations
         assert domain.is_cross_model(new_integration)

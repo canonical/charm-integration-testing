@@ -15,10 +15,7 @@ def _active_charm_integration_for_app_int(
 ) -> DomainCharmIntegration | None:
     """Return the ``DomainCharmIntegration`` currently backing ``app_int``, if any.
 
-    A user-declared cross-model ``app_int`` is linked (via ``charm_integration_ids``) to every
-    candidate charm integration it could resolve to; only one is actually active in a given
-    solution. Returns ``None`` for external CMRs (no in-domain charm integration exists to link
-    to) or if none of the candidates evaluate as active.
+    ``None`` for external CMRs, or if none of its candidates are active in this solution.
     """
     for idx, mapping_var in app_int.charm_integration_ids.items():
         if model.evaluate(mapping_var, model_completion=True):
@@ -183,25 +180,18 @@ def _extract_single_model(
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
 
-        # Resolve the offer name/URL through the shared-offer resolver when this user-declared
-        # CMR is backed by a DomainCharmIntegration (i.e. not an external CMR).
+        # Resolve offer name/URL via the shared-offer resolver when backed by a
+        # DomainCharmIntegration; otherwise fall back to the external-CMR default.
         backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
         resolved_offer_name: str
         if backing_integration is not None:
             resolved_offer_name = domain.integration_offer_name(backing_integration, model)
             resolved_url = domain.integration_offer_url(backing_integration, model)
         else:
-            # External CMR (no backing DomainCharmIntegration): app_int.offer_name is only
-            # non-None when the user explicitly declared one, so fall back to the same
-            # "<remote_application>-offer" default IntegrationSpec.resolved_offer_name() uses.
             resolved_offer_name = app_int.offer_name or f"{remote_ep.application}-offer"
             resolved_url = app_int.url
 
-        # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
-        # For PROVIDES: not exported by Bundle.export() (which only reads .url for the
-        # REQUIRES side), but still preserve any resolved (user-declared) URL here so the
-        # mirror pass below can reuse it instead of re-synthesizing one from the provider
-        # model, which would silently discard an explicit user-declared URL.
+        # For REQUIRES: synthesize the saas url unless one was already resolved/user-declared.
         url: str | None
         if charm_ep.type == EndpointType.REQUIRES:
             if resolved_url is not None:
@@ -419,18 +409,10 @@ def extract_solution(
 def _validate_resolved_cmr_offer_consistency(bundles: dict[ModelRef, Bundle]) -> None:
     """Reject any two resolved CMRs whose url/offer_name disagree.
 
-    ``spec.py``'s ``_check_cmr_offer_consistency`` already performs this same bidirectional
-    check before solving, but it can only see CMRs that declare ``url``/``offer_name``
-    explicitly in the spec -- an in-spec CMR that omits both has its offer_name synthesized
-    only later, by ``domain.integration_offer_name()``, once a charm-pair anchor is chosen.
-    That synthesis has no instance-qualifying component (it depends only on the providing
-    charm's name/endpoint/interface), so two different provider charm instances sharing
-    those three values will synthesize the exact same default offer_name despite pointing at
-    different provider models/urls. Since ``Bundle.export()`` keys each requiring model's
-    emitted SAAS entries by ``offer_name`` alone (``saas_entries[cmr.offer_name] = {"url":
-    cmr.url}``), such a collision would otherwise silently drop one relation's URL. Re-running
-    the same consistency check here, after every CMR (in-spec, external, or synthesized) has
-    a concrete resolved offer_name/url, catches what the pre-solve check structurally cannot.
+    ``spec.py``'s check runs pre-solve and can't see offer names synthesized later by
+    ``domain.integration_offer_name()``, which can collide across different provider
+    instances sharing the same charm/endpoint/interface. Re-check post-solve, once every
+    CMR has a concrete resolved offer_name/url.
     """
     for model_ref, bundle in bundles.items():
         seen_urls: dict[str, str] = {}

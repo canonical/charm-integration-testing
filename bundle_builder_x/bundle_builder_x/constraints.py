@@ -254,10 +254,7 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                     if domain.is_cross_model(integration):
                         cross_model_integrations_using_endpoint.append(integration.exists)
 
-            # Add cross-model contributions: for each (app, endpoint) that has CMR
-            # integrations in this charm's own model, add +N when the
-            # application-to-charm mapping is active.
-            # External CMRs contribute to both the plain count and the cross-model-only count.
+            # External CMRs contribute +N to both the plain and cross-model-only counts.
             cmr_terms: list[z3.ArithRef] = []
             for (cmr_model_ref, app, ep), ext_count in cmr_counts.items():
                 if ep != endpoint_name or cmr_model_ref != charm.model:

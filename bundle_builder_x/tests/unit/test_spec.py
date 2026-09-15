@@ -644,12 +644,8 @@ class TestClassifyIntegrations:
         # WHEN classifying
         result = classify_integrations(model_spec, {"model-a": model_spec})
 
-        # THEN offer_name stays None here rather than eagerly resolving to the
-        # "<remote_application>-offer" default: domain.py's offer-sharing/conflict-detection
-        # logic (_matching_user_app_integration_field) needs to distinguish a genuinely
-        # user-declared offer_name from an absent one, and extract.py applies the same
-        # "<remote_application>-offer" default later, only once no user- or shared-offer value
-        # is found.
+        # THEN offer_name stays None (not defaulted) so domain.py can distinguish a
+        # user-declared offer_name from an absent one; extract.py applies the default later.
         assert len(result) == 1
         assert result[0].offer_name is None
 
@@ -828,9 +824,7 @@ class TestSpecFileEdgeCases:
 
     def test_in_spec_cmr_explicit_url_without_offer_name_rejected(self) -> None:
         # GIVEN an in-spec CMR with an explicit url but no offer_name
-        # THEN it is rejected: Bundle Builder X itself creates and names the Juju offer for
-        # in-spec CMRs, and that name may not match whatever offer name is embedded in an
-        # independently-authored url, so the two must be pinned together explicitly.
+        # THEN it is rejected: an unpinned offer_name could diverge from the offer embedded in url.
         with pytest.raises(ValueError, match="provides an explicit 'url' but no 'offer_name'"):
             SpecFile(
                 models=[
@@ -854,10 +848,8 @@ class TestSpecFileEdgeCases:
             )
 
     def test_in_spec_cmr_offer_name_disagreeing_with_url_rejected(self) -> None:
-        # GIVEN an in-spec CMR whose offer_name names a different offer than the one embedded
-        # in its url
-        # THEN it is rejected: extraction preserves both values verbatim, so the emitted
-        # relation would be named after one offer while its url points at another.
+        # GIVEN an in-spec CMR whose offer_name doesn't match the offer embedded in its url
+        # THEN it is rejected: extraction preserves both values verbatim.
         with pytest.raises(ValueError, match="does not match the offer name embedded in 'url'"):
             SpecFile(
                 models=[
@@ -882,12 +874,9 @@ class TestSpecFileEdgeCases:
             )
 
     def test_external_cmrs_to_same_application_with_distinct_offers_accepted(self) -> None:
-        # GIVEN two external CMRs targeting the same remote application, but each consuming a
-        # genuinely distinct offer (different urls, each internally consistent with its own
-        # offer_name)
-        # THEN it is accepted: a single remote application can legitimately expose multiple
-        # distinct offers (e.g. different endpoint subsets under different offer names), so this
-        # is not a conflict merely because the remote application is shared.
+        # GIVEN two external CMRs to the same remote application, but each consuming a
+        # distinct offer (different, internally-consistent url/offer_name pairs)
+        # THEN it is accepted: one remote application can expose multiple distinct offers.
         spec = SpecFile(
             models=[
                 ModelSpec(
@@ -920,10 +909,9 @@ class TestSpecFileEdgeCases:
         assert len(spec.models_by_name["m-a"].integrations) == 2
 
     def test_external_cmrs_sharing_a_url_with_disagreeing_offer_name_rejected(self) -> None:
-        # GIVEN two external CMRs that declare the exact same url (i.e. they consume the same
-        # underlying offer), but different offer_name values
-        # THEN it is rejected: bundle.py keys emitted SAAS entries by offer_name, so the same
-        # offer would otherwise be emitted twice under two different names.
+        # GIVEN two external CMRs with the same url but different offer_name values
+        # THEN it is rejected: SAAS entries are keyed by offer_name, so the same offer would
+        # be emitted twice under two different names.
         with pytest.raises(ValueError, match="disagreeing offer_name"):
             SpecFile(
                 models=[
@@ -957,10 +945,8 @@ class TestSpecFileEdgeCases:
 
     def test_external_cmrs_sharing_an_offer_name_with_disagreeing_url_rejected(self) -> None:
         # GIVEN two external CMRs that resolve to the same offer_name, but declare different urls
-        # THEN it is rejected: Bundle.export() keys each requiring model's SAAS entries by
-        # offer_name alone, so two different urls sharing one offer_name would silently collide
-        # -- the later url would overwrite the first in the emitted bundle, and both relations
-        # would end up consuming whichever offer won that race.
+        # THEN it is rejected: SAAS entries are keyed by offer_name alone, so the two urls
+        # would silently collide.
         with pytest.raises(ValueError, match="disagreeing url"):
             SpecFile(
                 models=[
@@ -993,14 +979,9 @@ class TestSpecFileEdgeCases:
             )
 
     def test_external_cmrs_to_same_application_with_offer_name_omitted_on_one_side_rejected(self) -> None:
-        # GIVEN two external CMRs targeting the same remote application, where one declares an
-        # explicit offer_name matching its url and the other omits offer_name entirely (even
-        # though it shares the exact same url)
-        # THEN it is rejected: extraction resolves the omitted offer_name via the
-        # "<remote_application>-offer" default (see extract.py), *not* by reading the url, so the
-        # two integrations would be emitted under different offer names despite pointing at the
-        # same url -- this must be caught using the same defaulting rule extraction uses, not one
-        # derived from the url.
+        # GIVEN two external CMRs sharing a url, where one has an explicit offer_name and the
+        # other omits it
+        # THEN it is rejected: the omitted one defaults per extract.py, which disagrees here.
         with pytest.raises(ValueError, match="disagreeing offer_name"):
             SpecFile(
                 models=[
@@ -1032,12 +1013,9 @@ class TestSpecFileEdgeCases:
             )
 
     def test_in_spec_and_external_cmr_sharing_offer_name_with_disagreeing_url_rejected(self) -> None:
-        # GIVEN one in-spec CMR (explicit offer_name/url pair, required to agree with each
-        # other) and one external CMR that happen to resolve to the same offer_name but declare
-        # different urls
-        # THEN it is rejected: Bundle.export() keys each requiring model's SAAS entries by
-        # offer_name alone regardless of whether the CMR is in-spec or external, so this
-        # collision is just as real across the two kinds as it is between two external CMRs.
+        # GIVEN an in-spec CMR and an external CMR resolving to the same offer_name but
+        # declaring different urls
+        # THEN it is rejected: the collision applies regardless of in-spec vs. external.
         with pytest.raises(ValueError, match="disagreeing url"):
             SpecFile(
                 models=[
@@ -1071,11 +1049,9 @@ class TestSpecFileEdgeCases:
             )
 
     def test_two_in_spec_cmrs_sharing_offer_name_with_disagreeing_url_rejected(self) -> None:
-        # GIVEN two in-spec CMRs to two different in-spec remote models, each with an explicit
-        # offer_name/url pair, that happen to declare the same offer_name but different urls
-        # THEN it is rejected for the same reason as the external case: the requiring model's
-        # emitted SAAS entries are keyed by offer_name alone, so the second url would silently
-        # overwrite the first.
+        # GIVEN two in-spec CMRs to different remote models that share an offer_name but
+        # declare different urls
+        # THEN it is rejected for the same reason as the external case.
         with pytest.raises(ValueError, match="disagreeing url"):
             SpecFile(
                 models=[
