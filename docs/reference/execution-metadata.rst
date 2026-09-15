@@ -96,7 +96,7 @@ Integration Information
      - Normalized
      - Example Value
    * - ``integration``
-     - Integrations between charms deployed in the test model. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded.
+     - Integrations between charms involved in the test model, including cross-model relations (CMRs) where one side is a remote SAAS entry backed by a consumed offer. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded. For CMRs, the remote side's charm is resolved by checking the offering model's status, so it is recorded identically to a same-model integration (i.e. by charm name, not by the offer URL). Offer URLs embed randomly generated controller/model names and are never used for this value, since that would make it unique per run and useless for matching. If the offering model can't be reached to resolve the charm, the offer's local alias is recorded instead, in the form ``offer:<alias>:<endpoint>``.
      - No
      - ``postgresql:db/postgresql/app:database``
 
