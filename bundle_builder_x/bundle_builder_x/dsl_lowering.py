@@ -99,9 +99,8 @@ from .domain import Domain, DomainCharm
 # ---------------------------------------------------------------------------
 
 
-# RelationSet: a list of endpoint refs belonging to the current charm. Each ref carries a
-# cross_model_only tag set by cross_model(), so downstream reducers (bool(), len(), charms())
-# know to read the cross-model-scoped z3 variables instead of the plain ones.
+# RelationSet: endpoint refs for the current charm, each tagged cross_model_only by
+# cross_model() so reducers (bool(), len(), charms()) read the right z3 variables.
 @dataclass(frozen=True)
 class _EndpointRef:
     name: str
