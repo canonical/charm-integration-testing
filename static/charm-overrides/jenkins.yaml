@@ -1,5 +1,6 @@
 ---
 overrides:
-  - provides:
+  - assumes: [unsupported-obsolete]
+    provides:
       nrpe-external-master:
         optional: true
