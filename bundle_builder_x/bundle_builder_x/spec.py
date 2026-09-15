@@ -176,14 +176,8 @@ class SpecFile(BaseModel):
             model_name = model_spec.key
             seen_local: set[tuple[str, str, str, str]] = set()
             seen_cmrs: set[tuple[str, str, str, str, str]] = set()
-            # Track by url and by offer_name across *all* CMRs with an explicit url (both
-            # in-spec and external): Bundle.export() keys every requiring model's emitted SAAS
-            # entries by offer_name alone (``saas_entries[cmr.offer_name] = {"url": cmr.url}``),
-            # so a collision is possible regardless of whether the CMR is in-spec or external.
-            # In-spec CMRs that omit url (and therefore offer_name, since url requires it) are
-            # not covered here: their offer_name is only resolved later, at Domain-build time,
-            # via integration_offer_name()'s charm-pair anchor sharing, which isn't available
-            # during this spec-level validation pass.
+            # Track url<->offer_name across CMRs with an explicit url; Bundle.export() keys
+            # SAAS entries by offer_name alone, so they must agree bidirectionally.
             seen_cmr_urls: dict[str, str] = {}
             seen_cmr_offer_names: dict[str, str] = {}
             for integration in model_spec.integrations:
@@ -223,9 +217,8 @@ class SpecFile(BaseModel):
 
                 remote_model_key = cast(str, integration.remote_model_key)  # includes controller if set
 
-                # A CMR whose remote_model resolves to the current model is nonsensical;
-                # use a local integration instead.
-                # Compare via resolved key so plain-name aliases and full keys both match.
+                # A CMR whose remote_model resolves to the current model is nonsensical (use a
+                # local integration); compare via resolved key so aliases and full keys match.
                 resolved_remote = all_models.get(remote_model_key)
                 resolved_remote_key = resolved_remote.key if resolved_remote is not None else remote_model_key
                 if resolved_remote_key == model_name or remote_model_key == model_name:
@@ -272,13 +265,7 @@ class SpecFile(BaseModel):
                             f"Model '{model_name}': cross-model integration references model "
                             f"'{remote_model_key}' which has no 'controller' set"
                         )
-                    # In-spec CMR: an explicit url with no offer_name is ambiguous. Bundle Builder X
-                    # itself creates and names the Juju offer for in-spec CMRs (see
-                    # domain.integration_offer_name()), which may synthesize a name that shares
-                    # an offer with other cross-model integrations between the same charm pair.
-                    # An explicit url baked around a *different* offer name would then point at
-                    # an offer that's never actually created, so require offer_name whenever url
-                    # is given here to keep the two in agreement.
+                    # An explicit url requires offer_name since Bundle Builder X synthesizes it.
                     if integration.url is not None and integration.offer_name is None:
                         raise ValueError(
                             f"Model '{model_name}': cross-model integration to in-spec model "
@@ -287,11 +274,7 @@ class SpecFile(BaseModel):
                             "explicitly so the url can be guaranteed to point at it -- set 'offer_name' "
                             "to match the offer name embedded in 'url'"
                         )
-                    # An offer_name/url pair that name two *different* offers is just as
-                    # ambiguous as an omitted offer_name: extraction preserves both values
-                    # verbatim, so the emitted relation would be named after one offer while
-                    # its url resolves to another -- neither of which is guaranteed to be the
-                    # offer Bundle Builder X actually creates.
+                    # offer_name and url must name the same offer.
                     if integration.url is not None and integration.offer_name is not None:
                         url_offer_name = _offer_name_from_url(integration.url)
                         if url_offer_name != integration.offer_name:
@@ -301,11 +284,7 @@ class SpecFile(BaseModel):
                                 f"that does not match the offer name embedded in 'url' "
                                 f"({url_offer_name!r}); the two must agree"
                             )
-                    # An in-spec CMR with an explicit url always has offer_name too (enforced
-                    # above), so its resolved offer_name/url pair is known here and must be
-                    # checked against every other CMR (in-spec or external) sharing this
-                    # requiring model, the same way external CMRs are checked below -- see
-                    # seen_cmr_urls/seen_cmr_offer_names for why this must be bidirectional.
+                    # Check against every other CMR (in-spec or external) in this model.
                     if integration.url is not None and integration.offer_name is not None:
                         self._check_cmr_offer_consistency(
                             model_name=model_name,
@@ -321,22 +300,8 @@ class SpecFile(BaseModel):
                             f"Model '{model_name}': cross-model integration to external model "
                             f"'{remote_model_key}' requires a 'url' field"
                         )
-                    # A single remote application can legitimately expose multiple distinct
-                    # offers (different endpoint subsets under different offer names), so two
-                    # integrations to the same (remote_model, remote_application) with different
-                    # urls are not necessarily a conflict -- they may simply consume two
-                    # different offers. What *is* a conflict is two integrations whose urls
-                    # agree (i.e. they consume the very same offer, e.g. a cross_model()
-                    # companion endpoint alongside the CMR that triggered it) but whose
-                    # offer_name resolves differently; bundle.py keys the emitted SAAS entries by
-                    # offer_name, so this would silently mean the same offer is emitted twice
-                    # under different names. Key the check by url, not by remote application.
-                    # Mirror extract.py's actual default synthesis for external CMRs
-                    # (`app_int.offer_name or f"{remote_ep.application}-offer"`) rather than
-                    # deriving a default from the url: an integration that omits offer_name
-                    # keeps its own url but is emitted under the "<remote_application>-offer"
-                    # name regardless of what offer_name the url happens to embed, so the
-                    # resolved value used for comparison here must match that, not the url.
+                    # A remote application may expose multiple offers, so key by url, not
+                    # application. Match extract.py's default offer_name for omitted values.
                     resolved_offer_name = integration.offer_name or f"{integration.remote_application}-offer"
                     self._check_cmr_offer_consistency(
                         model_name=model_name,
@@ -358,11 +323,8 @@ class SpecFile(BaseModel):
     ) -> None:
         """Reject a CMR (in-spec or external) whose url/offer_name conflicts with a prior one.
 
-        Bundle.export() keys each requiring model's emitted SAAS entries by offer_name alone
-        (``saas_entries[cmr.offer_name] = {"url": cmr.url}``), so both directions matter:
-        the same url must always resolve to the same offer_name (else the same offer would be
-        emitted twice under different names), and the same offer_name must always resolve to
-        the same url (else the later url silently overwrites the first in the emitted bundle).
+        Bundle.export() keys SAAS entries by offer_name alone, so url and offer_name must
+        agree bidirectionally across every CMR in a model.
         """
         prior_offer_name = seen_cmr_urls.get(url)
         if prior_offer_name is not None and prior_offer_name != resolved_offer_name:

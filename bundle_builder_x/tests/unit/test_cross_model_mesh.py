@@ -360,11 +360,8 @@ class TestCrossModelExprDSL:
         self, op: str
     ) -> None:
         # GIVEN the same mixed expression as above but combined with "&" or "-" instead of "|".
-        # Unlike "|" (which keeps both refs in its output, letting the post-hoc check see the
-        # conflicting tags), "&"/"-" filter by _EndpointRef equality directly: "&" would otherwise
-        # silently produce an empty set (wrongly evaluating len() to 0), and "-" would silently
-        # keep the unfiltered endpoint's full count -- neither surfaces the conflict in its own
-        # output, so it must be checked on the operands before combining.
+        # Unlike "|", these filter by _EndpointRef equality directly and would otherwise
+        # silently drop the tag conflict, so it must be checked on the operands before combining.
         domain = _make_domain(
             {
                 ModelRef(name="model-a"): DomainModel(
@@ -493,14 +490,9 @@ class TestCrossModelMeshOfferSharing:
         assert mesh_offer == "my-custom-workload-offer"
 
     def test_second_in_spec_cmr_without_explicit_offer_name_does_not_spuriously_conflict(self) -> None:
-        # GIVEN two REAL user-declared (in-spec) CMRs between the same charm pair, going through
-        # the actual spec-to-domain pipeline (classify_integrations) rather than hand-constructed
-        # DomainApplicationIntegration objects: one with an explicit offer_name, the other with
-        # none at all (so IntegrationSpec.resolved_offer_name() would default it to
-        # "provider-app-offer"). Before the fix, classify_integrations eagerly materialized that
-        # default into DomainApplicationIntegration.offer_name, so domain.py's conflict detector
-        # (_matching_user_app_integration_field) saw two distinct non-None "user-declared" values
-        # and raised, even though the second one was never actually declared by the user.
+        # GIVEN two real user-declared CMRs via classify_integrations: one with an explicit
+        # offer_name, the other with none. Before the fix, the missing one was eagerly defaulted,
+        # making domain.py's conflict detector wrongly see two distinct "user-declared" values.
         consumer_ref = ModelRef(name="model-a", controller="foo")
         provider_ref = ModelRef(name="model-b", controller="foo")
         consumer_spec = ModelSpec(
@@ -588,12 +580,8 @@ class TestCrossModelMeshOfferSharing:
         assert domain.integration_offer_name(backend_alt_integration, model) == "my-custom-workload-offer"
 
     def test_extraction_keeps_explicit_offer_name_and_url_in_agreement(self) -> None:
-        # GIVEN an in-spec CMR with BOTH an explicit offer_name and an explicit url (the only
-        # combination SpecFile validation now allows for in-spec CMRs -- see
-        # test_in_spec_cmr_explicit_url_without_offer_name_rejected in test_spec.py -- precisely
-        # because Bundle Builder X itself creates and names the Juju offer for in-spec CMRs, and
-        # an unpinned offer_name could silently diverge from whatever offer name is embedded in
-        # an independently-authored url), going through the real classify_integrations pipeline.
+        # GIVEN an in-spec CMR with both an explicit offer_name and url (the only combination
+        # SpecFile allows; see test_spec.py), via the real classify_integrations pipeline.
         consumer_ref = ModelRef(name="model-a", controller="foo")
         provider_ref = ModelRef(name="model-b", controller="foo")
         consumer_spec = ModelSpec(
@@ -655,10 +643,8 @@ class TestCrossModelMeshOfferSharing:
         assert solver.check() == z3.sat
         model = solver.model()
 
-        # THEN both the domain-level accessors and the final extracted bundle agree: the offer
-        # name used to name/group the Juju offer matches the offer name embedded in the url used
-        # to consume it, rather than silently diverging as they would if offer_name were left
-        # unset and re-synthesized independently of url.
+        # THEN the domain-level accessors and the extracted bundle agree on the offer name,
+        # rather than silently diverging as they would if it were re-synthesized from url.
         assert domain.integration_offer_name(backend_integration, model) == "my-pinned-offer"
         assert domain.integration_offer_url(backend_integration, model) == "foo:admin/model-b.my-pinned-offer"
 
@@ -724,10 +710,9 @@ class TestCrossModelMeshOfferSharing:
         assert domain.integration_offer_url(mesh_integration, model) == "foo:admin/model-b.my-custom-workload-offer"
 
     def test_conflicting_user_declared_offer_names_for_same_pair_raise(self) -> None:
-        # GIVEN two distinct, explicit user CMRs between the same charm pair (different
-        # endpoints) that declare two DIFFERENT offer names. Since this codebase merges every
-        # cross-model integration between the same charm pair onto a single Juju offer, these
-        # two user-declared names cannot both be honored.
+        # GIVEN two explicit user CMRs between the same charm pair, on different endpoints,
+        # declaring different offer names. Since every CMR between a charm pair merges onto a
+        # single Juju offer, both names can't be honored.
         consumer = _make_charm(
             "consumer-app",
             {
@@ -797,14 +782,9 @@ class TestCrossModelMeshOfferSharing:
             domain.integration_offer_name(workload_integration, model)
 
     def test_explicitly_declared_mesh_cmr_with_conflicting_offer_name_raises_on_extraction(self) -> None:
-        # GIVEN a spec that explicitly declares BOTH the real workload CMR AND the
-        # cross_model_mesh companion CMR between the same charm pair, each under its own
-        # (different) user-supplied offer name. This is the extraction-time counterpart to
-        # test_conflicting_user_declared_offer_names_for_same_pair_raise: since the real relation
-        # and the mesh relation are both fully user-declared here (not solver-discovered), the
-        # per-model extraction loop resolves their offer names directly from
-        # application_integrations rather than via the solver-discovered-companion path -- so the
-        # conflict must be caught there too, not just for discovered companions.
+        # GIVEN a spec declaring both the real CMR and its cross_model_mesh companion under
+        # different user-supplied offer names. Extraction-time counterpart to
+        # test_conflicting_user_declared_offer_names_for_same_pair_raise, since both are user-declared.
         consumer_ref = ModelRef(name="model-a", controller="foo")
         provider_ref = ModelRef(name="model-b", controller="foo")
         domain = _make_domain(
@@ -917,10 +897,8 @@ class TestCrossModelMeshOfferSharing:
 
     def test_bidirectional_cross_model_pair_keeps_separate_offers_per_direction(self) -> None:
         # GIVEN two charms in different models that each provide a distinct endpoint to the
-        # other (a mutually-required pair, e.g. dex-auth/oidc-gatekeeper's dex-oidc-config <->
-        # oidc-client cyclic relation). Offer-sharing must NOT merge these into one offer: a
-        # Juju offer is hosted by a single application, so charm-a's offer (exposing endpoint-a)
-        # and charm-b's offer (exposing endpoint-b) are necessarily two separate offers.
+        # other (a cyclic pair). Offer-sharing must NOT merge these: a Juju offer is hosted by
+        # one application, so each charm's offer is necessarily separate.
         charm_a = _make_charm(
             "charm-a",
             {
@@ -995,11 +973,9 @@ class TestCrossModelMeshCompanionOverrideConstraint:
         return lower(expr, ctx).expr
 
     def test_local_only_cmr_mesh_pairing_is_rejected_by_the_companion_constraint(self) -> None:
-        # GIVEN two charms in the SAME model, related via BOTH cross_model_mesh and workload.
-        # A local-only mesh relation carries no CMR data at all (there is no cross-model
-        # relation for it to describe), so cross_model_mesh should never be used purely
-        # in-model: the companion constraint's cross-model-only clause rejects it even though
-        # the bare equality alone would hold vacuously (both sides empty).
+        # GIVEN two charms in the same model, related via both cross_model_mesh and workload.
+        # A local-only mesh relation carries no CMR data, so cross_model_mesh must never be
+        # satisfied purely in-model, even though the bare equality holds vacuously.
         domain = _make_domain(
             {
                 ModelRef(name="default"): DomainModel(
