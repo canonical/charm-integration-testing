@@ -2740,6 +2740,30 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
+name = "validators-etcd-client"
+version = "0.1.0"
+description = "Validator for etcd_client interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42.0.0"
+grpcio = ">=1.60.0"
+types-grpcio = {version = ">=1.83.0.20260730,<2", optional = true}
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["types-grpcio (>=1.83.0.20260730,<2)", "validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/etcd_client"
+
+[[package]]
 name = "validators-external-provider"
 version = "0.1.0"
 description = "Validator for external_provider interface"
@@ -3192,6 +3216,7 @@ validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cross-model-mesh = "*"
 validators-cve-catalog = "*"
+validators-etcd-client = "*"
 validators-external-provider = "*"
 validators-grafana-dashboard = "*"
 validators-grafana-datasource = "*"
@@ -3507,4 +3532,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "828aaf2699b5a1d3631d739e2dfaffd5aa539ce1157780a415e1de0c3b522cd4"
+content-hash = "3fe609b36938a1d5298b418d0fb43e7243b5444ca50337c7a1ffe0e9df59197e"
