@@ -633,15 +633,19 @@ def _duplicate_item_for_repeat(
     ``copy.copy`` only copies attribute references, so without further action
     the duplicate would share *item*'s mutable ``own_markers``/``keywords``,
     ``stash`` (used elsewhere in the suite to record per-item pass/fail/
-    skip state, e.g. ``resource_tracking``), and ``user_properties`` (used by
-    the ``execution_metadata``/``record_property`` fixture to attach JUnit
-    metadata); marking, reporting on, or recording metadata for the
-    duplicate would then incorrectly mutate *item* too. All four are
-    replaced here with independent copies bound to the duplicate. The
-    ``keywords`` mapping is rebuilt after relabeling (it seeds itself from
-    the node's ``name`` at construction) and repopulated with *item*'s own
-    entries so the duplicate doesn't lose markers/keywords the template
-    already had beyond its own (now stale) name.
+    skip state, e.g. ``resource_tracking``), ``user_properties`` (JUnit/Test
+    Observer metadata recorded via ``record_property``, e.g. by the
+    ``execution_metadata`` fixture), and ``_report_sections`` (captured
+    output attached to the item's test reports); marking, reporting on, or
+    recording metadata/output for the duplicate would then incorrectly
+    mutate *item* too, and if *item* already ran once (e.g. a template
+    reused for a later recovery), the duplicate would start out inheriting
+    that earlier run's stale metadata/output. All five are replaced here
+    with independent, empty copies bound to the duplicate. The ``keywords``
+    mapping is rebuilt after relabeling (it seeds itself from the node's
+    ``name`` at construction) and repopulated with *item*'s own entries so
+    the duplicate doesn't lose markers/keywords the template already had
+    beyond its own (now stale) name.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
     pointing back to *item*'s original object ID (chasing through any prior
@@ -654,7 +658,9 @@ def _duplicate_item_for_repeat(
     if hasattr(item, "stash"):
         duplicate.stash = type(item.stash)()
     if hasattr(item, "user_properties"):
-        duplicate.user_properties = list(item.user_properties)
+        duplicate.user_properties = []
+    if hasattr(item, "_report_sections"):
+        duplicate._report_sections = []
     _duplicate_original_ids[id(duplicate)] = _duplicate_original_ids.get(id(item), id(item))
     _label_occurrence(
         duplicate,

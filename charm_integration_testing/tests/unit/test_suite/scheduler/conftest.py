@@ -60,6 +60,10 @@ class FakeItem:
         # record_property), so tests can exercise
         # _duplicate_item_for_repeat's user_properties-isolation fix.
         self.user_properties: list[tuple[str, object]] = []
+        # Mirrors real pytest.Item._report_sections (captured output
+        # attached to test reports), so tests can exercise
+        # _duplicate_item_for_repeat's report-sections-isolation fix.
+        self._report_sections: list[tuple[str, str, str]] = []
 
     @property
     def nodeid(self) -> str:

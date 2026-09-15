@@ -221,6 +221,38 @@ class TestDuplicateItemForRepeat:
         # other occurrences
         assert ("category", "value") not in item.user_properties
 
+    def test_duplicate_does_not_inherit_templates_stale_user_properties(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a template that already ran once and recorded JUnit metadata
+        # (e.g. this template was already used for an earlier occurrence, or
+        # for the static plan, before being reused for runtime recovery)
+        item = make_item("test_foo")
+        item.user_properties.append(("category", "stale_value"))
+
+        # WHEN duplicated for a later occurrence
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate starts with no metadata of its own - it must
+        # not report a prior occurrence's stale/duplicate metadata
+        assert duplicate.user_properties == []
+
+    def test_duplicate_has_independent_report_sections(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a template that already ran once and captured output (e.g.
+        # this template was already used for an earlier occurrence before
+        # being reused for runtime recovery)
+        item = make_item("test_foo")
+        item._report_sections.append(("call", "stdout", "stale output"))
+
+        # WHEN duplicated for a later occurrence
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate starts with no captured sections of its own,
+        # and appending to it does not mutate the template's list
+        assert duplicate._report_sections == []
+        duplicate._report_sections.append(("call", "stdout", "new output"))
+        assert ("call", "stdout", "new output") not in item._report_sections
+
     def test_duplicate_keywords_carry_over_template_entries_under_the_new_name(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
