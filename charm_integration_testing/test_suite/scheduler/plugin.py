@@ -317,6 +317,14 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
       immediately before *item*; if that succeeded, ``_current_state`` will
       already match by the time this hook runs. If not, *item* is skipped here,
       and recovery is attempted again for whatever test follows it.
+    * *item* is a transition test candidate that already setup-skipped earlier
+      in this run (tracked via ``_skipped_transition_item_ids``), even though
+      ``_current_state`` now satisfies its ``requires``. The static plan can
+      contain the same underlying test more than once (see
+      ``test_repeated_bridge_item_gets_unique_nodeid_per_occurrence``); without
+      this check, a later preplanned occurrence would re-run the exact
+      candidate that dynamically-injected recovery bridges are barred from
+      retrying (see ``_skipped_transitions`` / ``_shortest_path_to_any``).
 
     Unmarked tests are never affected.
     """
@@ -337,6 +345,14 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
             f"Skipped: environment is at state {_current_state.value!r}, but this test requires one of "
             f"{[s.value for s in marker.requires]!r} and no recovery path could bridge the gap."
         )
+    if marker.is_transition:
+        original_id = _duplicate_original_ids.get(id(item), id(item))
+        edge = StateTransition(from_state=_current_state, to_state=marker.provides)
+        if original_id in _skipped_transition_item_ids.get(edge, set()):
+            pytest.skip(
+                f"Skipped: this test already skipped earlier in the run as a candidate for the "
+                f"{_current_state.value!r} -> {marker.provides.value!r} transition and will not be retried."
+            )
 
 
 @pytest.hookimpl(hookwrapper=True)

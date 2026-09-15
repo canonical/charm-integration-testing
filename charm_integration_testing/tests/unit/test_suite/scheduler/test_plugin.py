@@ -1423,6 +1423,35 @@ class TestPytestRuntestSetup:
 
         pytest_runtest_setup(item)  # must not raise
 
+    def test_skips_a_preplanned_duplicate_of_an_already_skipped_transition_candidate(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        """Regression: the static plan can list the same candidate twice
+        (see ``test_repeated_bridge_item_gets_unique_nodeid_per_occurrence``).
+        If the first occurrence setup-skips, a later preplanned occurrence
+        must not be allowed to retry it just because ``_current_state``
+        happens to satisfy its ``requires`` again - the no-retry rule that
+        already applies to dynamically-injected bridges (``_skipped_transitions``)
+        must also apply here.
+        """
+        # GIVEN a transition candidate that already skipped once
+        edge = StateTransition(from_state=State.DEPLOYED, to_state=State.NEIGHBOR_ONLY)
+        original = make_item("test_teardown", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions[edge] = [original]
+        _plugin_module._current_state = State.DEPLOYED
+        _plugin_module._record_skipped_transition_candidate(edge, original)
+
+        # AND a second, preplanned occurrence of the same underlying test
+        duplicate = make_item("test_teardown", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        _plugin_module._duplicate_original_ids[id(duplicate)] = id(original)
+
+        # WHEN the environment is (again) at the state the duplicate requires
+        _plugin_module._current_state = State.DEPLOYED
+
+        # THEN the duplicate is skipped instead of being allowed to retry
+        with pytest.raises(pytest.skip.Exception):
+            pytest_runtest_setup(duplicate)
+
 
 # ---------------------------------------------------------------------------
 # Tests for pytest_sessionfinish (global cleanup)
