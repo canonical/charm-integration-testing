@@ -12,6 +12,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED_WITH_OLD_REVISION, provides=State.DEPLOYED)
 def test_upgrade_charm(
     juju_client: JujuClient,
+    target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
     target_application: str,
     target_revision: int | None,
@@ -21,7 +22,10 @@ def test_upgrade_charm(
         pytest.fail("--target-revision must be provided as an integer for this test.")
 
     # Upgrading the charm to the target revision specified by the fixture
-    juju_client.logger.info(f"Refreshing {target_application} to original bundle revision {target_revision}.")
+    juju_client.logger.info(
+        f"Refreshing {target_application} from downgrade revision {target_downgrade_revision} "
+        f"to original bundle revision {target_revision}."
+    )
     juju_client.refresh_application(
         application=target_application,
         revision=target_revision,
