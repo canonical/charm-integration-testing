@@ -419,6 +419,28 @@ class TestValidatorInjectorExtension:
             assert results["myapp/0"][0].endpoint == "canary"
             assert results["myapp/0"][0].status == "FAIL"
 
+        def test_continues_to_remaining_units_when_one_units_remote_command_fails(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # Regression test for: _run_persistence_on_unit() raising (e.g. a non-zero
+            # run_validators exit) previously propagated straight out of post_persistence(),
+            # aborting the loop and leaving every unit after the failing one with no persistence
+            # op attempted at all.
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            juju.exec_responses.extend([_ok(), _fail(stderr="boom")])  # myapp/0: readiness OK, run fails
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))  # myapp/1: succeeds
+
+            # WHEN
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", {})
+
+            # THEN myapp/0 reports an ERROR result instead of raising, and myapp/1 was still
+            # attempted (its own run command shows up in exec_calls) and reports its own result.
+            assert results["myapp/0"][0].status == "ERROR"
+            assert "boom" in (results["myapp/0"][0].error or "")
+            run_cmds = [call for call in juju.exec_calls if "--persistence" in call[2]]
+            assert len(run_cmds) == 2
+            assert results["myapp/1"] == []
+
         def test_skips_and_preserves_tracked_state_when_no_validators_path_and_venv_absent(
             self, extension_no_path: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
