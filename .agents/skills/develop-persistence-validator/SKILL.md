@@ -76,7 +76,13 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         return self._make_result(level="deep", checks=[...]), new_state
 
     def cleanup(self) -> None:
-        """Drop all canary data. Called once, at the end of the run."""
+        """Drop all canary data.
+
+        Not guaranteed to run only once at the end of a test run: the harness also
+        invokes cleanup on state transitions mid-session (e.g. before
+        `test_idempotent_redeploy`), and `prepare()` may run again afterwards. Must be
+        safe to call when no canary resource remains (no-op, not an error).
+        """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
 ```
@@ -229,8 +235,10 @@ neither.
 
 8. Manually verify end-to-end if a live model is available: deploy the
    two charms, run
-   `run_validators --persistence prepare` on the requirer unit, disrupt the
-   provider (restart/scale/migrate), then `run_validators --persistence
+   `run_validators --persistence prepare` on the unit whose role this
+   validator applies to (per its role gating - e.g. the requirer for a
+   requirer-side canary), disrupt the other/remote side of the relation
+   (restart/scale/migrate), then `run_validators --persistence
    checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'` and confirm
    a `PASS` result plus an `updated_refs` entry for that `relation_id` with
    `ref` advanced by one (`ref` is not on the `ValidationResult` itself - see
