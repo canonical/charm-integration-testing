@@ -44,7 +44,10 @@ def test_downgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Also wait on the neighbor model (refreshing the target can trigger relation/databag work
+    # there), so the neighbor-side checkpoint below doesn't race a hook that hasn't settled yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Verify the application is downgraded to the selected revision and the model is healthy
     downgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
