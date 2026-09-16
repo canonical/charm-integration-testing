@@ -1008,6 +1008,13 @@ class TestIntegrationMethods:
 
     def test_wait_for_removal_of_saas_delegates_to_backend(self) -> None:
         backend = IntegrationTrackingBackendStub()
+        timeout = timedelta(minutes=10)
+        _client(backend).wait_for_removal_of_saas("neighbor-offer", model=_MODEL, timeout=timeout)
+
+        assert backend.wait_removal_of_saas_calls == [(_MODEL, "neighbor-offer", timeout)]
+
+    def test_wait_for_removal_of_saas_defaults_timeout_to_none(self) -> None:
+        backend = IntegrationTrackingBackendStub()
         _client(backend).wait_for_removal_of_saas("neighbor-offer", model=_MODEL)
 
         assert backend.wait_removal_of_saas_calls == [(_MODEL, "neighbor-offer", None)]
