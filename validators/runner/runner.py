@@ -109,6 +109,14 @@ class ValidatorRunnerResults(BaseModel):
     # --persistence prepare/checkpoint. Empty for functional-only runs and for cleanup (which has
     # no state to carry forward - see BasePersistenceValidator.cleanup).
     updated_refs: dict[str, PersistenceState] = Field(default_factory=dict)
+    # relation_ids that --persistence cleanup actually visited (i.e. had a live relation with a
+    # registered persistence validator at cleanup time), whether or not the cleanup call itself
+    # succeeded. Callers use this to distinguish "cleanup ran for this relation" (safe to drop
+    # tracked state, once absent from any FAIL/ERROR result) from "this relation_id was never
+    # touched" (e.g. the relation was already removed, or its interface's persistence validator
+    # failed to load) - the latter must keep its tracked state so orphaned canary data isn't
+    # forgotten. Empty for prepare/checkpoint and for functional-only runs.
+    cleaned_relation_ids: list[int] = Field(default_factory=list)
 
 
 class ValidatorRunner:
@@ -402,7 +410,9 @@ class ValidatorRunner:
         """Drop all canary data for every relation with a registered persistence validator."""
         logger.info("Cleaning up persistence validators")
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
+        cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
+            cleaned_relation_ids.append(integration.id)
             for validator_cls in self.persistence_validators[interface_name]:
                 _, error_result = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.cleanup()
@@ -410,7 +420,7 @@ class ValidatorRunner:
                 if error_result is not None:
                     results.append(error_result)
         logger.info("Finished cleaning up persistence validators")
-        return ValidatorRunnerResults(results=results, updated_refs={})
+        return ValidatorRunnerResults(results=results, updated_refs={}, cleaned_relation_ids=cleaned_relation_ids)
 
     def _call_persistence_method(
         self,
@@ -528,6 +538,7 @@ def main() -> None:
         if persistence_results is not None:
             results.results.extend(persistence_results.results)
             results.updated_refs.update(persistence_results.updated_refs)
+            results.cleaned_relation_ids.extend(persistence_results.cleaned_relation_ids)
     finally:
         framework.close()
 

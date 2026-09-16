@@ -94,34 +94,48 @@ def _runner_json(*results: ValidationResult) -> str:
     return ValidatorRunnerResults(results=list(results)).model_dump_json()
 
 
-def _pass_result(endpoint: str = "db") -> ValidationResult:
+def _pass_result(endpoint: str = "db", relation_id: int = 0) -> ValidationResult:
     return ValidationResult(
-        status="PASS", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0
+        status="PASS",
+        endpoint=endpoint,
+        interface="sample_interface",
+        level="simple",
+        role="requires",
+        relation_id=relation_id,
     )
 
 
-def _fail_result(endpoint: str = "db") -> ValidationResult:
+def _fail_result(endpoint: str = "db", relation_id: int = 0) -> ValidationResult:
     return ValidationResult(
-        status="FAIL", endpoint=endpoint, interface="sample_interface", level="simple", role="requires", relation_id=0
+        status="FAIL",
+        endpoint=endpoint,
+        interface="sample_interface",
+        level="simple",
+        role="requires",
+        relation_id=relation_id,
     )
 
 
-def _error_result(endpoint: str = "db", error: str = "oops") -> ValidationResult:
+def _error_result(endpoint: str = "db", error: str = "oops", relation_id: int = 0) -> ValidationResult:
     return ValidationResult(
         status="ERROR",
         endpoint=endpoint,
         interface="sample_interface",
         level="simple",
         role="requires",
-        relation_id=0,
+        relation_id=relation_id,
         error=error,
     )
 
 
 def _persistence_runner_json(
-    results: list[ValidationResult] | None = None, updated_refs: dict[str, PersistenceState] | None = None
+    results: list[ValidationResult] | None = None,
+    updated_refs: dict[str, PersistenceState] | None = None,
+    cleaned_relation_ids: list[int] | None = None,
 ) -> str:
-    return ValidatorRunnerResults(results=results or [], updated_refs=updated_refs or {}).model_dump_json()
+    return ValidatorRunnerResults(
+        results=results or [], updated_refs=updated_refs or {}, cleaned_relation_ids=cleaned_relation_ids or []
+    ).model_dump_json()
 
 
 # Exec responses for a full injection + clean run cycle:
@@ -320,7 +334,7 @@ class TestValidatorInjectorExtension:
             juju.units_by_app["myapp"] = ["myapp/0"]
             key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
             persistence_state = {key: PersistenceState(id=1, ref=2)}
-            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
 
             # WHEN
             extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
@@ -334,12 +348,14 @@ class TestValidatorInjectorExtension:
         def test_cleanup_keeps_state_when_a_result_is_fail_or_error(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
-            # GIVEN cleanup reports a FAIL for one of the unit's canary tables
+            # GIVEN cleanup visited relation 4 but reported a FAIL for its canary table
             juju.units_by_app["myapp"] = ["myapp/0"]
             key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
             persistence_state = {key: PersistenceState(id=1, ref=2)}
             juju.exec_responses.extend(
-                _preinstalled_responses(_persistence_runner_json(results=[_fail_result("canary")]))
+                _preinstalled_responses(
+                    _persistence_runner_json(results=[_fail_result("canary", relation_id=4)], cleaned_relation_ids=[4])
+                )
             )
 
             # WHEN
@@ -347,6 +363,28 @@ class TestValidatorInjectorExtension:
 
             # THEN the tracking entry is kept, since the canary data may not actually be gone
             assert persistence_state == {key: PersistenceState(id=1, ref=2)}
+
+        def test_cleanup_keeps_state_for_a_relation_cleanup_never_visited(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN two tracked relations on the same unit, but cleanup_all only visited one of
+            # them (e.g. the other relation was already removed, or its interface's persistence
+            # validator failed to load)
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            visited_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            unvisited_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 9)
+            persistence_state = {
+                visited_key: PersistenceState(id=1, ref=2),
+                unvisited_key: PersistenceState(id=2, ref=3),
+            }
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+
+            # THEN only the visited relation's state is dropped; the unvisited one is kept so its
+            # (possibly still-present) canary data isn't silently forgotten
+            assert persistence_state == {unvisited_key: PersistenceState(id=2, ref=3)}
 
         def test_cleanup_does_not_drop_state_belonging_to_other_units(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -359,7 +397,7 @@ class TestValidatorInjectorExtension:
                 own_key: PersistenceState(id=1, ref=2),
                 other_key: PersistenceState(id=2, ref=3),
             }
-            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
 
             # WHEN
             extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
