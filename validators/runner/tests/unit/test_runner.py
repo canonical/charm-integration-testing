@@ -776,6 +776,28 @@ class TestValidatorRunnerPersistence:
         assert "No persistence validator registered" in (results.results[0].error or "")
         assert results.updated_refs == {}
 
+    def test_checkpoint_all_does_not_duplicate_error_for_ref_on_interface_with_load_error(self) -> None:
+        # GIVEN a ref pointing at a live relation whose interface's persistence validator failed
+        # to load this run
+        # Regression test for: _persistence_load_error_results() already adds one ERROR per live
+        # relation on a load-failed interface; the ref-checkpointing loop below used to add a
+        # second, more generic ERROR for the same relation_id, reporting one load failure twice.
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=7)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+
+        # THEN only the single load-error ERROR is reported for this relation, not two
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
 
 class TestConfigureLogging:
     """Tests for the file logging set up on the "validators" logger."""
