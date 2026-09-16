@@ -78,10 +78,12 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def cleanup(self) -> None:
         """Drop all canary data.
 
-        Not guaranteed to run only once at the end of a test run: the harness also
-        invokes cleanup on state transitions mid-session (e.g. before
-        `test_idempotent_redeploy`), and `prepare()` may run again afterwards. Must be
-        safe to call when no canary resource remains (no-op, not an error).
+        Not guaranteed to run only once at the end of a test run: the harness also invokes
+        cleanup on state transitions mid-session (e.g. before a disruptive test in
+        `test_remove_and_restore_integration`, which explicitly invalidates the old state after
+        the relation is removed and re-added under a new relation ID), and `prepare()` may run
+        again afterwards. Must be safe to call when no canary resource remains (no-op, not an
+        error).
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
@@ -200,22 +202,29 @@ neither.
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares.
 
-5. Write unit tests in the existing `tests/unit/test_validator.py`, extending
-   any connection/cursor stubs already used by the functional validator's
-   tests rather than duplicating them. Cover, at minimum:
+5. Write unit tests. If the package already has `tests/unit/test_validator.py`
+   for its functional validator, extend it (reuse any connection/cursor stubs
+   it already defines rather than duplicating them). If the package was just
+   created from scratch in step 1 and has no test file yet, create
+   `tests/unit/test_validator.py` (and any `tests/unit/__init__.py` needed to
+   make it a package) following the layout of an existing validator package.
+   Cover, at minimum:
    - Role gating: each of `prepare`/`checkpoint`/`cleanup` raises
      `PersistenceNotApplicable` when `self.role` isn't the applicable side.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
      with a fresh identifier and `ref=1`.
-   - `checkpoint()` passes when the marker-filtered count matches
-     `expected.ref`, fails when it doesn't, and in both cases returns
-     `PersistenceState(ref=expected.ref + 1)` and writes a new marked
-     record. Also cover that a check scoped only to a bare `count(*)` would
-     be insufficient (i.e. assert the query filters on the marker, not just
-     the table).
+   - `checkpoint()` passes when the check matches `expected.ref`, fails when
+     it doesn't, and in both cases returns `PersistenceState(ref=expected.ref
+     + 1)` and writes a new marked record. Also cover that a check based only
+     on a bare existence/count check would be insufficient - assert it scopes
+     on the marker/identifier written by `prepare()`, not just "the resource
+     exists" or "the count matches" (for SQL backends this means filtering
+     the row count query on the marker column, not a bare `count(*)`; for a
+     KV store, bucket, or topic, the equivalent is asserting the read/list
+     is scoped to the specific key/object/message identifier).
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
-     before using it in a DDL statement.
+     before using it in a DDL statement (where applicable to the backend).
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
