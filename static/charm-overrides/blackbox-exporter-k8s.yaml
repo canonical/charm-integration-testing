@@ -5,16 +5,12 @@
 # optional: true upstream. They are only present on the dev track (not tracks 0.28, 1 or 2);
 # tracks predating dev do not yet have the service_mesh integration.
 #
-# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
-# mesh-managed provides endpoint (per the charm's ServiceMeshConsumer policy in src/charm.py:
-# self-metrics-endpoint) is cross-model with; see issue GH-980.
+# provide-cmr-mesh must track self-metrics-endpoint's cross-model status; see GH-980.
 overrides:
   - criteria:
       - track: dev
     constraints:
       - 'charms(cross_model(endpoint[self-metrics-endpoint])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # Closes the gap where both sides are external (see CrossModelExpr's docstring
-      # in constraints_dsl.py); not len()-equality since managed endpoints can coalesce.
+      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
       - 'bool(cross_model(endpoint[self-metrics-endpoint])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
-      # Rejects a purely local provide-cmr-mesh (both sides vacuously empty). See GH-980.
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

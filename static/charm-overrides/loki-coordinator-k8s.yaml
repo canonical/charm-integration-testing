@@ -7,9 +7,7 @@
 # (not track 1 or plain track 2); older tracks predate the service_mesh integration. They are
 # already optional: true upstream.
 #
-# provide-cmr-mesh must be integrated cross-model with exactly the same charms as the
-# mesh-managed provides endpoints (per the charm's ServiceMeshConsumer policies in src/charm.py
-# _charm_mesh_policies: logging, grafana-source) are cross-model with; see issue GH-980.
+# provide-cmr-mesh must track logging/grafana-source's cross-model status; see GH-980.
 overrides:
   - criteria:
       - any_of:
@@ -33,8 +31,6 @@ overrides:
         optional: false  # same handler blocks with "[s3] Missing S3 integration."
     constraints:
       - 'charms(cross_model(endpoint[logging] | endpoint[grafana-source])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # Closes the gap where both sides are external (see CrossModelExpr's docstring
-      # in constraints_dsl.py); not len()-equality since managed endpoints can coalesce.
+      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
       - 'bool(cross_model(endpoint[logging] | endpoint[grafana-source])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
-      # Rejects a purely local provide-cmr-mesh (both sides vacuously empty). See GH-980.
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
