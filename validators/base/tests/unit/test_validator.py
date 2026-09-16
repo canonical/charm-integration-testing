@@ -7,7 +7,9 @@ import ops
 import pytest
 
 from validators.base import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
@@ -28,6 +30,21 @@ class ConcreteValidator(BaseValidator):
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         return self._make_result(status="PASS", interface="test-interface", level=level)
+
+
+class ConcretePersistenceValidator(BasePersistenceValidator):
+    """Minimal in-memory concrete implementation for testing BasePersistenceValidator."""
+
+    def prepare(self) -> PersistenceState:
+        return PersistenceState(id=1, ref=1)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        check = ValidationCheck(name="row_count", passed=True, message="OK")
+        result = self._make_result(status="PASS", level="deep", interface="test-interface", checks=[check])
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+
+    def cleanup(self) -> None:
+        pass
 
 
 class TestValidationCheck:
@@ -226,3 +243,85 @@ class TestBaseValidator:
 
         # THEN the explicit data was used instead of self.databag
         assert check == ValidationCheck(name="schema", passed=True, message="OK")
+
+
+class TestPersistenceState:
+    def test_ref_defaults_to_zero(self) -> None:
+        # GIVEN / WHEN
+        state = PersistenceState(id=7)
+
+        # THEN
+        assert state.ref == 0
+
+    def test_serialises_to_json(self) -> None:
+        # GIVEN
+        state = PersistenceState(id=4, ref=2)
+
+        # WHEN
+        json_str = state.model_dump_json()
+
+        # THEN
+        assert json_str == '{"id":4,"ref":2}'
+
+
+class TestBasePersistenceValidator:
+    def test_cannot_instantiate_abstract_class(self) -> None:
+        # GIVEN / WHEN / THEN
+        with pytest.raises(TypeError):
+            relation = RelationStub(name="x", id=0)
+            charm = make_charm_from_relation(relation)
+            BasePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))  # type: ignore[abstract]
+
+    def test_prepare_returns_persistence_state(self) -> None:
+        # GIVEN
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        state = validator.prepare()
+
+        # THEN
+        assert isinstance(state, PersistenceState)
+        assert state.ref == 1
+
+    def test_checkpoint_returns_result_and_advanced_state(self) -> None:
+        # GIVEN
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+        expected = PersistenceState(id=1, ref=3)
+
+        # WHEN
+        result, new_state = validator.checkpoint(expected)
+
+        # THEN
+        assert isinstance(result, ValidationResult)
+        assert result.status == "PASS"
+        assert new_state.id == expected.id
+        assert new_state.ref == expected.ref + 1
+
+    def test_cleanup_does_not_raise(self) -> None:
+        # GIVEN
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN / THEN
+        validator.cleanup()
+
+    def test_shares_relation_helpers_with_base_validator(self) -> None:
+        # GIVEN a persistence validator on a relation with a databag
+        app = ApplicationStub()
+        databag = {"username": "admin"}
+        relation = RelationStub(name="my-db", id=3, app=app, data={app: databag})
+        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="my-interface")
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # THEN the same relation-inspection helpers as BaseValidator are available
+        assert validator.endpoint == "my-db"
+        assert validator.relation_id == 3
+        assert validator.interface == "my-interface"
+        assert validator.role == "requires"
+        assert validator.databag == databag
+        assert validator.relation_exists() is True
