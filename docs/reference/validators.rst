@@ -67,3 +67,65 @@ Writing a new validator
       my_interface = "validators.my_interface:MyInterfaceValidator"
 
 The runner will discover and invoke the validator automatically for any relation whose interface matches the key.
+
+Data integrity and persistence validation
+------------------------------------------
+
+Persistence validators check that data survives disruptive operations (e.g. removing and
+re-adding a relation, restarting a controller, redeploying a unit) rather than just checking
+that a relation currently works. They implement ``validators/base``'s ``BasePersistenceValidator``
+and are registered under a separate ``endpoint_persistence_validators`` entry-point group, keyed
+by interface name (a package may register both an ``endpoint_validators`` and an
+``endpoint_persistence_validators`` entry, or only the latter).
+
+Lifecycle
+~~~~~~~~~
+
+A persistence validator implements three methods, called at different points in the test suite:
+
+``prepare(state: PersistenceState | None) -> PersistenceState``
+  Seeds canary data (e.g. a marker row) for a relation and returns a ``PersistenceState``
+  identifying it. Called once when a relation is first established.
+
+``checkpoint(state: PersistenceState) -> PersistenceState``
+  Verifies the canary data seeded by ``prepare()`` is still present and returns an updated
+  ``PersistenceState``. Called after a disruptive operation to confirm nothing was lost.
+
+``cleanup(state: PersistenceState) -> None``
+  Removes the canary data. Called during test teardown.
+
+Raise ``PersistenceNotApplicable`` from any of these methods when persistence checking doesn't
+apply to the current side of the relation (e.g. only the ``provides`` role can seed data); the
+runner treats this as "no applicable validator" rather than a failure.
+
+``PersistenceState`` (``validators/base``) is the opaque state passed between calls: ``id`` is a
+validator-chosen identifier for the canary (stable across a relation remove/re-add, unlike Juju's
+``relation_id``), and ``ref`` is a monotonically increasing counter used to detect lost writes.
+
+CLI and wire format
+~~~~~~~~~~~~~~~~~~~~
+
+``run_validators`` exposes persistence operations via two additional flags:
+
+``--persistence {prepare,checkpoint,cleanup}``
+  Selects which lifecycle method to invoke, for every active relation whose interface has a
+  registered persistence validator. Can be combined with ``--level`` in the same invocation, or
+  used on its own for a persistence-only run.
+
+``--refs '{"<relation_id>": {"id": <identifier>, "ref": <ref>}}'``
+  A JSON dict mapping relation IDs to their current ``PersistenceState``, required when
+  ``--persistence checkpoint`` is used (``checkpoint()`` needs the state ``prepare()`` returned).
+
+The runner's JSON output includes an ``updated_refs`` field alongside the usual functional
+``results``: a dict of the same shape as ``--refs``, containing each relation's new
+``PersistenceState`` after the requested operation. Callers (the ``ValidatorInjectorExtension``,
+via its ``post_persistence`` hook) are responsible for persisting ``updated_refs`` across test
+steps (e.g. in ``persistence_state``, keyed by controller/model/unit) and passing the relevant
+entries back in via ``--refs`` on the next ``checkpoint`` call.
+
+Writing a new persistence validator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+See the ``develop-persistence-validator`` skill
+(``.agents/skills/develop-persistence-validator/SKILL.md``) for a full walkthrough, using
+``validators/postgresql_client`` as the reference implementation.
