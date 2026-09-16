@@ -54,11 +54,14 @@ from validators.base import (
 class MyClientPersistenceValidator(BasePersistenceValidator):
     def prepare(self) -> PersistenceState:
         """Seed canary data for this relation. Called once when a relation is first established,
-        and again whenever the relation is removed and re-added (which changes relation_id, so
-        the previous canary data - if any survived - is no longer reachable under the new state
-        key and fresh data is needed). prepare() must not assume the canary resource it creates
-        doesn't already exist (e.g. from a previous run's leftover state, or a re-run of a failed
-        prepare), and should always return a state usable from a clean slate."""
+        again whenever the relation is removed and re-added (which changes relation_id, so the
+        previous canary data - if any survived - is no longer reachable under the new state key
+        and fresh data is needed), and again when a test run resumes from a prior `State.DEPLOYED`
+        checkpoint (`seed_persistence_state_for_resumed_run` in conftest.py) - in that last case the
+        relation_id is unchanged and canary data from the previous process may already exist in the
+        same namespace. prepare() must not assume the canary resource it creates doesn't already
+        exist (e.g. from a previous run's leftover state, or a re-run of a failed prepare), and
+        should always return a state usable from a clean slate."""
         self._require_requires_role()
         # Mask to a backend-safe bit width (e.g. 63 bits for PostgreSQL) rather than using the
         # full value if the identifier becomes part of a length-limited resource name - see the
@@ -237,7 +240,11 @@ rather than registering multiple entry points for the same interface.
    `pyproject.toml` and `validators/runner/pyproject.toml` (reusing only the
    packaging/dependency-registration steps from the `develop-validator`
    skill), which persistence validators rely on for entry-point discovery
-   just as functional validators do. A functional validator
+   just as functional validators do. Whether or not the package is new, make
+   sure `validators-base` is declared in its `pyproject.toml` `dependencies`
+   (see `develop-validator`'s step 7) - the generated class imports
+   `validators.base` directly, and a persistence-only package has no other
+   dependency that would pull it in. A functional validator
    (`endpoint_validators` entry point) is *not* a hard prerequisite: the
    runner discovers `endpoint_validators` and `endpoint_persistence_validators`
    independently, so a package may register either, both, or neither -
