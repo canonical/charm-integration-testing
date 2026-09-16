@@ -301,10 +301,10 @@ rather than registering multiple entry points for the same interface.
    runner discovers `endpoint_validators` and `endpoint_persistence_validators`
    independently, so a package may register the persistence group alone, or
    both groups together - don't implement a functional validator unless this
-   interface actually needs one. This skill's own package must still register
-   `endpoint_persistence_validators` (per the acceptance criteria below);
-   registering neither group would make it undiscoverable and silently
-   deploy no validator at all. In practice, most interfaces already have a
+   interface actually needs one. The interface package created by this
+   workflow must still register `endpoint_persistence_validators` (per the
+   acceptance criteria below); registering neither group would make it
+   undiscoverable and silently deploy no validator at all. In practice, most interfaces already have a
    functional validator, and persistence validators are usually additive to
    that existing package.
 
@@ -423,23 +423,33 @@ rather than registering multiple entry points for the same interface.
    `ValidatorInjectorExtension._run_persistence_on_unit` invokes it - a bare
    `run_validators` on `$PATH` won't work; it's not installed there):
    ```
-   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
+   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
    ```
    on the unit whose role this validator applies to (per its role gating -
    e.g. the requirer for a requirer-side canary). `juju exec` runs the
    command inside the unit's hook execution context, which is what sets
    `JUJU_CHARM_DIR` (required by the CLI) - invoking the binary directly over
-   a plain SSH session instead won't have it set. Then disrupt the other/
-   remote side of the relation (restart/scale/migrate) **and wait for it to
-   fully settle** (idle/ready again) before checkpointing - checkpointing
-   immediately after triggering the disruption (e.g. right after scaling to
-   zero, before scaling back up and reaching idle) only proves the backend
-   was unreachable mid-disruption and reports `ERROR`, not a real persistence
-   check. `test_scale_in_and_scale_out.py` shows the correct ordering: it
+   a plain SSH session instead won't have it set. On Kubernetes charms
+   (pre-Juju-4; the `--operator` flag was removed in Juju 4+, see
+   `ValidatorInjectorExtension`'s `operator=is_k8s` usage), the `--operator`
+   flag is required too - without it the command runs in the workload
+   container, where the validators venv doesn't exist; omit `--operator` on
+   machine charms. Then disrupt the component under test (restart/scale/
+   migrate) **and wait for it to fully settle** (idle/ready again) before
+   checkpointing - checkpointing immediately after triggering the disruption
+   (e.g. right after scaling to zero, before scaling back up and reaching
+   idle) only proves the backend was unreachable mid-disruption and reports
+   `ERROR`, not a real persistence check. Which side to disrupt depends on
+   the scenario: most tests (e.g. `test_scale_in_and_scale_out.py`) disrupt
+   the remote/provider side of the relation and checkpoint the requirer, but
+   some (e.g. `test_pod_deletion.py`) disrupt the application the persistence
+   validator itself runs on - checkpoint whichever unit you ran `prepare()`
+   on above, regardless of which side was disrupted.
+   `test_scale_in_and_scale_out.py` shows the correct ordering: it
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
-   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
+   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
    ```
    (`--refs` must be valid JSON - `run_validators` parses/rejects it before
    `checkpoint()` ever runs, so a placeholder like `...` is not usable here;
@@ -451,7 +461,7 @@ rather than registering multiple entry points for the same interface.
    `ValidationResult` itself - see `ValidatorRunnerResults` in
    `validators/runner/runner.py`), and finally
    ```
-   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
+   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
    ```
    and confirm the canary resource is gone.
 
