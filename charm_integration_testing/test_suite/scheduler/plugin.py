@@ -60,10 +60,7 @@ from .markers import StateMarker, read_state_marker
 from .states import State
 
 try:
-    # Builtin on Python 3.11+. On 3.10, pytest itself depends on the
-    # "exceptiongroup" backport package whenever it needs to construct one
-    # (e.g. SetupState.teardown_exact grouping multiple finalizer failures -
-    # see pytest_runtest_protocol below), so it is always installed here.
+    # Builtin on 3.11+; pytest depends on the "exceptiongroup" backport on 3.10.
     _BaseExceptionGroup: type[BaseException] = BaseExceptionGroup  # type: ignore[name-defined]
 except NameError:  # pragma: no cover - only exercised on Python 3.10
     from exceptiongroup import BaseExceptionGroup as _BaseExceptionGroup  # type: ignore[import-not-found,no-redef]
@@ -73,55 +70,43 @@ logger = logging.getLogger(__name__)
 #: State assumed when no ``--current-state`` flag is given.
 _DEFAULT_CURRENT_STATE = State.NO_BUNDLE
 
-# All items collected by pytest before any -k/-m filtering.
-# Populated by pytest_itemcollected; used by modifyitems to build the full graph.
+# Every item collected before -k/-m filtering; used to build the full state graph.
 _all_collected: list[pytest.Item] = []
 
-# Tracks item object IDs that have already been labelled as injected, so that
-# re-injecting the same bridge item a second time does not double-prefix its name.
+# Object IDs already labelled as injected, so re-injecting a bridge item doesn't
+# double-prefix its name.
 _injected_item_ids: set[int] = set()
 
-# Maps a duplicate's object ID (see ``_duplicate_item_for_repeat``) back to the
-# object ID of the originating item it was copied from, so later per-occurrence
-# logic (e.g. applying injected-labeling to only the injected occurrence) can
-# still identify which scheduled item a duplicate came from.
+# Maps a duplicate's object ID (see _duplicate_item_for_repeat) back to its
+# original item's ID, so per-occurrence logic can trace a duplicate to its source.
 _duplicate_original_ids: dict[int, int] = {}
 
-# Set to the first state-marked item that fails. Once non-None, all
-# subsequent state-marked tests are skipped as "environment unknown".
+# First state-marked item that failed. Once set, all remaining state-marked
+# tests are skipped as "environment unknown".
 _failed_state_test: pytest.Item | None = None
 
-# The scheduler's runtime belief about the environment's actual state, updated
-# as tests execute rather than assumed from the static plan. ``None`` means
-# "unknown" (see ``_failed_state_test``). A transition test that passes
-# advances this to its ``provides`` state; one that skips (at any phase)
-# leaves it unchanged, since every skip check in this suite runs before any
-# state-mutating action (see the convention documented in ``markers.py``).
-# Set from ``--current-state`` at the start of collection.
+# Runtime belief about the environment's actual state (updated as tests run,
+# not assumed from the static plan). None means "unknown". A passing
+# transition advances this to its provides state; a skip leaves it unchanged
+# (see the skip convention documented in markers.py). Set from
+# --current-state at the start of collection.
 _current_state: State | None = None
 
-# The full state graph and every known transition test, keyed by edge, built
-# once from ALL collected items (pre -k/-m filtering) in
-# ``pytest_collection_modifyitems``. Reused at runtime to find a bridging path
-# when a skipped transition leaves ``_current_state`` short of what the next
-# planned test requires.
+# Full state graph and all known transition tests, keyed by edge, built once
+# from every collected item (pre -k/-m). Used at runtime to find a bridging
+# path when a skip leaves _current_state short of what's needed next.
 _full_graph: StateGraph | None = None
 _all_transitions: dict[StateTransition, list[pytest.Item]] = {}
 
-# Monotonically increasing counter used to give each runtime-injected recovery
-# bridge a unique name/nodeid, even if the same underlying transition test is
-# injected more than once in the same session (see ``_find_recovery_bridge``).
+# Counter giving each runtime-injected recovery bridge a unique nodeid.
 _recovery_counter: int = 0
 
-# Edges excluded from runtime recovery search because every registered
-# candidate test for them (see ``_all_transitions``/``_skipped_transition_item_ids``)
-# has already skipped: retrying would only skip again, chasing an
-# unreachable state forever.
+# Edges excluded from recovery search because every candidate test for them
+# has already skipped (retrying would just skip again).
 _skipped_transitions: set[StateTransition] = set()
 
-# Per-edge object IDs (resolved through ``_duplicate_original_ids``) of
-# template items that have skipped at runtime. An edge only moves into
-# ``_skipped_transitions`` once all of its candidates are recorded here.
+# Per-edge object IDs of template items that have skipped at runtime. An edge
+# moves into _skipped_transitions once all its candidates are recorded here.
 _skipped_transition_item_ids: dict[StateTransition, set[int]] = {}
 
 
@@ -199,47 +184,22 @@ def _record_skipped_transition_candidate(edge: StateTransition, item: pytest.Ite
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:  # type: ignore[misc]
     """Keep ``_current_state`` in sync with what actually happened, not the plan.
 
-    * A state-marked test failing at setup, call, or teardown time means the
-      environment state is no longer known: a setup failure may leave it
-      partially configured, and a teardown failure may leave it indeterminate.
-      ``_current_state`` becomes ``None`` and all subsequent state-marked
-      tests are skipped (``pytest_runtest_setup``) until the run ends.
+    * Failing at any phase makes the state unknown (``_current_state = None``);
+      all subsequent state-marked tests are then skipped.
+    * Passing at call time advances ``_current_state`` to ``marker.provides``.
+      This applies to transitions and to the multi-``requires`` "pure" case
+      where ``provides`` equals only one of several accepted states (see
+      ``test_provides_may_equal_one_of_requires`` in ``test_markers.py``); for
+      an ordinary single-``requires`` pure test it's a no-op.
+    * A transition skipped via plain ``pytest.skip()`` (any phase) leaves
+      ``_current_state`` unchanged, per the convention in ``markers.py`` that
+      every skip check runs before any state-mutating action. So the state
+      stays at ``requires``, unless the call phase already advanced it to
+      ``provides`` before a later teardown-phase skip.
+    * A skip caused by ``xfail`` is *not* covered by that convention - the
+      test body ran and may have mutated the environment - so it's treated
+      like a failure instead.
 
-    * A state-marked test passing at call time means the environment reached
-      its ``provides`` state: ``_current_state`` advances accordingly. This
-      holds for transition tests and for the multi-``requires`` variant of a
-      "pure" test too, where ``provides`` matches only *one* of several
-      accepted ``requires`` states (see
-      ``test_provides_may_equal_one_of_requires`` in ``test_markers.py``) - a
-      passing run starting from a *different* accepted ``requires`` state
-      still genuinely moves the environment to ``provides``. For an ordinary
-      single-``requires`` pure test this is a no-op.
-
-    * A transition test skipped at *any* phase (setup, call, or teardown) via
-      a plain ``pytest.skip()`` does not itself change ``_current_state``: it
-      is left exactly as it was before the skip. In practice this means
-      ``requires`` (the skip happened before any state-mutating action ran),
-      *unless* the call phase already passed and advanced the state to
-      ``provides`` before a *later* teardown-phase skip - the skip does not
-      revert that. ``pytest_runtest_protocol`` uses whatever
-      ``_current_state`` ends up being to try bridging to whatever the next
-      planned test actually needs. This relies on the convention documented
-      in ``markers.py``: every skip check in this suite - whether in a
-      fixture or as a guard clause at the top of a test body - runs before
-      any state-mutating action, regardless of which pytest phase that check
-      happens to execute in.
-
-    * A state-marked test (transition *or* pure) that resolves to "skipped"
-      via ``xfail`` (either ``@pytest.mark.xfail`` or an imperative
-      ``pytest.xfail()`` call after the test body started) is *not* covered
-      by that convention: the test body actually ran until it hit the
-      expected failure, so it may have mutated the environment partway
-      through. This is treated like a failure, not a skip, regardless of
-      whether the test is a transition or a pure test.
-
-    Pure tests (``requires == provides``) leave ``_current_state`` unchanged
-    when they pass or skip; a failure still halts everything and sets it to
-    ``None``, since pure test failures can leave the environment broken too.
     Unmarked tests are never affected.
     """
     global _failed_state_test, _current_state
@@ -262,15 +222,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
             item.nodeid,
         )
     elif report.when == "call" and report.passed:
-        # Always advance to marker.provides, not just when marker.is_transition:
-        # a marker with multiple accepted requires states and a provides that
-        # equals only *one* of them (see
-        # test_provides_may_equal_one_of_requires in test_markers.py) is not
-        # flagged as is_transition, yet a passing run starting from a
-        # *different* accepted requires state still genuinely changes the
-        # environment to provides. For an ordinary pure test (a single
-        # requires state equal to provides), this is a no-op: the state was
-        # already provides before the test ran.
+        # Advance even for a non-transition marker: a multi-requires "pure" marker
+        # whose provides matches only one accepted state still genuinely moves the
+        # environment there (see test_provides_may_equal_one_of_requires). No-op
+        # for an ordinary single-requires pure test.
         _current_state = marker.provides
     elif report.skipped and marker.is_transition:
         candidate_recorded = False
@@ -288,10 +243,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
                 _current_state.value,
             )
         else:
-            # _current_state didn't satisfy any of marker.requires (this is
-            # pytest_runtest_setup's own skip - see there), so no candidate
-            # was recorded above: this test may still be tried again later
-            # if the environment reaches one of its requires states.
+            # No candidate was satisfied by _current_state (pytest_runtest_setup's
+            # own skip), so this test may still be retried later.
             logger.warning(
                 "State-marked transition test %r was skipped: environment remains at %r.  "
                 "The scheduler may still attempt this transition later if the environment "
@@ -330,21 +283,15 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     Called before each test's setup phase. Skips *item* when:
 
     * the environment state is unknown (a prior state-marked test failed), or
-    * the environment's actual current state (``_current_state``, which may
-      differ from what the static plan assumed if an earlier transition was
-      skipped) doesn't satisfy *item*'s ``requires``.  ``pytest_runtest_protocol``
-      already tried to bridge this gap by injecting a recovery transition
-      immediately before *item*; if that succeeded, ``_current_state`` will
-      already match by the time this hook runs. If not, *item* is skipped here,
-      and recovery is attempted again for whatever test follows it.
-    * *item* is a transition test candidate that already skipped earlier
-      in this run (tracked via ``_skipped_transition_item_ids``), even though
-      ``_current_state`` now satisfies its ``requires``. The static plan can
-      contain the same underlying test more than once (see
-      ``test_repeated_bridge_item_gets_unique_nodeid_per_occurrence``); without
-      this check, a later preplanned occurrence would re-run the exact
-      candidate that dynamically-injected recovery bridges are barred from
-      retrying (see ``_skipped_transitions`` / ``_shortest_path_to_any``).
+    * ``_current_state`` doesn't satisfy *item*'s ``requires``.
+      ``pytest_runtest_protocol`` already tried to bridge this gap right
+      before *item*; if it failed, *item* is skipped here and recovery is
+      retried for whatever follows it.
+    * *item* is a transition candidate that already skipped earlier in this
+      run (``_skipped_transition_item_ids``), even if ``_current_state`` now
+      satisfies its ``requires`` - the static plan can schedule the same
+      underlying test more than once, and a later occurrence shouldn't retry
+      a candidate recovery bridges are already barred from retrying.
 
     Unmarked tests are never affected.
     """
@@ -378,17 +325,14 @@ def _is_recoverable_reconciliation_failure(exc: BaseException) -> bool:
     """Whether *exc* should be treated as a recoverable state-machine failure.
 
     Ordinary exceptions and pytest's own ``Skipped``/``Failed`` outcomes
-    qualify. ``pytest.exit()``'s ``Exit`` is deliberately excluded even
-    though it derives from ``Exception``: it signals a whole-run abort
-    request, not a recoverable failure, and must propagate untouched.
+    qualify. ``pytest.exit()``'s ``Exit`` is excluded even though it derives
+    from ``Exception``: it's a whole-run abort request, not a recoverable
+    failure, and must propagate untouched.
 
-    ``BaseExceptionGroup.split()`` calls this predicate on nested group
-    nodes themselves, not just their leaves - and since a group is itself an
-    ``Exception``/``BaseExceptionGroup`` instance, returning ``True`` for one
-    would wrongly classify an entire nested group (and any ``Exit`` hiding
-    inside it) as recoverable without ever inspecting its members. Returning
-    ``False`` here for any group node makes ``split()`` descend into it and
-    evaluate each of its own members individually instead.
+    Returns ``False`` for any ``_BaseExceptionGroup`` too, since
+    ``split()`` tests this predicate against group nodes themselves, not
+    just leaves; returning ``True`` for a group would hide an ``Exit``
+    nested inside it instead of letting ``split()`` descend into it.
     """
     if isinstance(exc, _BaseExceptionGroup):
         return False
@@ -400,9 +344,9 @@ def _is_recoverable_reconciliation_failure(exc: BaseException) -> bool:
 def _handle_reconciliation_failure(item: pytest.Item, bridge_items: list[pytest.Item], exc: BaseException) -> None:
     """Treat a failed setup-stack reconciliation like any other unexpected recovery failure.
 
-    See ``pytest_runtest_protocol``'s docstring for why this reconciliation
-    can fail outside pytest's normal per-item reporting flow, so no report
-    was ever logged for it.
+    See ``pytest_runtest_protocol``'s docstring for why this can fail
+    outside pytest's normal per-item reporting flow, so no report was ever
+    logged for it.
     """
     global _current_state, _failed_state_test
     logger.error(
@@ -411,14 +355,8 @@ def _handle_reconciliation_failure(item: pytest.Item, bridge_items: list[pytest.
         [b.nodeid for b in bridge_items],
         exc,
     )
-    # Bump session.testsfailed directly - the same counter pytest's own
-    # accounting uses to decide the run's exit status - so this doesn't
-    # silently produce a successful exit despite failed cleanup (which may
-    # have leaked infrastructure). Mirror pytest's own
-    # Session.pytest_runtest_logreport handling of --maxfail too: bumping
-    # testsfailed alone does not trip session.shouldfail, so without this a
-    # reconciliation failure would make the eventual exit status nonzero but
-    # not actually stop the run at --maxfail=N like a normal failure would.
+    # Bump session.testsfailed (pytest's own exit-status accounting) and mirror its
+    # --maxfail handling, so a reconciliation failure isn't silently a successful exit.
     item.session.testsfailed += 1
     maxfail = item.session.config.getvalue("maxfail")
     if maxfail and item.session.testsfailed >= maxfail:
@@ -431,71 +369,45 @@ def _handle_reconciliation_failure(item: pytest.Item, bridge_items: list[pytest.
 def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # type: ignore[misc]
     """Recover the state machine before *nextitem* runs, if a gap opened up.
 
-    Runs after *item*'s entire setup/call/teardown protocol has finished
-    (the natural boundary between one item and the next in pytest's
-    ``session.items`` loop). If ``_current_state`` no longer satisfies
-    *nextitem*'s ``requires`` (typically because a transition test in
-    between was skipped rather than run), this looks for a bridging path in
-    the full state graph and, if one exists, splices freshly-built bridge
-    test item(s) into ``session.items`` right after *item* - i.e. before
-    *nextitem* - so the environment is corrected before *nextitem* starts.
+    Runs after *item*'s full setup/call/teardown protocol. If
+    ``_current_state`` no longer satisfies *nextitem*'s ``requires``
+    (typically because an in-between transition test skipped instead of
+    running), searches the full state graph for a bridging path and splices
+    fresh bridge item(s) into ``session.items`` right before *nextitem*.
 
-    If *nextitem* is itself a transition test candidate, any ``requires``
-    state for which this exact original candidate has already skipped as a
-    candidate for the (that state -> ``provides``) edge earlier in the run
-    is excluded up front, before checking whether the environment already
-    satisfies *nextitem* - not only from the bridge search: ``pytest_runtest_setup``
-    would just skip *nextitem* straight back out once reached anyway (see
-    its docstring), so treating that excluded state as satisfying
-    *nextitem* here (because ``_current_state`` happens to equal it) would
-    miss the chance to bridge towards another still-viable ``requires``
-    state instead, and bridging towards it explicitly would only move the
-    environment away from whatever a later, otherwise-runnable test needed,
-    for no benefit either way. If every ``requires`` state is excluded this
-    way, nothing is injected at all, exactly as if no bridging path existed.
+    If *nextitem* is itself a transition candidate, any ``requires`` state it
+    has already skipped for earlier in the run is excluded before the bridge
+    search (and before checking whether the environment already satisfies
+    it) - otherwise ``pytest_runtest_setup`` would just skip it right back
+    out, wasting the bridge or missing a still-viable alternate state. If no
+    state remains after exclusion, nothing is injected.
 
     If no bridging path exists, nothing is injected: ``pytest_runtest_setup``
-    will skip *nextitem* when its turn comes, and this hook runs again
-    afterwards for whatever test follows *nextitem*, repeating the same
-    recovery attempt against the new state of the plan. This way a run of
-    several unreachable tests in a row is skipped one at a time rather than
-    all at once, and any test further down the plan that the environment's
-    actual (unchanged) state still happens to satisfy keeps running normally.
+    skips *nextitem* when its turn comes, and this hook retries recovery for
+    whatever follows it - so a run of several unreachable tests is skipped
+    one at a time rather than all at once.
 
-    By the time this hookwrapper resumes after ``yield``, pytest has already
-    torn *item* down using the *original* ``nextitem`` argument (via
-    ``SetupState.teardown_exact``), which retains any collector scope (e.g. a
-    module-scoped fixture) shared between *item* and that original
-    ``nextitem``. If the bridge belongs to a different module than the
-    original ``nextitem``, that retained scope is no longer valid for
-    whatever now actually runs next, and pytest's own ``SetupState.setup``
-    asserts on it (``previous item was not torn down properly``). Calling
-    ``teardown_exact`` again, this time towards the bridge's first item, cuts
-    the stack down to only what the bridge actually shares with *item*
-    before returning control to pytest.
+    Pytest has already torn *item* down using the *original* ``nextitem``
+    (via ``SetupState.teardown_exact``), which may retain a collector scope
+    only valid for that original ``nextitem``. If the bridge belongs to a
+    different module, that scope is stale and pytest's own ``SetupState.setup``
+    would assert on it, so ``teardown_exact`` is called again towards the
+    bridge's first item to cut the stack down to what's actually shared.
 
-    That second ``teardown_exact`` call can itself run retained
-    module/package-scoped fixture finalizers, outside of pytest's normal
-    per-item reporting flow. If a finalizer raises - including via
-    ``pytest.skip()``/``pytest.fail()``, whose ``Skipped``/``Failed``
-    exceptions deliberately derive from ``BaseException`` rather than
-    ``Exception`` - we cannot route it through the usual report machinery
-    from here, but we still treat it the same way any other unexpected
-    failure during recovery is treated: environment state becomes unknown,
-    every remaining state-marked test is skipped, and
-    ``session.testsfailed`` is bumped directly so pytest's own exit-status
-    accounting still reflects the failure - rather than letting an
-    unrelated ``INTERNALERROR`` crash the whole run, or silently letting
-    the session end with a successful exit status despite failed cleanup.
+    That second ``teardown_exact`` call can run retained fixture finalizers
+    outside pytest's normal reporting flow. A raised failure there (including
+    ``Skipped``/``Failed`` from ``pytest.skip()``/``pytest.fail()``) is
+    treated like any other recovery failure: state becomes unknown, all
+    remaining state-marked tests are skipped, and ``session.testsfailed`` is
+    bumped so the exit status reflects it - instead of crashing the whole run
+    with an unrelated ``INTERNALERROR`` or exiting successfully despite the
+    failed cleanup.
 
-    Abort-style exceptions are deliberately left alone rather than being
-    treated as a recoverable failure: ``KeyboardInterrupt``, ``SystemExit``,
-    ``pytest.exit()``'s ``Exit``, and any other exception outside
-    ``(Exception, OutcomeException)`` propagate untouched, including when
-    wrapped in a ``BaseExceptionGroup`` (which ``SetupState.teardown_exact``
-    itself only ever produces for multiple *ordinary* finalizer failures on
-    the same node, but is split defensively here in case that ever
-    changes).
+    Abort-style exceptions (``KeyboardInterrupt``, ``SystemExit``, pytest's
+    own ``Exit``, ...) are never treated as recoverable and always propagate
+    untouched, including when wrapped in a ``BaseExceptionGroup`` (split
+    defensively here even though ``teardown_exact`` only ever groups
+    ordinary finalizer failures today).
     """
     yield
     if nextitem is None or _current_state is None or _full_graph is None:
@@ -507,19 +419,10 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     if marker is None:
         return  # Unmarked test.
 
-    # If nextitem is itself a transition test candidate, don't bridge
-    # towards (or accept the environment already being at) a requires-state
-    # for which this exact original candidate has already skipped as a
-    # candidate for the (that requires-state -> provides) edge earlier in
-    # the run - pytest_runtest_setup would skip nextitem right back out once
-    # it got there anyway (see its docstring), so treating that state as
-    # satisfying nextitem here would either waste a one-way bridge on it, or
-    # (if the environment happens to already be there) miss the chance to
-    # bridge to another still-viable requires-state instead. This filtering
-    # must happen before checking whether the environment already satisfies
-    # *nextitem*, not only when a bridge search is needed - otherwise a
-    # currently-already-skipped-for state that happens to equal
-    # ``_current_state`` would short-circuit recovery entirely.
+    # Exclude requires-states nextitem already skipped for (as a transition
+    # candidate) before checking whether the environment satisfies it or
+    # searching for a bridge - otherwise pytest_runtest_setup would just skip
+    # nextitem back out, wasting a bridge or missing a still-viable state.
     candidate_requires = marker.requires
     if marker.is_transition:
         original_id = _duplicate_original_ids.get(id(nextitem), id(nextitem))
@@ -556,27 +459,17 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     session_items = item.session.items
     insert_at = session_items.index(item) + 1
     session_items[insert_at:insert_at] = bridge_items
-    # Keep session.testscollected in sync with the now-longer item list.
-    # Reporters (e.g. the terminal reporter's progress percentage) size the
-    # run from this count, set once at collection time; without bumping it
-    # here, injecting items after collection understates it and produces
-    # inconsistent totals/percentages over 100%.
+    # Reporters size the run from testscollected (set at collection time), so
+    # bump it to reflect the newly-injected items.
     item.session.testscollected += len(bridge_items)
-    # Reconcile pytest's setup stack with the item that will actually run
-    # next (the bridge), not the original nextitem the just-finished
-    # teardown assumed - see the docstring note above.
+    # The just-finished teardown assumed the original nextitem; reconcile pytest's
+    # setup stack with what will actually run next (the bridge) instead.
     try:
         item.session._setupstate.teardown_exact(bridge_items[0])
     except _BaseExceptionGroup as excgroup:
-        # pytest's own SetupState.teardown_exact only ever wraps multiple
-        # finalizer failures in a BaseExceptionGroup if each individual
-        # failure is itself an ``Exception`` or one of pytest's ``Skipped``/
-        # ``Failed`` outcomes (see TEST_OUTCOME in _pytest/runner.py) - real
-        # abort/cancellation exceptions (KeyboardInterrupt, SystemExit,
-        # asyncio.CancelledError, pytest's own Exit, ...) are never caught by
-        # that loop and so are never wrapped this way. Still, split
-        # defensively rather than assume that always holds, and re-raise
-        # anything unexpected found inside the group untouched.
+        # teardown_exact only wraps ordinary Exception/Skipped/Failed finalizer
+        # failures in a group; abort exceptions bypass it entirely. Split
+        # defensively anyway and re-raise anything unrecoverable untouched.
         recoverable, unrecoverable = excgroup.split(  # type: ignore[attr-defined]
             _is_recoverable_reconciliation_failure
         )
@@ -586,21 +479,12 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         _handle_reconciliation_failure(item, bridge_items, exc)
         return
     except _pytest.outcomes.Exit:
-        # pytest.exit() called from within a finalizer - this is a
-        # deliberate whole-run abort request, not a recoverable state
-        # machine failure, so it must propagate untouched even though
-        # Exit (unlike Skipped/Failed) derives from Exception.
+        # A deliberate whole-run abort from a finalizer; must propagate untouched
+        # even though Exit (unlike Skipped/Failed) derives from Exception.
         raise
     except (Exception, _pytest.outcomes.OutcomeException) as exc:
-        # Catches ordinary exceptions and pytest's own skip/fail outcomes
-        # (``pytest.skip()``/``pytest.fail()`` inside a finalizer, which
-        # raise ``Skipped``/``Failed`` - these deliberately derive from
-        # BaseException, not Exception, specifically so they aren't caught
-        # by ordinary exception handlers elsewhere in pytest, but here we do
-        # want to catch them: they mean the same thing for recovery purposes
-        # as any other finalizer failure). Any other BaseException (e.g.
-        # KeyboardInterrupt, SystemExit, asyncio.CancelledError) is left
-        # uncaught by this clause and propagates normally.
+        # Also catches Skipped/Failed from pytest.skip()/pytest.fail() in a
+        # finalizer, treated the same as any other finalizer failure here.
         _handle_reconciliation_failure(item, bridge_items, exc)
         return
     logger.warning(
@@ -634,22 +518,16 @@ def _shortest_path_to_any(
 def _find_recovery_bridge(from_state: State, to_states: tuple[State, ...]) -> list[pytest.Item] | None:
     """Build fresh, uniquely-named bridge items for a path from *from_state* to *to_states*.
 
-    Returns ``None`` if no path exists in the full state graph (excluding any
-    edge whose candidate transition tests have all already skipped - see
-    ``_skipped_transitions``), or if the graph claims an edge exists but no
-    transition test was ever registered for it (should not happen in
-    practice; the graph is built directly from registered items).
+    Returns ``None`` if no path exists (excluding fully-skipped edges, see
+    ``_skipped_transitions``), or if the graph claims an edge exists with no
+    registered transition test (shouldn't happen; the graph is built directly
+    from registered items).
 
-    Each edge's template item (the transition test registered for it) is
-    duplicated rather than reused directly: the same template may need to be
-    injected more than once across a run's recovery attempts, and reusing the
-    same ``pytest.Item`` object produces duplicate nodeids (see
-    ``_duplicate_item_for_repeat``).
-
-    When an edge has more than one registered candidate test, a candidate
-    that has not yet skipped at runtime is preferred over ``candidates[0]``,
-    since an edge is only excluded from the path search once every candidate
-    has skipped.
+    Each edge's template item is duplicated rather than reused directly,
+    since the same template may be injected more than once and reusing one
+    ``pytest.Item`` object would produce duplicate nodeids (see
+    ``_duplicate_item_for_repeat``). When an edge has multiple candidates, one
+    that hasn't yet skipped at runtime is preferred over ``candidates[0]``.
     """
     global _recovery_counter
     assert _full_graph is not None
@@ -819,12 +697,10 @@ def _mark_as_injected(item: pytest.Item) -> None:
     item.add_marker(pytest.mark.injected)
     original_name = item.name
     item.name = f"[injected] {original_name}"
-    # pytest exposes no public API to override the node ID; _nodeid is the
-    # backing attribute for the read-only ``nodeid`` property.  This is a
-    # known limitation: revisit if pytest removes or renames _nodeid.
-    # Only the trailing test-name segment (after the last "::") is prefixed;
-    # the file-path/module prefix before it must be preserved, since JUnit
-    # XML/Test Observer derive the test's template_id from that prefix (GH-947).
+    # pytest exposes no public API to override the node ID; _nodeid backs the
+    # read-only nodeid property (revisit if pytest renames/removes it). Only the
+    # trailing test-name segment is prefixed - the module prefix before it must
+    # be preserved since JUnit/Test Observer derive template_id from it (GH-947).
     path_prefix, separator, _ = item._nodeid.rpartition("::")
     item._nodeid = f"{path_prefix}{separator}[injected] {original_name}"
 
@@ -845,60 +721,43 @@ def _duplicate_item_for_repeat(
 ) -> pytest.Item:
     """Build an independent duplicate of *item* for its *occurrence*-th scheduled run.
 
-    A bridging transition test may be scheduled more than once when the same
-    edge must be crossed several times (see ``_inject_bridge``), which means
-    the exact same ``pytest.Item`` object can appear multiple times in the
-    final plan. Running one ``Item`` object twice produces two test results
-    that share a single nodeid, and JUnit consumers (e.g. Test Observer)
-    compact same-nodeid results into a single test case, hiding one of the
-    runs (SQT-913 / GH-445).
+    A bridging transition test may be scheduled more than once for the same
+    edge (see ``_inject_bridge``), and running the same ``pytest.Item``
+    object twice produces two results sharing one nodeid - JUnit consumers
+    (e.g. Test Observer) then compact them into a single test case, hiding
+    one run (SQT-913 / GH-445).
 
     A shallow copy keeps the duplicate on the same module/class/fixtures as
-    *item* while giving it its own ``name`` and ``nodeid``, distinguished by
-    a ``[occurrence]`` index (e.g. ``test_upgrade_charm[1]``,
-    ``test_upgrade_charm[2]``) so Test Observer shows a clean, structured
-    naming scheme instead of an ad hoc ``(repeat N)`` suffix. *base_name*/
-    *base_nodeid* default to *item*'s current name/nodeid, but callers that
-    have already relabeled *item* in place (see ``_disambiguate_repeated_items``)
-    should pass the pre-relabeling values explicitly so the index isn't
-    stacked on top of an earlier one (e.g. ``test_foo[1][2]``). Real
-    ``pytest.Function`` items cache a fixture request that refers back to
-    ``self`` at construction time (``_initrequest``); the duplicate re-runs
-    that step so it resolves and tears down its own fixtures instead of
-    aliasing the original item's.
+    *item*, with its own ``name``/``nodeid`` suffixed by a ``[occurrence]``
+    index (e.g. ``test_upgrade_charm[1]``). *base_name*/*base_nodeid* default
+    to *item*'s current name/nodeid; callers that already relabeled *item* in
+    place (``_disambiguate_repeated_items``) should pass the pre-relabeling
+    values so the index isn't stacked twice (``test_foo[1][2]``).
+    ``pytest.Function`` caches a fixture request bound to ``self``
+    (``_initrequest``); re-running it lets the duplicate resolve/tear down
+    its own fixtures instead of aliasing the original's.
 
-    ``copy.copy`` only copies attribute references, so without further action
-    the duplicate would share *item*'s mutable ``own_markers``/``keywords``,
-    ``stash`` (used elsewhere in the suite to record per-item pass/fail/
-    skip state, e.g. ``resource_tracking``), ``user_properties`` (JUnit/Test
-    Observer metadata recorded via ``record_property``, e.g. by the
-    ``execution_metadata`` fixture), and ``_report_sections`` (captured
-    output attached to the item's test reports); marking, reporting on, or
-    recording metadata/output for the duplicate would then incorrectly
-    mutate *item* too, and if *item* already ran once (e.g. a template
-    reused for a later recovery), the duplicate would start out inheriting
-    that earlier run's stale metadata/output. All five are replaced here
-    with independent, empty copies bound to the duplicate. The ``keywords``
-    mapping is rebuilt after relabeling (it seeds itself from the node's
-    ``name`` at construction) and repopulated with *item*'s own entries so
-    the duplicate doesn't lose markers/keywords the template already had
-    beyond its own (now stale) name.
+    ``copy.copy`` only copies attribute references, so ``own_markers``,
+    ``keywords``, ``stash`` (per-item pass/fail state, e.g.
+    ``resource_tracking``), ``user_properties`` (JUnit/Test Observer
+    metadata), and ``_report_sections`` (captured output) all need
+    independent copies here - otherwise marking/reporting on the duplicate
+    would mutate *item* too, and a duplicate of an already-run template would
+    inherit stale metadata. ``keywords`` is rebuilt after relabeling (it
+    seeds from the node's name at construction) and repopulated with *item*'s
+    own entries.
 
     The duplicate's object ID is recorded in ``_duplicate_original_ids``,
-    pointing back to *item*'s original object ID (chasing through any prior
-    duplication), so later per-occurrence logic can still identify which
-    scheduled item a duplicate came from.
+    pointing back to *item*'s original ID, so later per-occurrence logic can
+    trace a duplicate to its source.
     """
     duplicate = copy.copy(item)
     if hasattr(item, "own_markers"):
         duplicate.own_markers = list(item.own_markers)
     if hasattr(item, "stash"):
         duplicate.stash = type(item.stash)()
-        # pytest.Node.__init__ sets self._store = self.stash as a backwards
-        # -compatibility alias (pre-Stash API); copy.copy leaves it pointing
-        # at *item*'s original stash object even after the line above rebinds
-        # duplicate.stash, so plugins that still read/write via ._store would
-        # otherwise keep sharing state with the template. Rebind it too.
+        # pytest.Node.__init__ aliases self._store = self.stash; copy.copy leaves
+        # it pointing at item's original stash, so rebind it too.
         if hasattr(duplicate, "_store"):
             duplicate._store = duplicate.stash
     if hasattr(item, "user_properties"):
@@ -914,9 +773,8 @@ def _duplicate_item_for_repeat(
     )
     if hasattr(item, "keywords"):
         new_keywords = type(item.keywords)(duplicate)
-        # Private attribute access mirrors the existing ``_nodeid`` precedent
-        # above: pytest exposes no public way to enumerate a node's own
-        # keyword entries. Skip *item*'s own (now stale) name entry; the
+        # No public API to enumerate a node's own keyword entries (mirrors the
+        # _nodeid precedent above). Skip item's own (now stale) name entry; the
         # fresh mapping above already seeded *duplicate*'s current name.
         for key, value in getattr(item.keywords, "_markers", {}).items():
             if key != item.name:
@@ -976,53 +834,21 @@ def _build_execution_plan(
 ) -> list[pytest.Item]:
     r"""Build an ordered item list using backtracking with memoization and cycle detection.
 
-    **Algorithm Overview**
+    Uses exhaustive backtracking to reorder user-selected tests and inject
+    bridging transitions needed to satisfy state constraints:
 
-    The scheduler uses exhaustive backtracking to reorder user-selected tests
-    and automatically inject bridging transitions needed to satisfy state constraints.
+    1. Run any pure tests already reachable at ``current_state`` for free.
+    2. Recursively try each remaining destination state in sorted order: find
+       the shortest path via Dijkstra, inject bridging tests, run the
+       destination's selected tests, and recurse. Backtrack on failure.
+    3. Dead-end branches are memoized by ``(state, frozenset(remaining))`` so
+       they aren't re-explored; an in-flight ``visiting`` set breaks cycles by
+       returning ``None`` if the same key is re-entered mid-search.
+    4. Raise ``_UnreachableStateError`` if no ordering bridges all gaps, or if
+       ``full_graph.unreachable_states`` shows a destination is unreachable.
 
-    **Phase 1: Early Exits (O(states))**
-    - Check for unconnected nodes: LogWarning if any states are unreachable from current state.
-    - Run any pure tests already reachable at the current state (free destinations).
-    - Mark those tests as scheduled so they won't be reordered.
-
-    **Phase 2: Backtracking Search (O(destinations^destinations) worst-case)**
-    - Recursively explore different orderings of remaining destinations.
-    - For each remaining destination state:
-      * Use Dijkstra to find the shortest path from current state (O(edges log nodes)).
-      * If reachable: create a branch, inject bridging tests, execute tests at that destination.
-      * Recurse with new state and updated scheduled set.
-      * If recursion succeeds: return the complete plan.
-      * If recursion fails (returns None): backtrack and try the next destination.
-    - If all orderings fail: raise _UnreachableStateError.
-
-        **Optimization: Dead-End Memoization & Cycle Detection**
-        - Memo key: (current_state, frozenset(remaining_destinations)).
-        - Dead-end memoization caches only unsatisfiable branches, so repeated visits
-            can be pruned immediately.
-        - Cycle detection uses an in-flight ``visiting`` set for the same key shape.
-            If we re-enter a key that is currently being explored, we return ``None``
-            to break recursion loops.
-        - Combined effect: guarantees termination even when the graph contains cycles
-            and at least one destination is unreachable.
-
-        **Cycle & Connectivity Detection**
-    - ``full_graph.unreachable_states(current_state)``: Returns states with no path from current_state.
-    - Logged as a warning; if a destination is in that set, _UnreachableStateError is raised.
-        - Cycle detection via ``visiting``: if (state, remaining) is re-entered while
-            still in progress, that branch returns ``None``.
-
-    **Destination Ordering**
-    - Tries destinations in sorted order for determinism.
-    - Backtracking ensures the first valid ordering is returned.
-    - Multiple user-selected tests on the same edge (multiple item variants) all run,
-      with bridging re-navigation between them.
-
-    **Edge Cases**
-    - Empty selection: returns empty plan.
-    - Already at required state: runs tests immediately without bridges.
-    - Isolated graph components: _UnreachableStateError raised before backtracking starts.
-    - Cyclic paths: dead-end memoization + cycle detection ensures recursive search terminates.
+    Multiple user-selected tests on the same edge all run, with bridging
+    re-navigation between them.
 
     Args:
         current_state: Environment state before any tests run.

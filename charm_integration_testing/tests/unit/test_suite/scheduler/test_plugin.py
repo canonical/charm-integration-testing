@@ -208,18 +208,13 @@ class TestDuplicateItemForRepeat:
         assert key not in item.stash
 
     def test_duplicate_has_independent_store_alias(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN an item duplicated for a recovery bridge - real pytest.Item
-        # instances carry a ``_store`` attribute as a backwards-compatibility
-        # alias of ``stash`` (see pytest.Node.__init__), which copy.copy alone
-        # would leave pointing at the template's original stash object even
-        # after duplicate.stash itself is rebound to a fresh one.
+        # Real pytest.Item carries _store as a backwards-compat alias of stash
+        # (pytest.Node.__init__), which copy.copy alone would leave pointing at
+        # the template's original stash even after duplicate.stash is rebound.
         item = make_item("test_foo")
         duplicate = _duplicate_item_for_repeat(item, 2)
 
-        # THEN the duplicate's _store alias points at its OWN fresh stash,
-        # not the template's - otherwise a plugin reading/writing via
-        # ._store (rather than .stash directly) would still leak per-run
-        # state back to the template.
+        # The duplicate's _store alias points at its own fresh stash, not the template's.
         assert cast(Any, duplicate)._store is duplicate.stash
         assert cast(Any, duplicate)._store is not cast(Any, item)._store
 
@@ -1996,11 +1991,8 @@ class TestPytestRuntestProtocolRecovery:
     def test_exception_group_of_ordinary_finalizer_failures_is_handled_gracefully(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN the same recovery scenario as above, but this time
-        # teardown_exact fails with a BaseExceptionGroup - as real pytest's
-        # SetupState.teardown_exact does when more than one retained
-        # module/package-scoped fixture's finalizer raises during the same
-        # call (see _pytest.runner.SetupState.teardown_exact).
+        # teardown_exact fails with a BaseExceptionGroup, as real pytest does when
+        # more than one retained fixture's finalizer raises during the same call.
         bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
         _plugin_module._full_graph = graph
@@ -2018,12 +2010,10 @@ class TestPytestRuntestProtocolRecovery:
 
         cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
 
-        # WHEN the hook runs, it must not propagate the group as an
-        # unexplained INTERNALERROR, since every member is an ordinary
-        # (non-abort) exception...
+        # Must not propagate as an unexplained INTERNALERROR; every member is ordinary.
         _drive_runtest_protocol(skipped_downgrade, nextitem)
 
-        # THEN recovery treats it like any other unexpected failure.
+        # Recovery treats it like any other unexpected failure.
         assert _plugin_module._current_state is None
         assert _plugin_module._failed_state_test is skipped_downgrade
         assert skipped_downgrade.session.testsfailed == 1
@@ -2031,10 +2021,8 @@ class TestPytestRuntestProtocolRecovery:
     def test_abort_exception_during_reconciliation_propagates_uncaught(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN the same recovery scenario as above, but the finalizer raises
-        # an abort-style exception (KeyboardInterrupt) rather than an
-        # ordinary one - this must never be swallowed as a "test failure",
-        # unlike Exception/OutcomeException subclasses.
+        # Finalizer raises an abort-style exception (KeyboardInterrupt), which
+        # must never be swallowed as a "test failure".
         bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
         _plugin_module._full_graph = graph
@@ -2050,19 +2038,16 @@ class TestPytestRuntestProtocolRecovery:
 
         cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
 
-        # WHEN the hook runs, THEN the abort exception must propagate rather
-        # than being caught and reinterpreted as a state-machine failure.
+        # Must propagate rather than being reinterpreted as a state-machine failure.
         with pytest.raises(KeyboardInterrupt):
             _drive_runtest_protocol(skipped_downgrade, nextitem)
 
     def test_exception_group_containing_an_abort_exception_reraises_the_abort_part(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN a BaseExceptionGroup mixing an ordinary exception with an
-        # abort-style one - defensive coverage for the split() logic, even
-        # though real pytest's teardown_exact loop only ever catches
-        # (OutcomeException, Exception) members, so it can't actually
-        # produce such a mixed group today.
+        # A BaseExceptionGroup mixing an ordinary exception with an abort-style one -
+        # defensive coverage, since teardown_exact only ever catches
+        # (OutcomeException, Exception) and so can't actually produce this today.
         bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
         _plugin_module._full_graph = graph
@@ -2080,8 +2065,7 @@ class TestPytestRuntestProtocolRecovery:
 
         cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
 
-        # WHEN/THEN the abort part must propagate rather than being
-        # swallowed alongside the ordinary exception.
+        # The abort part must propagate rather than being swallowed alongside the ordinary one.
         with pytest.raises(_plugin_module._BaseExceptionGroup) as excinfo:
             _drive_runtest_protocol(skipped_downgrade, nextitem)
         assert any(isinstance(exc, KeyboardInterrupt) for exc in excinfo.value.exceptions)  # type: ignore[attr-defined]
@@ -2089,11 +2073,9 @@ class TestPytestRuntestProtocolRecovery:
     def test_pytest_exit_from_finalizer_during_reconciliation_propagates_uncaught(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN a finalizer that calls pytest.exit() - a deliberate whole-run
-        # abort request. Unlike Skipped/Failed, pytest's own Exit exception
-        # derives from Exception (not just BaseException), so a naive
-        # ``except Exception`` here would wrongly swallow it as though it
-        # were an ordinary recoverable failure.
+        # A finalizer calls pytest.exit() (a deliberate whole-run abort). Unlike
+        # Skipped/Failed, Exit derives from Exception, so a naive "except
+        # Exception" would wrongly swallow it as an ordinary recoverable failure.
         bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
         _plugin_module._full_graph = graph
@@ -2109,24 +2091,19 @@ class TestPytestRuntestProtocolRecovery:
 
         cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
 
-        # WHEN the hook runs, THEN Exit must propagate rather than being
-        # caught and reinterpreted as a state-machine failure.
+        # Must propagate rather than being reinterpreted as a state-machine failure.
         with pytest.raises(_pytest.outcomes.Exit):
             _drive_runtest_protocol(skipped_downgrade, nextitem)
 
     def test_exit_nested_inside_an_exception_group_still_propagates(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
-        # GIVEN a BaseExceptionGroup where the Exit is itself wrapped inside
-        # a nested sub-group alongside an ordinary exception - as pytest's
-        # own SetupState.teardown_exact would produce when more than one
-        # collector node each contribute failing finalizers (see
-        # "errors during test teardown" wrapping per-node sub-groups).
-        # BaseExceptionGroup.split() tests its predicate against group nodes
-        # themselves, not just their leaves, so a predicate that returns True
-        # for any Exception (including a group, which is itself one) would
-        # wrongly classify the whole nested group - Exit included - as
-        # recoverable without ever inspecting its members.
+        # Exit is wrapped inside a nested sub-group alongside an ordinary exception,
+        # as pytest's teardown_exact produces when multiple collector nodes each
+        # contribute failing finalizers. split() tests its predicate against group
+        # nodes themselves, not just leaves, so a predicate returning True for any
+        # Exception (a group is one too) would wrongly classify the whole nested
+        # group - Exit included - as recoverable without inspecting its members.
         bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
         _plugin_module._full_graph = graph
@@ -2151,9 +2128,7 @@ class TestPytestRuntestProtocolRecovery:
 
         cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
 
-        # WHEN/THEN the nested Exit must still surface rather than being
-        # swallowed as though the whole nested group were an ordinary
-        # recoverable failure.
+        # The nested Exit must still surface, not be swallowed as part of the group.
         with pytest.raises(_plugin_module._BaseExceptionGroup) as excinfo:
             _drive_runtest_protocol(skipped_downgrade, nextitem)
 
@@ -2171,21 +2146,12 @@ class TestPytestRuntestProtocolRecovery:
     ) -> None:
         """Regression for review comment on plugin.py:496.
 
-        GIVEN nextitem is a transition candidate accepting more than one
-        requires state (DEPLOYED or NEIGHBOR_ONLY), and this exact original
-        candidate already skipped as the (DEPLOYED -> provides) edge earlier
-        in the run - but NOT yet as (NEIGHBOR_ONLY -> provides).
-
-        A one-way bridge from the current state to DEPLOYED would be
-        wasted: pytest_runtest_setup would skip nextitem right back out once
-        it got there (see test_skips_a_preplanned_duplicate_of_an_already_skipped_transition_candidate),
-        leaving the environment stuck at DEPLOYED for no benefit - and,
-        worse, no longer at a state some later test might have needed. The
-        still-viable NEIGHBOR_ONLY requires-state must be preferred instead.
+        nextitem accepts DEPLOYED or NEIGHBOR_ONLY as requires; this exact
+        candidate already skipped for (DEPLOYED -> provides) but not yet for
+        (NEIGHBOR_ONLY -> provides). A bridge to DEPLOYED would be wasted
+        (skipped right back out), so NEIGHBOR_ONLY must be preferred.
         """
-        # GIVEN two possible bridge targets from the current state: one to
-        # DEPLOYED (a dead end for this candidate) and one to NEIGHBOR_ONLY
-        # (still viable).
+        # Two possible bridge targets: DEPLOYED (dead end) and NEIGHBOR_ONLY (viable).
         to_deployed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
         to_neighbor_only = make_item("test_scale_direct", requires=State.EMPTY_MODEL, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all(
@@ -2196,9 +2162,9 @@ class TestPytestRuntestProtocolRecovery:
         _plugin_module._all_transitions = all_transitions
         _plugin_module._current_state = State.EMPTY_MODEL
 
-        # AND nextitem is a duplicate of an original transition candidate
-        # that already skipped for the (DEPLOYED -> DEPLOYED_WITH_OLD_REVISION)
-        # edge, but never tried (NEIGHBOR_ONLY -> DEPLOYED_WITH_OLD_REVISION).
+        # nextitem is a duplicate of an original candidate that already skipped for
+        # (DEPLOYED -> DEPLOYED_WITH_OLD_REVISION) but never tried
+        # (NEIGHBOR_ONLY -> DEPLOYED_WITH_OLD_REVISION).
         original = make_item(
             "test_multi",
             requires=[State.DEPLOYED, State.NEIGHBOR_ONLY],
@@ -2217,12 +2183,10 @@ class TestPytestRuntestProtocolRecovery:
         item = make_item("test_something_else")
         _with_session(item, [item, nextitem])
 
-        # WHEN the hook runs
         _drive_runtest_protocol(item, nextitem)
 
-        # THEN the bridge injected targets the still-viable NEIGHBOR_ONLY
-        # requires-state, not the dead-end DEPLOYED one (which would only
-        # have gotten nextitem skipped right back out anyway).
+        # The bridge injected targets the still-viable NEIGHBOR_ONLY state, not the
+        # dead-end DEPLOYED one.
         injected_names = [i.name for i in item.session.items if i not in (item, nextitem)]
         assert any("test_scale_direct" in name for name in injected_names)
         assert not any("test_deploy" in name for name in injected_names)
@@ -2232,20 +2196,14 @@ class TestPytestRuntestProtocolRecovery:
     ) -> None:
         """Regression for review comment 4029755560 on plugin.py:504.
 
-        GIVEN the environment's current state is exactly a requires-state
-        this transition candidate already gave up on (DEPLOYED), while
-        another requires-state (NEIGHBOR_ONLY) it hasn't tried yet is still
-        reachable via a bridge.
-
-        The old ``if _current_state in marker.requires: return`` early exit
-        ran before the already-skipped filtering, so it short-circuited
-        recovery entirely just because the environment happened to already
-        be at DEPLOYED - leaving pytest_runtest_setup to skip nextitem
-        again, even though bridging to NEIGHBOR_ONLY instead would have let
-        it run.
+        The environment's current state is exactly a requires-state this
+        candidate already gave up on (DEPLOYED), while another requires-state
+        (NEIGHBOR_ONLY) it hasn't tried is still reachable via a bridge. The old
+        ``if _current_state in marker.requires: return`` ran before the
+        already-skipped filtering, so it short-circuited recovery just because
+        the environment happened to be at DEPLOYED already.
         """
-        # GIVEN a bridge from the current state (DEPLOYED) to the other
-        # still-viable requires-state (NEIGHBOR_ONLY).
+        # Bridge from the current state (DEPLOYED) to the other still-viable state.
         to_neighbor_only = make_item("test_scale_direct", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         graph, all_transitions = _graph_and_all(
             (State.DEPLOYED, State.NEIGHBOR_ONLY, to_neighbor_only),
@@ -2254,9 +2212,8 @@ class TestPytestRuntestProtocolRecovery:
         _plugin_module._all_transitions = all_transitions
         _plugin_module._current_state = State.DEPLOYED
 
-        # AND nextitem is a duplicate of an original transition candidate
-        # that already skipped for the (DEPLOYED -> DEPLOYED_WITH_OLD_REVISION)
-        # edge - i.e. exactly the edge matching the environment's current
+        # nextitem is a duplicate of an original candidate that already skipped for
+        # (DEPLOYED -> DEPLOYED_WITH_OLD_REVISION) - the edge matching the current
         # state - but never tried (NEIGHBOR_ONLY -> DEPLOYED_WITH_OLD_REVISION).
         original = make_item(
             "test_multi",
@@ -2276,12 +2233,9 @@ class TestPytestRuntestProtocolRecovery:
         item = make_item("test_something_else")
         _with_session(item, [item, nextitem])
 
-        # WHEN the hook runs
         _drive_runtest_protocol(item, nextitem)
 
-        # THEN a bridge towards NEIGHBOR_ONLY was injected instead of giving
-        # up just because _current_state already matched a given-up-on
-        # requires-state.
+        # A bridge towards NEIGHBOR_ONLY was injected instead of giving up.
         injected_names = [i.name for i in item.session.items if i not in (item, nextitem)]
         assert any("test_scale_direct" in name for name in injected_names)
 

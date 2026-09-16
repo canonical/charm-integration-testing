@@ -58,9 +58,8 @@ class FakeItem:
         # Real pytest.Item instances carry a per-node Stash; mirrored here so
         # tests can exercise _duplicate_item_for_repeat's stash-isolation fix.
         self.stash: pytest.Stash = pytest.Stash()
-        # Real pytest.Node.__init__ sets self._store = self.stash as a
-        # backwards-compatibility alias (pre-Stash API); mirrored here so
-        # tests can exercise _duplicate_item_for_repeat's _store-rebinding fix.
+        # Real pytest.Node.__init__ aliases self._store = self.stash (pre-Stash API);
+        # mirrored so tests can exercise the _store-rebinding fix.
         self._store = self.stash
         # Mirrors real pytest.Item.keywords, so tests can exercise
         # _duplicate_item_for_repeat's keywords-copying logic.

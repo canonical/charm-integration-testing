@@ -28,24 +28,18 @@ pytest_plugins = ["pytester"]
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
 
-    By the time ``pytest_runtest_protocol``'s hookwrapper resumes after
-    ``yield``, pytest has already torn the just-finished item down using the
-    *original* ``nextitem`` (before recovery decided to inject a bridge).
-    That teardown retains any collector scope (e.g. a module-scoped fixture)
-    shared between the item and that original ``nextitem``. If the injected
-    bridge belongs to a different module, the retained scope is stale for
-    whatever pytest actually runs next, and pytest's own
-    ``SetupState.setup`` used to assert on it (``previous item was not torn
-    down properly``) before the reconciling ``teardown_exact`` call was
-    added in ``pytest_runtest_protocol``.
+    By the time the hookwrapper resumes after ``yield``, pytest has already
+    torn the item down using the *original* ``nextitem``, retaining any
+    collector scope (e.g. a module-scoped fixture) shared with it. If the
+    injected bridge belongs to a different module, that scope is stale and
+    pytest's ``SetupState.setup`` used to assert on it before the
+    reconciling ``teardown_exact`` call was added.
 
-    Scenario: ``test_downgrade_charm`` (module A) skips at setup time
-    (simulating missing Test Observer credentials), so the environment stays
-    at ``deployed``. The next planned test, ``test_upgrade_charm`` (also
-    module A), requires ``neighbor_only``. The only registered transition
-    from ``deployed`` to ``neighbor_only`` other than the skipped one is
-    ``test_scale``, registered in a *different* module (module B) - forcing
-    the cross-module bridge that used to trigger the crash.
+    Scenario: ``test_downgrade_charm`` (module A) skips at setup, so the
+    environment stays at ``deployed``. ``test_upgrade_charm`` (module A)
+    needs ``neighbor_only``, reachable only via ``test_scale`` in a
+    *different* module (B) - forcing the cross-module bridge that used to
+    trigger the crash.
     """
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
@@ -91,13 +85,11 @@ def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown
 
     result = pytester.runpytest("--current-state", "deployed")
 
-    # THEN the recovery bridge (test_scale, injected from module B) and the
-    # rest of the plan run cleanly - no AssertionError from pytest's own
-    # SetupState, and no error outcome for the injected item.
+    # The recovery bridge (test_scale, from module B) and the rest of the plan
+    # run cleanly - no SetupState assertion, no error outcome for the injected item.
     result.assert_outcomes(passed=3, skipped=1)
-    # AND the terminal reporter's progress percentages stay within 0-100%,
-    # proving session.testscollected was kept in sync with the injected
-    # bridge item rather than understating the now-longer item list.
+    # Progress percentages stay within 0-100%, proving testscollected was kept
+    # in sync with the injected bridge item.
     percentages = [int(m) for m in re.findall(r"\[\s*(\d+)%\]", "\n".join(result.outlines))]
     assert percentages, "expected at least one progress percentage in output"
     assert max(percentages) == 100
@@ -107,18 +99,15 @@ def test_call_time_skip_via_guard_clause_does_not_halt_remaining_state_marked_te
     """A transition test that skips via a body guard clause must not be treated as a failure.
 
     Mirrors ``test_upgrade_controller`` in the real suite: it checks a
-    precondition as the first statement in the test *body* (not in a
-    fixture) and calls ``pytest.skip()`` before doing anything else. Pytest
-    classifies this as a *call*-phase skip, but functionally it is identical
-    to a setup-time skip: nothing has been mutated yet. Before the fix, the
-    scheduler treated any call/teardown-phase skip of a transition test as
-    "environment state unknown", incorrectly halting recovery and every
-    subsequent state-marked test even though the environment never changed.
+    precondition as the first statement in the test body and calls
+    ``pytest.skip()`` before doing anything else - pytest classifies this as
+    a *call*-phase skip, but functionally it's identical to a setup-time
+    skip. Before the fix, the scheduler treated any call/teardown-phase skip
+    as "environment state unknown", incorrectly halting recovery and every
+    subsequent state-marked test.
 
-    Scenario mirrors
-    ``test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown``
-    above, but the skip is a call-phase guard clause instead of a
-    setup-phase fixture skip.
+    Same scenario as the cross-module bridge test above, but the skip is a
+    call-phase guard clause instead of a setup-phase fixture skip.
     """
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
@@ -129,8 +118,8 @@ def test_call_time_skip_via_guard_clause_does_not_halt_remaining_state_marked_te
 
             @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
             def test_downgrade_charm():
-                # A guard clause in the test body, exactly like the real
-                # test_upgrade_controller: skip before mutating anything.
+                # Guard clause in the test body, like the real test_upgrade_controller:
+                # skip before mutating anything.
                 pytest.skip("simulated: no downgrade target available")
 
             @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
@@ -154,8 +143,7 @@ def test_call_time_skip_via_guard_clause_does_not_halt_remaining_state_marked_te
 
     result = pytester.runpytest("--current-state", "deployed")
 
-    # THEN recovery still bridges via an injected test_scale (module B)
-    # exactly as it would for a setup-time skip, and test_upgrade_charm
+    # Recovery still bridges via injected test_scale (module B) and test_upgrade_charm
     # still runs - the call-time skip did not halt the state machine.
     result.assert_outcomes(passed=3, skipped=1)
     result.stdout.no_fnmatch_line("*environment state is unknown*")
@@ -166,16 +154,12 @@ def test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_fai
 ) -> None:
     """A retained fixture finalizer that fails during recovery must not silently exit successfully.
 
-    Same cross-module bridge scenario as
-    ``test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown``, but
-    module A's module-scoped fixture raises during its own finalizer. Since
-    the original ``nextitem`` (also module A) would have kept that fixture's
-    scope retained, only the reconciling ``teardown_exact`` call towards the
-    injected module B bridge actually tears it down and hits the raising
-    finalizer - outside pytest's normal per-item reporting flow. Before the
-    fix, this exception would have escaped straight past our hook, likely
-    surfacing as a raw traceback/``INTERNALERROR`` instead of a clean,
-    accounted-for pytest failure.
+    Same cross-module bridge scenario as above, but module A's module-scoped
+    fixture raises during its own finalizer. Only the reconciling
+    ``teardown_exact`` call towards the injected module B bridge tears it
+    down, outside pytest's normal per-item reporting flow - before the fix
+    this would have surfaced as a raw traceback/``INTERNALERROR`` instead of
+    a clean, accounted-for failure.
     """
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
@@ -218,17 +202,15 @@ def test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_fai
 
     result = pytester.runpytest("--current-state", "deployed")
 
-    # THEN pytest's exit status reflects the failure (not a clean, all-green
-    # exit despite the finalizer failure)...
+    # Exit status reflects the failure (not a clean, all-green exit).
     assert result.ret != 0
-    # ...our error message explains what happened (propagated via Python
-    # logging into this outer test's own captured log records, since the
-    # nested in-process pytester run shares the same logging machinery)...
+    # Our error message explains what happened (via logging, shared with this
+    # outer test's captured records since pytester runs in-process).
     assert any(
         "Failed to reconcile pytest's setup stack" in record.message and "simulated finalizer failure" in record.message
         for record in caplog.records
     )
-    # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
+    # No raw INTERNALERROR/unhandled traceback leaked past our hook.
     result.stdout.no_fnmatch_line("*INTERNALERROR*")
 
 
@@ -237,16 +219,12 @@ def test_finalizer_calling_pytest_skip_during_reconciliation_gives_a_failing_exi
 ) -> None:
     """A retained fixture finalizer that calls ``pytest.skip()`` must be handled like any other failure.
 
-    Same cross-module bridge scenario as the ``RuntimeError``-raising
-    finalizer test above, but the finalizer instead calls ``pytest.skip()``.
-    ``pytest.skip()`` raises ``Skipped``, which - like ``Failed`` from
-    ``pytest.fail()`` - deliberately derives from ``BaseException`` rather
-    than ``Exception``, specifically so it is *not* caught by ordinary
-    ``except Exception`` handlers throughout pytest's own internals. An
-    ``except Exception`` guard around the reconciling ``teardown_exact`` call
-    would let such a ``Skipped`` exception escape uncaught, outside pytest's
-    normal reporting flow, likely surfacing as an unexplained
-    ``INTERNALERROR``.
+    Same scenario as the ``RuntimeError``-raising finalizer test above, but
+    the finalizer calls ``pytest.skip()`` instead. ``Skipped`` (like
+    ``Failed``) deliberately derives from ``BaseException`` rather than
+    ``Exception`` so ordinary pytest internals don't catch it; a naive
+    ``except Exception`` around the reconciling ``teardown_exact`` call would
+    let it escape uncaught as an unexplained ``INTERNALERROR``.
     """
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
@@ -289,28 +267,24 @@ def test_finalizer_calling_pytest_skip_during_reconciliation_gives_a_failing_exi
 
     result = pytester.runpytest("--current-state", "deployed")
 
-    # THEN pytest's exit status still reflects the failure...
+    # Exit status still reflects the failure, error message explains it, and
+    # no raw INTERNALERROR/unhandled traceback leaked past our hook.
     assert result.ret != 0
-    # ...our error message explains what happened...
     assert any(
         "Failed to reconcile pytest's setup stack" in record.message and "finalizer decided to skip" in record.message
         for record in caplog.records
     )
-    # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
     result.stdout.no_fnmatch_line("*INTERNALERROR*")
 
 
 def test_finalizer_failure_stops_the_run_under_maxfail(pytester: Pytester) -> None:
     """A reconciliation finalizer failure must stop the run under ``--maxfail``, like a normal failure would.
 
-    Same cross-module bridge + raising module-scoped finalizer scenario as
-    ``test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_failing_exit_status``,
-    but with an extra, unrelated unmarked test and ``--maxfail=1``. Bumping
+    Same cross-module bridge + raising finalizer scenario as above, but with
+    an extra unrelated unmarked test and ``--maxfail=1``. Bumping
     ``session.testsfailed`` alone (without also setting
-    ``session.shouldfail``, mirroring pytest's own
-    ``Session.pytest_runtest_logreport``) makes the eventual exit status
-    nonzero but does not actually stop the run early: the unrelated test
-    would still execute even though a "failure" already happened.
+    ``session.shouldfail``, mirroring pytest's own accounting) makes the
+    exit status nonzero but doesn't stop the run early.
     """
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
@@ -361,7 +335,6 @@ def test_finalizer_failure_stops_the_run_under_maxfail(pytester: Pytester) -> No
 
     result = pytester.runpytest("-v", "--current-state", "deployed", "--maxfail", "1")
 
-    # THEN the run stops before reaching the unrelated, unmarked test in
-    # module C - exactly like a normal failure would under --maxfail=1.
+    # The run stops before reaching the unrelated, unmarked test in module C.
     result.stdout.no_fnmatch_line("*test_unrelated_and_unmarked*")
     assert result.ret != 0
