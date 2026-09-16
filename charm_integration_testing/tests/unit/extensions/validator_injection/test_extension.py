@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
+    persistence_marker,
     remote_validators_path,
 )
 from juju import JujuModelHandle, PersistenceKey
@@ -124,17 +125,17 @@ def _persistence_runner_json(
 
 
 # Exec responses for a full injection + clean run cycle:
-#   1. test -f venv_runner → rc=1 (not present)
-#   2-4. three install commands → rc=0 each
-#   5. run_validators       → rc=0 with PASS JSON
+#   1. test -f venv_runner [&& test -f persistence_marker] → rc=1 (not present)
+#   2-5. four install commands (chmod, venv, pip install, touch marker) → rc=0 each
+#   6. run_validators       → rc=0 with PASS JSON
 def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
         run_stdout = _runner_json(_pass_result())
-    return [_fail(), _ok(), _ok(), _ok(), _ok(run_stdout)]
+    return [_fail(), _ok(), _ok(), _ok(), _ok(), _ok(run_stdout)]
 
 
 # Exec responses when the venv is already installed:
-#   1. test -f venv_runner → rc=0 (present)
+#   1. test -f venv_runner [&& test -f persistence_marker] → rc=0 (present)
 #   2. run_validators      → rc=0 with PASS JSON
 def _preinstalled_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -231,6 +232,26 @@ class TestValidatorInjectorExtension:
 
             # THEN no command was ever run on the unit
             assert not juju.exec_calls
+
+        def test_reinstalls_when_venv_predates_persistence_support(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # Regression test for: a venv installed before persistence support existed has
+            # venv_runner present but understands only --level, not --persistence. The readiness
+            # check must also require the persistence_marker file (only written by a fresh
+            # _inject_validators() run) so this venv is reinstalled instead of being invoked with
+            # an argument it doesn't support.
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            juju.exec_responses.extend(_inject_and_pass_responses(_persistence_runner_json()))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare", {})
+
+            # THEN the venv was (re)installed - i.e. more than just the readiness check and the run
+            # command were executed - and the run command still succeeded afterwards
+            run_cmds = [call[2] for call in juju.exec_calls if "--persistence" in call[2]]
+            assert len(run_cmds) == 1
+            assert len(juju.exec_calls) > 2
 
         def test_prepare_runs_on_each_unit_with_no_refs_argument(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -432,9 +453,9 @@ class TestValidatorInjectorExtension:
                 # WHEN
                 extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
 
-                # THEN scp + 3 install commands + run_validators all happened
+                # THEN scp + 4 install commands + run_validators all happened
                 assert len(juju.scp_calls) == 2  # validators + uv
-                assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
+                assert len(juju.exec_calls) == 6  # test-f + 4 installs (incl. persistence marker) + run
 
         class TestResultHandling:
             def test_does_not_raise_when_all_pass(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
@@ -596,19 +617,32 @@ class TestValidatorInjectorExtension:
             assert mkdir == f"sudo mkdir -p {remote_validators_path}"
             assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
-        def test_runs_three_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+        def test_runs_four_install_commands(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
-            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+            juju.exec_responses.extend([_ok(), _ok(), _ok(), _ok()])
 
             # WHEN
             extension._inject_validators(TEST_MODEL, "myapp/0")
 
-            # THEN exactly three exec_unit calls were made
-            assert len(juju.exec_calls) == 3
+            # THEN exactly four exec_unit calls were made (chmod, venv, pip install, marker touch)
+            assert len(juju.exec_calls) == 4
+
+        def test_writes_persistence_marker_after_install(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN all install commands succeed
+            juju.exec_responses.extend([_ok(), _ok(), _ok(), _ok()])
+
+            # WHEN
+            extension._inject_validators(TEST_MODEL, "myapp/0")
+
+            # THEN the last command touches the persistence-capability marker, so a stale venv
+            # from before persistence support existed can be told apart from a freshly (re)installed one
+            assert juju.exec_calls[-1][2] == f"touch {persistence_marker}"
 
         def test_uv_commands_include_uv_no_cache(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN all install commands succeed
-            juju.exec_responses.extend([_ok(), _ok(), _ok()])
+            juju.exec_responses.extend([_ok(), _ok(), _ok(), _ok()])
 
             # WHEN
             extension._inject_validators(TEST_MODEL, "myapp/0")
