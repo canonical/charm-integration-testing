@@ -662,9 +662,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
 class TestPostgreSQLClientPersistenceValidatorCleanup:
     def test_drops_all_discovered_canary_tables(self) -> None:
-        # GIVEN two leftover canary tables are discovered
+        # GIVEN two leftover canary tables are discovered, in the current schema
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchall_rows=[("validator_canary_1",), ("validator_canary_2",)])
+        cursor = CursorStub(fetchall_rows=[("public", "validator_canary_1"), ("public", "validator_canary_2")])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -677,7 +677,24 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         assert any("validator_canary_2" in q for q in drop_queries)
         # THEN dropped identifiers are safely quoted (defense in depth: they come from
         # information_schema, not directly from user input, but should not be trusted blindly)
-        assert all('"validator_canary_' in q for q in drop_queries)
+        # and schema-qualified, so a same-named table in another schema can't be targeted instead.
+        assert all('"public"."validator_canary_' in q for q in drop_queries)
+
+    def test_restricts_discovery_to_the_current_schema(self) -> None:
+        # Regression test for: an unqualified information_schema query and DROP TABLE can miss a
+        # canary outside the connection's current schema, or drop an unrelated same-named object
+        # in a different schema. Discovery must be scoped to current_schema().
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "current_schema()" in select_query
 
     def test_escapes_like_wildcards_in_prefix_pattern(self) -> None:
         # GIVEN
