@@ -40,51 +40,12 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 
 ## Chaos Mesh
 
-Kubernetes setup includes Chaos Mesh Helm chart **2.8.4** from <https://charts.chaos-mesh.org>.
-Run this inside the VM from the repository root:
+Sandbox Kubernetes setup includes Chaos Mesh. It installs the components but
+does not run chaos experiments. Shared CI clusters are provisioned separately.
 
-```bash
-bash development-sandbox/bin/setup-k8s.sh
-```
-
-The script prepares curl, jq, and CA certificates if needed. It installs Helm **v3.21.4**
-with SHA-256 verification when Helm is absent, keeps an existing Helm 3 installation,
-and stops if another major version is found. Tool installation and the Canonical k8s
-fallback require sudo access without a password prompt.
-
-Chaos Mesh uses the release and namespace `chaos-mesh`, with `chaosDaemon.runtime=containerd`,
-`chaosDaemon.socketPath=/run/containerd/containerd.sock`, and `dashboard.create=false`.
-Installation creates CRDs, RBAC, webhooks, and a privileged daemon. It does not create chaos experiments.
-This setup is for the sandbox; shared CI clusters require a separate provisioning step.
-On Cilium clusters, use NetworkPolicy rather than Chaos Mesh NetworkChaos for network isolation.
-
-For an existing sandbox cluster with Helm 3 and jq available, run only the Chaos Mesh setup:
-
-```bash
-bash development-sandbox/bin/setup-chaos-mesh.sh /home/ubuntu/k8s.yaml
-```
-
-The kubeconfig argument is optional and defaults to `/home/ubuntu/k8s.yaml`. The script uses
-kubectl if available, otherwise `sudo -n k8s kubectl`. An existing release with the expected
-version and settings is checked without reinstalling. A different version, status, or setting
-stops setup for manual inspection rather than triggering an upgrade. A failed Helm installation
-uses atomic cleanup, but CRDs and the namespace may remain. Inspect these before retrying.
-
-Setup waits for the StressChaos and IOChaos CRDs to become Established and for the controller,
-DNS server, and daemon to finish rolling out. To inspect the installation:
-
-```bash
-helm status chaos-mesh --namespace chaos-mesh --kubeconfig /home/ubuntu/k8s.yaml
-sudo k8s kubectl --kubeconfig /home/ubuntu/k8s.yaml get deployments,daemonsets,pods -n chaos-mesh
-```
-
-For test suite detection, set `KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
-Tests that depend exclusively on Chaos Mesh should request `require_chaos_mesh`. It skips
-when the target lacks `stresschaos.chaos-mesh.org` or is not Kubernetes. Missing kubeconfig
-and API errors are not treated as an absent installation by this fixture.
-
-The complete Kubernetes setup was verified on a fresh Ubuntu **24.04** amd64 VM with
-Canonical k8s **v1.32.13**. Actual chaos injection and shared CI deployment remain unverified.
+See the [setup-k8s skill](../.agents/skills/setup-k8s/SKILL.md) for installation
+and checks, and [setup-charm-tests](../.agents/skills/setup-charm-tests/SKILL.md)
+for test prerequisites.
 
 ## Token setup
 
