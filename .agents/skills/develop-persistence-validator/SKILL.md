@@ -110,11 +110,13 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def cleanup(self) -> None:
         """Drop all canary data.
 
-        Invoked only from the `test_teardown` state transition, never from `prepare()`/
-        `checkpoint()` or mid-transition - though a single pytest session can execute
-        `test_teardown` more than once (e.g. an injected bridge transition ahead of a later
-        redeployment), so this is "once per `test_teardown` invocation," not strictly "once per
-        pytest session." A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
+        Within the test harness, invoked only from the `test_teardown` state transition, never
+        from `prepare()`/`checkpoint()` or mid-transition - though a single pytest session can
+        execute `test_teardown` more than once (e.g. an injected bridge transition ahead of a
+        later redeployment), so this is "once per `test_teardown` invocation," not strictly "once
+        per pytest session." (Manually invoking `run_validators --persistence cleanup` directly,
+        e.g. for iteration - see "Manually verify" below - bypasses the harness and can call this
+        method at any time.) A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
         instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
         `prepare()` again for the new one. Note that this is a real, accepted limitation, not just
         a delay: the discovery namespace (see `_canary_table_prefix`/"Common patterns" below) is
@@ -370,7 +372,13 @@ rather than registering multiple entry points for the same interface.
    - Role gating: each of `prepare`/`checkpoint`/`cleanup` raises
      `PersistenceNotApplicable` when `self.role` isn't the applicable side.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
-     with a fresh identifier and `ref=1`.
+     with a fresh identifier and `ref=1`. Also cover rerunning `prepare()`
+     against an identifier that already has a canary resource (e.g. a
+     resumed/retried run per `seed_persistence_state_for_resumed_run`) and
+     assert the resulting resource/state is still usable by `checkpoint()`
+     - a non-idempotent `CREATE`-style implementation could otherwise pass
+     a "creates a fresh resource" test while failing on a second `prepare()`
+     against the same identifier.
    - `checkpoint()` passes when the check matches `expected.ref`, fails when
      it doesn't. On `PASS`, it advances the backend-specific canary state
      (e.g. writing a new marked row/record for a SQL-style backend;
@@ -395,6 +403,19 @@ rather than registering multiple entry points for the same interface.
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
      before using it in a DDL statement (where applicable to the backend).
+     Also cover the destructive-safeguard cases the cleanup() design point
+     above requires, not just the happy path: a same-prefixed but unrelated
+     resource (e.g. a hand-created backup) must survive cleanup, an
+     out-of-range look-alike identifier (larger than any `prepare()` could
+     have produced) must be rejected before dropping, and - for SQL
+     backends - discovery must be scoped to the current schema and escape
+     any `LIKE` wildcards in the prefix pattern, the way the reference
+     implementation's `test_rejects_discovered_tables_that_only_share_the_prefix`/
+     `test_rejects_discovered_tables_with_an_out_of_range_identifier`/
+     `test_restricts_discovery_to_the_current_schema`/
+     `test_escapes_like_wildcards_in_prefix_pattern` do. A prefix-only
+     implementation could otherwise pass a "drops matching resources" test
+     while still deleting unrelated data.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
@@ -432,20 +453,23 @@ rather than registering multiple entry points for the same interface.
    shell with access to the model you can also invoke `run_validators`
    directly to iterate faster (matching how
    `ValidatorInjectorExtension._run_persistence_on_unit` invokes it - a bare
-   `run_validators` on `$PATH` won't work; it's not installed there):
+   `run_validators` on `$PATH` won't work; it's not installed there). On a
+   Kubernetes charm running under Juju older than 4.0, add `--operator` so
+   the command reaches the operator (charm) container rather than the
+   workload container, where the validators venv doesn't exist (see
+   `ValidatorInjectorExtension`'s `operator=is_k8s` usage); omit it on
+   machine charms, and omit it on Juju 4+ regardless of substrate, since the
+   flag was removed there and passing it either has no effect or errors
+   depending on your Juju client version - check with `juju version`
+   first:
    ```
-   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
+   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
    ```
    on the unit whose role this validator applies to (per its role gating -
    e.g. the requirer for a requirer-side canary). `juju exec` runs the
    command inside the unit's hook execution context, which is what sets
    `JUJU_CHARM_DIR` (required by the CLI) - invoking the binary directly over
-   a plain SSH session instead won't have it set. On Kubernetes charms
-   (pre-Juju-4; the `--operator` flag was removed in Juju 4+, see
-   `ValidatorInjectorExtension`'s `operator=is_k8s` usage), the `--operator`
-   flag is required too - without it the command runs in the workload
-   container, where the validators venv doesn't exist; omit `--operator` on
-   machine charms. Then disrupt the component under test (restart/scale/
+   a plain SSH session instead won't have it set. Then disrupt the component under test (restart/scale/
    migrate) **and wait for it to fully settle** (idle/ready again) before
    checkpointing - checkpointing immediately after triggering the disruption
    (e.g. right after scaling to zero, before scaling back up and reaching
@@ -460,7 +484,7 @@ rather than registering multiple entry points for the same interface.
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
-   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
+   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
    ```
    (`--refs` must be valid JSON - `run_validators` parses/rejects it before
    `checkpoint()` ever runs, so a placeholder like `...` is not usable here;
@@ -472,7 +496,7 @@ rather than registering multiple entry points for the same interface.
    `ValidationResult` itself - see `ValidatorRunnerResults` in
    `validators/runner/runner.py`), and finally
    ```
-   juju exec --unit <unit> --operator -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
+   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
    ```
    and confirm the canary resource is gone.
 
