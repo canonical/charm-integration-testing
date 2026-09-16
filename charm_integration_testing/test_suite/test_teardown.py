@@ -55,7 +55,10 @@ def test_teardown(
             if first_other_error is None:
                 first_other_error = exc
     if combined_failed_validations:
-        raise JujuValidationError(combined_failed_validations)
+        # Chain first_other_error (if any model also raised a non-validation exception) as the
+        # cause, rather than silently discarding it - otherwise a remote/transport cleanup
+        # failure on one model would be invisible whenever another model also failed validation.
+        raise JujuValidationError(combined_failed_validations) from first_other_error
     if first_other_error is not None:
         raise first_other_error
 
