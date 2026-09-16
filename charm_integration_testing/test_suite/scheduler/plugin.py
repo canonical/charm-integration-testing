@@ -381,7 +381,17 @@ def _is_recoverable_reconciliation_failure(exc: BaseException) -> bool:
     qualify. ``pytest.exit()``'s ``Exit`` is deliberately excluded even
     though it derives from ``Exception``: it signals a whole-run abort
     request, not a recoverable failure, and must propagate untouched.
+
+    ``BaseExceptionGroup.split()`` calls this predicate on nested group
+    nodes themselves, not just their leaves - and since a group is itself an
+    ``Exception``/``BaseExceptionGroup`` instance, returning ``True`` for one
+    would wrongly classify an entire nested group (and any ``Exit`` hiding
+    inside it) as recoverable without ever inspecting its members. Returning
+    ``False`` here for any group node makes ``split()`` descend into it and
+    evaluate each of its own members individually instead.
     """
+    if isinstance(exc, _BaseExceptionGroup):
+        return False
     return isinstance(exc, (Exception, _pytest.outcomes.OutcomeException)) and not isinstance(
         exc, _pytest.outcomes.Exit
     )

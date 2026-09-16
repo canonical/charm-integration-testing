@@ -2098,6 +2098,58 @@ class TestPytestRuntestProtocolRecovery:
         with pytest.raises(_pytest.outcomes.Exit):
             _drive_runtest_protocol(skipped_downgrade, nextitem)
 
+    def test_exit_nested_inside_an_exception_group_still_propagates(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a BaseExceptionGroup where the Exit is itself wrapped inside
+        # a nested sub-group alongside an ordinary exception - as pytest's
+        # own SetupState.teardown_exact would produce when more than one
+        # collector node each contribute failing finalizers (see
+        # "errors during test teardown" wrapping per-node sub-groups).
+        # BaseExceptionGroup.split() tests its predicate against group nodes
+        # themselves, not just their leaves, so a predicate that returns True
+        # for any Exception (including a group, which is itself one) would
+        # wrongly classify the whole nested group - Exit included - as
+        # recoverable without ever inspecting its members.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise _plugin_module._BaseExceptionGroup(
+                "errors during test teardown",
+                [
+                    RuntimeError("finalizer boom"),
+                    _plugin_module._BaseExceptionGroup(
+                        "errors during test teardown",
+                        [_pytest.outcomes.Exit("stopping early"), ValueError("other finalizer boom")],
+                    ),
+                ],
+            )
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN/THEN the nested Exit must still surface rather than being
+        # swallowed as though the whole nested group were an ordinary
+        # recoverable failure.
+        with pytest.raises(_plugin_module._BaseExceptionGroup) as excinfo:
+            _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        def _contains_exit(exc: BaseException) -> bool:
+            if isinstance(exc, _pytest.outcomes.Exit):
+                return True
+            if isinstance(exc, _plugin_module._BaseExceptionGroup):
+                return any(_contains_exit(sub) for sub in exc.exceptions)  # type: ignore[attr-defined]
+            return False
+
+        assert _contains_exit(excinfo.value)
+
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs
         graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))
