@@ -92,6 +92,12 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
+
+    def _require_requires_role(self) -> None:
+        # Every method above calls this before doing anything else; defined once here rather than
+        # repeated inline (see "Role gating" below).
+        if self.role != "requires":
+            raise PersistenceNotApplicable(f"persistence not applicable on the '{self.role}' side")
 ```
 
 Key design points (see `PostgreSQLClientPersistenceValidator` in
