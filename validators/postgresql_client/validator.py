@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import secrets
 import time
 import urllib.parse
 import uuid
@@ -8,14 +9,68 @@ import uuid
 import psycopg2
 
 from validators.base import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
 )
 
+# Table name prefix for persistence-validator canary tables. Kept as a module constant so
+# PostgreSQLClientPersistenceValidator.cleanup() (which has no per-call state to work from) can
+# discover every canary table it may have created by pattern rather than by identifier.
+_CANARY_TABLE_PREFIX = "validator_canary_"
 
-class PostgreSQLClientValidator(BaseValidator):
+
+class _PostgreSQLConnectionMixin:
+    """Shared credential-resolution and connection helpers for postgresql_client validators.
+
+    Both ``PostgreSQLClientValidator`` (health probe) and ``PostgreSQLClientPersistenceValidator``
+    (durability probe) need to resolve the same relation credentials and open the same kind of
+    psycopg2 connection, so that logic lives here once instead of being duplicated.
+    """
+
+    def _resolve_credentials(self) -> dict[str, str]:
+        """Resolve credentials from the relation databag or Juju secrets."""
+        return {
+            **self.resolve_secret("secret-user", "username", "password", "uris"),  # type: ignore[attr-defined]
+            **self.resolve_secret("secret-tls", "tls", "tls-ca"),  # type: ignore[attr-defined]
+        }
+
+    def _connect(self, uri: str) -> "psycopg2.extensions.connection":
+        """Open a psycopg2 connection using a PostgreSQL URI."""
+        return psycopg2.connect(dsn=uri, connect_timeout=5)
+
+    def _safe_uri_string(self, uri: str) -> str:
+        parsed = urllib.parse.urlsplit(uri)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        safe_target = f"{host}{port}{parsed.path or ''}"
+        return safe_target
+
+    def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
+        """Verify the database in the URI matches the `database` field in the databag."""
+        try:
+            parsed = urllib.parse.urlparse(uri)
+            uri_db = urllib.parse.unquote(parsed.path.lstrip("/"))
+        except Exception as exc:
+            return ValidationCheck(name="database_consistency", passed=False, message=f"Could not parse URI: {exc}")
+        if uri_db == expected_db:
+            return ValidationCheck(
+                name="database_consistency",
+                passed=True,
+                message=f"URI database '{uri_db}' matches databag 'database' field.",
+            )
+        return ValidationCheck(
+            name="database_consistency",
+            passed=False,
+            message=f"URI database '{uri_db}' does not match databag 'database' field '{expected_db}'.",
+        )
+
+
+class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
@@ -233,25 +288,6 @@ class PostgreSQLClientValidator(BaseValidator):
 
         return self._make_result(level="deep", checks=checks)
 
-    def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
-        """Verify the database in the URI matches the `database` field in the databag."""
-        try:
-            parsed = urllib.parse.urlparse(uri)
-            uri_db = urllib.parse.unquote(parsed.path.lstrip("/"))
-        except Exception as exc:
-            return ValidationCheck(name="database_consistency", passed=False, message=f"Could not parse URI: {exc}")
-        if uri_db == expected_db:
-            return ValidationCheck(
-                name="database_consistency",
-                passed=True,
-                message=f"URI database '{uri_db}' matches databag 'database' field.",
-            )
-        return ValidationCheck(
-            name="database_consistency",
-            passed=False,
-            message=f"URI database '{uri_db}' does not match databag 'database' field '{expected_db}'.",
-        )
-
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""
         if not self.relation_exists():
@@ -261,13 +297,6 @@ class PostgreSQLClientValidator(BaseValidator):
                 error=f"No remote application on relation '{self.endpoint}'.",
             )
         return None
-
-    def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve credentials from the relation databag or Juju secrets."""
-        return {
-            **self.resolve_secret("secret-user", "username", "password", "uris"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
-        }
 
     def _check_extensions(self, cur: "psycopg2.extensions.cursor") -> ValidationCheck | None:
         """Verify declared extensions are installed. Returns None when field is absent."""
@@ -287,13 +316,96 @@ class PostgreSQLClientValidator(BaseValidator):
             message="OK" if not missing else f"Missing: {', '.join(missing)}",
         )
 
-    def _connect(self, uri: str) -> "psycopg2.extensions.connection":
-        """Open a psycopg2 connection using a PostgreSQL URI."""
-        return psycopg2.connect(dsn=uri, connect_timeout=5)
 
-    def _safe_uri_string(self, uri: str) -> str:
-        parsed = urllib.parse.urlsplit(uri)
-        host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        safe_target = f"{host}{port}{parsed.path or ''}"
-        return safe_target
+class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersistenceValidator):
+    """Reference persistence validator implementation (see SQ103).
+
+    Each validator instance owns a dedicated canary table named ``validator_canary_{identifier}``,
+    where ``identifier`` is chosen by ``prepare()`` and carried forward by the caller (the test
+    harness) as ``PersistenceState.id``. ``ref`` tracks how many rows have been written so far, so
+    ``checkpoint()`` can detect data loss with a simple row count comparison.
+
+    Persistence only applies to the requirer side of the relation (the side holding credentials to
+    connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
+    ``PostgreSQLClientValidator.validate()`` performs for the functional probe.
+    """
+
+    def prepare(self) -> PersistenceState:
+        self._require_requires_role()
+        identifier = secrets.randbits(31)
+        table = self._canary_table_name(identifier)
+        conn = self._open_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - table name is int-derived, not user input
+                cur.execute(f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, written_at TIMESTAMPTZ)")  # nosec B608
+                cur.execute(f"INSERT INTO {table} (written_at) VALUES (now())")  # nosec B608
+        finally:
+            conn.close()
+        return PersistenceState(id=identifier, ref=1)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        self._require_requires_role()
+        table = self._canary_table_name(expected.id)
+        conn = self._open_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {table}")  # nosec B608 - table name is int-derived
+                row = cur.fetchone()
+                actual = int(row[0]) if row else 0
+                cur.execute(f"INSERT INTO {table} (written_at) VALUES (now())")  # nosec B608
+        finally:
+            conn.close()
+
+        passed = actual == expected.ref
+        check = ValidationCheck(
+            name="row_count",
+            passed=passed,
+            message=(
+                f"Found expected {actual} row(s) in '{table}'."
+                if passed
+                else f"Expected {expected.ref} row(s) in '{table}', found {actual}. Data may have been lost."
+            ),
+        )
+        result = self._make_result(level="deep", checks=[check])
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+
+    def cleanup(self) -> None:
+        """Drop every canary table this validator instance (or a prior one) created.
+
+        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so instead
+        of dropping one table by identifier, every table matching the canary name pattern is
+        discovered via ``information_schema`` and dropped. This also mops up a canary table left
+        behind by an interrupted run (e.g. a crash between ``prepare()`` and the next ``cleanup()``).
+        """
+        self._require_requires_role()
+        if not self.databag.get("uris") and not self.databag.get("secret-user"):
+            return
+        conn = self._open_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s",
+                    (f"{_CANARY_TABLE_PREFIX}%",),
+                )
+                tables = [row[0] for row in cur.fetchall()]
+            for table in tables:
+                with conn.cursor() as cur:
+                    cur.execute(f'DROP TABLE IF EXISTS "{table}"')  # nosec B608 - table name from information_schema
+        finally:
+            conn.close()
+
+    def _require_requires_role(self) -> None:
+        if self.role != "requires":
+            raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
+
+    def _open_connection(self) -> "psycopg2.extensions.connection":
+        creds = self._resolve_credentials()
+        data = self.databag | creds
+        uri = data["uris"].split(",")[0].strip()
+        conn = self._connect(uri)
+        conn.autocommit = True
+        return conn
+
+    def _canary_table_name(self, identifier: int) -> str:
+        return f"{_CANARY_TABLE_PREFIX}{identifier}"
