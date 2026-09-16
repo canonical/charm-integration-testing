@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import secrets
 import time
 import urllib.parse
 import uuid
@@ -22,6 +21,17 @@ from validators.base import (
 # PostgreSQLClientPersistenceValidator.cleanup() (which has no per-call state to work from) can
 # discover every canary table it may have created by pattern rather than by identifier.
 _CANARY_TABLE_PREFIX = "validator_canary_"
+
+
+def _quote_identifier(name: str) -> str:
+    """Safely quote a SQL identifier for interpolation into a query string.
+
+    Doubling embedded double-quotes is the standard, connection-independent way to escape a
+    Postgres identifier (unlike string literals, quoted identifiers do not process backslash
+    escapes). Used instead of ``psycopg2.extensions.quote_ident``, which requires a live
+    connection/cursor instance and so cannot be unit-tested against a stub.
+    """
+    return '"' + name.replace('"', '""') + '"'
 
 
 class _PostgreSQLConnectionMixin:
@@ -322,8 +332,11 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     Each validator instance owns a dedicated canary table named ``validator_canary_{identifier}``,
     where ``identifier`` is chosen by ``prepare()`` and carried forward by the caller (the test
-    harness) as ``PersistenceState.id``. ``ref`` tracks how many rows have been written so far, so
-    ``checkpoint()`` can detect data loss with a simple row count comparison.
+    harness) as ``PersistenceState.id``. Every row written to the table also carries a marker value
+    derived deterministically from ``identifier``, so ``checkpoint()`` can detect data loss (or a
+    table silently recreated from scratch) by counting only rows tagged with that marker, rather
+    than trusting a plain ``count(*)`` that a coincidentally-sized but unrelated table could satisfy.
+    ``ref`` tracks how many marked rows are expected so far.
 
     Persistence only applies to the requirer side of the relation (the side holding credentials to
     connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
@@ -332,14 +345,17 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     def prepare(self) -> PersistenceState:
         self._require_requires_role()
-        identifier = secrets.randbits(31)
+        identifier = uuid.uuid4().int
         table = self._canary_table_name(identifier)
+        marker = self._canary_marker(identifier)
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - table name is int-derived, not user input
-                cur.execute(f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, written_at TIMESTAMPTZ)")  # nosec B608
-                cur.execute(f"INSERT INTO {table} (written_at) VALUES (now())")  # nosec B608
+                cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - table name is UUID-derived, not user input
+                cur.execute(
+                    f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL, written_at TIMESTAMPTZ)"
+                )  # nosec B608
+                cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
         finally:
             conn.close()
         return PersistenceState(id=identifier, ref=1)
@@ -347,13 +363,17 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         self._require_requires_role()
         table = self._canary_table_name(expected.id)
+        marker = self._canary_marker(expected.id)
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT count(*) FROM {table}")  # nosec B608 - table name is int-derived
+                # Filter on `marker` (set once, deterministically, from the canary identifier) rather than
+                # counting every row in the table: a table recreated from scratch with unrelated rows could
+                # otherwise coincidentally match the expected count without any of the original data surviving.
+                cur.execute(f"SELECT count(*) FROM {table} WHERE marker = %s", (marker,))  # nosec B608
                 row = cur.fetchone()
                 actual = int(row[0]) if row else 0
-                cur.execute(f"INSERT INTO {table} (written_at) VALUES (now())")  # nosec B608
+                cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
         finally:
             conn.close()
 
@@ -362,9 +382,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             name="row_count",
             passed=passed,
             message=(
-                f"Found expected {actual} row(s) in '{table}'."
+                f"Found expected {actual} marked row(s) in '{table}'."
                 if passed
-                else f"Expected {expected.ref} row(s) in '{table}', found {actual}. Data may have been lost."
+                else (
+                    f"Expected {expected.ref} marked row(s) in '{table}', found {actual}. Data may have been "
+                    "lost, or the table was recreated without the original canary rows."
+                )
             ),
         )
         result = self._make_result(level="deep", checks=[check])
@@ -384,14 +407,19 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
+                # Escape LIKE metacharacters in the prefix: `_` and `%` are wildcards in a LIKE pattern, and
+                # `_CANARY_TABLE_PREFIX` contains underscores, so without escaping this could match unrelated
+                # tables (e.g. `validatorXcanaryY123`).
+                escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
                 cur.execute(
-                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s",
-                    (f"{_CANARY_TABLE_PREFIX}%",),
+                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s ESCAPE '\\'",
+                    (f"{escaped_prefix}%",),
                 )
                 tables = [row[0] for row in cur.fetchall()]
             for table in tables:
+                quoted_table = _quote_identifier(table)
                 with conn.cursor() as cur:
-                    cur.execute(f'DROP TABLE IF EXISTS "{table}"')  # nosec B608 - table name from information_schema
+                    cur.execute(f"DROP TABLE IF EXISTS {quoted_table}")  # nosec B608 - identifier is safely quoted
         finally:
             conn.close()
 
@@ -409,3 +437,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     def _canary_table_name(self, identifier: int) -> str:
         return f"{_CANARY_TABLE_PREFIX}{identifier}"
+
+    def _canary_marker(self, identifier: int) -> str:
+        """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""
+        return f"marker-{identifier}"
