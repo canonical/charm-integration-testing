@@ -313,6 +313,22 @@ class TestParseCliArgs:
         with pytest.raises(SystemExit):
             _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
 
+    def test_refs_rejected_when_persistence_is_not_checkpoint(self) -> None:
+        # Regression test for: --refs was silently ignored when combined with --persistence
+        # prepare/cleanup or with no --persistence at all, so a typo like
+        # "--persistence prepare --refs ..." would run a different lifecycle op than the
+        # supplied --refs implied, instead of failing loudly.
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "prepare", "--refs", refs_json])
+
+    def test_refs_rejected_when_persistence_is_cleanup(self) -> None:
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "cleanup", "--refs", refs_json])
+
 
 class TestValidatorRunnerRun:
     def _runner_with(self, interface: str, validator_cls: type[BaseValidator]) -> ValidatorRunner:
@@ -681,6 +697,8 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "ERROR"
         assert "cleanup exploded" in (results.results[0].error or "")
         assert results.cleaned_relation_ids == [0]
+
+    def test_persistence_targets_ignored_when_interface_has_no_registered_validator(self) -> None:
         # GIVEN a runner with no persistence validators registered at all
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
