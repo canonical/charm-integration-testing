@@ -666,8 +666,14 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         check = next(c for c in result.checks if c.name == "row_count")
         assert not check.passed
         assert "3" in check.message and "1" in check.message
-        # ref still advances so the chain continues to track expected writes
-        assert new_state.ref == 4
+        # Regression test for: checkpoint() previously wrote a new marker row and advanced `ref`
+        # even on FAIL, but ValidatorRunner only carries the returned state forward on PASS -
+        # writing here anyway would grow the actual row count past what a later checkpoint could
+        # ever compare against again, masking the original data loss behind permanent drift.
+        # Neither should happen on FAIL: the returned state must match `expected` unchanged, and
+        # no INSERT should have been issued.
+        assert new_state == PersistenceState(id=7, ref=3)
+        assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
     def test_uses_canary_table_name_from_expected_identifier(self) -> None:
         # GIVEN

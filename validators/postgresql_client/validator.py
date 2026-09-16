@@ -390,11 +390,18 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 cur.execute(f"SELECT count(*) FROM {table} WHERE marker = %s", (marker,))  # nosec B608
                 row = cur.fetchone()
                 actual = int(row[0]) if row else 0
-                cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
+                passed = actual == expected.ref
+                # Only write the next marker row when this checkpoint passed: ValidatorRunner
+                # only carries the advanced PersistenceState forward on a PASS result (a FAIL/ERROR
+                # leaves the harness's tracked `expected` untouched), so writing here unconditionally
+                # would grow `actual` past what the harness will ever compare against again -
+                # masking the original mismatch behind a permanent, un-trackable drift instead of
+                # letting a later checkpoint re-detect the same data loss consistently.
+                if passed:
+                    cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
         finally:
             conn.close()
 
-        passed = actual == expected.ref
         check = ValidationCheck(
             name="row_count",
             passed=passed,
@@ -408,7 +415,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             ),
         )
         result = self._make_result(level="deep", checks=[check])
-        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1) if passed else expected
+        return result, new_state
 
     def cleanup(self) -> None:
         """Drop every canary table this relation (or a prior instance of it) created.
