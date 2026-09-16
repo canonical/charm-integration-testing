@@ -191,9 +191,13 @@ implementation):
 - **Role gating.** Most client-server interfaces only make sense to persist
   from the `requires` (client) side. Raise `PersistenceNotApplicable` from
   all three methods when `self.role != "requires"` (or whatever your
-  interface's applicable side is) - the runner treats this as a silent skip,
-  not a failure. Add a small `_require_requires_role()` helper to avoid
-  repeating the check.
+  interface's applicable non-peer side is - only `requires`/`provides` are
+  currently supported; the runner's `_iter_persistence_targets()` and
+  `_find_relation_by_id()` skip `peer` relations entirely, so a persistence
+  validator registered against a peer role would never receive `prepare()`,
+  `checkpoint()`, or `cleanup()`) - the runner treats a raised
+  `PersistenceNotApplicable` as a silent skip, not a failure. Add a small
+  `_require_requires_role()` helper to avoid repeating the check.
 - Share connection/credential-resolution logic between the functional and
   persistence validator classes via a private mixin (e.g.
   `_PostgreSQLConnectionMixin`) rather than duplicating it.
