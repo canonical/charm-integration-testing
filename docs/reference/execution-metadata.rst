@@ -155,6 +155,10 @@ Failure Information
      - Failure message when a test fails. Contains the error message from failed tests.
      - Yes
      - ``AssertionError: Expected 'active'``
+   * - ``failure:charm``
+     - Name of a charm involved in a Juju wait timeout failure. Recorded for every noncompliant application, unit, or unit agent so failures can be filtered by charm regardless of the specific status value.
+     - No
+     - ``postgresql``
    * - ``failure:charm:<name>:status``
      - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>``, ``unit:<status>:<message>``, or ``unit_agent:<status>:<message>``. The message portion is normalized.
      - Partial
