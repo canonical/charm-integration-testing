@@ -185,8 +185,10 @@ class BasePersistenceValidator(_RelationValidatorMixin, ABC):
 
     Where ``BaseValidator.validate()`` is a stateless, idempotent health probe safe to call at any
     time, ``prepare()``/``checkpoint()`` form an explicitly stateful durability scenario: ``prepare()``
-    seeds known data and establishes a steady state, and each subsequent ``checkpoint()`` call
-    verifies all previously-written data survived (and advances the steady state for the next round).
+    seeds known data and establishes a steady state, and each subsequent passing ``checkpoint()``
+    call verifies all previously-written data survived and advances the steady state for the next
+    round. A failing ``checkpoint()`` leaves the steady state unchanged instead of advancing past
+    the failure - see ``checkpoint()`` below.
     This is only meaningful when the caller (the test harness) controls the sequence and carries
     ``PersistenceState`` across calls; it is not a general-purpose health check.
 
@@ -203,7 +205,12 @@ class BasePersistenceValidator(_RelationValidatorMixin, ABC):
 
     @abstractmethod
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
-        """Verify all prior data is still present, write a new marker, return updated state."""
+        """Verify all prior data is still present. On PASS, write a new marker and return the
+        advanced state; on FAIL, return ``expected`` unchanged and write nothing - the harness
+        only carries a returned state forward when the result is a PASS (see
+        ``ValidatorRunner.checkpoint_all``), so writing/advancing on FAIL would drift the backend
+        past what the harness will ever compare against again, masking the original failure
+        instead of letting a later checkpoint re-detect it."""
 
     @abstractmethod
     def cleanup(self) -> None:
