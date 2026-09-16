@@ -489,6 +489,13 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
     if args.persistence == "checkpoint" and args.refs is None:
         parser.error("--refs is required when --persistence checkpoint is used")
 
+    if args.refs is not None and args.persistence != "checkpoint":
+        # --refs is only meaningful for checkpoint (prepare_all/cleanup_all take no state
+        # argument - see their docstrings). Without this check, a typo such as
+        # "--persistence prepare --refs ..." would parse and validate the JSON but then silently
+        # ignore it, running a different lifecycle op than the supplied --refs implied.
+        parser.error("--refs is only valid when --persistence checkpoint is used")
+
     # Preserve the pre-persistence CLI contract: invoking run_validators with no flags at all
     # still runs the "simple" functional level, matching every existing direct caller. Only
     # suppress the functional run when --persistence was explicitly requested (a persistence-only
