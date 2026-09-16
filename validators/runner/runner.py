@@ -104,7 +104,7 @@ def _configure_logging(log_dir: Path = LOG_DIR) -> None:
 
 
 class ValidatorRunnerResults(BaseModel):
-    results: list[ValidationResult] = Field(default_factory=list)
+    results: list[ValidationResult]
     # Updated PersistenceState per relation_id (as a string key, matching --refs), populated by
     # --persistence prepare/checkpoint. Empty for functional-only runs and for cleanup (which has
     # no state to carry forward - see BasePersistenceValidator.cleanup).
@@ -546,7 +546,7 @@ def main() -> None:
     # Run validators and collect results
     try:
         charm = CharmBase(framework)
-        results = ValidatorRunnerResults()
+        results = ValidatorRunnerResults(results=[])
 
         if args.level is not None:
             level_results = runner.run(charm, level=args.level)
