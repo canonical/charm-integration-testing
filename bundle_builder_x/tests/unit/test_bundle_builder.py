@@ -18,7 +18,7 @@ from bundle_builder_x.assertion_tags import (
     CharmEndpointPayload,
     CharmPayload,
     CharmRankBoundedTag,
-    EndpointCountMatchesIntegrationsTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
@@ -1691,17 +1691,16 @@ class TestCollectUnsatDiagnostics:
 
 
 class TestCrossModelEndpointAssertionTags:
-    """Round-trip coverage for EndpointCountMatchesIntegrationsTag(cross_model=True).
+    """Round-trip coverage for CrossModelEndpointCountMatchesIntegrationsTag.
 
     Backs DomainCharmEndpoint.cross_model_count, read by the cross_model() DSL filter.
     """
 
     def test_cross_model_endpoint_count_tag_round_trips_through_encode_decode(self) -> None:
         # GIVEN a tag as it would be attached to a Z3 assertion
-        tag = EndpointCountMatchesIntegrationsTag(
+        tag = CrossModelEndpointCountMatchesIntegrationsTag(
             charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=3, endpoint="backend"),
             num_terms=2,
-            cross_model=True,
         )
 
         # WHEN it's encoded (as when added to the solver) and decoded back (as when read from an
@@ -1710,5 +1709,4 @@ class TestCrossModelEndpointAssertionTags:
 
         # THEN the round trip reproduces the exact same tag
         assert decoded == tag
-        assert isinstance(decoded, EndpointCountMatchesIntegrationsTag)
-        assert decoded.cross_model is True
+        assert isinstance(decoded, CrossModelEndpointCountMatchesIntegrationsTag)

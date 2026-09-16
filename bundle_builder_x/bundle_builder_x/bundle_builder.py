@@ -15,6 +15,7 @@ from .assertion_tags import (
     Assertions,
     AssertionTag,
     CharmEndpointNonOptionalTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
     EndpointCountMatchesIntegrationsTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
@@ -64,6 +65,7 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.APPLICATION_INTEGRATION_EXISTS: 1,
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: 2,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
+    Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
     Assertions.PEER_CHANNEL_MISMATCH: 4,
     Assertions.SUBORDINATE_BASE_MISMATCH: 5,
 }
@@ -420,8 +422,11 @@ class BundleBuilder:
             # eagerly pairs); connect them directly.
             return AssertionHandlingResult(expanded=self._connect_apps_for_integration(app_integration_exists, domain))
 
-        elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
-            count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
+        elif tag.kind in (
+            Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS,
+            Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS,
+        ):
+            count_tag = cast(EndpointCountMatchesIntegrationsTag | CrossModelEndpointCountMatchesIntegrationsTag, tag)
             return AssertionHandlingResult(
                 expanded=self._expand_for_endpoint(
                     count_tag.charm.charm_id,
