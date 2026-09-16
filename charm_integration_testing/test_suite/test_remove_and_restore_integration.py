@@ -30,26 +30,29 @@ def test_remove_and_restore_integration(
     if not integration_endpoints_removable:
         pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
 
-    # The relation being removed here gets a brand new relation_id when re-added below, so any
-    # tracked persistence state for this integration's units is about to go stale. Drop it now so
-    # the "prepare" call after re-adding seeds fresh canary data under the new relation_id, rather
-    # than the checkpoint below failing to find a (now nonexistent) relation_id.
+    # Removing and re-adding the relation gets it a brand new relation_id - in every model that
+    # takes part in it. For a same-model integration that's just integration_model_ref; for a CMR,
+    # both the offering model and the consuming model assign their own new relation_id, so any
+    # tracked persistence state for this integration's units in *either* model is about to go
+    # stale. Drop it now so the "prepare" call after re-adding seeds fresh canary data under the
+    # new relation_id(s), rather than the checkpoints below failing with "relation id not found"
+    # for stale entries.
     #
-    # For CMR integrations, integration_endpoint_1/_2 can be a SAAS alias rather than a real
-    # application deployed in integration_model_ref (see integration_spec.py); application_units()
-    # can't resolve a SAAS alias, so skip any endpoint that isn't actually deployed here.
-    affected_units: set[str] = set()
-    for endpoint in (integration_endpoint_1, integration_endpoint_2):
-        if juju_client.application_exists(endpoint.application, model=integration_model_ref):
-            affected_units.update(juju_backend.application_units(integration_model_ref, endpoint.application))
-    for key in [
-        key
-        for key in persistence_state
-        if key.controller == integration_model_ref.controller
-        and key.model == integration_model_ref.model
-        and key.unit in affected_units
-    ]:
-        del persistence_state[key]
+    # integration_endpoint_1/_2 can be a SAAS alias rather than a real application deployed in a
+    # given model (see integration_spec.py); application_units() can't resolve a SAAS alias, so
+    # only query units for endpoints that are genuinely deployed in that model.
+    candidate_models = {m for m in (target_model_ref, neighbor_model_ref) if m is not None}
+    for model_ref in candidate_models:
+        affected_units: set[str] = set()
+        for endpoint in (integration_endpoint_1, integration_endpoint_2):
+            if juju_client.application_exists(endpoint.application, model=model_ref):
+                affected_units.update(juju_backend.application_units(model_ref, endpoint.application))
+        for key in [
+            key
+            for key in persistence_state
+            if key.controller == model_ref.controller and key.model == model_ref.model and key.unit in affected_units
+        ]:
+            del persistence_state[key]
 
     # Break relation
     juju_client.remove_integration(
