@@ -382,11 +382,21 @@ class JujuClient:
                 for "prepare"/"checkpoint", removing them for "cleanup").
 
         Raises:
-            ValueError: If *persistence* is given without *persistence_state*.
+            ValueError: If *persistence* is an unsupported value, or given without *persistence_state*.
             JujuValidationError: If any validation or persistence checks fail.
         """
-        if persistence is not None and persistence_state is None:
-            raise ValueError("persistence_state is required when persistence is given")
+        if persistence is not None:
+            if persistence not in ("prepare", "checkpoint", "cleanup"):
+                # `Literal[...]` is a static-typing hint only, not enforced at runtime. Without this
+                # check, an invalid value reaches `post_persistence()` unvalidated; with no units,
+                # no applications, or only the default no-op `JujuExtension` hook, it would be
+                # silently treated as a successful no-op instead of raising - and even with a real
+                # extension, it's only rejected deep inside functional validation, and only when a
+                # unit happens to be visited. Validate at this boundary so every caller gets an
+                # immediate, consistent error.
+                raise ValueError(f"Invalid persistence operation: {persistence!r}")
+            if persistence_state is None:
+                raise ValueError("persistence_state is required when persistence is given")
 
         # Collect applications for validators
         applications = self.backend.list_applications(model)

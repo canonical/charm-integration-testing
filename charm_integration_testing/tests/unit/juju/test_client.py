@@ -4,7 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
@@ -489,6 +489,22 @@ class TestJujuClientValidateModel:
         # WHEN / THEN
         with pytest.raises(ValueError, match="persistence_state"):
             client.validate_model(self._model(), persistence="prepare")
+
+    def test_raises_value_error_for_unsupported_persistence_operation(self, logger: LoggerStub) -> None:
+        # Regression test for: `persistence`'s `Literal[...]` type hint isn't enforced at runtime,
+        # so an invalid value previously reached post_persistence() unvalidated and was silently
+        # treated as a no-op with no applications/units (or a default JujuExtension hook), rather
+        # than raising immediately at this boundary.
+        backend = BackendStub(app_list={})
+        client = self._client(logger, backend)
+
+        # WHEN / THEN
+        with pytest.raises(ValueError, match="Invalid persistence operation"):
+            client.validate_model(
+                self._model(),
+                persistence=cast(Any, "not-a-real-operation"),
+                persistence_state={},
+            )
 
     def test_skips_functional_validation_when_level_is_none(self, logger: LoggerStub) -> None:
         # GIVEN a backend that would FAIL functional validation

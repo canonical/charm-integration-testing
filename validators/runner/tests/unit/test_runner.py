@@ -113,6 +113,25 @@ class ExplodingPersistenceValidator(BasePersistenceValidator):
         raise RuntimeError("cleanup exploded")
 
 
+class FailingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator whose checkpoint() fails but still returns an advanced state.
+
+    Mirrors the reference PostgreSQL persistence validator, which increments and returns the ref
+    alongside a failed row-count check.
+    """
+
+    def prepare(self) -> PersistenceState:
+        return PersistenceState(id=self.relation_id + 100, ref=1)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        check = ValidationCheck(name="row_count", passed=False, message="mismatch")
+        result = self._make_result(status="FAIL", level="deep", interface="test-interface", checks=[check])
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+
+    def cleanup(self) -> None:
+        pass
+
+
 class NotApplicablePersistenceValidator(BasePersistenceValidator):
     """Persistence validator that is never applicable (e.g. wrong relation side)."""
 
@@ -589,6 +608,25 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "PASS"
         assert results.updated_refs["5"].ref == 2
         assert results.updated_refs["5"].id == 105
+
+    def test_checkpoint_all_does_not_advance_state_on_fail(self) -> None:
+        # Regression test for: checkpoint_all() previously recorded the new state returned
+        # alongside a FAIL result unconditionally, overwriting the last-known-good baseline before
+        # JujuClient raises on the failure. A retry/continued run would then checkpoint against the
+        # post-failure state instead of the original baseline, and could spuriously pass.
+        runner = self._runner_with("test-interface", FailingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=105, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN the FAIL result is still reported, but the previous baseline is preserved rather
+        # than being overwritten with the failed checkpoint's advanced state.
+        assert len(results.results) == 1
+        assert results.results[0].status == "FAIL"
+        assert results.updated_refs == {}
 
     def test_checkpoint_all_reports_error_for_missing_relation(self) -> None:
         # GIVEN a ref pointing at a relation_id no longer present in the model
