@@ -80,12 +80,14 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
         self._require_requires_role()
-        # expected.id comes from --refs, a (possibly restored/malformed) PersistenceState rather
-        # than a freshly minted identifier - validate it's in the range prepare() could have
-        # produced (e.g. 0..(1 << 63) - 1) before interpolating it into any resource name or
-        # query. An out-of-range value could otherwise produce a truncated/different identifier
-        # and silently target the wrong resource instead of failing safely; raise before any
-        # read/write if it's invalid.
+        # expected.id and expected.ref both come from --refs, a (possibly restored/malformed)
+        # PersistenceState rather than values prepare() just minted - validate expected.id is in
+        # the range prepare() could have produced (e.g. 0..(1 << 63) - 1) before interpolating it
+        # into any resource name or query, and validate expected.ref is >= 1 (matching what
+        # prepare() always returns). An out-of-range id could otherwise produce a truncated/
+        # different identifier and silently target the wrong resource; an unvalidated ref <= 0
+        # could let an empty or partially recreated canary satisfy `actual == expected.ref` and
+        # report a false PASS. Raise before any read/write if either is invalid.
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
@@ -178,7 +180,21 @@ implementation):
   no `updated_refs` entry for that relation either - the harness leaves the
   *previously tracked* `PersistenceState` untouched rather than clearing it
   (see `ValidatorInjectorExtension.post_persistence`), so a later checkpoint
-  still has the old `expected.ref` to retry against.
+  still has the old `expected.ref` to retry against. That retry is not
+  perfectly safe either: if the write itself is durably committed to the
+  backend but the connection/response fails before `checkpoint()` can
+  return normally (an ambiguous write - see "Common patterns" below), the
+  backend now actually has `expected.ref + 1` marked records while the
+  harness still expects `expected.ref`, so the next retry's read-back will
+  see one extra record and can report a false `FAIL` (or, if it advances
+  again, silently drift the state by one). Prefer a backend/write shape
+  where this ambiguous-write window can't occur (e.g. autocommit is already
+  atomic per-statement for a single `INSERT`, so the risk is specifically
+  in the *response* getting lost after the server has already committed);
+  if your backend cannot make the write itself unambiguous, document that
+  operators must reseed (re-run `prepare()`) rather than blindly retry
+  `checkpoint()` after a raised exception, since a retry cannot distinguish
+  "nothing was written" from "the write landed but the response was lost."
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
@@ -200,7 +216,17 @@ implementation):
   belonging to a different relation or interface that happens to share the
   same backend during the same test run (the runner calls `cleanup()` once
   per live relation with a registered persistence validator, so this is not
-  just a concern for concurrent external runs). Even with that scoping, a
+  just a concern for concurrent external runs). This model+relation scoping
+  still does not distinguish two *simultaneous* test runs against the same
+  relation and backend - the reference implementation has no execution-
+  scoped token beyond model UUID and `relation_id`, so one run's `cleanup()`
+  can still drop another concurrent run's canaries for that same relation.
+  Running more than one test session against the same deployed relation at
+  once is not supported by this scoping scheme; if that's a real
+  requirement for your backend, add an additional execution-scoped token
+  (e.g. a value persisted somewhere that outlives a single `run_validators`
+  invocation) rather than relying on model UUID + `relation_id` alone. Even
+  with that scoping, a
   prefix-based `LIKE` query only narrows *candidates* - re-validate each
   discovered name against the exact fixed-width shape `prepare()` produces
   (e.g. via a compiled regex `fullmatch`) before dropping it, so a same-
@@ -354,9 +380,10 @@ rather than registering multiple entry points for the same interface.
      KV store, bucket, or topic, the equivalent is asserting the read/list
      is scoped to the specific key/object/message identifier). Also cover
      `checkpoint()` rejecting an out-of-range `expected.id` (e.g. negative,
-     or one past the maximum your `prepare()` can produce) before any
-     read/write, the way the reference implementation's
-     `test_raises_when_expected_identifier_is_out_of_range`/
+     or one past the maximum your `prepare()` can produce) and rejecting an
+     invalid `expected.ref` (e.g. zero or negative, since `prepare()` always
+     returns `ref=1`) before any read/write, the way the reference
+     implementation's `test_raises_when_expected_identifier_is_out_of_range`/
      `test_raises_when_expected_identifier_is_negative` do.
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
@@ -543,11 +570,18 @@ def _require_requires_role(self) -> None:
 ```python
 class _PostgreSQLConnectionMixin:
     def _resolve_credentials(self) -> dict[str, str]: ...
-    def _connect(self, credentials: dict[str, str]) -> "Connection": ...
+    def _connect(self, uri: str) -> "Connection": ...
 
 class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator): ...
 class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersistenceValidator): ...
 ```
+
+`_connect` takes the selected connection URI string (e.g. one entry from a
+`uris` field split on `,`), not the raw credentials mapping - call
+`_resolve_credentials()` first, pick a URI from it, then pass that URI to
+`_connect`, matching `PostgreSQLClientValidator`/
+`PostgreSQLClientPersistenceValidator`'s actual call sequence in
+`validators/postgresql_client/validator.py`.
 
 ## Validator-specific notes
 
