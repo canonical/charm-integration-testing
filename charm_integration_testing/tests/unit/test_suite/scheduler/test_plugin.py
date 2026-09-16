@@ -1625,19 +1625,32 @@ class FakeSetupState:
         self.teardown_exact_calls.append(nextitem)
 
 
+class FakeConfig:
+    """Minimal pytest.Config substitute exposing just the ``maxfail`` value used by recovery."""
+
+    def __init__(self, maxfail: int = 0) -> None:
+        self._maxfail = maxfail
+
+    def getvalue(self, name: str) -> int:
+        assert name == "maxfail"
+        return self._maxfail
+
+
 class FakeSession:
     """Minimal pytest.Session substitute exposing a mutable ``items`` list."""
 
-    def __init__(self, items: list[pytest.Item]) -> None:
+    def __init__(self, items: list[pytest.Item], maxfail: int = 0) -> None:
         self.items = items
         self._setupstate = FakeSetupState()
         self.testscollected = len(items)
         self.testsfailed = 0
+        self.shouldfail: str | bool = False
+        self.config = FakeConfig(maxfail)
 
 
-def _with_session(item: pytest.Item, items: list[pytest.Item]) -> pytest.Item:
+def _with_session(item: pytest.Item, items: list[pytest.Item], maxfail: int = 0) -> pytest.Item:
     """Attach a FakeSession(items) to *item* and return it for chaining."""
-    cast(Any, item).session = FakeSession(items)
+    cast(Any, item).session = FakeSession(items, maxfail=maxfail)
     return item
 
 
@@ -1934,6 +1947,34 @@ class TestPytestRuntestProtocolRecovery:
         # despite the finalizer failure (and any infrastructure it may have
         # leaked while failing to clean up).
         assert skipped_downgrade.session.testsfailed == 1
+
+    def test_finalizer_failure_triggers_shouldfail_under_maxfail(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the same failing-finalizer scenario as above, but the run was
+        # started with --maxfail=1 (session.config.getvalue("maxfail") == 1).
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem], maxfail=1)
+
+        def _raise(_: pytest.Item) -> None:
+            raise RuntimeError("finalizer boom")
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN the hook runs
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN session.shouldfail is set exactly like pytest's own
+        # Session.pytest_runtest_logreport does for a normal failed report
+        # once testsfailed reaches maxfail - otherwise --maxfail=1 would
+        # silently fail to stop the run after this reconciliation failure,
+        # even though the eventual exit status is still nonzero.
+        assert skipped_downgrade.session.shouldfail
 
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs

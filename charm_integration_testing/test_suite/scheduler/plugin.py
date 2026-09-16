@@ -462,7 +462,12 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         # Bump session.testsfailed directly - the same counter pytest's own
         # accounting uses to decide the run's exit status - so this doesn't
         # silently produce a successful exit despite failed cleanup (which
-        # may have leaked infrastructure).
+        # may have leaked infrastructure). Mirror pytest's own
+        # Session.pytest_runtest_logreport handling of --maxfail too: bumping
+        # testsfailed alone does not trip session.shouldfail, so without this
+        # a reconciliation failure would make the eventual exit status
+        # nonzero but not actually stop the run at --maxfail=N like a normal
+        # failure would.
         logger.error(
             "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
             "Environment state is now unknown; all remaining state-marked tests will be skipped.",
@@ -470,6 +475,9 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
             exc,
         )
         item.session.testsfailed += 1
+        maxfail = item.session.config.getvalue("maxfail")
+        if maxfail and item.session.testsfailed >= maxfail:
+            item.session.shouldfail = f"stopping after {item.session.testsfailed} failures"
         _current_state = None
         _failed_state_test = item
         return

@@ -298,3 +298,70 @@ def test_finalizer_calling_pytest_skip_during_reconciliation_gives_a_failing_exi
     )
     # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
     result.stdout.no_fnmatch_line("*INTERNALERROR*")
+
+
+def test_finalizer_failure_stops_the_run_under_maxfail(pytester: Pytester) -> None:
+    """A reconciliation finalizer failure must stop the run under ``--maxfail``, like a normal failure would.
+
+    Same cross-module bridge + raising module-scoped finalizer scenario as
+    ``test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_failing_exit_status``,
+    but with an extra, unrelated unmarked test and ``--maxfail=1``. Bumping
+    ``session.testsfailed`` alone (without also setting
+    ``session.shouldfail``, mirroring pytest's own
+    ``Session.pytest_runtest_logreport``) makes the eventual exit status
+    nonzero but does not actually stop the run early: the unrelated test
+    would still execute even though a "failure" already happened.
+    """
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        test_mod_a=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.fixture(scope="module")
+            def mod_fixture_a():
+                yield
+                raise RuntimeError("simulated finalizer failure")
+
+            @pytest.fixture
+            def observer_creds():
+                pytest.skip("simulated: test observer creds missing")
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_downgrade_charm(mod_fixture_a, observer_creds):
+                pass
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_upgrade_charm(mod_fixture_a):
+                pass
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_mod_b=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_scale():
+                pass
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_mod_c=textwrap.dedent(
+            """
+            def test_unrelated_and_unmarked():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("-v", "--current-state", "deployed", "--maxfail", "1")
+
+    # THEN the run stops before reaching the unrelated, unmarked test in
+    # module C - exactly like a normal failure would under --maxfail=1.
+    result.stdout.no_fnmatch_line("*test_unrelated_and_unmarked*")
+    assert result.ret != 0
