@@ -71,12 +71,15 @@ The runner will discover and invoke the validator automatically for any relation
 Data integrity and persistence validation
 ------------------------------------------
 
-Persistence validators check that data survives disruptive operations (e.g. removing and
-re-adding a relation, restarting a controller, redeploying a unit) rather than just checking
-that a relation currently works. They implement ``validators/base``'s ``BasePersistenceValidator``
-and are registered under a separate ``endpoint_persistence_validators`` entry-point group, keyed
-by interface name (a package may register both an ``endpoint_validators`` and an
-``endpoint_persistence_validators`` entry, or only the latter).
+Persistence validators check that data survives disruptive operations (e.g. restarting a
+controller, upgrading/downgrading a charm, scaling, migrating a model) rather than just checking
+that a relation currently works. A relation remove/re-add is handled differently: it changes
+``relation_id`` (see below), so the harness re-seeds fresh canary data for the new ID rather than
+verifying the old data survived the operation. They implement ``validators/base``'s
+``BasePersistenceValidator`` and are registered under a separate
+``endpoint_persistence_validators`` entry-point group, keyed by interface name (a package may
+register both an ``endpoint_validators`` and an ``endpoint_persistence_validators`` entry, or
+only the latter).
 
 Lifecycle
 ~~~~~~~~~

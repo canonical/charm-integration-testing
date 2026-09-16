@@ -18,6 +18,7 @@ def test_upgrade_controller(
     target_controller: str,
     target_upgrade_version: JujuVersion | None,
     model: str,
+    neighbor_model_ref: JujuModelHandle | None,
     persistence_state: dict[PersistenceKey, PersistenceState],
     request: pytest.FixtureRequest,
 ) -> None:
@@ -75,6 +76,13 @@ def test_upgrade_controller(
         persistence="checkpoint",
         persistence_state=persistence_state,
     )
+    # For a CMR where the target application is the provider, the applicable persistence
+    # validator and tracked canary state live on the neighbor's requirer units instead.
+    # neighbor_model_ref's own controller is unaffected by this upgrade, so no rekey is needed.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(
+            model=neighbor_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+        )
 
 
 def _upgrade_in_place(

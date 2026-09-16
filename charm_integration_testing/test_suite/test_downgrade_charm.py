@@ -16,6 +16,7 @@ def test_downgrade_charm(
     juju_client: JujuClient,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_charm: str,
     target_application: str,
     target_revision: int | None,
@@ -55,3 +56,9 @@ def test_downgrade_charm(
     juju_client.validate_model(
         model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
     )
+    # For a CMR where the target application is the provider, the applicable persistence
+    # validator and tracked canary state live on the neighbor's requirer units instead.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(
+            model=neighbor_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+        )

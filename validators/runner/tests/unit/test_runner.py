@@ -193,13 +193,18 @@ class TestValidatorRunnerLoadValidators:
 
 
 class TestValidatorRunnerLoadPersistenceValidators:
+    def _runner(self) -> ValidatorRunner:
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.persistence_load_errors = {}
+        return runner
+
     def test_loads_valid_persistence_validator(self) -> None:
         # GIVEN a well-formed persistence entry point
         entry_point = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
 
         with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
-            validators = ValidatorRunner._load_persistence_validators()
+            validators = self._runner()._load_persistence_validators()
 
         # THEN
         assert validators["test-interface"] == [PreparingPersistenceValidator]
@@ -213,7 +218,7 @@ class TestValidatorRunnerLoadPersistenceValidators:
 
         with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
-            validators = ValidatorRunner._load_persistence_validators()
+            validators = self._runner()._load_persistence_validators()
 
         # THEN
         assert validators == {}
@@ -228,11 +233,26 @@ class TestValidatorRunnerLoadPersistenceValidators:
         with caplog.at_level(logging.WARNING, logger="validators"):
             with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
                 # WHEN
-                validators = ValidatorRunner._load_persistence_validators()
+                validators = self._runner()._load_persistence_validators()
 
         # THEN both are still registered, but a warning explains the state-overwrite risk
         assert len(validators["test-interface"]) == 2
         assert "Multiple persistence validators registered for interface 'test-interface'" in caplog.text
+
+    def test_records_load_error_for_interface_when_entry_point_load_raises(self) -> None:
+        # GIVEN an entry point whose load() raises (e.g. a broken/incompatible package)
+        entry_point = EntryPointStub(name="test-interface", _load_error=RuntimeError("broken import"))
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            runner = self._runner()
+            validators = runner._load_persistence_validators()
+
+        # THEN the interface has no registered validator, but the failure is recorded so
+        # prepare_all/checkpoint_all/cleanup_all can surface it instead of silently treating a
+        # relation on this interface as having no applicable persistence validator
+        assert validators == {}
+        assert "broken import" in runner.persistence_load_errors["test-interface"]
 
 
 class TestParseCliArgs:
@@ -473,6 +493,7 @@ class TestValidatorRunnerPersistence:
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
         runner.persistence_validators = {interface: [validator_cls]}
+        runner.persistence_load_errors = {}
         return runner
 
     def setup_method(self) -> None:
@@ -626,6 +647,7 @@ class TestValidatorRunnerPersistence:
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
         runner.persistence_validators = {}
+        runner.persistence_load_errors = {}
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
@@ -637,6 +659,62 @@ class TestValidatorRunnerPersistence:
         assert prepare_results.results == []
         assert prepare_results.updated_refs == {}
         assert cleanup_results.results == []
+
+    def test_prepare_all_reports_error_for_interface_with_load_error(self) -> None:
+        # GIVEN a relation on an interface whose persistence validator failed to load
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN the load failure surfaces as an ERROR instead of being silently skipped, so
+        # post_persistence doesn't mistake "nothing loaded" for "nothing to do"
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+
+    def test_cleanup_all_reports_error_for_interface_with_load_error(self) -> None:
+        # GIVEN a relation on an interface whose persistence validator failed to load
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN cleanup reports an ERROR rather than an empty (and therefore state-clearing)
+        # result list
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+
+    def test_checkpoint_all_reports_error_when_ref_interface_has_no_registered_validator(self) -> None:
+        # GIVEN a ref pointing at a live relation whose interface has no registered validator
+        # (e.g. it was removed since the ref was produced, or failed to load this run)
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {}
+        relation = RelationStub(name="db", id=7)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+
+        # THEN the checkpoint is reported as an ERROR rather than silently succeeding with no
+        # results, which would let a real durability check pass without ever running
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "No persistence validator registered" in (results.results[0].error or "")
+        assert results.updated_refs == {}
 
 
 class TestConfigureLogging:
