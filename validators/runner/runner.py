@@ -330,7 +330,21 @@ class ValidatorRunner:
             try:
                 relation_id = int(relation_id_str)
             except ValueError:
-                logger.error(f"Invalid relation_id '{relation_id_str}' in --refs; skipping.")
+                # A malformed key means the tracked state for this entry can never be
+                # checkpointed; report it as an ERROR rather than silently discarding it, which
+                # would otherwise let a real durability check pass without ever running.
+                logger.error(f"Invalid relation_id '{relation_id_str}' in --refs; cannot checkpoint.")
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint="",
+                        interface="",
+                        role="requires",
+                        level=_PERSISTENCE_RESULT_LEVEL,
+                        relation_id=-1,
+                        error=f"Invalid relation_id '{relation_id_str}' in --refs; cannot checkpoint.",
+                    )
+                )
                 continue
             found = self._find_relation_by_id(charm, relation_id)
             if found is None:

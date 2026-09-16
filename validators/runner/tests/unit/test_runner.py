@@ -584,7 +584,7 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "ERROR"
         assert results.updated_refs == {}
 
-    def test_checkpoint_all_skips_non_integer_relation_ids(self) -> None:
+    def test_checkpoint_all_reports_error_for_non_integer_relation_ids(self) -> None:
         # GIVEN a malformed ref key
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
@@ -594,8 +594,11 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN no crash, nothing checkpointed
-        assert results.results == []
+        # THEN no crash, and the malformed entry is reported as an ERROR rather than silently
+        # discarded, so a real durability check can't pass without ever running
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "Invalid relation_id" in (results.results[0].error or "")
         assert results.updated_refs == {}
 
     def test_checkpoint_all_captures_exception_as_error_result(self) -> None:
