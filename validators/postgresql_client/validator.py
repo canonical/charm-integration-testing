@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
 import time
 import urllib.parse
 import uuid
@@ -331,14 +332,14 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     """Reference persistence validator implementation (see SQ103).
 
     Each validator instance owns a dedicated canary table named
-    ``validator_canary_{relation_id}_{identifier}``, where ``relation_id`` scopes the table to this
-    relation (see ``_canary_table_prefix``) and ``identifier`` is chosen by ``prepare()`` and
-    carried forward by the caller (the test harness) as ``PersistenceState.id``. Every row written
-    to the table also carries a marker value derived deterministically from ``identifier``, so
-    ``checkpoint()`` can detect data loss (or a table silently recreated from scratch) by counting
-    only rows tagged with that marker, rather than trusting a plain ``count(*)`` that a
-    coincidentally-sized but unrelated table could satisfy. ``ref`` tracks how many marked rows are
-    expected so far.
+    ``validator_canary_{model_token}_{relation_id}_{identifier}``, where ``model_token`` and
+    ``relation_id`` scope the table to this model and relation (see ``_canary_table_prefix``) and
+    ``identifier`` is chosen by ``prepare()`` and carried forward by the caller (the test harness)
+    as ``PersistenceState.id``. Every row written to the table also carries a marker value derived
+    deterministically from ``identifier``, so ``checkpoint()`` can detect data loss (or a table
+    silently recreated from scratch) by counting only rows tagged with that marker, rather than
+    trusting a plain ``count(*)`` that a coincidentally-sized but unrelated table could satisfy.
+    ``ref`` tracks how many marked rows are expected so far.
 
     Persistence only applies to the requirer side of the relation (the side holding credentials to
     connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
@@ -347,7 +348,11 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     def prepare(self) -> PersistenceState:
         self._require_requires_role()
-        identifier = uuid.uuid4().int
+        # Masked to 63 bits (rather than the full 128-bit uuid4().int) so the canary table name -
+        # which also carries a model-scoping token and relation_id (see _canary_table_prefix) -
+        # stays comfortably within PostgreSQL's 63-byte identifier limit, while still leaving ~9.2
+        # quintillion possible values, far more entropy than a test run could plausibly collide on.
+        identifier = uuid.uuid4().int & ((1 << 63) - 1)
         table = self._canary_table_name(identifier)
         marker = self._canary_marker(identifier)
         conn = self._open_connection()
@@ -404,14 +409,15 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         table left behind by an interrupted run (e.g. a crash between ``prepare()`` and the next
         ``cleanup()``).
 
-        Discovery is scoped to ``self.relation_id`` (see ``_canary_table_name``) rather than the
-        bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client`` relations sharing the
-        same database/schema get distinct relation IDs, so this relation's cleanup can no longer
-        drop another relation's canary tables (or an unrelated table that merely shares the
-        prefix). ``relation_id`` is stable for the lifetime of a given relation, so this still
-        finds a table left behind by an interrupted run of *this* relation; it does not sweep up
-        a stray table from a relation that was removed and re-added under a new ID, which is an
-        accepted trade-off since a fresh ``prepare()`` for the new ID starts its own table anyway.
+        Discovery is scoped to a model+relation namespace (see ``_canary_table_prefix``) rather
+        than the bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client`` relations
+        sharing the same database/schema - even across different models, whose relation IDs are
+        assigned independently and so can collide numerically - can no longer drop each other's
+        canary tables (or an unrelated table that merely shares the prefix). The namespace is
+        stable for the lifetime of a given relation, so this still finds a table left behind by
+        an interrupted run of *this* relation; it does not sweep up a stray table from a relation
+        that was removed and re-added under a new ID, which is an accepted trade-off since a
+        fresh ``prepare()`` for the new ID starts its own table anyway.
         """
         self._require_requires_role()
         if not self.databag.get("uris") and not self.databag.get("secret-user"):
@@ -452,20 +458,32 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _open_connection(self) -> "psycopg2.extensions.connection":
         creds = self._resolve_credentials()
         data = self.databag | creds
+        # Unlike the functional validator's validate()/deep(), these methods have no ValidationCheck
+        # to report a schema failure through, so a missing/blank "uris" is raised rather than passed
+        # to psycopg2 as an empty dsn: libpq treats dsn="" as "use local/default connection
+        # parameters", which would silently create/check a canary against an unintended database
+        # instead of failing loudly for missing relation credentials.
+        schema_check = self.validate_schema(["uris", "database", "username", "password"], creds)
+        if not schema_check.passed:
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
         uri = data["uris"].split(",")[0].strip()
         conn = self._connect(uri)
         conn.autocommit = True
         return conn
 
     def _canary_table_prefix(self) -> str:
-        """Prefix scoped to this relation, so cleanup discovery can't cross relation boundaries.
+        """Prefix scoped to this model and relation, so cleanup discovery can't cross boundaries.
 
         ``self.relation_id`` is stable for the lifetime of a given relation (it only changes if
-        the relation is removed and re-added), and is unique across concurrent relations in the
-        model, so embedding it here means two ``postgresql_client`` relations sharing a
-        database/schema can never observe or drop each other's canary tables.
+        the relation is removed and re-added), but relation IDs are assigned independently per
+        model and so can collide numerically across two different models relating to the same
+        backend. A short, deterministic hash of ``self.charm.model.uuid`` (globally unique) is
+        included alongside it so two ``postgresql_client`` relations sharing a database/schema -
+        whether in the same model or different ones - can never observe or drop each other's
+        canary tables.
         """
-        return f"{_CANARY_TABLE_PREFIX}{self.relation_id}_"
+        model_token = hashlib.sha256(self.charm.model.uuid.encode()).hexdigest()[:8]
+        return f"{_CANARY_TABLE_PREFIX}{model_token}_{self.relation_id}_"
 
     def _canary_table_name(self, identifier: int) -> str:
         return f"{self._canary_table_prefix()}{identifier}"
