@@ -5,9 +5,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, PersistenceKey
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, JujuValidationError, PersistenceKey
 
-from validators.base import PersistenceState
+from validators.base import PersistenceState, ValidationResult
 
 from .scheduler.states import State
 
@@ -34,10 +34,21 @@ def test_teardown(
     cleanup_model_refs = {target_model_ref}
     if neighbor_model_ref is not None:
         cleanup_model_refs.add(neighbor_model_ref)
+    # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR
+    # result (and propagates any remote-cleanup failure), so a bare loop would abort after the
+    # first failing model and skip cleanup for every model after it. Attempt every model, merge
+    # any failures together, and only raise once all of them have been attempted.
+    combined_failed_validations: dict[str, list[ValidationResult]] = {}
     for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
-        juju_client.validate_model(
-            model=model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
-        )
+        try:
+            juju_client.validate_model(
+                model=model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
+            )
+        except JujuValidationError as exc:
+            for unit, results in exc.failed_validations.items():
+                combined_failed_validations.setdefault(unit, []).extend(results)
+    if combined_failed_validations:
+        raise JujuValidationError(combined_failed_validations)
 
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
