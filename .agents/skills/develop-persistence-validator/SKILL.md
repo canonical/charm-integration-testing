@@ -29,9 +29,10 @@ test_teardown              (harness)  --persistence cleanup    -> drop canary da
 Each of the three lifecycle ops is a separate `run_validators` invocation on
 the unit (via `ValidatorInjectorExtension.post_persistence` ->
 `JujuClient.validate_model(persistence=...)`), mirroring how
-`post_validate`/`validate_model(level=...)` works for functional checks. See
-`SQ103 - Data Integrity and Persistence Validation.md` at the repo root for
-the full design spec.
+`post_validate`/`validate_model(level=...)` works for functional checks. The
+`BasePersistenceValidator`/`PersistenceState`/`PersistenceNotApplicable`
+docstrings in `validators/base/validator.py` are the source of truth for the
+protocol; there is no design document checked into this repository.
 
 ### The three lifecycle methods
 
@@ -39,6 +40,8 @@ Every persistence validator lives in `validators/<name>/validator.py`
 alongside its functional counterpart and extends `BasePersistenceValidator`:
 
 ```python
+import uuid
+
 from validators.base import (
     BasePersistenceValidator,
     PersistenceNotApplicable,
@@ -48,17 +51,20 @@ from validators.base import (
 
 class MyClientPersistenceValidator(BasePersistenceValidator):
     def prepare(self) -> PersistenceState:
-        """Seed canary data. Called once, before any disruption."""
+        """Seed canary data for this relation. Called once per relation_id - potentially more
+        than once per test run if a relation is removed and re-added, since that changes
+        relation_id and so requires fresh canary data."""
         self._require_requires_role()
-        identifier = secrets.randbits(31)
-        # ... create a uniquely-named canary table/object and write one row/record ...
+        identifier = uuid.uuid4().int
+        # ... create a uniquely-named canary table/object and write one marked row/record ...
         return PersistenceState(id=identifier, ref=1)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
         self._require_requires_role()
-        # ... read back and assert the row/record count matches expected.ref ...
-        # ... unconditionally write one more row/record ...
+        # ... read back and assert the marked row/record count matches expected.ref (filter on a
+        # stable marker value, not a bare row count - see "Common patterns" below) ...
+        # ... unconditionally write one more marked row/record ...
         new_state = PersistenceState(id=expected.id, ref=expected.ref + 1)
         return self._make_result(level="deep", checks=[...]), new_state
 
@@ -73,23 +79,32 @@ Key design points (see `PostgreSQLClientPersistenceValidator` in
 implementation):
 
 - **`prepare()`** picks its own random, unpredictable identifier (e.g.
-  `secrets.randbits(31)`) - never derive it from `relation_id`, which is
-  *not* stable across relation remove/re-add (see
-  `test_remove_and_restore_integration`). The identifier seeds a uniquely
-  named canary resource (e.g. `validator_canary_<identifier>`) so concurrent
-  or repeated runs never collide.
+  `uuid.uuid4().int`) - never derive it from `relation_id`, which is *not*
+  stable across relation remove/re-add (see
+  `test_remove_and_restore_integration`), and never use a small random space
+  (e.g. a 31-bit int) that could collide across concurrent or repeated runs.
+  The identifier seeds a uniquely named canary resource (e.g.
+  `validator_canary_<identifier>`).
 - **`checkpoint()`** takes the `PersistenceState` the harness has been
   tracking, verifies the canary data is still there and has exactly
   `expected.ref` records, then unconditionally writes one more record and
   returns `PersistenceState(id=expected.id, ref=expected.ref + 1)` -
   regardless of whether the check passed. This lets subsequent checkpoints
   in the same run keep counting correctly even after a single failure was
-  already reported.
+  already reported. Verify a stable, identifier-derived marker value on each
+  record rather than trusting a bare `count(*)` - a resource that was
+  dropped and silently recreated from scratch could otherwise coincidentally
+  satisfy a row-count-only check (see "Common patterns" below).
 - **`cleanup()`** takes no arguments (it runs as a fresh process invocation
   with no state carried over from `prepare`/`checkpoint`). Discover
   everything to remove by name pattern (e.g. `information_schema.tables
   WHERE table_name LIKE 'validator_canary_%'`), not by a remembered
-  identifier.
+  identifier. Because this discovery is prefix-based rather than
+  identifier-based, it will also drop canary resources left behind by any
+  other concurrent validator run against the same backend that shares the
+  prefix - this is an accepted trade-off of the pattern, so avoid running
+  multiple persistence validation runs against the same database/model
+  concurrently.
 - **Role gating.** Most client-server interfaces only make sense to persist
   from the `requires` (client) side. Raise `PersistenceNotApplicable` from
   all three methods when `self.role != "requires"` (or whatever your
@@ -122,9 +137,18 @@ either, both, or neither.
 
 ## Steps
 
-1. Confirm (or build, per `develop-validator`) a functional validator already
-   exists for the interface in `validators/<name>/validator.py`. Persistence
-   validators are additive to that package.
+1. Confirm a package for this interface already exists under
+   `validators/<name>/` (with `pyproject.toml`, `__init__.py`, etc.), or
+   create one per the `develop-validator` skill first if it doesn't - that
+   includes registering the new package in the root `pyproject.toml` and
+   `validators/runner/pyproject.toml`, which persistence validators rely on
+   for entry-point discovery just as functional validators do. A functional
+   validator (`endpoint_validators` entry point) is *not* a hard
+   prerequisite: the runner discovers `endpoint_validators` and
+   `endpoint_persistence_validators` independently, so a package may
+   register either, both, or neither. In practice, most interfaces already
+   have a functional validator, and persistence validators are usually
+   additive to that existing package.
 
 2. Identify what "canary data" means for this interface: a row in a table, a
    key in a KV store, an object in a bucket, a topic message, etc. It must be:
@@ -139,9 +163,14 @@ either, both, or neither.
    sides where persistence doesn't apply.
 
 4. Register the `endpoint_persistence_validators` entry point in the
-   package's `pyproject.toml` (see above). No other pyproject.toml changes
-   are needed - persistence validators reuse the same dependency graph as
-   the functional validator in the same package.
+   package's `pyproject.toml` (see above). If the package already existed
+   with a functional validator, it's already registered as a Poetry
+   dependency in the root `pyproject.toml` and in
+   `validators/runner/pyproject.toml`, and no further changes are needed
+   there - only the new entry-point table above. If you just created the
+   package from scratch in step 1, make sure those two registrations are
+   also done (per `develop-validator`); they're required for entry-point
+   discovery regardless of which entry-point group(s) the package declares.
 
 5. Write unit tests in the existing `tests/unit/test_validator.py`, extending
    any connection/cursor stubs already used by the functional validator's
@@ -150,11 +179,15 @@ either, both, or neither.
      `PersistenceNotApplicable` when `self.role` isn't the applicable side.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
      with a fresh identifier and `ref=1`.
-   - `checkpoint()` passes when the count matches `expected.ref`, fails when
-     it doesn't, and in both cases returns `PersistenceState(ref=expected.ref
-     + 1)` and writes a new record.
-   - `cleanup()` discovers and drops every matching canary resource, and is a
-     no-op when none exist.
+   - `checkpoint()` passes when the marker-filtered count matches
+     `expected.ref`, fails when it doesn't, and in both cases returns
+     `PersistenceState(ref=expected.ref + 1)` and writes a new marked
+     record. Also cover that a check scoped only to a bare `count(*)` would
+     be insufficient (i.e. assert the query filters on the marker, not just
+     the table).
+   - `cleanup()` discovers and drops every matching canary resource, is a
+     no-op when none exist, and safely quotes any discovered identifier
+     before using it in a DDL statement.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
@@ -166,12 +199,11 @@ either, both, or neither.
    ```
    Fix any issues before continuing.
 
-7. If the harness doesn't already wire persistence into the disruptive test
-   suite for this interface's typical charms, no charm-specific harness
-   changes are needed - `ValidatorInjectorExtension.post_persistence` and
+7. No charm-specific harness changes are needed to wire persistence in:
+   `ValidatorInjectorExtension.post_persistence` and
    `JujuClient.validate_model(persistence=...)` are interface-agnostic and
    pick up any registered `endpoint_persistence_validators` entry
-   automatically once `test_deploy` (prepare), the disruptive tests
+   automatically, once `test_deploy` (prepare), the disruptive tests
    (checkpoint), and `test_teardown` (cleanup) run for a model containing
    this interface.
 
@@ -191,15 +223,26 @@ either, both, or neither.
 ```python
 _CANARY_TABLE_PREFIX = "validator_canary_"
 
+
+def _quote_identifier(name: str) -> str:
+    """Double any embedded double-quotes - the standard, connection-independent way to escape a
+    Postgres identifier. Prefer this (or `psycopg2.sql.Identifier`) over raw string interpolation
+    whenever a table/column name comes from a query result rather than a value you generated."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def cleanup(self) -> None:
     self._require_requires_role()
+    # `_` and `%` are LIKE wildcards, so a prefix containing underscores must be escaped or it
+    # can match unrelated tables (e.g. "validatorXcanaryY1").
+    escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     with self._open_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s",  # nosec B608
-            (f"{_CANARY_TABLE_PREFIX}%",),
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s ESCAPE '\\'",  # nosec B608
+            (f"{escaped_prefix}%",),
         )
         for (table_name,) in cur.fetchall():
-            cur.execute(f"DROP TABLE IF EXISTS {table_name}")  # nosec B608
+            cur.execute(f"DROP TABLE IF EXISTS {_quote_identifier(table_name)}")  # nosec B608
 ```
 
 ### Role gating helper
