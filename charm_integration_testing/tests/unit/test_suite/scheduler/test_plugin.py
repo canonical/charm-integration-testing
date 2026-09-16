@@ -11,6 +11,7 @@ from collections.abc import Callable, Generator
 from types import SimpleNamespace
 from typing import Any, cast
 
+import _pytest.outcomes
 import pytest
 from test_suite.scheduler import plugin as _plugin_module
 from test_suite.scheduler.graph import StateGraph, StateTransition
@@ -1975,6 +1976,127 @@ class TestPytestRuntestProtocolRecovery:
         # silently fail to stop the run after this reconciliation failure,
         # even though the eventual exit status is still nonzero.
         assert skipped_downgrade.session.shouldfail
+
+    def test_exception_group_of_ordinary_finalizer_failures_is_handled_gracefully(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the same recovery scenario as above, but this time
+        # teardown_exact fails with a BaseExceptionGroup - as real pytest's
+        # SetupState.teardown_exact does when more than one retained
+        # module/package-scoped fixture's finalizer raises during the same
+        # call (see _pytest.runner.SetupState.teardown_exact).
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise _plugin_module._BaseExceptionGroup(
+                "errors during test teardown", [RuntimeError("finalizer boom"), ValueError("other finalizer boom")]
+            )
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN the hook runs, it must not propagate the group as an
+        # unexplained INTERNALERROR, since every member is an ordinary
+        # (non-abort) exception...
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN recovery treats it like any other unexpected failure.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is skipped_downgrade
+        assert skipped_downgrade.session.testsfailed == 1
+
+    def test_abort_exception_during_reconciliation_propagates_uncaught(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the same recovery scenario as above, but the finalizer raises
+        # an abort-style exception (KeyboardInterrupt) rather than an
+        # ordinary one - this must never be swallowed as a "test failure",
+        # unlike Exception/OutcomeException subclasses.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise KeyboardInterrupt()
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN the hook runs, THEN the abort exception must propagate rather
+        # than being caught and reinterpreted as a state-machine failure.
+        with pytest.raises(KeyboardInterrupt):
+            _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+    def test_exception_group_containing_an_abort_exception_reraises_the_abort_part(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a BaseExceptionGroup mixing an ordinary exception with an
+        # abort-style one - defensive coverage for the split() logic, even
+        # though real pytest's teardown_exact loop only ever catches
+        # (OutcomeException, Exception) members, so it can't actually
+        # produce such a mixed group today.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise _plugin_module._BaseExceptionGroup(
+                "errors during test teardown", [RuntimeError("finalizer boom"), KeyboardInterrupt()]
+            )
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN/THEN the abort part must propagate rather than being
+        # swallowed alongside the ordinary exception.
+        with pytest.raises(_plugin_module._BaseExceptionGroup) as excinfo:
+            _drive_runtest_protocol(skipped_downgrade, nextitem)
+        assert any(isinstance(exc, KeyboardInterrupt) for exc in excinfo.value.exceptions)  # type: ignore[attr-defined]
+
+    def test_pytest_exit_from_finalizer_during_reconciliation_propagates_uncaught(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a finalizer that calls pytest.exit() - a deliberate whole-run
+        # abort request. Unlike Skipped/Failed, pytest's own Exit exception
+        # derives from Exception (not just BaseException), so a naive
+        # ``except Exception`` here would wrongly swallow it as though it
+        # were an ordinary recoverable failure.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise _pytest.outcomes.Exit("stopping early")
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN the hook runs, THEN Exit must propagate rather than being
+        # caught and reinterpreted as a state-machine failure.
+        with pytest.raises(_pytest.outcomes.Exit):
+            _drive_runtest_protocol(skipped_downgrade, nextitem)
 
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs

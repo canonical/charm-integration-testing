@@ -59,6 +59,15 @@ from .graph import StateGraph, StateTransition
 from .markers import StateMarker, read_state_marker
 from .states import State
 
+try:
+    # Builtin on Python 3.11+. On 3.10, pytest itself depends on the
+    # "exceptiongroup" backport package whenever it needs to construct one
+    # (e.g. SetupState.teardown_exact grouping multiple finalizer failures -
+    # see pytest_runtest_protocol below), so it is always installed here.
+    _BaseExceptionGroup: type[BaseException] = BaseExceptionGroup  # type: ignore[name-defined]
+except NameError:  # pragma: no cover - only exercised on Python 3.10
+    from exceptiongroup import BaseExceptionGroup as _BaseExceptionGroup  # type: ignore[import-not-found,no-redef]
+
 logger = logging.getLogger(__name__)
 
 #: State assumed when no ``--current-state`` flag is given.
@@ -365,6 +374,49 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
             )
 
 
+def _is_recoverable_reconciliation_failure(exc: BaseException) -> bool:
+    """Whether *exc* should be treated as a recoverable state-machine failure.
+
+    Ordinary exceptions and pytest's own ``Skipped``/``Failed`` outcomes
+    qualify. ``pytest.exit()``'s ``Exit`` is deliberately excluded even
+    though it derives from ``Exception``: it signals a whole-run abort
+    request, not a recoverable failure, and must propagate untouched.
+    """
+    return isinstance(exc, (Exception, _pytest.outcomes.OutcomeException)) and not isinstance(
+        exc, _pytest.outcomes.Exit
+    )
+
+
+def _handle_reconciliation_failure(item: pytest.Item, bridge_items: list[pytest.Item], exc: BaseException) -> None:
+    """Treat a failed setup-stack reconciliation like any other unexpected recovery failure.
+
+    See ``pytest_runtest_protocol``'s docstring for why this reconciliation
+    can fail outside pytest's normal per-item reporting flow, so no report
+    was ever logged for it.
+    """
+    global _current_state, _failed_state_test
+    logger.error(
+        "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
+        "Environment state is now unknown; all remaining state-marked tests will be skipped.",
+        [b.nodeid for b in bridge_items],
+        exc,
+    )
+    # Bump session.testsfailed directly - the same counter pytest's own
+    # accounting uses to decide the run's exit status - so this doesn't
+    # silently produce a successful exit despite failed cleanup (which may
+    # have leaked infrastructure). Mirror pytest's own
+    # Session.pytest_runtest_logreport handling of --maxfail too: bumping
+    # testsfailed alone does not trip session.shouldfail, so without this a
+    # reconciliation failure would make the eventual exit status nonzero but
+    # not actually stop the run at --maxfail=N like a normal failure would.
+    item.session.testsfailed += 1
+    maxfail = item.session.config.getvalue("maxfail")
+    if maxfail and item.session.testsfailed >= maxfail:
+        item.session.shouldfail = f"stopping after {item.session.testsfailed} failures"
+    _current_state = None
+    _failed_state_test = item
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # type: ignore[misc]
     """Recover the state machine before *nextitem* runs, if a gap opened up.
@@ -411,8 +463,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     accounting still reflects the failure - rather than letting an
     unrelated ``INTERNALERROR`` crash the whole run, or silently letting
     the session end with a successful exit status despite failed cleanup.
+
+    Abort-style exceptions are deliberately left alone rather than being
+    treated as a recoverable failure: ``KeyboardInterrupt``, ``SystemExit``,
+    ``pytest.exit()``'s ``Exit``, and any other exception outside
+    ``(Exception, OutcomeException)`` propagate untouched, including when
+    wrapped in a ``BaseExceptionGroup`` (which ``SetupState.teardown_exact``
+    itself only ever produces for multiple *ordinary* finalizer failures on
+    the same node, but is split defensively here in case that ever
+    changes).
     """
-    global _current_state, _failed_state_test
     yield
     if nextitem is None or _current_state is None or _full_graph is None:
         return
@@ -447,39 +507,39 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     # teardown assumed - see the docstring note above.
     try:
         item.session._setupstate.teardown_exact(bridge_items[0])
-    except (KeyboardInterrupt, SystemExit, _pytest.outcomes.Exit):
-        raise  # Let real interpreter/session-abort signals propagate untouched.
-    except BaseException as exc:
-        # A retained fixture finalizer failed outside pytest's normal
-        # per-item reporting flow (see the docstring note above), so no
-        # report was ever logged for it. Note this must catch BaseException,
-        # not just Exception: pytest's own skip/fail outcomes
-        # (``pytest.skip()``/``pytest.fail()`` inside a finalizer) raise
-        # ``Skipped``/``Failed``, which deliberately derive from
-        # BaseException so they aren't caught by ordinary exception
-        # handlers - but here we do want to catch them, since they mean the
-        # same thing for recovery purposes as any other finalizer failure.
-        # Bump session.testsfailed directly - the same counter pytest's own
-        # accounting uses to decide the run's exit status - so this doesn't
-        # silently produce a successful exit despite failed cleanup (which
-        # may have leaked infrastructure). Mirror pytest's own
-        # Session.pytest_runtest_logreport handling of --maxfail too: bumping
-        # testsfailed alone does not trip session.shouldfail, so without this
-        # a reconciliation failure would make the eventual exit status
-        # nonzero but not actually stop the run at --maxfail=N like a normal
-        # failure would.
-        logger.error(
-            "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
-            "Environment state is now unknown; all remaining state-marked tests will be skipped.",
-            [b.nodeid for b in bridge_items],
-            exc,
-        )
-        item.session.testsfailed += 1
-        maxfail = item.session.config.getvalue("maxfail")
-        if maxfail and item.session.testsfailed >= maxfail:
-            item.session.shouldfail = f"stopping after {item.session.testsfailed} failures"
-        _current_state = None
-        _failed_state_test = item
+    except _BaseExceptionGroup as excgroup:
+        # pytest's own SetupState.teardown_exact only ever wraps multiple
+        # finalizer failures in a BaseExceptionGroup if each individual
+        # failure is itself an ``Exception`` or one of pytest's ``Skipped``/
+        # ``Failed`` outcomes (see TEST_OUTCOME in _pytest/runner.py) - real
+        # abort/cancellation exceptions (KeyboardInterrupt, SystemExit,
+        # asyncio.CancelledError, pytest's own Exit, ...) are never caught by
+        # that loop and so are never wrapped this way. Still, split
+        # defensively rather than assume that always holds, and re-raise
+        # anything unexpected found inside the group untouched.
+        recoverable, unrecoverable = excgroup.split(_is_recoverable_reconciliation_failure)  # type: ignore[attr-defined]
+        if unrecoverable is not None:
+            raise unrecoverable
+        exc: BaseException = recoverable if recoverable is not None else excgroup
+        _handle_reconciliation_failure(item, bridge_items, exc)
+        return
+    except _pytest.outcomes.Exit:
+        # pytest.exit() called from within a finalizer - this is a
+        # deliberate whole-run abort request, not a recoverable state
+        # machine failure, so it must propagate untouched even though
+        # Exit (unlike Skipped/Failed) derives from Exception.
+        raise
+    except (Exception, _pytest.outcomes.OutcomeException) as exc:
+        # Catches ordinary exceptions and pytest's own skip/fail outcomes
+        # (``pytest.skip()``/``pytest.fail()`` inside a finalizer, which
+        # raise ``Skipped``/``Failed`` - these deliberately derive from
+        # BaseException, not Exception, specifically so they aren't caught
+        # by ordinary exception handlers elsewhere in pytest, but here we do
+        # want to catch them: they mean the same thing for recovery purposes
+        # as any other finalizer failure). Any other BaseException (e.g.
+        # KeyboardInterrupt, SystemExit, asyncio.CancelledError) is left
+        # uncaught by this clause and propagates normally.
+        _handle_reconciliation_failure(item, bridge_items, exc)
         return
     logger.warning(
         "Recovering state machine: injecting %s to bridge %r towards %r before %r.",
