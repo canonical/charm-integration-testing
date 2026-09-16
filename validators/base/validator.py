@@ -35,13 +35,39 @@ class ValidationResult(BaseModel):
     error: Optional[str] = None
 
 
-class BaseValidator(ABC):
+class PersistenceState(BaseModel):
+    """Opaque cross-call state for a single persistence validator instance.
+
+    ``id`` is a unique identifier chosen by the validator at ``prepare()`` time (not the Juju
+    ``relation_id``, which is unstable across a relation remove/re-add). ``ref`` is a monotonically
+    increasing counter the validator uses to assert no data was lost between calls.
+    """
+
+    id: int
+    ref: int = 0
+
+
+class PersistenceNotApplicable(Exception):
+    """Raised by a ``BasePersistenceValidator`` method to signal it does not apply here.
+
+    ``prepare()``/``checkpoint()``/``cleanup()`` have no ``SKIPPED`` result to return (unlike
+    ``BaseValidator.validate()``), since ``prepare()``/``cleanup()`` don't produce a
+    ``ValidationResult`` at all. Raise this instead - e.g. when ``self.role`` isn't the side of the
+    relation persistence applies to - and callers (the validator runner) treat it as "no applicable
+    validator", not as a failure.
+    """
+
+
+class _RelationValidatorMixin:
+    """Shared relation/databag/result-building helpers for both validator base classes.
+
+    Factored out of ``BaseValidator`` so ``BasePersistenceValidator`` implementations (which are
+    not stateless health probes and therefore don't share ``BaseValidator``'s contract) can still
+    reuse the same relation-inspection and credential-resolution primitives.
+    """
+
     charm: ops.CharmBase
     relation: ops.Relation
-
-    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
-        self.charm = charm
-        self.relation = relation
 
     @property
     def role(self) -> ValidationRole:
@@ -65,28 +91,6 @@ class BaseValidator(ABC):
     @property
     def interface(self) -> str:
         return self.charm.meta.relations[self.relation.name].interface_name or ""
-
-    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
-        """Return a SKIPPED result indicating this validator does not support *level*."""
-        return self._make_result(
-            status="SKIPPED",
-            level=level,
-            checks=[],
-            error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
-        )
-
-    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
-        """Return a SKIPPED result indicating this validator does not support *role*."""
-        return self._make_result(
-            status="SKIPPED",
-            level=level,
-            checks=[],
-            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
-        )
-
-    @abstractmethod
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        pass
 
     def relation_exists(self) -> bool:
         return self.relation.app in self.relation.data
@@ -146,3 +150,65 @@ class BaseValidator(ABC):
 
     def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         return self._make_result(status="FAIL", level=level, checks=checks)
+
+
+class BaseValidator(_RelationValidatorMixin, ABC):
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+        self.charm = charm
+        self.relation = relation
+
+    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *level*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
+        )
+
+    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *role*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
+        )
+
+    @abstractmethod
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        pass
+
+
+class BasePersistenceValidator(_RelationValidatorMixin, ABC):
+    """Two-phase durability probe for a single relation, complementing ``BaseValidator``.
+
+    Where ``BaseValidator.validate()`` is a stateless, idempotent health probe safe to call at any
+    time, ``prepare()``/``checkpoint()`` form an explicitly stateful durability scenario: ``prepare()``
+    seeds known data and establishes a steady state, and each subsequent ``checkpoint()`` call
+    verifies all previously-written data survived (and advances the steady state for the next round).
+    This is only meaningful when the caller (the test harness) controls the sequence and carries
+    ``PersistenceState`` across calls; it is not a general-purpose health check.
+
+    Concrete implementations choose how to map their internal storage (tables, keys, queues, ...)
+    to the interface. They are not required to key storage off ``relation_id`` - it is not a
+    stable identifier: it changes whenever a relation is removed and re-added, whereas the
+    identifier chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the
+    canary data it names.
+    """
+
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+        self.charm = charm
+        self.relation = relation
+
+    @abstractmethod
+    def prepare(self) -> PersistenceState:
+        """Write known test data through the relation. Called before a disruptive operation."""
+
+    @abstractmethod
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        """Verify all prior data is still present, write a new marker, return updated state."""
+
+    @abstractmethod
+    def cleanup(self) -> None:
+        """Remove all canary data written by this validator instance."""
