@@ -506,8 +506,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
   (`expected: PersistenceState`) or discoverable from the live backend
   (`cleanup()`).
 - Do not assume `checkpoint()` is called with contiguous, ever-increasing
-  `ref` values only on success - a prior checkpoint's failure still advances
-  `ref`, so always trust the `expected` argument passed in rather than
+  `ref` values only on success - a prior checkpoint's failure keeps `expected`
+  unchanged (the harness only advances tracked state on `PASS`, see the
+  `checkpoint()` design point above), so a retry can see the same `ref` it
+  saw last time. Always trust the `expected` argument passed in rather than
   re-deriving state from what you last wrote.
 
 ## Acceptance criteria
