@@ -104,12 +104,13 @@ runner treats this as "no applicable validator" rather than a failure.
 ``PersistenceState`` (``validators/base``) is the opaque state passed between calls: ``id`` is a
 validator-chosen identifier for the canary (stable for the lifetime of the canary data it names,
 unlike Juju's ``relation_id`` which changes across a relation remove/re-add), and ``ref`` is a
-monotonically increasing counter used to detect lost writes. The harness currently keys tracked
-state by ``relation_id`` (see ``PersistenceKey``), so a relation remove/re-add invalidates and
-re-``prepare``\ s that relation's state rather than remapping the old ``id`` onto the new
-``relation_id`` - preserving the design intent of a stable ``id`` across that scenario would
-require the harness to discover the new ``relation_id`` before checkpointing, which it cannot do
-today.
+monotonically increasing counter used to detect lost writes. The harness tracks state keyed by
+``PersistenceKey`` (controller, model, unit, and ``relation_id`` together - see
+``charm_integration_testing/juju/models.py``), so a relation remove/re-add invalidates the old
+entry and runs ``prepare()`` again for that relation under its new ``relation_id``, rather than
+remapping the old ``id`` onto it - preserving the design intent of a stable ``id`` across that
+scenario would require the harness to discover the new ``relation_id`` before checkpointing, which
+it cannot do today.
 
 CLI and wire format
 ~~~~~~~~~~~~~~~~~~~~
