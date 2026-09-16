@@ -35,12 +35,15 @@ def test_teardown(
     if neighbor_model_ref is not None:
         cleanup_model_refs.add(neighbor_model_ref)
     # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR
-    # result, but a remote cleanup failure (e.g. a non-zero `run_validators` invocation, or a
-    # transport/parsing failure reaching the unit) surfaces as a bare RuntimeError from
-    # ValidatorInjectorExtension instead - catching only JujuValidationError would abort the loop
-    # on the first such failure and skip cleanup for every model after it. Attempt every model,
-    # merge JujuValidationError failures together, and remember the first other exception; only
-    # raise once every model has been attempted.
+    # result. ValidatorInjectorExtension.post_persistence() itself converts a per-unit remote
+    # cleanup failure (e.g. a non-zero `run_validators` exit, or a malformed result payload) into
+    # an ERROR result rather than raising, so those surface via JujuValidationError too - but
+    # application/model-discovery failures (e.g. `application_units()`/`is_k8s_model()` raising
+    # because the application or model itself is gone) happen outside that per-unit try/except and
+    # still surface as a bare exception. Catching only JujuValidationError would abort the loop on
+    # the first such failure and skip cleanup for every model after it. Attempt every model, merge
+    # JujuValidationError failures together, and remember the first other exception; only raise
+    # once every model has been attempted.
     combined_failed_validations: dict[str, list[ValidationResult]] = {}
     first_other_error: Exception | None = None
     for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
