@@ -2227,6 +2227,64 @@ class TestPytestRuntestProtocolRecovery:
         assert any("test_scale_direct" in name for name in injected_names)
         assert not any("test_deploy" in name for name in injected_names)
 
+    def test_bridges_to_another_viable_requires_state_even_when_current_state_matches_a_given_up_on_one(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        """Regression for review comment 4029755560 on plugin.py:504.
+
+        GIVEN the environment's current state is exactly a requires-state
+        this transition candidate already gave up on (DEPLOYED), while
+        another requires-state (NEIGHBOR_ONLY) it hasn't tried yet is still
+        reachable via a bridge.
+
+        The old ``if _current_state in marker.requires: return`` early exit
+        ran before the already-skipped filtering, so it short-circuited
+        recovery entirely just because the environment happened to already
+        be at DEPLOYED - leaving pytest_runtest_setup to skip nextitem
+        again, even though bridging to NEIGHBOR_ONLY instead would have let
+        it run.
+        """
+        # GIVEN a bridge from the current state (DEPLOYED) to the other
+        # still-viable requires-state (NEIGHBOR_ONLY).
+        to_neighbor_only = make_item("test_scale_direct", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all(
+            (State.DEPLOYED, State.NEIGHBOR_ONLY, to_neighbor_only),
+        )
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        # AND nextitem is a duplicate of an original transition candidate
+        # that already skipped for the (DEPLOYED -> DEPLOYED_WITH_OLD_REVISION)
+        # edge - i.e. exactly the edge matching the environment's current
+        # state - but never tried (NEIGHBOR_ONLY -> DEPLOYED_WITH_OLD_REVISION).
+        original = make_item(
+            "test_multi",
+            requires=[State.DEPLOYED, State.NEIGHBOR_ONLY],
+            provides=State.DEPLOYED_WITH_OLD_REVISION,
+        )
+        _plugin_module._record_skipped_transition_candidate(
+            StateTransition(State.DEPLOYED, State.DEPLOYED_WITH_OLD_REVISION), original
+        )
+        nextitem = make_item(
+            "test_multi",
+            requires=[State.DEPLOYED, State.NEIGHBOR_ONLY],
+            provides=State.DEPLOYED_WITH_OLD_REVISION,
+        )
+        _plugin_module._duplicate_original_ids[id(nextitem)] = id(original)
+
+        item = make_item("test_something_else")
+        _with_session(item, [item, nextitem])
+
+        # WHEN the hook runs
+        _drive_runtest_protocol(item, nextitem)
+
+        # THEN a bridge towards NEIGHBOR_ONLY was injected instead of giving
+        # up just because _current_state already matched a given-up-on
+        # requires-state.
+        injected_names = [i.name for i in item.session.items if i not in (item, nextitem)]
+        assert any("test_scale_direct" in name for name in injected_names)
+
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs
         graph, all_transitions = _graph_and_all((State.EMPTY_MODEL, State.DEPLOYED, make_item("test_deploy")))

@@ -443,12 +443,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     If *nextitem* is itself a transition test candidate, any ``requires``
     state for which this exact original candidate has already skipped as a
     candidate for the (that state -> ``provides``) edge earlier in the run
-    is excluded from the bridge search: ``pytest_runtest_setup`` would just
-    skip *nextitem* straight back out once reached anyway (see its
-    docstring), so bridging towards that state would only move the
+    is excluded up front, before checking whether the environment already
+    satisfies *nextitem* - not only from the bridge search: ``pytest_runtest_setup``
+    would just skip *nextitem* straight back out once reached anyway (see
+    its docstring), so treating that excluded state as satisfying
+    *nextitem* here (because ``_current_state`` happens to equal it) would
+    miss the chance to bridge towards another still-viable ``requires``
+    state instead, and bridging towards it explicitly would only move the
     environment away from whatever a later, otherwise-runnable test needed,
-    for no benefit. If every ``requires`` state is excluded this way,
-    nothing is injected at all, exactly as if no bridging path existed.
+    for no benefit either way. If every ``requires`` state is excluded this
+    way, nothing is injected at all, exactly as if no bridging path existed.
 
     If no bridging path exists, nothing is injected: ``pytest_runtest_setup``
     will skip *nextitem* when its turn comes, and this hook runs again
@@ -500,17 +504,22 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         marker = read_state_marker(nextitem)
     except ValueError:
         marker = None
-    if marker is None or _current_state in marker.requires:
-        return  # Unmarked test, or the environment already satisfies it.
+    if marker is None:
+        return  # Unmarked test.
 
     # If nextitem is itself a transition test candidate, don't bridge
-    # towards a requires-state for which this exact original candidate has
-    # already skipped as a candidate for the (that requires-state ->
-    # provides) edge earlier in the run - pytest_runtest_setup would skip
-    # nextitem right back out once it got there anyway (see its docstring),
-    # so any one-way bridge built to reach that requires-state would only
-    # move the environment away from a state a later, otherwise-runnable
-    # test might have needed, for no benefit.
+    # towards (or accept the environment already being at) a requires-state
+    # for which this exact original candidate has already skipped as a
+    # candidate for the (that requires-state -> provides) edge earlier in
+    # the run - pytest_runtest_setup would skip nextitem right back out once
+    # it got there anyway (see its docstring), so treating that state as
+    # satisfying nextitem here would either waste a one-way bridge on it, or
+    # (if the environment happens to already be there) miss the chance to
+    # bridge to another still-viable requires-state instead. This filtering
+    # must happen before checking whether the environment already satisfies
+    # *nextitem*, not only when a bridge search is needed - otherwise a
+    # currently-already-skipped-for state that happens to equal
+    # ``_current_state`` would short-circuit recovery entirely.
     candidate_requires = marker.requires
     if marker.is_transition:
         original_id = _duplicate_original_ids.get(id(nextitem), id(nextitem))
@@ -520,15 +529,19 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
             if original_id
             not in _skipped_transition_item_ids.get(StateTransition(requires_state, marker.provides), set())
         )
-        if not candidate_requires:
-            logger.warning(
-                "No recovery path from state %r to any of %r: %r will be skipped (every candidate edge for "
-                "this test already skipped earlier in the run).",
-                _current_state.value,
-                [s.value for s in marker.requires],
-                nextitem.nodeid,
-            )
-            return
+
+    if _current_state in candidate_requires:
+        return  # The environment already satisfies a still-viable requires-state.
+
+    if not candidate_requires:
+        logger.warning(
+            "No recovery path from state %r to any of %r: %r will be skipped (every candidate edge for "
+            "this test already skipped earlier in the run).",
+            _current_state.value,
+            [s.value for s in marker.requires],
+            nextitem.nodeid,
+        )
+        return
 
     bridge_items = _find_recovery_bridge(_current_state, candidate_requires)
     if bridge_items is None:
