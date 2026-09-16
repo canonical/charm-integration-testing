@@ -60,7 +60,10 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         doesn't already exist (e.g. from a previous run's leftover state, or a re-run of a failed
         prepare), and should always return a state usable from a clean slate."""
         self._require_requires_role()
-        identifier = uuid.uuid4().int
+        # Mask to a backend-safe bit width (e.g. 63 bits for PostgreSQL) rather than using the
+        # full value if the identifier becomes part of a length-limited resource name - see the
+        # "prepare()" design point below.
+        identifier = uuid.uuid4().int & ((1 << 63) - 1)
         # ... create a uniquely-named canary table/object and write one marked row/record ...
         # commit (or use an autocommit connection) before returning - a transactional backend
         # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
@@ -79,12 +82,13 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def cleanup(self) -> None:
         """Drop all canary data.
 
-        Not guaranteed to run only once at the end of a test run: the harness also invokes
-        cleanup on state transitions mid-session (e.g. before a disruptive test in
-        `test_remove_and_restore_integration`, which explicitly invalidates the old state after
-        the relation is removed and re-added under a new relation ID), and `prepare()` may run
-        again afterwards. Must be safe to call when no canary resource remains (no-op, not an
-        error).
+        Only invoked from `test_teardown`, once per test run - the harness does not call cleanup
+        mid-session. A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
+        instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
+        `prepare()` again for the new one; the old canary resource is left in place until the
+        final teardown cleanup discovers and drops it by name pattern. Must still be safe to call
+        when no canary resource remains (no-op, not an error) - e.g. if `prepare()` was never
+        reached for a given relation.
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
@@ -99,8 +103,16 @@ implementation):
   stable across relation remove/re-add (see
   `test_remove_and_restore_integration`), and never use a small random space
   (e.g. a 31-bit int) that could collide across concurrent or repeated runs.
-  The identifier seeds a uniquely named canary resource (e.g.
-  `validator_canary_<identifier>`).
+  If the identifier becomes part of a length-limited resource name (e.g. a
+  SQL identifier), mask it to a backend-safe bit width rather than using the
+  full value - the reference implementation masks to 63 bits
+  (`uuid.uuid4().int & ((1 << 63) - 1)`) because a fixed scope-token prefix
+  plus a full 128-bit decimal integer can exceed PostgreSQL's 63-byte
+  identifier limit. Prefer a *fixed-width* representation (e.g. always
+  zero-padded to the same number of digits) over a variable-length one, so
+  discovery in `cleanup()` can validate an exact shape instead of a bare
+  prefix (see below). The identifier seeds a uniquely named canary resource
+  (e.g. `validator_canary_<scope_token>_<identifier>`).
 - **`checkpoint()`** takes the `PersistenceState` the harness has been
   tracking, verifies the canary data is still there and has exactly
   `expected.ref` records, then unconditionally writes one more record and
@@ -112,16 +124,23 @@ implementation):
   dropped and silently recreated from scratch could otherwise coincidentally
   satisfy a row-count-only check (see "Common patterns" below).
 - **`cleanup()`** takes no arguments (it runs as a fresh process invocation
-  with no state carried over from `prepare`/`checkpoint`). Discover
-  everything to remove by name pattern - see the escaped, schema-scoped
-  `information_schema.tables` query under "Common patterns" below, not a
-  bare `LIKE 'validator_canary_%'` (`_` is itself a `LIKE` wildcard and can
-  match unrelated tables). Discovery is prefix-based rather than
-  identifier-based, so it will also drop canary resources left behind by any
-  other concurrent validator run against the same backend that shares the
-  prefix - this is an accepted trade-off of the pattern, so avoid running
-  multiple persistence validation runs against the same database/model
-  concurrently.
+  with no state carried over from `prepare`/`checkpoint`), so it must
+  discover everything to remove by name pattern rather than by identifier.
+  Scope the discovery pattern to *this validator instance* - a token derived
+  from both the model UUID and `relation_id`, not just a bare interface-wide
+  prefix - or cleanup for one relation/interface will drop canary resources
+  belonging to a different relation or interface that happens to share the
+  same backend during the same test run (the runner calls `cleanup()` once
+  per live relation with a registered persistence validator, so this is not
+  just a concern for concurrent external runs). Even with that scoping, a
+  prefix-based `LIKE` query only narrows *candidates* - re-validate each
+  discovered name against the exact fixed-width shape `prepare()` produces
+  (e.g. via a compiled regex `fullmatch`) before dropping it, so a same-
+  prefixed but unrelated resource (e.g. a hand-created backup table) isn't
+  destroyed. See the escaped, schema-scoped `information_schema.tables`
+  query under "Common patterns" below, not a bare
+  `LIKE 'validator_canary_%'` (`_` is itself a `LIKE` wildcard and can match
+  unrelated tables).
 - **Role gating.** Most client-server interfaces only make sense to persist
   from the `requires` (client) side. Raise `PersistenceNotApplicable` from
   all three methods when `self.role != "requires"` (or whatever your
@@ -267,6 +286,9 @@ neither.
 ### Discovering canary resources by name pattern
 
 ```python
+import hashlib
+import re
+
 _CANARY_TABLE_PREFIX = "validator_canary_"
 
 
@@ -277,13 +299,25 @@ def _quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _canary_scope_token(self) -> str:
+    # A single fixed-width token derived from *both* the model UUID and relation_id: relation_id
+    # is assigned per-model, so two different models could otherwise expose the same numeric
+    # relation_id against a shared database/schema and collide, and folding relation_id into the
+    # hash (rather than appending it as a raw decimal) keeps the token's length independent of
+    # how large relation_id gets.
+    digest_input = f"{self.charm.model.uuid}:{self.relation_id}".encode()
+    return hashlib.sha256(digest_input).hexdigest()[:16]
+
+
 def _canary_table_prefix(self) -> str:
-    # Scope discovery to this model *and* relation, not just relation_id: relation_id is
-    # assigned per-model, so two different models could otherwise expose the same numeric
-    # relation_id against a shared database/schema and collide. A short hash of the model UUID
-    # keeps the prefix bounded in length regardless of the UUID's own format.
-    model_token = hashlib.sha256(self.charm.model.uuid.encode()).hexdigest()[:8]
-    return f"{_CANARY_TABLE_PREFIX}{model_token}_{self.relation_id}_"
+    return f"{_CANARY_TABLE_PREFIX}{self._canary_scope_token()}_"
+
+
+def _canary_table_regex(self) -> "re.Pattern[str]":
+    # Exact-shape match: prefix + a fixed-width, zero-padded identifier (see prepare()'s masked,
+    # zero-padded identifier above). Used to reject a same-prefixed but unrelated resource that a
+    # bare prefix LIKE match would otherwise let through - see cleanup() below.
+    return re.compile(re.escape(self._canary_table_prefix()) + r"[0-9]{20}")
 
 
 def cleanup(self) -> None:
@@ -316,7 +350,14 @@ def cleanup(self) -> None:
                 (f"{escaped_prefix}%",),
             )
             tables = cur.fetchall()
+        # The LIKE query above only narrows candidates by *prefix* - it can't cheaply assert an
+        # exact suffix shape. Re-check every candidate against the fixed-width regex before
+        # dropping it, so a same-prefixed but unrelated table (e.g. a hand-created "..._backup")
+        # is skipped instead of destroyed.
+        name_regex = self._canary_table_regex()
         for schema, table_name in tables:
+            if not name_regex.fullmatch(table_name):
+                continue
             with conn.cursor() as cur:
                 quoted = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
                 cur.execute(f"DROP TABLE IF EXISTS {quoted}")  # nosec B608
