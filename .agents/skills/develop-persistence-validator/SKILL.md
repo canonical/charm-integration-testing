@@ -51,9 +51,12 @@ from validators.base import (
 
 class MyClientPersistenceValidator(BasePersistenceValidator):
     def prepare(self) -> PersistenceState:
-        """Seed canary data for this relation. Called once per relation_id - potentially more
-        than once per test run if a relation is removed and re-added, since that changes
-        relation_id and so requires fresh canary data."""
+        """Seed canary data for this relation. Called once when a relation is first established,
+        but the harness may also call it again for the same relation_id later in a run (e.g.
+        ``test_idempotent_redeploy`` re-seeds without removing the relation first) - prepare()
+        must not assume the canary resource it creates doesn't already exist, and should always
+        return a state usable from a clean slate. It's also called again after a relation is
+        removed and re-added, since that changes relation_id and so requires fresh canary data."""
         self._require_requires_role()
         identifier = uuid.uuid4().int
         # ... create a uniquely-named canary table/object and write one marked row/record ...
@@ -122,9 +125,10 @@ implementation):
 ### Package structure
 
 Persistence validators live in the **same package** as the interface's
-functional validator - there's no separate `validators/<name>_persistence/`
-directory. Add the new class to the existing `validator.py`, export it from
-`__init__.py`, and register a **second** entry point:
+functional validator, if one already exists - there's no separate
+`validators/<name>_persistence/` directory. Add the new class to the
+existing `validator.py`, export it from `__init__.py`, and register it as a
+**second** entry point alongside the existing `endpoint_validators` one:
 
 ```toml
 [project.entry-points."endpoint_validators"]
@@ -134,10 +138,13 @@ directory. Add the new class to the existing `validator.py`, export it from
 <interface_name> = "validators.<name>:MyClientPersistenceValidator"
 ```
 
-Both entry-point groups key off the same Juju interface name. The runner
-(`validators/runner/runner.py`) discovers `endpoint_persistence_validators`
-independently of `endpoint_validators`, so a validator package can implement
-either, both, or neither.
+A functional validator is not required, though: a package may register only
+`endpoint_persistence_validators` (persistence-only) if the interface has no
+`endpoint_validators` entry - see step 1. Both entry-point groups key off the
+same Juju interface name. The runner (`validators/runner/runner.py`)
+discovers `endpoint_persistence_validators` independently of
+`endpoint_validators`, so a validator package can implement either, both, or
+neither.
 
 ## Steps
 
@@ -175,12 +182,14 @@ either, both, or neither.
    metadata can change: persistence support may need its own runtime
    dependency (e.g. a client library the functional validator doesn't use)
    or dev dependency (e.g. a test double), which must still be added to the
-   package's own `pyproject.toml` `[tool.poetry.dependencies]` /
-   `[tool.poetry.group.dev.dependencies]`. If you just created the package
-   from scratch in step 1, make sure the root/`validators/runner`
-   registrations are also done (per `develop-validator`); they're required
-   for entry-point discovery regardless of which entry-point group(s) the
-   package declares.
+   package's own `pyproject.toml` under `[project].dependencies` /
+   `[project.optional-dependencies].dev` (matching the format
+   `validators/<name>/pyproject.toml` already uses - not the
+   `[tool.poetry.dependencies]` format used by the root/runner projects). If
+   you just created the package from scratch in step 1, make sure the
+   root/`validators/runner` registrations are also done (per
+   `develop-validator`); they're required for entry-point discovery
+   regardless of which entry-point group(s) the package declares.
 
 5. Write unit tests in the existing `tests/unit/test_validator.py`, extending
    any connection/cursor stubs already used by the functional validator's
@@ -222,7 +231,9 @@ either, both, or neither.
    `run_validators --persistence prepare` on the requirer unit, disrupt the
    provider (restart/scale/migrate), then `run_validators --persistence
    checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'` and confirm
-   a `PASS` result with `ref` advanced by one, and finally
+   a `PASS` result plus an `updated_refs` entry for that `relation_id` with
+   `ref` advanced by one (`ref` is not on the `ValidationResult` itself - see
+   `ValidatorRunnerResults` in `validators/runner/runner.py`), and finally
    `run_validators --persistence cleanup` and confirm the canary resource is
    gone.
 
@@ -243,18 +254,30 @@ def _quote_identifier(name: str) -> str:
 
 def cleanup(self) -> None:
     self._require_requires_role()
+    # cleanup() runs for every relation with a registered persistence validator, including one
+    # that never got as far as receiving credentials (e.g. the relation is still being set up).
+    # Treat a databag with no usable credentials yet as a no-op instead of raising by opening a
+    # connection anyway.
+    if not self.databag.get("uris") and not self.databag.get("secret-user"):
+        return
     # `_` and `%` are LIKE wildcards, so a prefix containing underscores must be escaped or it
     # can match unrelated tables (e.g. "validatorXcanaryY1").
     escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     conn = self._open_connection()
+    conn.autocommit = True  # or commit explicitly after each DROP - without this the DDL below
+    # is rolled back when the connection closes, so cleanup can report success while leaving the
+    # canary tables in place.
     try:
         with conn.cursor() as cur:
             # CREATE TABLE elsewhere is unqualified, so it resolves through search_path into
             # current_schema(); restrict discovery (and the DROP below) to that same schema, or
-            # a same-named table in another schema could be left behind or wrongly targeted.
+            # a same-named table in another schema could be left behind or wrongly targeted. Also
+            # restrict to base tables: a view/foreign table sharing the prefix would make DROP
+            # TABLE fail and abort cleanup, leaving any remaining canary tables undropped.
             cur.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "  # nosec B608
-                "WHERE table_schema = current_schema() AND table_name LIKE %s ESCAPE '\\'",
+                "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
+                "AND table_name LIKE %s ESCAPE '\\'",
                 (f"{escaped_prefix}%",),
             )
             tables = cur.fetchall()
