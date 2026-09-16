@@ -75,6 +75,12 @@ class ValidatorInjectorExtension(JujuExtension):
         persistence: str,
         persistence_state: dict[PersistenceKey, PersistenceState],
     ) -> dict[str, list[ValidationResult]]:
+        if persistence not in _PERSISTENCE_OPS:
+            # Validate once, up front, rather than inside the per-unit loop below: this is a
+            # caller/programming error (not a remote/transport failure), so it must still raise
+            # immediately, before any command runs on any unit - not be swallowed into a per-unit
+            # ERROR result by the broad except in that loop.
+            raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
@@ -85,7 +91,28 @@ class ValidatorInjectorExtension(JujuExtension):
                 for key, state in persistence_state.items()
                 if key.controller == model.controller and key.model == model.model and key.unit == unit
             }
-            outcome = self._run_persistence_on_unit(model, unit, persistence, unit_refs, model_is_k8s)
+            try:
+                outcome = self._run_persistence_on_unit(model, unit, persistence, unit_refs, model_is_k8s)
+            except Exception as exc:
+                # A transport/remote-command failure (e.g. a non-zero `run_validators` exit, or a
+                # malformed result payload) previously propagated straight out of this method,
+                # aborting the loop and leaving every later unit in this application - not just
+                # this one - with no persistence op attempted at all. Report it as an ERROR result
+                # for this unit instead (mirroring how ValidatorRunner turns a validator-level
+                # exception into an ERROR result) so validate_model()'s normal FAIL/ERROR
+                # aggregation surfaces it, while every other unit still gets its own attempt.
+                results[unit] = [
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint="",
+                        interface="",
+                        role="requires",
+                        level="deep",
+                        relation_id=-1,
+                        error=f"Persistence op '{persistence}' failed on {unit}: {exc}",
+                    )
+                ]
+                continue
             if outcome is None:
                 # Skipped entirely (no validators_path configured, see _run_persistence_on_unit) -
                 # distinct from "ran and found nothing to report", which returns ([], {}) below.
