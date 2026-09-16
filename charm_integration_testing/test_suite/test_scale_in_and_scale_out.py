@@ -5,14 +5,19 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_scale_in_and_scale_out_charm(
-    juju_client: JujuClient, target_model_ref: JujuModelHandle, target_application: str
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    target_application: str,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     # Get units
     num_units = juju_client.num_units(target_application, model=target_model_ref)
@@ -30,4 +35,6 @@ def test_scale_in_and_scale_out_charm(
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    juju_client.validate_model(
+        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+    )

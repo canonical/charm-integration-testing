@@ -1,14 +1,16 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
+import shlex
 import tarfile
 import urllib.request
 from pathlib import Path
 
-from juju import JujuBackend, JujuExtension, JujuModelHandle
+from juju import JujuBackend, JujuExtension, JujuModelHandle, PersistenceKey
 
-from validators.base.validator import ValidationResult
+from validators.base.validator import PersistenceState, ValidationResult
 from validators.runner import ValidatorRunnerResults
 
 install_env = " ".join(
@@ -53,6 +55,44 @@ class ValidatorInjectorExtension(JujuExtension):
             results[unit] = self._run_validators_on_unit(model, unit, level, model_is_k8s)
         return results
 
+    def post_persistence(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        persistence: str,
+        persistence_state: dict[PersistenceKey, PersistenceState],
+    ) -> dict[str, list[ValidationResult]]:
+        results: dict[str, list[ValidationResult]] = {}
+        model_is_k8s = self.juju.is_k8s_model(model)
+        for unit in self.juju.application_units(model, application):
+            # Slice persistence_state down to just this unit's relations; the runner only ever
+            # needs (and only ever reports back) refs for the unit it's running on.
+            unit_refs = {
+                key.relation_id: state
+                for key, state in persistence_state.items()
+                if key.controller == model.controller and key.model == model.model and key.unit == unit
+            }
+            unit_results, updated_refs = self._run_persistence_on_unit(
+                model, unit, persistence, unit_refs, model_is_k8s
+            )
+            results[unit] = unit_results
+
+            if persistence == "cleanup":
+                # Canary tables have been dropped; drop any tracked state for this unit too.
+                for key in [
+                    key
+                    for key in persistence_state
+                    if key.controller == model.controller and key.model == model.model and key.unit == unit
+                ]:
+                    del persistence_state[key]
+            else:
+                for relation_id_str, state in updated_refs.items():
+                    key = PersistenceKey(
+                        controller=model.controller, model=model.model, unit=unit, relation_id=int(relation_id_str)
+                    )
+                    persistence_state[key] = state
+        return results
+
     def _run_validators_on_unit(
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
@@ -71,6 +111,37 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Collect results
         return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
+
+    def _run_persistence_on_unit(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        persistence: str,
+        refs: dict[int, PersistenceState],
+        is_k8s: bool = True,
+    ) -> tuple[list[ValidationResult], dict[str, PersistenceState]]:
+        # Inject validators
+        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+            if not self.validators_path:
+                self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
+                return [], {}
+            self._inject_validators(model, unit, is_k8s=is_k8s)
+
+        # Run persistence op
+        self.logger.debug(f"Running persistence op '{persistence}' on unit {unit}")
+        cmd = f"{venv_runner} --persistence {persistence}"
+        if persistence == "checkpoint":
+            refs_json = json.dumps({str(relation_id): state.model_dump() for relation_id, state in refs.items()})
+            cmd += f" --refs {shlex.quote(refs_json)}"
+        run_result = self.juju.exec_unit(model, unit, cmd, operator=is_k8s)
+        if run_result.return_code != 0:
+            raise RuntimeError(
+                f"Persistence op '{persistence}' failed on {unit} (rc={run_result.return_code}): {run_result.stderr}"
+            )
+
+        # Collect results
+        parsed = ValidatorRunnerResults.model_validate_json(run_result.stdout)
+        return parsed.results, parsed.updated_refs
 
     def _inject_validators(self, model: JujuModelHandle, unit: str, is_k8s: bool = True) -> None:
         # Ensure validators path is provided

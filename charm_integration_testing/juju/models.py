@@ -3,8 +3,12 @@
 
 from dataclasses import dataclass, field
 from functools import total_ordering
+from typing import TYPE_CHECKING
 
 from .handles import JujuModelHandle
+
+if TYPE_CHECKING:
+    from validators.base import PersistenceState
 
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
@@ -117,3 +121,33 @@ class JujuConsumedOfferInfo:
         return ParsedOfferUrl(
             model=JujuModelHandle(controller=controller, model=model, owner=owner), offer_name=offer_name
         )
+
+
+@dataclass(frozen=True)
+class PersistenceKey:
+    """Identifies a single relation's persistence-tracking slot.
+
+    Keyed by (controller, model, unit, relation_id) rather than just relation_id, since
+    relation_id is only unique within a model and this framework may track multiple models
+    (and controllers, e.g. during cross-model or migration tests) at once.
+    """
+
+    controller: str
+    model: str
+    unit: str
+    relation_id: int
+
+
+def rekey_persistence_state_controller(
+    persistence_state: dict["PersistenceKey", "PersistenceState"], model: str, old_controller: str, new_controller: str
+) -> None:
+    """Rewrite tracked persistence keys for *model* after it migrates to a new controller.
+
+    Model migration changes a model's controller without changing its units or relation ids, so
+    the (controller, model, unit, relation_id) tracking key would otherwise stop matching after a
+    migration. Mutates *persistence_state* in place.
+    """
+    for key in [key for key in persistence_state if key.controller == old_controller and key.model == model]:
+        persistence_state[
+            PersistenceKey(controller=new_controller, model=model, unit=key.unit, relation_id=key.relation_id)
+        ] = persistence_state.pop(key)

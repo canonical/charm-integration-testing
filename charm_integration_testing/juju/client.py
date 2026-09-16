@@ -4,8 +4,9 @@
 import logging
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 
-from validators.base import ValidationResult
+from validators.base import PersistenceState, ValidationResult
 
 from .backend import JujuBackend
 from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
@@ -16,6 +17,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    PersistenceKey,
 )
 from .version import JujuVersion
 
@@ -360,37 +362,64 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
-        """Validate all applications in the model.
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+        persistence: Literal["prepare", "checkpoint", "cleanup"] | None = None,
+        persistence_state: dict[PersistenceKey, PersistenceState] | None = None,
+    ) -> None:
+        """Validate all applications in the model, and/or run a persistence lifecycle op.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
             model: Juju model reference
-            level: Validation level ("simple" or "deep", default: "simple")
+            level: Validation level ("simple" or "deep"), or None to skip functional validation
+                entirely (e.g. when only running a persistence op).
+            persistence: Persistence lifecycle operation to run ("prepare", "checkpoint", or
+                "cleanup"), or None to skip persistence handling entirely.
+            persistence_state: Tracking dict for canary state, keyed by
+                ``PersistenceKey(controller, model, unit, relation_id)``. Required whenever
+                *persistence* is given; extensions mutate it in place (adding/updating entries
+                for "prepare"/"checkpoint", removing them for "cleanup").
 
         Raises:
-            JujuValidationError: If any validation checks fail.
+            ValueError: If *persistence* is given without *persistence_state*.
+            JujuValidationError: If any validation or persistence checks fail.
         """
+        if persistence is not None and persistence_state is None:
+            raise ValueError("persistence_state is required when persistence is given")
+
         # Collect applications for validators
         applications = self.backend.list_applications(model)
-        self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
+        self.logger.info(
+            f"Running validators on {len(applications)} applications (level={level}, persistence={persistence})"
+        )
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
-            # Phase 2: This will trigger Ops framework validation
-            # Phase 1: This is a no-op, just a placeholder
-            for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                results.setdefault(unit, []).extend(unit_results)
-
-            # Call extensions (Phase 1 validation happens here)
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_validate(model, application, level).items():
+            if level is not None:
+                # Phase 2: This will trigger Ops framework validation
+                # Phase 1: This is a no-op, just a placeholder
+                for unit, unit_results in self.backend.validate_application(model, application, level).items():
                     results.setdefault(unit, []).extend(unit_results)
+
+                # Call extensions (Phase 1 validation happens here)
+                for extension in self.extensions:
+                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                        results.setdefault(unit, []).extend(unit_results)
+
+            if persistence is not None and persistence_state is not None:
+                for extension in self.extensions:
+                    for unit, unit_results in extension.post_persistence(
+                        model, application, persistence, persistence_state
+                    ).items():
+                        results.setdefault(unit, []).extend(unit_results)
 
             if not results:
                 self.logger.info(f"No validation results for application '{application}'.")

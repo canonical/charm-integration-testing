@@ -33,6 +33,7 @@ from juju import (
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
+    PersistenceKey,
 )
 from juju.resource_registry import (
     JujuControllerHandle,
@@ -76,6 +77,7 @@ from bundle_builder_x import (
     leaf_release_errors,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
+from validators.base import PersistenceState
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -254,6 +256,19 @@ def register_preexisting_resources(
             handle=JujuModelHandle(controller=neighbor_controller, model=neighbor_model),
             parent=neighbor_ctrl_handle,
         )
+
+
+@pytest.fixture(scope="session")
+def persistence_state() -> dict[PersistenceKey, PersistenceState]:
+    """Tracking dict for canary data seeded by data persistence validators.
+
+    Session-scoped and shared across every ``validate_model(persistence=...)`` call in a test
+    run: ``test_deploy`` populates it via "prepare", each disruptive test verifies and advances it
+    via "checkpoint", and ``test_teardown`` clears it via "cleanup". Keyed by
+    ``PersistenceKey(controller, model, unit, relation_id)`` so state for concurrently-tracked
+    models/controllers (e.g. during migration tests) never collides.
+    """
+    return {}
 
 
 @pytest.fixture

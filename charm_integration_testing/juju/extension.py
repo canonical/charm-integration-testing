@@ -3,9 +3,10 @@
 
 from abc import ABC
 
-from validators.base import ValidationResult
+from validators.base import PersistenceState, ValidationResult
 
 from .handles import JujuModelHandle
+from .models import PersistenceKey
 
 
 class JujuExtension(ABC):
@@ -19,6 +20,20 @@ class JujuExtension(ABC):
         pass
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        return {}
+
+    def post_persistence(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        persistence: str,
+        persistence_state: dict[PersistenceKey, PersistenceState],
+    ) -> dict[str, list[ValidationResult]]:
+        """Run a persistence lifecycle op ("prepare"/"checkpoint"/"cleanup") for *application*.
+
+        Implementations are expected to mutate *persistence_state* in place: adding/updating
+        entries for relations they seeded or verified, and removing entries once cleaned up.
+        """
         return {}
 
     def post_bootstrap_controller(self, controller: str) -> None:

@@ -6,7 +6,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -20,6 +22,7 @@ def test_idempotent_redeploy(
     neighbor_bundle: Path | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
     tmp_path: Path,
 ) -> None:
     all_bundles: list[tuple[Path, JujuModelHandle]] = [(target_bundle, target_model_ref)]
@@ -38,4 +41,6 @@ def test_idempotent_redeploy(
         juju_client.idle_for_period(model=model_ref, timeout=timedelta(minutes=15))
 
     for _, model_ref in all_bundles:
-        juju_client.validate_model(model=model_ref, level="simple")
+        juju_client.validate_model(
+            model=model_ref, level="simple", persistence="prepare", persistence_state=persistence_state
+        )
