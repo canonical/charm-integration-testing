@@ -79,9 +79,14 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         self._require_requires_role()
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
-        # ... unconditionally write one more marked row/record, then commit it (or use autocommit)
-        # for the same reason as prepare() above ...
-        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1)
+        passed = ...  # the assertion above
+        # Only write one more marked row/record - and only advance the returned state - when the
+        # check passed. The harness only carries a returned state forward on PASS (see the design
+        # point below), so writing/advancing on FAIL would grow the backend's actual state past
+        # what the harness will ever compare against again, masking the mismatch instead of
+        # letting a later checkpoint re-detect it. Commit the write (or use autocommit) for the
+        # same reason as prepare() above.
+        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1) if passed else expected
         return self._make_result(level="deep", checks=[...]), new_state
 
     def cleanup(self) -> None:
@@ -137,18 +142,26 @@ implementation):
   (e.g. `validator_canary_<scope_token>_<identifier>`).
 - **`checkpoint()`** takes the `PersistenceState` the harness has been
   tracking, verifies the canary data is still there and has exactly
-  `expected.ref` records, then unconditionally writes one more record and
-  returns `PersistenceState(id=expected.id, ref=expected.ref + 1)` -
-  regardless of whether the check *itself* passed. This lets subsequent
-  checkpoints in the same run keep counting correctly even after a single
-  check reported `FAIL`. This only covers a returned result, not an
-  operational failure: if `checkpoint()` raises instead of returning (e.g.
-  the connection itself fails), the runner converts that exception to an
-  `ERROR` result and emits no `updated_refs` entry for that relation - the
-  harness leaves the *previously tracked* `PersistenceState` untouched
-  rather than clearing it (see `ValidatorInjectorExtension.post_persistence`),
-  so a later checkpoint still has the old `expected.ref` to retry against; it
-  just never advanced past it for this attempt.
+  `expected.ref` records, and only on a *passing* check writes one more
+  record and returns `PersistenceState(id=expected.id, ref=expected.ref + 1)`.
+  This matters because `ValidatorRunner.checkpoint_all()` only carries a
+  returned state forward into `updated_refs` when the result is `PASS` - a
+  `FAIL`/`ERROR` result leaves the harness's tracked state untouched. If
+  `checkpoint()` wrote the extra record and advanced the returned state
+  unconditionally, that write would still land in the backend even though
+  the harness keeps comparing future checkpoints against the old, frozen
+  `expected.ref` - permanently masking the original mismatch behind
+  untracked drift (or, worse, letting a later checkpoint coincidentally
+  match the stale `expected.ref` and report a false `PASS`). On `FAIL`,
+  return `expected` unchanged and skip the write entirely, so a later
+  checkpoint re-detects the exact same data loss consistently instead of
+  drifting. This only covers a returned result, not an operational failure:
+  if `checkpoint()` raises instead of returning (e.g. the connection itself
+  fails), the runner converts that exception to an `ERROR` result and emits
+  no `updated_refs` entry for that relation either - the harness leaves the
+  *previously tracked* `PersistenceState` untouched rather than clearing it
+  (see `ValidatorInjectorExtension.post_persistence`), so a later checkpoint
+  still has the old `expected.ref` to retry against.
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
