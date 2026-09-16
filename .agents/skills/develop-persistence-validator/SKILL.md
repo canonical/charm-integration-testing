@@ -281,8 +281,9 @@ rather than registering multiple entry points for the same interface.
    `[tool.poetry.dependencies]` format). A new dev dependency there is only
    installed if the root `pyproject.toml`'s path dependency for this package
    already lists `extras = ["dev"]` (e.g. `validators-postgresql-client = {
-   path = "./validators/postgresql_client", develop = true, extras = ["dev",
-   ...] }`) - if it's missing `"dev"`, add it. If
+   path = "./validators/postgresql_client", develop = true, extras = ["dev"]
+   }` - preserve any other existing extras already listed alongside `"dev"`)
+   - if it's missing `"dev"`, add it. If
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
@@ -344,7 +345,15 @@ rather than registering multiple entry points for the same interface.
    this interface.
 
 8. Manually verify end-to-end if a live model is available: deploy the
-   two charms, then from a shell with access to the model run (matching how
+   two charms, then run the full test suite against that model at least
+   through `test_deploy` (e.g. `pytest ... --current-state=empty_model
+   -k test_deploy`, or the full suite up to the point you want to inspect) -
+   this is what actually injects the validators venv onto each unit via
+   `ValidatorInjectorExtension._inject_validators()`
+   (`/var/lib/juju/validators/venv/bin/run_validators` does not exist on a
+   plain `juju deploy`; only the harness creates it). Once injected, from a
+   shell with access to the model you can also invoke `run_validators`
+   directly to iterate faster (matching how
    `ValidatorInjectorExtension._run_persistence_on_unit` invokes it - a bare
    `run_validators` on `$PATH` won't work; it's not installed there):
    ```
