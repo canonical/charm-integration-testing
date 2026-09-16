@@ -102,17 +102,18 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         a delay: the discovery namespace (see `_canary_table_prefix`/"Common patterns" below) is
         derived from the *current* relation_id, so `cleanup()` for the new relation cannot find
         canary data left behind under the old relation_id - that old resource remains orphaned
-        rather than being swept up by a later cleanup call. If your backend needs a stronger
+        rather than being swept up by a later cleanup call, unless prior relation_ids were
+        recorded somewhere durable. Neither this relation's own databag (removed along with the
+        relation) nor `ops.StoredState` can provide that durability: `run_validators` constructs
+        a fresh in-memory Ops `Framework` (`SQLiteStorage(":memory:")`) on every CLI invocation
+        (see `validators/runner/runner.py`), so anything written to `StoredState` during one
+        `prepare()`/`checkpoint()`/`cleanup()` call is gone before the next one runs - cleanup
+        cannot enumerate prior relation_ids from either store. If your backend needs the stronger
         guarantee, record prior relation_ids somewhere that outlives both the relation and the
         validator process itself - e.g. the charm's own peer relation databag (if one exists),
-        which Juju persists independently of any given relation. Neither this relation's databag
-        (removed along with the relation) nor `ops.StoredState` works here: `run_validators`
-        constructs a fresh in-memory Ops `Framework` (`SQLiteStorage(":memory:")`) on every CLI
-        invocation (see `validators/runner/runner.py`), so anything written to `StoredState`
-        during one `prepare()`/`checkpoint()`/`cleanup()` call is gone before the next one runs -
-        so cleanup can enumerate and drop them too. Must still be safe to call when no canary
-        resource remains (no-op, not an error) - e.g. if `prepare()` was never reached for a given
-        relation.
+        which Juju persists independently of any given relation - so cleanup can enumerate and
+        drop them too. Must still be safe to call when no canary resource remains (no-op, not an
+        error) - e.g. if `prepare()` was never reached for a given relation.
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
@@ -242,9 +243,9 @@ rather than registering multiple entry points for the same interface.
    skill), which persistence validators rely on for entry-point discovery
    just as functional validators do. Whether or not the package is new, make
    sure `validators-base` is declared in its `pyproject.toml` `dependencies`
-   (see `develop-validator`'s step 7) - the generated class imports
-   `validators.base` directly, and a persistence-only package has no other
-   dependency that would pull it in. A functional validator
+   (see `develop-validator`'s step 10 self-review checklist) - the generated
+   class imports `validators.base` directly, and a persistence-only package
+   has no other dependency that would pull it in. A functional validator
    (`endpoint_validators` entry point) is *not* a hard prerequisite: the
    runner discovers `endpoint_validators` and `endpoint_persistence_validators`
    independently, so a package may register either, both, or neither -
@@ -309,8 +310,11 @@ rather than registering multiple entry points for the same interface.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
      with a fresh identifier and `ref=1`.
    - `checkpoint()` passes when the check matches `expected.ref`, fails when
-     it doesn't, and in both cases returns `PersistenceState(ref=expected.ref
-     + 1)` and writes a new marked record. Also cover that a check based only
+     it doesn't. On `PASS`, it writes a new marked record and returns
+     `PersistenceState(ref=expected.ref + 1)`; on `FAIL`, it must not write
+     anything and returns `expected` unchanged, so a later retry re-checks
+     the same expected count instead of drifting past the failure (see the
+     `checkpoint()` design point above). Also cover that a check based only
      on a bare existence/count check would be insufficient - assert it scopes
      on the marker/identifier written by `prepare()`, not just "the resource
      exists" or "the count matches" (for SQL backends this means filtering
