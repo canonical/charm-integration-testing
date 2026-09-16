@@ -380,12 +380,16 @@ class ValidatorRunner:
             integration, interface_name, role = found
             registered_validators = self.persistence_validators.get(interface_name, [])
             if not registered_validators:
+                if interface_name in self.persistence_load_errors:
+                    # _persistence_load_error_results() (seeded into `results` above) already
+                    # added an ERROR for every live relation on this interface, including this
+                    # one - don't add a second, more generic ERROR for the same relation_id.
+                    continue
                 # A ref was supplied for a relation whose interface has no loaded persistence
                 # validator. This can't happen from a ref this same run's prepare_all produced
                 # (it only tracks interfaces it found validators for), so it means the ref is
-                # stale (e.g. the charm's interface changed) or the validator failed to load this
-                # run - either way, silently doing nothing would let a real durability check
-                # pass without ever running.
+                # stale (e.g. the charm's interface changed) - either way, silently doing nothing
+                # would let a real durability check pass without ever running.
                 logger.error(
                     f"No persistence validator registered for interface '{interface_name}'; cannot checkpoint."
                 )
