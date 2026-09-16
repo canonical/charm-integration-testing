@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import hashlib
+import re
 import time
 import urllib.parse
 import uuid
@@ -332,10 +333,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     """Reference persistence validator implementation (see SQ103).
 
     Each validator instance owns a dedicated canary table named
-    ``validator_canary_{model_token}_{relation_id}_{identifier}``, where ``model_token`` and
-    ``relation_id`` scope the table to this model and relation (see ``_canary_table_prefix``) and
-    ``identifier`` is chosen by ``prepare()`` and carried forward by the caller (the test harness)
-    as ``PersistenceState.id``. Every row written to the table also carries a marker value derived
+    ``validator_canary_{scope_token}_{identifier}``, where ``scope_token`` is a fixed-width hash of
+    this model's UUID and relation ID (see ``_canary_table_prefix``) and ``identifier`` is a
+    fixed-width, zero-padded value chosen by ``prepare()`` and carried forward by the caller (the
+    test harness) as ``PersistenceState.id``. Both components have a fixed length so ``cleanup()``
+    can validate the *exact* shape of a candidate table name (not just a prefix) before dropping
+    it - see ``cleanup()``. Every row written to the table also carries a marker value derived
     deterministically from ``identifier``, so ``checkpoint()`` can detect data loss (or a table
     silently recreated from scratch) by counting only rows tagged with that marker, rather than
     trusting a plain ``count(*)`` that a coincidentally-sized but unrelated table could satisfy.
@@ -349,8 +352,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def prepare(self) -> PersistenceState:
         self._require_requires_role()
         # Masked to 63 bits (rather than the full 128-bit uuid4().int) so the canary table name -
-        # which also carries a model-scoping token and relation_id (see _canary_table_prefix) -
-        # stays comfortably within PostgreSQL's 63-byte identifier limit, while still leaving ~9.2
+        # which also carries a fixed-width scope token (see _canary_table_prefix) - stays
+        # comfortably within PostgreSQL's 63-byte identifier limit, while still leaving ~9.2
         # quintillion possible values, far more entropy than a test run could plausibly collide on.
         identifier = uuid.uuid4().int & ((1 << 63) - 1)
         table = self._canary_table_name(identifier)
@@ -413,11 +416,17 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         than the bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client`` relations
         sharing the same database/schema - even across different models, whose relation IDs are
         assigned independently and so can collide numerically - can no longer drop each other's
-        canary tables (or an unrelated table that merely shares the prefix). The namespace is
-        stable for the lifetime of a given relation, so this still finds a table left behind by
-        an interrupted run of *this* relation; it does not sweep up a stray table from a relation
-        that was removed and re-added under a new ID, which is an accepted trade-off since a
-        fresh ``prepare()`` for the new ID starts its own table anyway.
+        canary tables. The namespace is stable for the lifetime of a given relation, so this still
+        finds a table left behind by an interrupted run of *this* relation; it does not sweep up a
+        stray table from a relation that was removed and re-added under a new ID, which is an
+        accepted trade-off since a fresh ``prepare()`` for the new ID starts its own table anyway.
+
+        The initial ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE``
+        can't cheaply assert an exact suffix shape), so every candidate is re-checked against
+        ``_canary_table_regex()`` - which requires the full ``prefix + fixed-width digits`` shape -
+        before being dropped. This rejects a same-prefixed but unrelated table (e.g. a hand-created
+        ``validator_canary_<token>_backup``) that a bare prefix match would otherwise catch and
+        destroy.
         """
         self._require_requires_role()
         if not self.databag.get("uris") and not self.databag.get("secret-user"):
@@ -444,7 +453,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                     (f"{escaped_prefix}%",),
                 )
                 tables = [(row[0], row[1]) for row in cur.fetchall()]
+            name_regex = self._canary_table_regex()
             for schema, table in tables:
+                if not name_regex.fullmatch(table):
+                    continue
                 quoted_table = f"{_quote_identifier(schema)}.{_quote_identifier(table)}"
                 with conn.cursor() as cur:
                     cur.execute(f"DROP TABLE IF EXISTS {quoted_table}")  # nosec B608 - identifier is safely quoted
@@ -476,17 +488,38 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
         ``self.relation_id`` is stable for the lifetime of a given relation (it only changes if
         the relation is removed and re-added), but relation IDs are assigned independently per
-        model and so can collide numerically across two different models relating to the same
-        backend. A short, deterministic hash of ``self.charm.model.uuid`` (globally unique) is
-        included alongside it so two ``postgresql_client`` relations sharing a database/schema -
-        whether in the same model or different ones - can never observe or drop each other's
-        canary tables.
+        model and can collide numerically across two different models relating to the same
+        backend, and can themselves be arbitrarily long. Rather than embedding the raw
+        ``relation_id`` (variable length) and a short model hash (narrow collision resistance) in
+        the table name directly, both are folded into a single fixed-width, collision-resistant
+        ``scope_token``: the first 16 hex characters (64 bits) of a SHA-256 hash of
+        ``f"{model_uuid}:{relation_id}"``. A fixed-width token, combined with the fixed-width
+        identifier written by ``_canary_table_name()``, lets ``cleanup()`` validate the *exact*
+        shape of a table name (via ``_canary_table_regex()``) instead of relying on a prefix match
+        alone, and keeps the total name safely within PostgreSQL's 63-byte identifier limit
+        regardless of how large ``relation_id`` gets.
         """
-        model_token = hashlib.sha256(self.charm.model.uuid.encode()).hexdigest()[:8]
-        return f"{_CANARY_TABLE_PREFIX}{model_token}_{self.relation_id}_"
+        scope_token = self._canary_scope_token()
+        return f"{_CANARY_TABLE_PREFIX}{scope_token}_"
+
+    def _canary_scope_token(self) -> str:
+        digest_input = f"{self.charm.model.uuid}:{self.relation_id}".encode()
+        return hashlib.sha256(digest_input).hexdigest()[:16]
+
+    def _canary_table_regex(self) -> "re.Pattern[str]":
+        """Exact-shape match for this relation's canary tables: prefix + fixed-width digits.
+
+        Used by ``cleanup()`` to reject a table that merely shares the discovery prefix (e.g. a
+        hand-created ``validator_canary_<token>_backup``) but doesn't match the fixed-width
+        zero-padded identifier suffix ``_canary_table_name()`` always produces.
+        """
+        return re.compile(re.escape(self._canary_table_prefix()) + r"[0-9]{20}")
 
     def _canary_table_name(self, identifier: int) -> str:
-        return f"{self._canary_table_prefix()}{identifier}"
+        # Zero-padded to a fixed 20 digits (identifier is masked to 63 bits in prepare(), so it
+        # never exceeds 19 digits) so every canary table name has the same length and shape,
+        # which _canary_table_regex() relies on to reject look-alike, unrelated tables.
+        return f"{self._canary_table_prefix()}{identifier:020d}"
 
     def _canary_marker(self, identifier: int) -> str:
         """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""

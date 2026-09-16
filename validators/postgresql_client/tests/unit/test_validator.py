@@ -586,7 +586,7 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
         assert isinstance(state, PersistenceState)
         assert state.ref == 1
         queries = " ".join(conn.cursor_stub.executed_queries)
-        assert f"validator_canary_bafde89c_0_{state.id}" in queries
+        assert f"validator_canary_e88ccf2f7c3cde3c_{state.id:020d}" in queries
         assert "DROP TABLE IF EXISTS" in queries
         assert "CREATE TABLE" in queries
         assert "INSERT INTO" in queries
@@ -653,7 +653,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
             validator.checkpoint(PersistenceState(id=99, ref=1))
 
         # THEN
-        assert any("validator_canary_bafde89c_0_99" in q for q in cursor.executed_queries)
+        assert any("validator_canary_e88ccf2f7c3cde3c_00000000000000000099" in q for q in cursor.executed_queries)
 
     def test_filters_row_count_by_identifier_derived_marker(self) -> None:
         # GIVEN
@@ -695,7 +695,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
     def test_drops_all_discovered_canary_tables(self) -> None:
         # GIVEN two leftover canary tables are discovered, in the current schema
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchall_rows=[("public", "validator_canary_1"), ("public", "validator_canary_2")])
+        table_1 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        table_2 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000002"
+        cursor = CursorStub(fetchall_rows=[("public", table_1), ("public", table_2)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -704,8 +706,8 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
 
         # THEN
         drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
-        assert any("validator_canary_1" in q for q in drop_queries)
-        assert any("validator_canary_2" in q for q in drop_queries)
+        assert any(table_1 in q for q in drop_queries)
+        assert any(table_2 in q for q in drop_queries)
         # THEN dropped identifiers are safely quoted (defense in depth: they come from
         # information_schema, not directly from user input, but should not be trusted blindly)
         # and schema-qualified, so a same-named table in another schema can't be targeted instead.
@@ -731,7 +733,8 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # Regression test for: discovery previously matched the bare `validator_canary_` prefix
         # shared by every relation, so cleanup for one `postgresql_client` relation could drop
         # canary tables belonging to a different, concurrent relation on the same database/schema.
-        # The LIKE pattern must be scoped to this validator's own model+relation_id.
+        # The LIKE pattern must be scoped to a token derived from this validator's own
+        # model+relation_id.
         validator = _make_persistence_validator(VALID_DATABAG, relation_id=7)
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
@@ -743,7 +746,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "table_name LIKE %s" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_bafde89c\\_7\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_64dc56c7ce45d7d9\\_%",)
 
     def test_scopes_discovery_to_this_models_uuid(self) -> None:
         # Regression test for: relation IDs are assigned independently per model, so two
@@ -765,7 +768,27 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "table_name LIKE %s" in select_query
         like_pattern = cursor.executed_params[0][0]
-        assert like_pattern != "validator\\_canary\\_bafde89c\\_7\\_%"
+        assert like_pattern != "validator\\_canary\\_64dc56c7ce45d7d9\\_%"
+
+    def test_rejects_discovered_tables_that_only_share_the_prefix(self) -> None:
+        # Regression test for: the information_schema LIKE query only narrows candidates by
+        # *prefix*, so a same-prefixed but unrelated table (e.g. a hand-created backup table)
+        # would previously be dropped unconditionally. Cleanup must re-check the exact shape
+        # (prefix + fixed-width digits) before dropping, and skip anything that doesn't match.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        look_alike = "validator_canary_e88ccf2f7c3cde3c_backup"
+        cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", look_alike)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any(good_table in q for q in drop_queries)
+        assert not any(look_alike in q for q in drop_queries)
 
     def test_restricts_discovery_to_base_tables(self) -> None:
         # Regression test for: information_schema.tables also lists views/foreign tables. A view
@@ -798,7 +821,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "ESCAPE" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_bafde89c\\_0\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_e88ccf2f7c3cde3c\\_%",)
 
     def test_noop_when_no_credentials_present(self) -> None:
         # GIVEN a databag without any credential fields (e.g. relation already gone)
