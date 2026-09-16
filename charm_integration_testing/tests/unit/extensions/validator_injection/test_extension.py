@@ -419,7 +419,7 @@ class TestValidatorInjectorExtension:
             assert results["myapp/0"][0].endpoint == "canary"
             assert results["myapp/0"][0].status == "FAIL"
 
-        def test_continues_to_remaining_units_when_one_units_remote_command_fails(
+        def test_continues_to_remaining_units_when_one_unit_remote_command_fails(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
             # Regression test for: _run_persistence_on_unit() raising (e.g. a non-zero
