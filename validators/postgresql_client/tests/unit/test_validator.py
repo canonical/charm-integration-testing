@@ -584,6 +584,20 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
         with pytest.raises(RuntimeError, match="uris"):
             validator.prepare()
 
+    def test_prepare_raises_when_uri_database_does_not_match_databag_database(self) -> None:
+        # GIVEN a "uris" value pointing at "mydb" but a "database" field claiming a different
+        # database.
+        # Regression test for: unlike _validate_simple()/_validate_deep(), _open_connection() (used
+        # by prepare()/checkpoint()/cleanup()) previously skipped this consistency check entirely,
+        # so a relation advertising uris=".../other_db" alongside a stale "database" field would
+        # silently write and verify canary data against the wrong database.
+        databag = {**VALID_DATABAG, "database": "otherdb"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.prepare()
+
 
 class TestPostgreSQLClientPersistenceValidatorPrepare:
     def test_creates_canary_table_and_returns_state(self) -> None:
@@ -802,6 +816,27 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
         assert any(good_table in q for q in drop_queries)
         assert not any(look_alike in q for q in drop_queries)
+
+    def test_rejects_discovered_tables_with_an_out_of_range_identifier(self) -> None:
+        # Regression test for: the discovery regex only checked the *shape* of the identifier
+        # suffix (20 digits), but prepare() masks identifiers to 63 bits (max
+        # 9223372036854775807, 19 digits) - a 20-digit suffix can represent a value far larger
+        # than that. Without an explicit bound check, cleanup would still drop a shape-only
+        # look-alike such as "..._99999999999999999999" that prepare() could never have produced.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        out_of_range_table = "validator_canary_e88ccf2f7c3cde3c_99999999999999999999"
+        cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", out_of_range_table)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any(good_table in q for q in drop_queries)
+        assert not any(out_of_range_table in q for q in drop_queries)
 
     def test_restricts_discovery_to_base_tables(self) -> None:
         # Regression test for: information_schema.tables also lists views/foreign tables. A view
