@@ -9,6 +9,7 @@ from typing import Iterator, Optional, cast
 from unittest.mock import patch
 
 import ops
+import pydantic
 import pytest
 
 from validators.base import (
@@ -835,6 +836,18 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "ERROR"
         assert "failed to load" in (results.results[0].error or "")
         assert results.updated_refs == {}
+
+
+class TestValidatorRunnerResultsModel:
+    """Regression tests for ValidatorRunnerResults' wire model."""
+
+    def test_results_field_is_required(self) -> None:
+        # `results` was previously required by the wire model; making it optional would let a
+        # malformed or truncated runner payload (e.g. `{}`) parse as an empty successful run,
+        # silently reporting a checkpoint/cleanup as passing without executing or reporting
+        # anything.
+        with pytest.raises(pydantic.ValidationError):
+            ValidatorRunnerResults.model_validate_json("{}")
 
 
 class TestConfigureLogging:
