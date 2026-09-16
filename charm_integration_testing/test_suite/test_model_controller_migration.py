@@ -47,14 +47,17 @@ def test_model_controller_migration(
     # Wait migration to start
     juju_client.wait_for_model_to_exist(model=temp_model_ref, timeout=timedelta(minutes=15))
 
-    # Wait until model is idle in new controller
-    juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
+    # Wait until model is idle in new controller. Also wait on the neighbor model (migrating the
+    # target can trigger relation hooks there), so the checkpoint below doesn't race a
+    # neighbor-side hook that hasn't settled yet.
+    models_to_settle = [temp_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
     # restart after migration, hanging `juju exec`. K8s-only.
     if juju_backend.is_k8s_controller(temp_juju_controller):
         juju_client.reboot_model_controller(model=temp_model_ref)
-        juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
+        juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # The model kept its units and relation ids, but its controller name changed: remap the
     # tracking keys so the checkpoint below finds the state seeded before migration.
@@ -76,14 +79,17 @@ def test_model_controller_migration(
     # Wait migration to start
     juju_client.wait_for_model_to_exist(model=target_model_ref, timeout=timedelta(minutes=15))
 
-    # Wait until model is idle in old controller
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Wait until model is idle in old controller. Also wait on the neighbor model (migrating the
+    # target back can trigger relation hooks there), so the checkpoint below doesn't race a
+    # neighbor-side hook that hasn't settled yet.
+    models_to_settle_back = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle_back, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers on the
     # original controller don't restart after the return migration. K8s-only.
     if juju_backend.is_k8s_controller(target_controller):
         juju_client.reboot_model_controller(model=target_model_ref)
-        juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+        juju_client.multi_model_idle_for_period(models_to_settle_back, timeout=timedelta(minutes=15))
 
     # Remap the tracking keys back to the original controller for the second checkpoint.
     rekey_persistence_state_controller(
