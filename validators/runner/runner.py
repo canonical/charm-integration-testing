@@ -414,7 +414,14 @@ class ValidatorRunner:
                 elif outcome is not None:
                     result, new_state = outcome
                     results.append(result)
-                    updated_refs[relation_id_str] = new_state
+                    # Only carry the new state forward on PASS: checkpoint() can return an advanced
+                    # state (e.g. an incremented row count) alongside a FAIL/ERROR result when the
+                    # underlying check didn't hold. Recording that advanced state anyway would
+                    # overwrite the last-known-good baseline before the caller raises on this
+                    # failure, so a later retry/continued run would checkpoint against
+                    # post-failure state and could spuriously pass.
+                    if result.status == "PASS":
+                        updated_refs[relation_id_str] = new_state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
