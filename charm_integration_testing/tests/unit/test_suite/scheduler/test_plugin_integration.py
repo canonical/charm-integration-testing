@@ -230,3 +230,71 @@ def test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_fai
     )
     # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
     result.stdout.no_fnmatch_line("*INTERNALERROR*")
+
+
+def test_finalizer_calling_pytest_skip_during_reconciliation_gives_a_failing_exit_status(
+    pytester: Pytester, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A retained fixture finalizer that calls ``pytest.skip()`` must be handled like any other failure.
+
+    Same cross-module bridge scenario as the ``RuntimeError``-raising
+    finalizer test above, but the finalizer instead calls ``pytest.skip()``.
+    ``pytest.skip()`` raises ``Skipped``, which - like ``Failed`` from
+    ``pytest.fail()`` - deliberately derives from ``BaseException`` rather
+    than ``Exception``, specifically so it is *not* caught by ordinary
+    ``except Exception`` handlers throughout pytest's own internals. An
+    ``except Exception`` guard around the reconciling ``teardown_exact`` call
+    would let such a ``Skipped`` exception escape uncaught, outside pytest's
+    normal reporting flow, likely surfacing as an unexplained
+    ``INTERNALERROR``.
+    """
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        test_mod_a=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.fixture(scope="module")
+            def mod_fixture_a():
+                yield
+                pytest.skip("simulated: finalizer decided to skip")
+
+            @pytest.fixture
+            def observer_creds():
+                pytest.skip("simulated: test observer creds missing")
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_downgrade_charm(mod_fixture_a, observer_creds):
+                pass
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_upgrade_charm(mod_fixture_a):
+                pass
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_mod_b=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_scale():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("--current-state", "deployed")
+
+    # THEN pytest's exit status still reflects the failure...
+    assert result.ret != 0
+    # ...our error message explains what happened...
+    assert any(
+        "Failed to reconcile pytest's setup stack" in record.message and "finalizer decided to skip" in record.message
+        for record in caplog.records
+    )
+    # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
+    result.stdout.no_fnmatch_line("*INTERNALERROR*")

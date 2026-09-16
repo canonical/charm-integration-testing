@@ -23,24 +23,31 @@ A single marker, ``@pytest.mark.state``, is used to annotate every test:
 Convention for recoverable skips
 ---------------------------------
 When a transition test skips via a plain ``pytest.skip()`` (at any pytest
-phase - setup, call, or teardown), the scheduler assumes the environment
-never left its ``requires`` state and may still try to bridge to it later
-(see ``pytest_runtest_makereport`` in ``plugin.py``). This assumption only
-holds if every skip check for a state-marked test - whether in a fixture or
-a guard clause at the top of the test body - runs *before* any real,
-state-mutating side effect (e.g. a Juju deploy/refresh/scale action).
-Authors adding new state-marked tests should keep environment-mutating logic
-strictly after any conditional ``pytest.skip()`` (as the existing transition
-tests do, e.g. ``test_upgrade_controller`` checking for an available upgrade
-target before mutating anything), so this recovery assumption is not
-silently violated regardless of which phase the skip happens to run in.
+phase - setup, call, or teardown), the skip itself does not change the
+scheduler's tracked state: it simply does not advance it. In the common
+case (skip happens before the call phase runs) this means the environment
+never left its ``requires`` state. If the call phase already passed before
+a *later* teardown-phase skip, the state was already advanced to
+``provides`` and the skip does not revert it (see
+``pytest_runtest_makereport`` in ``plugin.py``). Either way, the scheduler
+may still try to bridge from wherever the environment actually ended up.
+This assumption only holds if every skip check for a state-marked test -
+whether in a fixture or a guard clause at the top of the test body - runs
+*before* any real, state-mutating side effect (e.g. a Juju
+deploy/refresh/scale action). Authors adding new state-marked tests should
+keep environment-mutating logic strictly after any conditional
+``pytest.skip()`` (as the existing transition tests do, e.g.
+``test_upgrade_controller`` checking for an available upgrade target before
+mutating anything), so this recovery assumption is not silently violated
+regardless of which phase the skip happens to run in.
 
 This convention does not extend to ``xfail``: a state-marked test that
 resolves to "skipped" via ``@pytest.mark.xfail`` or an imperative
 ``pytest.xfail()`` call is treated like a failure instead, since (unlike a
 plain ``pytest.skip()`` guard clause) the test body actually ran until it
 hit the expected failure and may have mutated the environment partway
-through. State-marked tests in this suite should not use ``xfail``.
+through. This applies to transition and pure tests alike. State-marked
+tests in this suite should not use ``xfail``.
 """
 
 from __future__ import annotations

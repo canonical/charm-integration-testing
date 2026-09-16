@@ -52,6 +52,7 @@ import copy
 import logging
 from collections import defaultdict
 
+import _pytest.outcomes
 import pytest
 
 from .graph import StateGraph, StateTransition
@@ -199,14 +200,18 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
       its ``provides`` state: ``_current_state`` advances accordingly.
 
     * A transition test skipped at *any* phase (setup, call, or teardown) via
-      a plain ``pytest.skip()`` means the environment never left its
-      ``requires`` state: ``_current_state`` is left as-is.
-      ``pytest_runtest_protocol`` uses this to try bridging to whatever the
-      next planned test actually needs. This relies on the convention
-      documented in ``markers.py``: every skip check in this suite - whether
-      in a fixture or as a guard clause at the top of a test body - runs
-      before any state-mutating action, regardless of which pytest phase
-      that check happens to execute in.
+      a plain ``pytest.skip()`` does not itself change ``_current_state``: it
+      is left exactly as it was before the skip. In practice this means
+      ``requires`` (the skip happened before any state-mutating action ran),
+      *unless* the call phase already passed and advanced the state to
+      ``provides`` before a *later* teardown-phase skip - the skip does not
+      revert that. ``pytest_runtest_protocol`` uses whatever
+      ``_current_state`` ends up being to try bridging to whatever the next
+      planned test actually needs. This relies on the convention documented
+      in ``markers.py``: every skip check in this suite - whether in a
+      fixture or as a guard clause at the top of a test body - runs before
+      any state-mutating action, regardless of which pytest phase that check
+      happens to execute in.
 
     * A state-marked test (transition *or* pure) that resolves to "skipped"
       via ``xfail`` (either ``@pytest.mark.xfail`` or an imperative
@@ -379,13 +384,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
 
     That second ``teardown_exact`` call can itself run retained
     module/package-scoped fixture finalizers, outside of pytest's normal
-    per-item reporting flow. If a finalizer raises, we cannot route it
-    through the usual report machinery from here, but we still treat it the
-    same way any other unexpected failure during recovery is treated:
-    environment state becomes unknown, every remaining state-marked test is
-    skipped, and ``session.testsfailed`` is bumped directly so pytest's own
-    exit-status accounting still reflects the failure - rather than letting
-    an unrelated ``INTERNALERROR`` crash the whole run, or silently letting
+    per-item reporting flow. If a finalizer raises - including via
+    ``pytest.skip()``/``pytest.fail()``, whose ``Skipped``/``Failed``
+    exceptions deliberately derive from ``BaseException`` rather than
+    ``Exception`` - we cannot route it through the usual report machinery
+    from here, but we still treat it the same way any other unexpected
+    failure during recovery is treated: environment state becomes unknown,
+    every remaining state-marked test is skipped, and
+    ``session.testsfailed`` is bumped directly so pytest's own exit-status
+    accounting still reflects the failure - rather than letting an
+    unrelated ``INTERNALERROR`` crash the whole run, or silently letting
     the session end with a successful exit status despite failed cleanup.
     """
     global _current_state, _failed_state_test
@@ -423,13 +431,22 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     # teardown assumed - see the docstring note above.
     try:
         item.session._setupstate.teardown_exact(bridge_items[0])
-    except Exception as exc:
+    except (KeyboardInterrupt, SystemExit, _pytest.outcomes.Exit):
+        raise  # Let real interpreter/session-abort signals propagate untouched.
+    except BaseException as exc:
         # A retained fixture finalizer failed outside pytest's normal
         # per-item reporting flow (see the docstring note above), so no
-        # report was ever logged for it. Bump session.testsfailed directly -
-        # the same counter pytest's own accounting uses to decide the run's
-        # exit status - so this doesn't silently produce a successful exit
-        # despite failed cleanup (which may have leaked infrastructure).
+        # report was ever logged for it. Note this must catch BaseException,
+        # not just Exception: pytest's own skip/fail outcomes
+        # (``pytest.skip()``/``pytest.fail()`` inside a finalizer) raise
+        # ``Skipped``/``Failed``, which deliberately derive from
+        # BaseException so they aren't caught by ordinary exception
+        # handlers - but here we do want to catch them, since they mean the
+        # same thing for recovery purposes as any other finalizer failure.
+        # Bump session.testsfailed directly - the same counter pytest's own
+        # accounting uses to decide the run's exit status - so this doesn't
+        # silently produce a successful exit despite failed cleanup (which
+        # may have leaked infrastructure).
         logger.error(
             "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
             "Environment state is now unknown; all remaining state-marked tests will be skipped.",
