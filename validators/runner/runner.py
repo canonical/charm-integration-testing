@@ -299,10 +299,18 @@ class ValidatorRunner:
         return results
 
     def _find_relation_by_id(self, charm: CharmBase, relation_id: int) -> tuple[Relation, str, ValidationRole] | None:
-        """Locate a live relation by its Juju relation_id, along with its interface and role."""
+        """Locate a live, non-peer relation by its Juju relation_id, along with its interface and role.
+
+        Peer relations are skipped, matching ``_iter_persistence_targets``/
+        ``_persistence_load_error_results``: persistence validators are only ever registered
+        against non-peer interfaces, so a stale or malformed ``--refs`` entry that happens to
+        collide with a peer relation's ``relation_id`` must not resolve to it.
+        """
         for relation_name, metadata in charm.meta.relations.items():
-            interface_name = metadata.interface_name or relation_name
             role = str_to_validation_role(metadata.role.name)
+            if role == "peer":
+                continue
+            interface_name = metadata.interface_name or relation_name
             for integration in charm.model.relations.get(relation_name, []):
                 if integration.id == relation_id:
                     return integration, interface_name, role
