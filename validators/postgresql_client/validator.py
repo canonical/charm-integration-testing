@@ -330,13 +330,15 @@ class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator):
 class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersistenceValidator):
     """Reference persistence validator implementation (see SQ103).
 
-    Each validator instance owns a dedicated canary table named ``validator_canary_{identifier}``,
-    where ``identifier`` is chosen by ``prepare()`` and carried forward by the caller (the test
-    harness) as ``PersistenceState.id``. Every row written to the table also carries a marker value
-    derived deterministically from ``identifier``, so ``checkpoint()`` can detect data loss (or a
-    table silently recreated from scratch) by counting only rows tagged with that marker, rather
-    than trusting a plain ``count(*)`` that a coincidentally-sized but unrelated table could satisfy.
-    ``ref`` tracks how many marked rows are expected so far.
+    Each validator instance owns a dedicated canary table named
+    ``validator_canary_{relation_id}_{identifier}``, where ``relation_id`` scopes the table to this
+    relation (see ``_canary_table_prefix``) and ``identifier`` is chosen by ``prepare()`` and
+    carried forward by the caller (the test harness) as ``PersistenceState.id``. Every row written
+    to the table also carries a marker value derived deterministically from ``identifier``, so
+    ``checkpoint()`` can detect data loss (or a table silently recreated from scratch) by counting
+    only rows tagged with that marker, rather than trusting a plain ``count(*)`` that a
+    coincidentally-sized but unrelated table could satisfy. ``ref`` tracks how many marked rows are
+    expected so far.
 
     Persistence only applies to the requirer side of the relation (the side holding credentials to
     connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
@@ -394,12 +396,22 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
 
     def cleanup(self) -> None:
-        """Drop every canary table this validator instance (or a prior one) created.
+        """Drop every canary table this relation (or a prior instance of it) created.
 
         ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so instead
-        of dropping one table by identifier, every table matching the canary name pattern is
-        discovered via ``information_schema`` and dropped. This also mops up a canary table left
-        behind by an interrupted run (e.g. a crash between ``prepare()`` and the next ``cleanup()``).
+        of dropping one table by identifier, every table matching this relation's canary name
+        pattern is discovered via ``information_schema`` and dropped. This also mops up a canary
+        table left behind by an interrupted run (e.g. a crash between ``prepare()`` and the next
+        ``cleanup()``).
+
+        Discovery is scoped to ``self.relation_id`` (see ``_canary_table_name``) rather than the
+        bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client`` relations sharing the
+        same database/schema get distinct relation IDs, so this relation's cleanup can no longer
+        drop another relation's canary tables (or an unrelated table that merely shares the
+        prefix). ``relation_id`` is stable for the lifetime of a given relation, so this still
+        finds a table left behind by an interrupted run of *this* relation; it does not sweep up
+        a stray table from a relation that was removed and re-added under a new ID, which is an
+        accepted trade-off since a fresh ``prepare()`` for the new ID starts its own table anyway.
         """
         self._require_requires_role()
         if not self.databag.get("uris") and not self.databag.get("secret-user"):
@@ -408,9 +420,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         try:
             with conn.cursor() as cur:
                 # Escape LIKE metacharacters in the prefix: `_` and `%` are wildcards in a LIKE pattern, and
-                # `_CANARY_TABLE_PREFIX` contains underscores, so without escaping this could match unrelated
-                # tables (e.g. `validatorXcanaryY123`).
-                escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+                # the relation-scoped prefix contains underscores, so without escaping this could match
+                # unrelated tables (e.g. `validatorXcanaryY123_456`).
+                prefix = self._canary_table_prefix()
+                escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
                 # CREATE TABLE in prepare()/checkpoint() is unqualified, so it resolves through
                 # search_path into current_schema(). Restrict discovery (and the DROP below) to
                 # that same schema too - otherwise a same-named canary table in another schema
@@ -444,8 +457,18 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         conn.autocommit = True
         return conn
 
+    def _canary_table_prefix(self) -> str:
+        """Prefix scoped to this relation, so cleanup discovery can't cross relation boundaries.
+
+        ``self.relation_id`` is stable for the lifetime of a given relation (it only changes if
+        the relation is removed and re-added), and is unique across concurrent relations in the
+        model, so embedding it here means two ``postgresql_client`` relations sharing a
+        database/schema can never observe or drop each other's canary tables.
+        """
+        return f"{_CANARY_TABLE_PREFIX}{self.relation_id}_"
+
     def _canary_table_name(self, identifier: int) -> str:
-        return f"{_CANARY_TABLE_PREFIX}{identifier}"
+        return f"{self._canary_table_prefix()}{identifier}"
 
     def _canary_marker(self, identifier: int) -> str:
         """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""
