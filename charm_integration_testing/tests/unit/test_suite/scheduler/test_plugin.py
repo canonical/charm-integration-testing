@@ -1594,6 +1594,7 @@ class FakeSession:
         self.items = items
         self._setupstate = FakeSetupState()
         self.testscollected = len(items)
+        self.testsfailed = 0
 
 
 def _with_session(item: pytest.Item, items: list[pytest.Item]) -> pytest.Item:
@@ -1890,6 +1891,11 @@ class TestPytestRuntestProtocolRecovery:
         # the whole run crashing.
         assert _plugin_module._current_state is None
         assert _plugin_module._failed_state_test is skipped_downgrade
+        # AND pytest's own exit-status accounting reflects the failure -
+        # otherwise the session could finish with a successful exit status
+        # despite the finalizer failure (and any infrastructure it may have
+        # leaked while failing to clean up).
+        assert skipped_downgrade.session.testsfailed == 1
 
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs

@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import textwrap
 
+import pytest
 from pytest import Pytester
 
 # Enables the `pytester` fixture used below to run real, isolated pytest
@@ -158,3 +159,74 @@ def test_call_time_skip_via_guard_clause_does_not_halt_remaining_state_marked_te
     # still runs - the call-time skip did not halt the state machine.
     result.assert_outcomes(passed=3, skipped=1)
     result.stdout.no_fnmatch_line("*environment state is unknown*")
+
+
+def test_finalizer_failure_during_cross_module_bridge_reconciliation_gives_a_failing_exit_status(
+    pytester: Pytester, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A retained fixture finalizer that fails during recovery must not silently exit successfully.
+
+    Same cross-module bridge scenario as
+    ``test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown``, but
+    module A's module-scoped fixture raises during its own finalizer. Since
+    the original ``nextitem`` (also module A) would have kept that fixture's
+    scope retained, only the reconciling ``teardown_exact`` call towards the
+    injected module B bridge actually tears it down and hits the raising
+    finalizer - outside pytest's normal per-item reporting flow. Before the
+    fix, this exception would have escaped straight past our hook, likely
+    surfacing as a raw traceback/``INTERNALERROR`` instead of a clean,
+    accounted-for pytest failure.
+    """
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        test_mod_a=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.fixture(scope="module")
+            def mod_fixture_a():
+                yield
+                raise RuntimeError("simulated finalizer failure")
+
+            @pytest.fixture
+            def observer_creds():
+                pytest.skip("simulated: test observer creds missing")
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_downgrade_charm(mod_fixture_a, observer_creds):
+                pass
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_upgrade_charm(mod_fixture_a):
+                pass
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_mod_b=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_scale():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("--current-state", "deployed")
+
+    # THEN pytest's exit status reflects the failure (not a clean, all-green
+    # exit despite the finalizer failure)...
+    assert result.ret != 0
+    # ...our error message explains what happened (propagated via Python
+    # logging into this outer test's own captured log records, since the
+    # nested in-process pytester run shares the same logging machinery)...
+    assert any(
+        "Failed to reconcile pytest's setup stack" in record.message and "simulated finalizer failure" in record.message
+        for record in caplog.records
+    )
+    # ...and no raw INTERNALERROR/unhandled traceback leaked past our hook.
+    result.stdout.no_fnmatch_line("*INTERNALERROR*")

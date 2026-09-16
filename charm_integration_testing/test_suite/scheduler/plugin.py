@@ -381,9 +381,11 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     per-item reporting flow. If a finalizer raises, we cannot route it
     through the usual report machinery from here, but we still treat it the
     same way any other unexpected failure during recovery is treated:
-    environment state becomes unknown and every remaining state-marked test
-    is skipped, rather than letting an unrelated ``INTERNALERROR`` crash the
-    whole run silently without explaining what happened.
+    environment state becomes unknown, every remaining state-marked test is
+    skipped, and ``session.testsfailed`` is bumped directly so pytest's own
+    exit-status accounting still reflects the failure - rather than letting
+    an unrelated ``INTERNALERROR`` crash the whole run, or silently letting
+    the session end with a successful exit status despite failed cleanup.
     """
     global _current_state, _failed_state_test
     yield
@@ -422,15 +424,18 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         item.session._setupstate.teardown_exact(bridge_items[0])
     except Exception as exc:
         # A retained fixture finalizer failed outside pytest's normal
-        # per-item reporting flow (see the docstring note above). Treat it
-        # like any other unexpected failure during recovery instead of
-        # letting it surface as an unexplained INTERNALERROR.
+        # per-item reporting flow (see the docstring note above), so no
+        # report was ever logged for it. Bump session.testsfailed directly -
+        # the same counter pytest's own accounting uses to decide the run's
+        # exit status - so this doesn't silently produce a successful exit
+        # despite failed cleanup (which may have leaked infrastructure).
         logger.error(
             "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
             "Environment state is now unknown; all remaining state-marked tests will be skipped.",
             [b.nodeid for b in bridge_items],
             exc,
         )
+        item.session.testsfailed += 1
         _current_state = None
         _failed_state_test = item
         return
