@@ -1280,6 +1280,38 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._failed_state_test is None
         assert edge in _plugin_module._skipped_transitions
 
+    def test_teardown_skip_after_a_passing_call_does_not_revert_the_already_reached_state(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a transition test whose call phase already passed - the real
+        # mutation happened and current_state correctly advanced to
+        # 'provides' - and only afterwards does a fixture finalizer's own
+        # teardown-phase pytest.skip() produce a second, "skipped" report
+        # for the same item. This drives the full call-then-teardown report
+        # sequence pytest actually produces (rather than a standalone
+        # teardown report in isolation), to prove the later report cannot
+        # retroactively undo a transition that already happened.
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+
+        # WHEN the call phase passes (real transition happens)...
+        _drive_makereport(item, call, _make_report(when="call", failed=False))
+        assert _plugin_module._current_state == State.NEIGHBOR_ONLY
+
+        # ...and only then does a teardown-phase skip report arrive
+        _drive_makereport(item, call, _make_report(when="teardown", skipped=True))
+
+        # THEN the environment is still correctly at 'provides' - the
+        # teardown-phase skip does not revert it to 'requires' or mark the
+        # test as a failure, and does not blacklist the edge (the
+        # transition genuinely succeeded, so there is nothing to retry).
+        assert _plugin_module._current_state == State.NEIGHBOR_ONLY
+        assert _plugin_module._failed_state_test is None
+        assert edge not in _plugin_module._skipped_transitions
+
     def test_xfail_skip_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a transition test that resolves to "skipped" via xfail (its
         # body actually ran and hit the expected failure), not a plain
@@ -1825,6 +1857,39 @@ class TestPytestRuntestProtocolRecovery:
         injected = skipped_downgrade.session.items[1]
         setupstate = cast(FakeSetupState, skipped_downgrade.session._setupstate)
         assert setupstate.teardown_exact_calls == [injected]
+
+    def test_finalizer_failure_during_reconciliation_halts_gracefully(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN the same recovery scenario as above, but the reconciling
+        # teardown_exact call towards the bridge raises - as it could for a
+        # real pytest.SetupState if a retained module/package-scoped
+        # fixture's finalizer fails.
+        bridge_template = make_item("test_scale", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        graph, all_transitions = _graph_and_all((State.DEPLOYED, State.NEIGHBOR_ONLY, bridge_template))
+        _plugin_module._full_graph = graph
+        _plugin_module._all_transitions = all_transitions
+        _plugin_module._current_state = State.DEPLOYED
+
+        skipped_downgrade = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        nextitem = make_item("test_upgrade_charm", requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+        _with_session(skipped_downgrade, [skipped_downgrade, nextitem])
+
+        def _raise(_: pytest.Item) -> None:
+            raise RuntimeError("finalizer boom")
+
+        cast(Any, skipped_downgrade.session._setupstate).teardown_exact = _raise
+
+        # WHEN the hook runs, it must not propagate the finalizer's
+        # exception as an unexplained INTERNALERROR...
+        _drive_runtest_protocol(skipped_downgrade, nextitem)
+
+        # THEN recovery treats it like any other unexpected failure: state
+        # becomes unknown and the failing item is recorded, so subsequent
+        # state-marked tests are skipped via pytest_runtest_setup instead of
+        # the whole run crashing.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is skipped_downgrade
 
     def test_does_not_inject_when_no_path_exists(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no transition exists from the current state to what nextitem needs

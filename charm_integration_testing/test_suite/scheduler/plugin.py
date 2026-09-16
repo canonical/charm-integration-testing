@@ -375,7 +375,17 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     ``teardown_exact`` again, this time towards the bridge's first item, cuts
     the stack down to only what the bridge actually shares with *item*
     before returning control to pytest.
+
+    That second ``teardown_exact`` call can itself run retained
+    module/package-scoped fixture finalizers, outside of pytest's normal
+    per-item reporting flow. If a finalizer raises, we cannot route it
+    through the usual report machinery from here, but we still treat it the
+    same way any other unexpected failure during recovery is treated:
+    environment state becomes unknown and every remaining state-marked test
+    is skipped, rather than letting an unrelated ``INTERNALERROR`` crash the
+    whole run silently without explaining what happened.
     """
+    global _current_state, _failed_state_test
     yield
     if nextitem is None or _current_state is None or _full_graph is None:
         return
@@ -408,7 +418,22 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     # Reconcile pytest's setup stack with the item that will actually run
     # next (the bridge), not the original nextitem the just-finished
     # teardown assumed - see the docstring note above.
-    item.session._setupstate.teardown_exact(bridge_items[0])
+    try:
+        item.session._setupstate.teardown_exact(bridge_items[0])
+    except Exception as exc:
+        # A retained fixture finalizer failed outside pytest's normal
+        # per-item reporting flow (see the docstring note above). Treat it
+        # like any other unexpected failure during recovery instead of
+        # letting it surface as an unexplained INTERNALERROR.
+        logger.error(
+            "Failed to reconcile pytest's setup stack while recovering towards %s: %s.  "
+            "Environment state is now unknown; all remaining state-marked tests will be skipped.",
+            [b.nodeid for b in bridge_items],
+            exc,
+        )
+        _current_state = None
+        _failed_state_test = item
+        return
     logger.warning(
         "Recovering state machine: injecting %s to bridge %r towards %r before %r.",
         [b.nodeid for b in bridge_items],
