@@ -198,14 +198,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     * A transition test passing at call time means the environment reached
       its ``provides`` state: ``_current_state`` advances accordingly.
 
-    * A transition test skipped at *any* phase (setup, call, or teardown)
-      means the environment never left its ``requires`` state:
-      ``_current_state`` is left as-is. ``pytest_runtest_protocol`` uses this
-      to try bridging to whatever the next planned test actually needs. This
-      relies on the convention documented in ``markers.py``: every skip check
-      in this suite - whether in a fixture or as a guard clause at the top of
-      a test body - runs before any state-mutating action, regardless of
-      which pytest phase that check happens to execute in.
+    * A transition test skipped at *any* phase (setup, call, or teardown) via
+      a plain ``pytest.skip()`` means the environment never left its
+      ``requires`` state: ``_current_state`` is left as-is.
+      ``pytest_runtest_protocol`` uses this to try bridging to whatever the
+      next planned test actually needs. This relies on the convention
+      documented in ``markers.py``: every skip check in this suite - whether
+      in a fixture or as a guard clause at the top of a test body - runs
+      before any state-mutating action, regardless of which pytest phase
+      that check happens to execute in.
+
+    * A transition test that resolves to "skipped" via ``xfail`` (either
+      ``@pytest.mark.xfail`` or an imperative ``pytest.xfail()`` call after
+      the test body started) is *not* covered by that convention: the test
+      body actually ran until it hit the expected failure, so it may have
+      mutated the environment partway through. This is treated like a
+      failure, not a skip.
 
     Pure tests (``requires == provides``) leave ``_current_state`` unchanged
     when they pass or skip; a failure still halts everything and sets it to
@@ -223,7 +231,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         marker = None
     if marker is None:
         return
-    if report.failed:
+    if report.failed or (report.skipped and marker.is_transition and getattr(report, "wasxfail", None) is not None):
         _failed_state_test = item
         _current_state = None
         logger.error(

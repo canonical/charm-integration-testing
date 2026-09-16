@@ -1088,13 +1088,18 @@ class TestBuildExecutionPlan:
 # ---------------------------------------------------------------------------
 
 
-def _make_report(when: str = "call", failed: bool = False, skipped: bool = False) -> Any:
+def _make_report(when: str = "call", failed: bool = False, skipped: bool = False, wasxfail: str | None = None) -> Any:
     """Return a minimal test report substitute.
 
     Mirrors the mutually-exclusive ``failed``/``skipped``/``passed`` triad
-    that real ``pytest.TestReport`` objects expose.
+    that real ``pytest.TestReport`` objects expose. ``wasxfail`` mirrors the
+    attribute pytest only sets on xfail-turned-skip reports (never on a
+    plain ``pytest.skip()``); omit it (the default) for a plain skip.
     """
-    return SimpleNamespace(when=when, failed=failed, skipped=skipped, passed=not failed and not skipped)
+    namespace = SimpleNamespace(when=when, failed=failed, skipped=skipped, passed=not failed and not skipped)
+    if wasxfail is not None:
+        namespace.wasxfail = wasxfail
+    return namespace
 
 
 def _drive_makereport(item: pytest.Item, call: Any, report: Any) -> None:
@@ -1274,6 +1279,27 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._current_state == State.DEPLOYED
         assert _plugin_module._failed_state_test is None
         assert edge in _plugin_module._skipped_transitions
+
+    def test_xfail_skip_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that resolves to "skipped" via xfail (its
+        # body actually ran and hit the expected failure), not a plain
+        # pytest.skip() guard clause
+        item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", skipped=True, wasxfail="expected to fail")
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown (halted), unlike a
+        # plain pytest.skip(): the test body may have already mutated the
+        # environment before hitting its expected failure.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+        assert edge not in _plugin_module._skipped_transitions
 
     def test_edge_not_blacklisted_while_an_untried_candidate_remains(
         self, make_item: Callable[..., pytest.Item]
