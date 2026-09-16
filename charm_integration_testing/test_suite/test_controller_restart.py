@@ -21,8 +21,11 @@ def test_controller_restart(
     # Reboot our controllers with a rolling reboot
     juju_client.reboot_model_controller(model=target_model_ref)
 
-    # Wait until idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Wait until idle. Also wait on the neighbor model (unaffected by the reboot itself, but the
+    # CMR relation may process events there as the target model recovers), so the checkpoint below
+    # doesn't race a neighbor-side databag/hook that hasn't settled yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations, and verify canary data survived the reboot. For a
     # CMR where target_model_ref's application is the provider, the applicable persistence
