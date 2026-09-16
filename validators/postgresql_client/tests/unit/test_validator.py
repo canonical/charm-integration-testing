@@ -717,6 +717,29 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert result.interface == "postgresql_client"
         assert result.level == "deep"
 
+    def test_raises_when_expected_identifier_is_out_of_range(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously formatted expected.id into the table name
+        # without validating it, so a restored/malformed PersistenceState with an out-of-range id
+        # (larger than any identifier prepare() can produce, masked to 63 bits) could silently
+        # produce an overlong/invalid table name instead of failing safely.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        out_of_range_id = 1 << 63  # one past _MAX_CANARY_IDENTIFIER
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=out_of_range_id, ref=1))
+
+    def test_raises_when_expected_identifier_is_negative(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=-1, ref=1))
+
 
 class TestPostgreSQLClientPersistenceValidatorCleanup:
     def test_drops_all_discovered_canary_tables(self) -> None:

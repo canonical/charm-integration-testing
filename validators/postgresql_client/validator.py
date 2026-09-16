@@ -544,7 +544,15 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _canary_table_name(self, identifier: int) -> str:
         # Zero-padded to a fixed 20 digits (identifier is masked to 63 bits in prepare(), so it
         # never exceeds 19 digits) so every canary table name has the same length and shape,
-        # which _canary_table_regex() relies on to reject look-alike, unrelated tables.
+        # which _canary_table_regex() relies on to reject look-alike, unrelated tables. checkpoint()
+        # passes back an identifier from a (possibly restored/malformed) PersistenceState rather
+        # than a freshly masked one, so validate the range here too - an out-of-range value would
+        # otherwise produce a name PostgreSQL could truncate or reject, causing checkpoint() to
+        # silently read/write the wrong table instead of failing safely.
+        if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(
+                f"canary identifier {identifier} is out of range " f"(expected 0..{_MAX_CANARY_IDENTIFIER})"
+            )
         return f"{self._canary_table_prefix()}{identifier:020d}"
 
     def _canary_marker(self, identifier: int) -> str:
