@@ -294,6 +294,23 @@ class TestValidatorInjectorExtension:
             assert "--persistence cleanup" in run_cmd
             assert "--refs" not in run_cmd
 
+        def test_cleanup_keeps_state_when_a_result_is_fail_or_error(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN cleanup reports a FAIL for one of the unit's canary tables
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            persistence_state = {key: PersistenceState(id=1, ref=2)}
+            juju.exec_responses.extend(
+                _preinstalled_responses(_persistence_runner_json(results=[_fail_result("canary")]))
+            )
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+
+            # THEN the tracking entry is kept, since the canary data may not actually be gone
+            assert persistence_state == {key: PersistenceState(id=1, ref=2)}
+
         def test_cleanup_does_not_drop_state_belonging_to_other_units(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:

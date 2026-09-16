@@ -78,13 +78,17 @@ class ValidatorInjectorExtension(JujuExtension):
             results[unit] = unit_results
 
             if persistence == "cleanup":
-                # Canary tables have been dropped; drop any tracked state for this unit too.
-                for key in [
-                    key
-                    for key in persistence_state
-                    if key.controller == model.controller and key.model == model.model and key.unit == unit
-                ]:
-                    del persistence_state[key]
+                # Canary tables have been dropped; drop any tracked state for this unit too - but
+                # only once cleanup actually succeeded for every relation. If any result came back
+                # FAIL/ERROR, some canary data may still be sitting on the backend, so keep the
+                # tracking entries around for diagnosis or a retry instead of losing them silently.
+                if not any(result.status in ("FAIL", "ERROR") for result in unit_results):
+                    for key in [
+                        key
+                        for key in persistence_state
+                        if key.controller == model.controller and key.model == model.model and key.unit == unit
+                    ]:
+                        del persistence_state[key]
             else:
                 for relation_id_str, state in updated_refs.items():
                     key = PersistenceKey(

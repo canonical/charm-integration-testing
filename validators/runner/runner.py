@@ -142,6 +142,19 @@ class ValidatorRunner:
                 if not issubclass(validator_cls, BasePersistenceValidator):
                     logger.warning(f"Entry point '{ep.name}' does not implement BasePersistenceValidator. Skipping.")
                     continue
+                # Unlike functional validators, persistence state (PersistenceState per relation_id
+                # in --refs/updated_refs) has no room to distinguish which validator a state entry
+                # belongs to. Two persistence validators registered for the same interface would
+                # silently overwrite each other's state, so warn loudly rather than misbehaving
+                # quietly - this is a real constraint of the current wire format, not (yet) enforced
+                # at load time.
+                if ep.name in validators:
+                    logger.warning(
+                        f"Multiple persistence validators registered for interface '{ep.name}'; only one "
+                        "PersistenceState is tracked per relation_id, so their prepare()/checkpoint() calls "
+                        "will overwrite each other's state. This is unsupported - register at most one "
+                        "persistence validator per interface."
+                    )
                 validators.setdefault(ep.name, []).append(validator_cls)
             except Exception:
                 logger.exception(f"Failed to load persistence validator for '{ep.name}'")
@@ -335,8 +348,8 @@ class ValidatorRunner:
         (``PersistenceNotApplicable`` is treated as a silent skip, not an error). Shared by
         prepare_all/checkpoint_all/cleanup_all so each only has to handle its own return shape.
         """
-        validator = validator_cls(charm, integration)
         try:
+            validator = validator_cls(charm, integration)
             return call(validator), None
         except PersistenceNotApplicable:
             logger.debug(
@@ -374,6 +387,13 @@ def main() -> None:
 
     if args.persistence == "checkpoint" and args.refs is None:
         parser.error("--refs is required when --persistence checkpoint is used")
+
+    # Preserve the pre-persistence CLI contract: invoking run_validators with no flags at all
+    # still runs the "simple" functional level, matching every existing direct caller. Only
+    # suppress the functional run when --persistence was explicitly requested (a persistence-only
+    # invocation), so --level and --persistence can still be combined or used independently.
+    if args.level is None and args.persistence is None:
+        args.level = "simple"
 
     refs: dict[str, PersistenceState] = {}
     if args.refs is not None:
