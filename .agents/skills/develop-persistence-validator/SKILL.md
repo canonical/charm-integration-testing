@@ -37,7 +37,8 @@ protocol; there is no design document checked into this repository.
 ### The three lifecycle methods
 
 Every persistence validator lives in `validators/<name>/validator.py`
-alongside its functional counterpart and extends `BasePersistenceValidator`:
+(alongside its functional counterpart when one exists - a persistence-only
+package is also valid, see step 1) and extends `BasePersistenceValidator`:
 
 ```python
 import uuid
