@@ -343,14 +343,22 @@ def seed_persistence_state_for_resumed_run(
     To avoid that silent gap, re-run "prepare" against the already-deployed target application as
     soon as the session starts, seeding fresh canary data/state exactly as ``test_deploy`` would
     have. This only handles the ``State.DEPLOYED`` resume point, where the target (and, for CMR
-    tests, neighbor) application is guaranteed to already exist. Resuming into any other
-    post-deploy state (e.g. ``NEIGHBOR_ONLY``, ``DEPLOYED_WITH_OLD_REVISION``) is not handled here
+    tests, neighbor) application is guaranteed to already exist. ``State.NEIGHBOR_ONLY`` doesn't
+    need seeding here either, but for a different reason: every test that can run from that state
+    (``test_idempotent_redeploy``, ``test_deploy_target_old_revision``) calls ``prepare()`` itself
+    as part of its own transition, so no gap exists there and no warning is warranted. Resuming
+    into any other post-deploy state (e.g. ``DEPLOYED_WITH_OLD_REVISION``) is not handled here
     since the application topology at those states isn't guaranteed - persistence validation is
     skipped for those runs, with a loud warning rather than a silent one.
     """
     current_state = State(request.config.getoption("--current-state"))
     if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
         # test_deploy will run this session (or there's no model yet to seed against).
+        return
+
+    if current_state == State.NEIGHBOR_ONLY:
+        # Handled by whichever test transitions out of this state (see the docstring above) -
+        # no seeding and no warning needed.
         return
 
     if current_state != State.DEPLOYED:

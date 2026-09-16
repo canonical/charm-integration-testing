@@ -441,6 +441,35 @@ class TestValidatorInjectorExtension:
             assert len(run_cmds) == 2
             assert results["myapp/1"] == []
 
+        def test_reports_error_and_does_not_mutate_state_for_a_malformed_relation_id(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # Regression test for: converting updated_refs' string keys to int happened outside
+            # the per-unit try/except that catches _run_persistence_on_unit failures, so a
+            # malformed or forward-version remote payload (e.g. a non-numeric relation_id key)
+            # raised ValueError straight out of post_persistence(), aborting the loop before later
+            # units were attempted and before persistence_state could be left untouched.
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            existing_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            persistence_state = {existing_key: PersistenceState(id=1, ref=2)}
+            malformed_stdout = (
+                '{"results": [], "updated_refs": {"not-an-int": {"id": 1, "ref": 2}}, '
+                '"cleaned_relation_ids": []}'
+            )
+            juju.exec_responses.extend(_preinstalled_responses(malformed_stdout))  # myapp/0
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))  # myapp/1
+
+            # WHEN
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", persistence_state)
+
+            # THEN myapp/0 reports an ERROR result instead of raising, its existing tracked state
+            # is untouched, and myapp/1 still gets its own attempt.
+            assert results["myapp/0"][0].status == "ERROR"
+            assert persistence_state == {existing_key: PersistenceState(id=1, ref=2)}
+            run_cmds = [call for call in juju.exec_calls if "--persistence" in call[2]]
+            assert len(run_cmds) == 2
+            assert results["myapp/1"] == []
+
         def test_skips_and_preserves_tracked_state_when_no_validators_path_and_venv_absent(
             self, extension_no_path: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:

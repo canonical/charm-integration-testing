@@ -143,11 +143,34 @@ class ValidatorInjectorExtension(JujuExtension):
                 ]:
                     del persistence_state[key]
             else:
-                for relation_id_str, state in updated_refs.items():
-                    key = PersistenceKey(
-                        controller=model.controller, model=model.model, unit=unit, relation_id=int(relation_id_str)
-                    )
-                    persistence_state[key] = state
+                try:
+                    # Build every key/state pair before mutating persistence_state: a malformed
+                    # or forward-version remote payload (updated_refs is parsed from JSON, so
+                    # Pydantic accepts any string key - e.g. "not-an-int") must not partially
+                    # apply this unit's updates before failing partway through the dict.
+                    new_entries = {
+                        PersistenceKey(
+                            controller=model.controller,
+                            model=model.model,
+                            unit=unit,
+                            relation_id=int(relation_id_str),
+                        ): state
+                        for relation_id_str, state in updated_refs.items()
+                    }
+                except (TypeError, ValueError) as exc:
+                    results[unit] = [
+                        ValidationResult(
+                            status="ERROR",
+                            endpoint="",
+                            interface="",
+                            role="requires",
+                            level="deep",
+                            relation_id=-1,
+                            error=f"Persistence op '{persistence}' returned a malformed relation_id on {unit}: {exc}",
+                        )
+                    ]
+                    continue
+                persistence_state.update(new_entries)
         return results
 
     def _run_validators_on_unit(
