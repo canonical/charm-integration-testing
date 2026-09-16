@@ -24,6 +24,13 @@ from validators.base import (
 # discover every canary table it may have created by pattern rather than by identifier.
 _CANARY_TABLE_PREFIX = "validator_canary_"
 
+# prepare() masks its identifier to 63 bits (see PostgreSQLClientPersistenceValidator.prepare), so
+# a genuine canary identifier never exceeds this value. cleanup()'s discovery regex only checks
+# that a candidate table name has the right *shape* (prefix + 20 digits); this bound lets it also
+# reject an out-of-range, look-alike table (e.g. "..._99999999999999999999") that has the right
+# shape but couldn't possibly have been produced by prepare().
+_MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+
 
 def _quote_identifier(name: str) -> str:
     """Safely quote a SQL identifier for interpolation into a query string.
@@ -424,9 +431,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         The initial ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE``
         can't cheaply assert an exact suffix shape), so every candidate is re-checked against
         ``_canary_table_regex()`` - which requires the full ``prefix + fixed-width digits`` shape -
-        before being dropped. This rejects a same-prefixed but unrelated table (e.g. a hand-created
-        ``validator_canary_<token>_backup``) that a bare prefix match would otherwise catch and
-        destroy.
+        and against ``_MAX_CANARY_IDENTIFIER`` before being dropped. The regex alone would still
+        accept a shape-only look-alike such as ``..._99999999999999999999`` (20 nines), which is
+        larger than any identifier ``prepare()`` can produce (masked to 63 bits); the extra bound
+        check rejects that too. This rejects a same-prefixed but unrelated table (e.g. a
+        hand-created ``validator_canary_<token>_backup``) that a bare prefix match would otherwise
+        catch and destroy.
         """
         self._require_requires_role()
         if not self.databag.get("uris") and not self.databag.get("secret-user"):
@@ -455,7 +465,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 tables = [(row[0], row[1]) for row in cur.fetchall()]
             name_regex = self._canary_table_regex()
             for schema, table in tables:
-                if not name_regex.fullmatch(table):
+                match = name_regex.fullmatch(table)
+                if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
                     continue
                 quoted_table = f"{_quote_identifier(schema)}.{_quote_identifier(table)}"
                 with conn.cursor() as cur:
@@ -485,6 +496,13 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             # whitespace-only first entry) passes that check but would otherwise reach _connect()
             # as dsn="", which libpq silently treats as "use local/default connection parameters".
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'uris' is blank")
+        # Mirrors the database/URI consistency check _validate_simple()/_validate_deep() perform
+        # before connecting: without it, a relation advertising uris=".../other_db" alongside a
+        # stale/mismatched "database" field would silently write and verify canary data against
+        # the wrong database, allowing persistence validation to pass for the wrong target.
+        db_check = self._check_database_consistency(uri, data["database"])
+        if not db_check.passed:
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {db_check.message}")
         conn = self._connect(uri)
         conn.autocommit = True
         return conn
@@ -517,9 +535,11 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
         Used by ``cleanup()`` to reject a table that merely shares the discovery prefix (e.g. a
         hand-created ``validator_canary_<token>_backup``) but doesn't match the fixed-width
-        zero-padded identifier suffix ``_canary_table_name()`` always produces.
+        zero-padded identifier suffix ``_canary_table_name()`` always produces. Matching this
+        shape alone isn't sufficient though - see ``cleanup()``, which additionally checks the
+        captured ``identifier`` group against ``_MAX_CANARY_IDENTIFIER``.
         """
-        return re.compile(re.escape(self._canary_table_prefix()) + r"[0-9]{20}")
+        return re.compile(re.escape(self._canary_table_prefix()) + r"(?P<identifier>[0-9]{20})")
 
     def _canary_table_name(self, identifier: int) -> str:
         # Zero-padded to a fixed 20 digits (identifier is masked to 63 bits in prepare(), so it
