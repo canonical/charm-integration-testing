@@ -411,13 +411,19 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # `_CANARY_TABLE_PREFIX` contains underscores, so without escaping this could match unrelated
                 # tables (e.g. `validatorXcanaryY123`).
                 escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+                # CREATE TABLE in prepare()/checkpoint() is unqualified, so it resolves through
+                # search_path into current_schema(). Restrict discovery (and the DROP below) to
+                # that same schema too - otherwise a same-named canary table in another schema
+                # could be left behind, or an unrelated same-named object in a different schema
+                # could be dropped by mistake.
                 cur.execute(
-                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s ESCAPE '\\'",
+                    "SELECT table_schema, table_name FROM information_schema.tables "
+                    "WHERE table_schema = current_schema() AND table_name LIKE %s ESCAPE '\\'",
                     (f"{escaped_prefix}%",),
                 )
-                tables = [row[0] for row in cur.fetchall()]
-            for table in tables:
-                quoted_table = _quote_identifier(table)
+                tables = [(row[0], row[1]) for row in cur.fetchall()]
+            for schema, table in tables:
+                quoted_table = f"{_quote_identifier(schema)}.{_quote_identifier(table)}"
                 with conn.cursor() as cur:
                     cur.execute(f"DROP TABLE IF EXISTS {quoted_table}")  # nosec B608 - identifier is safely quoted
         finally:
