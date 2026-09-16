@@ -88,7 +88,9 @@ A persistence validator implements three methods, called at different points in 
 
 ``prepare() -> PersistenceState``
   Seeds canary data (e.g. a marker row) for a relation and returns a ``PersistenceState``
-  identifying it. Called once when a relation is first established.
+  identifying it. Called when a relation is first established, and again whenever a relation is
+  re-established with a fresh ``relation_id`` (e.g. after ``cleanup()`` runs during an
+  idempotent-redeploy or old-revision test, or when a neighbor relation is re-added).
 
 ``checkpoint(expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]``
   Verifies the canary data seeded by ``prepare()`` (or a previous ``checkpoint()``) is still
@@ -135,6 +137,14 @@ The runner's JSON output includes an ``updated_refs`` field alongside the usual 
 via its ``post_persistence`` hook) are responsible for persisting ``updated_refs`` across test
 steps (e.g. in ``persistence_state``, keyed by controller/model/unit) and passing the relevant
 entries back in via ``--refs`` on the next ``checkpoint`` call.
+
+For ``--persistence cleanup``, the output also includes a ``cleaned_relation_ids`` field: the
+relation IDs that cleanup actually visited (i.e. had a live relation with a registered
+persistence validator at cleanup time), regardless of whether the cleanup call itself succeeded.
+``post_persistence`` only drops tracked ``persistence_state`` entries for relation IDs that
+appear here *and* did not produce a FAIL/ERROR result - a tracked relation ID that cleanup never
+visited (e.g. its relation was already removed, or its interface's persistence validator failed
+to load) keeps its tracking entry, so orphaned canary data isn't silently forgotten.
 
 Writing a new persistence validator
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
