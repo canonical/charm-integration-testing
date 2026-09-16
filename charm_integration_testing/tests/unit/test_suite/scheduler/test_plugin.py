@@ -1207,6 +1207,26 @@ class TestPytestRuntestMakereport:
 
         assert _plugin_module._current_state == State.EMPTY_MODEL
 
+    def test_multi_requires_pass_from_a_non_provides_state_still_advances_current_state(
+        self, make_item: Callable[..., pytest.Item]
+    ) -> None:
+        # GIVEN a marker accepting multiple requires states where provides
+        # equals only one of them (marker.is_transition is False here - see
+        # test_provides_may_equal_one_of_requires in test_markers.py), and the
+        # environment currently sits at the *other* accepted requires state.
+        item = make_item("test_idempotent", requires=[State.DEPLOYED, State.NEIGHBOR_ONLY], provides=State.DEPLOYED)
+        _plugin_module._current_state = State.NEIGHBOR_ONLY
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", failed=False)
+
+        # WHEN it passes at call time
+        _drive_makereport(item, call, report)
+
+        # THEN the environment genuinely moved to provides, even though
+        # marker.is_transition is False - a stale is_transition-only check
+        # would have left _current_state at NEIGHBOR_ONLY instead.
+        assert _plugin_module._current_state == State.DEPLOYED
+
     def test_skipped_transition_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a transition test that gets skipped at setup time
         item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)

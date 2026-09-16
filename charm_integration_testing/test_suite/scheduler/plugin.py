@@ -196,8 +196,15 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
       ``_current_state`` becomes ``None`` and all subsequent state-marked
       tests are skipped (``pytest_runtest_setup``) until the run ends.
 
-    * A transition test passing at call time means the environment reached
-      its ``provides`` state: ``_current_state`` advances accordingly.
+    * A state-marked test passing at call time means the environment reached
+      its ``provides`` state: ``_current_state`` advances accordingly. This
+      holds for transition tests and for the multi-``requires`` variant of a
+      "pure" test too, where ``provides`` matches only *one* of several
+      accepted ``requires`` states (see
+      ``test_provides_may_equal_one_of_requires`` in ``test_markers.py``) - a
+      passing run starting from a *different* accepted ``requires`` state
+      still genuinely moves the environment to ``provides``. For an ordinary
+      single-``requires`` pure test this is a no-op.
 
     * A transition test skipped at *any* phase (setup, call, or teardown) via
       a plain ``pytest.skip()`` does not itself change ``_current_state``: it
@@ -245,7 +252,16 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
             "All remaining state-marked tests will be skipped.",
             item.nodeid,
         )
-    elif report.when == "call" and report.passed and marker.is_transition:
+    elif report.when == "call" and report.passed:
+        # Always advance to marker.provides, not just when marker.is_transition:
+        # a marker with multiple accepted requires states and a provides that
+        # equals only *one* of them (see
+        # test_provides_may_equal_one_of_requires in test_markers.py) is not
+        # flagged as is_transition, yet a passing run starting from a
+        # *different* accepted requires state still genuinely changes the
+        # environment to provides. For an ordinary pure test (a single
+        # requires state equal to provides), this is a no-op: the state was
+        # already provides before the test ran.
         _current_state = marker.provides
     elif report.skipped and marker.is_transition:
         candidate_recorded = False
