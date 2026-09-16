@@ -67,8 +67,11 @@ def test_deploy_target_old_revision(
     # Deploy the original bundle with only the target app revision overridden
     juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
 
-    # Wait until idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Wait until idle. Also wait on the neighbor model (already deployed, but the CMR relation
+    # this deploy establishes/updates is settled asynchronously by agents in that model), so the
+    # persistence prepare below doesn't race a neighbor-side databag that isn't ready yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Verify the application is deployed at the target revision and the model is healthy
     deployed_revision = juju_client.application_revision(application=target_application, model=target_model_ref)

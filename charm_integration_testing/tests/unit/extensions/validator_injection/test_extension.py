@@ -216,6 +216,22 @@ class TestValidatorInjectorExtension:
             assert all(len(v) == 1 for v in results.values())
 
     class TestPostPersistence:
+        def test_rejects_unsupported_persistence_op(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a persistence op outside the supported set (post_persistence's `persistence`
+            # parameter is a plain str; JujuClient.validate_model's Literal type isn't enforced at
+            # runtime, so a bad value here must be rejected before being interpolated into a
+            # remote shell command rather than silently run).
+            juju.units_by_app["myapp"] = ["myapp/0"]
+
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="Unsupported persistence op"):
+                extension.post_persistence(TEST_MODEL, "myapp", "prepare; rm -rf /", {})
+
+            # THEN no command was ever run on the unit
+            assert not juju.exec_calls
+
         def test_prepare_runs_on_each_unit_with_no_refs_argument(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:

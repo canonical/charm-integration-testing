@@ -29,6 +29,12 @@ venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
+# The three ops run_validators' --persistence flag accepts (see validators/runner/runner.py's
+# _PERSISTENCE_OPS). post_persistence's `persistence` parameter is a plain `str` (its caller's
+# Literal["prepare", "checkpoint", "cleanup"] annotation isn't enforced at runtime), so this is
+# validated explicitly before being interpolated into a remote shell command.
+_PERSISTENCE_OPS = frozenset({"prepare", "checkpoint", "cleanup"})
+
 
 class ValidatorInjectorExtension(JujuExtension):
     validators_path: Path | None
@@ -128,6 +134,9 @@ class ValidatorInjectorExtension(JujuExtension):
         refs: dict[int, PersistenceState],
         is_k8s: bool = True,
     ) -> tuple[list[ValidationResult], dict[str, PersistenceState]] | None:
+        if persistence not in _PERSISTENCE_OPS:
+            raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
+
         # Inject validators
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
@@ -145,7 +154,7 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Run persistence op
         self.logger.debug(f"Running persistence op '{persistence}' on unit {unit}")
-        cmd = f"{venv_runner} --persistence {persistence}"
+        cmd = f"{venv_runner} --persistence {shlex.quote(persistence)}"
         if persistence == "checkpoint":
             refs_json = json.dumps({str(relation_id): state.model_dump() for relation_id, state in refs.items()})
             cmd += f" --refs {shlex.quote(refs_json)}"
