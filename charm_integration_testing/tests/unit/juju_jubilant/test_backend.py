@@ -986,6 +986,51 @@ class TestJubilantBackend:
             # THEN no CLI call was made
             assert client.cli_calls == []
 
+    class TestWaitForRemovalOfSaas:
+        class Client(JubilantClientStub):
+            def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
+                self.app_endpoint_names = app_endpoint_names
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    name: jubilant.statustypes.RemoteAppStatus(
+                        url=f"neighbor-controller:admin/neighbor-model.{name}",
+                        endpoints={"database": jubilant.statustypes.RemoteEndpoint(interface="db", role="provider")},
+                    )
+                    for name in self.app_endpoint_names
+                }
+
+        def test_returns_immediately_when_saas_already_removed(self) -> None:
+            # GIVEN the SAAS proxy has already fully disappeared from status
+            client = self.Client(app_endpoint_names=frozenset())
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN no timeout is raised
+            backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
+
+        def test_times_out_when_saas_still_present(self) -> None:
+            # GIVEN the SAAS proxy for the alias being waited on is still present
+            client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN waiting on that exact alias times out
+            with pytest.raises(JujuWaitTimeoutError) as excinfo:
+                backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
+            assert "neighbor-offer" in excinfo.value.wait_state.noncompliant_applications
+
+        def test_ignores_unrelated_saas_proxies(self) -> None:
+            # GIVEN a different SAAS proxy is still present, but not the one being waited on
+            client = self.Client(app_endpoint_names=frozenset({"some-other-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN no timeout is raised for the unrelated alias
+            backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
+
     class TestWaitForRemovalOfUnits:
         def test_removal_of_units(self) -> None:
             # GIVEN
