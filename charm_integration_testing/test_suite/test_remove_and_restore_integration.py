@@ -24,7 +24,9 @@ def test_remove_and_restore_integration(
     integration_endpoints_removable: bool,
     charm_overrides: Path,
     target_model_ref: JujuModelHandle,
+    target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
+    neighbor_application: str,
     persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if not integration_endpoints_removable:
@@ -38,16 +40,24 @@ def test_remove_and_restore_integration(
     # new relation_id(s), rather than the checkpoints below failing with "relation id not found"
     # for stale entries.
     #
-    # integration_endpoint_1/_2 can be a SAAS alias rather than a real application deployed in a
-    # given model (see integration_spec.py); application_units() can't resolve a SAAS alias, so
-    # only query units for endpoints that are genuinely deployed in that model.
+    # integration_endpoint_1/_2 can be a SAAS alias rather than the real application deployed in
+    # a given model (see integration_spec.py): for a CMR, whichever side consumes the offer is
+    # represented there by a local alias, not the remote application's real name, so resolving
+    # affected units from those endpoints can silently miss the offering side. Use the real
+    # target/neighbor application names instead - each is always deployed in its own model
+    # (target_application in target_model_ref; neighbor_application in neighbor_model_ref, or in
+    # target_model_ref itself for a same-model integration).
+    neighbor_home = neighbor_model_ref if neighbor_model_ref is not None else target_model_ref
+    model_applications: dict[JujuModelHandle, set[str]] = {}
+    model_applications.setdefault(target_model_ref, set()).add(target_application)
+    model_applications.setdefault(neighbor_home, set()).add(neighbor_application)
+
     candidate_models = {m for m in (target_model_ref, neighbor_model_ref) if m is not None}
     invalidated_models: set[JujuModelHandle] = set()
     for model_ref in candidate_models:
         affected_units: set[str] = set()
-        for endpoint in (integration_endpoint_1, integration_endpoint_2):
-            if juju_client.application_exists(endpoint.application, model=model_ref):
-                affected_units.update(juju_backend.application_units(model_ref, endpoint.application))
+        for application in model_applications.get(model_ref, set()):
+            affected_units.update(juju_backend.application_units(model_ref, application))
         if not affected_units:
             continue
         invalidated_models.add(model_ref)
