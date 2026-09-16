@@ -88,15 +88,22 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # read/write if it's invalid.
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
-        passed = ...  # the assertion above
-        # Only write one more marked row/record - and only advance the returned state - when the
-        # check passed. The harness only carries a returned state forward on PASS (see the design
-        # point below), so writing/advancing on FAIL would grow the backend's actual state past
-        # what the harness will ever compare against again, masking the mismatch instead of
-        # letting a later checkpoint re-detect it. Commit the write (or use autocommit) for the
-        # same reason as prepare() above.
-        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1) if passed else expected
-        return self._make_result(level="deep", checks=[...]), new_state
+        result = self._make_result(level="deep", checks=[...])
+        # Gate the extra write and the returned state on the *overall* result, not just the one
+        # assertion above - if this method later adds more checks (e.g. a schema/connection
+        # check), a single "count matches" assertion could still be true while the combined
+        # result is FAIL, and writing/advancing here would ignore that. The harness only carries
+        # a returned state forward on PASS (see the design point below), so writing/advancing
+        # when result.status != "PASS" would grow the backend's actual state past what the
+        # harness will ever compare against again, masking the mismatch instead of letting a
+        # later checkpoint re-detect it. Commit the write (or use autocommit) for the same reason
+        # as prepare() above.
+        if result.status == "PASS":
+            # ... write one more marked row/record ...
+            new_state = PersistenceState(id=expected.id, ref=expected.ref + 1)
+        else:
+            new_state = expected
+        return result, new_state
 
     def cleanup(self) -> None:
         """Drop all canary data.
@@ -266,11 +273,14 @@ rather than registering multiple entry points for the same interface.
    has no other dependency that would pull it in. A functional validator
    (`endpoint_validators` entry point) is *not* a hard prerequisite: the
    runner discovers `endpoint_validators` and `endpoint_persistence_validators`
-   independently, so a package may register either, both, or neither -
-   don't implement a functional validator unless this interface actually
-   needs one. In practice, most interfaces already have a functional
-   validator, and persistence validators are usually additive to that
-   existing package.
+   independently, so a package may register the persistence group alone, or
+   both groups together - don't implement a functional validator unless this
+   interface actually needs one. This skill's own package must still register
+   `endpoint_persistence_validators` (per the acceptance criteria below);
+   registering neither group would make it undiscoverable and silently
+   deploy no validator at all. In practice, most interfaces already have a
+   functional validator, and persistence validators are usually additive to
+   that existing package.
 
 2. Identify what "canary data" means for this interface: a row in a table, a
    key in a KV store, an object in a bucket, a topic message, etc. It must be:
