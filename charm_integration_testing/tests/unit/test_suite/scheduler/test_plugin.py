@@ -1233,9 +1233,11 @@ class TestPytestRuntestMakereport:
         # THEN its edge is recorded so recovery won't retry the same test forever
         assert edge in _plugin_module._skipped_transitions
 
-    def test_skip_at_call_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
-        # GIVEN a transition test that skips mid-call, rather than a fixture
-        # skipping before the test body ever ran
+    def test_skip_at_call_time_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a transition test that skips mid-call via a guard clause at
+        # the top of its body (e.g. test_upgrade_controller checking for an
+        # available upgrade target), rather than a fixture skipping before
+        # the test body ever ran
         item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
         edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
         _plugin_module._all_transitions = {edge: [item]}
@@ -1246,17 +1248,20 @@ class TestPytestRuntestMakereport:
         # WHEN the hook runs
         _drive_makereport(item, call, report)
 
-        # THEN the environment is treated as unknown (halted), not as
-        # unchanged: recovery must not assume the pre-transition state still
-        # holds, since the test body may have already run real actions.
-        assert _plugin_module._current_state is None
-        assert _plugin_module._failed_state_test is item
-        assert _plugin_module._failed_state_reason == "skipped at call time"
-        assert edge not in _plugin_module._skipped_transitions
+        # THEN the environment is still believed to be at 'requires', exactly
+        # like a setup-time skip: every skip check in this suite runs before
+        # any state-mutating action, regardless of which pytest phase it
+        # happens to execute in (see the convention documented in
+        # markers.py), so a call-time skip is just as safe to assume as one.
+        assert _plugin_module._current_state == State.DEPLOYED
+        assert _plugin_module._failed_state_test is None
+        assert edge in _plugin_module._skipped_transitions
 
-    def test_skip_at_teardown_time_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+    def test_skip_at_teardown_time_leaves_current_state_unchanged(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN a transition test that skips during teardown
         item = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+        edge = StateTransition(State.DEPLOYED, State.NEIGHBOR_ONLY)
+        _plugin_module._all_transitions = {edge: [item]}
         _plugin_module._current_state = State.DEPLOYED
         call = SimpleNamespace(excinfo=None)
         report = _make_report(when="teardown", skipped=True)
@@ -1264,10 +1269,11 @@ class TestPytestRuntestMakereport:
         # WHEN the hook runs
         _drive_makereport(item, call, report)
 
-        # THEN the environment is treated as unknown, same as a call-time skip
-        assert _plugin_module._current_state is None
-        assert _plugin_module._failed_state_test is item
-        assert _plugin_module._failed_state_reason == "skipped at teardown time"
+        # THEN the environment is still believed to be at 'requires', same as
+        # a setup- or call-time skip.
+        assert _plugin_module._current_state == State.DEPLOYED
+        assert _plugin_module._failed_state_test is None
+        assert edge in _plugin_module._skipped_transitions
 
     def test_edge_not_blacklisted_while_an_untried_candidate_remains(
         self, make_item: Callable[..., pytest.Item]
@@ -1378,14 +1384,12 @@ class TestPytestRuntestSetup:
 
         assert "test_deploy" in str(exc_info.value)
 
-    def test_skip_message_reports_a_skip_not_a_failure_when_that_is_what_happened(
-        self, make_item: Callable[..., pytest.Item]
-    ) -> None:
-        # GIVEN the environment became unknown because a transition test
-        # skipped mid-call, not because anything actually failed
-        skipped = make_item("test_downgrade_charm", requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
-        _plugin_module._failed_state_test = skipped
-        _plugin_module._failed_state_reason = "skipped at call time"
+    def test_skip_message_reports_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN the environment became unknown because a state-marked test
+        # actually failed (the only remaining way _current_state becomes
+        # None, now that skips at any phase leave it unchanged)
+        failed = make_item("test_deploy", requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+        _plugin_module._failed_state_test = failed
         _plugin_module._current_state = None
 
         subsequent = make_item("test_integration", requires=State.DEPLOYED)
@@ -1393,10 +1397,7 @@ class TestPytestRuntestSetup:
         with pytest.raises(pytest.skip.Exception) as exc_info:
             pytest_runtest_setup(subsequent)
 
-        # THEN the message says it was skipped, not that it "failed"
-        message = str(exc_info.value)
-        assert "skipped at call time" in message
-        assert "failed" not in message
+        assert "failed" in str(exc_info.value)
 
     def test_skips_when_current_state_does_not_satisfy_requires(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN no failure, but the environment is at a state this test doesn't accept

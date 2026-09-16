@@ -100,3 +100,61 @@ def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown
     percentages = [int(m) for m in re.findall(r"\[\s*(\d+)%\]", "\n".join(result.outlines))]
     assert percentages, "expected at least one progress percentage in output"
     assert max(percentages) == 100
+
+
+def test_call_time_skip_via_guard_clause_does_not_halt_remaining_state_marked_tests(pytester: Pytester) -> None:
+    """A transition test that skips via a body guard clause must not be treated as a failure.
+
+    Mirrors ``test_upgrade_controller`` in the real suite: it checks a
+    precondition as the first statement in the test *body* (not in a
+    fixture) and calls ``pytest.skip()`` before doing anything else. Pytest
+    classifies this as a *call*-phase skip, but functionally it is identical
+    to a setup-time skip: nothing has been mutated yet. Before the fix, the
+    scheduler treated any call/teardown-phase skip of a transition test as
+    "environment state unknown", incorrectly halting recovery and every
+    subsequent state-marked test even though the environment never changed.
+
+    Scenario mirrors
+    ``test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown``
+    above, but the skip is a call-phase guard clause instead of a
+    setup-phase fixture skip.
+    """
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        test_mod_a=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_downgrade_charm():
+                # A guard clause in the test body, exactly like the real
+                # test_upgrade_controller: skip before mutating anything.
+                pytest.skip("simulated: no downgrade target available")
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_upgrade_charm():
+                pass
+            """
+        )
+    )
+    pytester.makepyfile(
+        test_mod_b=textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+            def test_scale():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("--current-state", "deployed")
+
+    # THEN recovery still bridges via an injected test_scale (module B)
+    # exactly as it would for a setup-time skip, and test_upgrade_charm
+    # still runs - the call-time skip did not halt the state machine.
+    result.assert_outcomes(passed=3, skipped=1)
+    result.stdout.no_fnmatch_line("*environment state is unknown*")

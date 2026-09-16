@@ -77,21 +77,17 @@ _injected_item_ids: set[int] = set()
 # still identify which scheduled item a duplicate came from.
 _duplicate_original_ids: dict[int, int] = {}
 
-# Set to the first state-marked item that fails, or a transition test that
-# skips at call/teardown time (see ``_failed_state_reason``). Once non-None,
-# all subsequent state-marked tests are skipped as "environment unknown".
+# Set to the first state-marked item that fails. Once non-None, all
+# subsequent state-marked tests are skipped as "environment unknown".
 _failed_state_test: pytest.Item | None = None
-
-# Paired with ``_failed_state_test``: "failed" or "skipped at <phase> time",
-# so downstream skip messages don't misreport an unrun test as having failed.
-_failed_state_reason: str | None = None
 
 # The scheduler's runtime belief about the environment's actual state, updated
 # as tests execute rather than assumed from the static plan. ``None`` means
 # "unknown" (see ``_failed_state_test``). A transition test that passes
-# advances this to its ``provides`` state; one skipped *during setup* leaves
-# it unchanged, since it never ran. Set from ``--current-state`` at the start
-# of collection.
+# advances this to its ``provides`` state; one that skips (at any phase)
+# leaves it unchanged, since every skip check in this suite runs before any
+# state-mutating action (see the convention documented in ``markers.py``).
+# Set from ``--current-state`` at the start of collection.
 _current_state: State | None = None
 
 # The full state graph and every known transition test, keyed by edge, built
@@ -202,24 +198,21 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     * A transition test passing at call time means the environment reached
       its ``provides`` state: ``_current_state`` advances accordingly.
 
-    * A transition test skipped during *setup* means it never ran, so the
-      environment never left its ``requires`` state: ``_current_state`` is
-      left as-is. ``pytest_runtest_protocol`` uses this to try bridging to
-      whatever the next planned test actually needs. This relies on the
-      fixture convention documented in ``markers.py``: state-mutating side
-      effects belong in the test body, not in fixtures, so a setup-time skip
-      is never preceded by a fixture that already changed the environment.
-
-    * A transition test skipped during *call* or *teardown* is treated like a
-      failure instead: the test body/teardown may have already acted, so the
-      environment can no longer be assumed to still be at ``requires``.
+    * A transition test skipped at *any* phase (setup, call, or teardown)
+      means the environment never left its ``requires`` state:
+      ``_current_state`` is left as-is. ``pytest_runtest_protocol`` uses this
+      to try bridging to whatever the next planned test actually needs. This
+      relies on the convention documented in ``markers.py``: every skip check
+      in this suite - whether in a fixture or as a guard clause at the top of
+      a test body - runs before any state-mutating action, regardless of
+      which pytest phase that check happens to execute in.
 
     Pure tests (``requires == provides``) leave ``_current_state`` unchanged
     when they pass or skip; a failure still halts everything and sets it to
     ``None``, since pure test failures can leave the environment broken too.
     Unmarked tests are never affected.
     """
-    global _failed_state_test, _failed_state_reason, _current_state
+    global _failed_state_test, _current_state
     outcome = yield
     if _current_state is None:
         return  # Already unknown; no need to re-check.
@@ -230,24 +223,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         marker = None
     if marker is None:
         return
-    if report.failed or (report.skipped and marker.is_transition and report.when != "setup"):
+    if report.failed:
         _failed_state_test = item
         _current_state = None
-        if report.failed:
-            _failed_state_reason = "failed"
-            logger.error(
-                "State-marked test %r failed: environment state is unknown.  "
-                "All remaining state-marked tests will be skipped.",
-                item.nodeid,
-            )
-        else:
-            _failed_state_reason = f"skipped at {report.when} time"
-            logger.error(
-                "State-marked transition test %r skipped at %s time: environment state is unknown.  "
-                "All remaining state-marked tests will be skipped.",
-                item.nodeid,
-                report.when,
-            )
+        logger.error(
+            "State-marked test %r failed: environment state is unknown.  "
+            "All remaining state-marked tests will be skipped.",
+            item.nodeid,
+        )
     elif report.when == "call" and report.passed and marker.is_transition:
         _current_state = marker.provides
     elif report.skipped and marker.is_transition:
@@ -289,12 +272,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitC
     """
     global _all_collected, _injected_item_ids, _duplicate_original_ids, _failed_state_test
     global _current_state, _full_graph, _all_transitions, _recovery_counter, _skipped_transitions
-    global _skipped_transition_item_ids, _failed_state_reason
+    global _skipped_transition_item_ids
     _all_collected.clear()
     _injected_item_ids.clear()
     _duplicate_original_ids.clear()
     _failed_state_test = None
-    _failed_state_reason = None
     _current_state = None
     _full_graph = None
     _all_transitions = {}
@@ -308,8 +290,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
     Called before each test's setup phase. Skips *item* when:
 
-    * the environment state is unknown (a prior state-marked test failed, or
-      a transition test skipped during call/teardown time), or
+    * the environment state is unknown (a prior state-marked test failed), or
     * the environment's actual current state (``_current_state``, which may
       differ from what the static plan assumed if an earlier transition was
       skipped) doesn't satisfy *item*'s ``requires``.  ``pytest_runtest_protocol``
@@ -317,7 +298,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
       immediately before *item*; if that succeeded, ``_current_state`` will
       already match by the time this hook runs. If not, *item* is skipped here,
       and recovery is attempted again for whatever test follows it.
-    * *item* is a transition test candidate that already setup-skipped earlier
+    * *item* is a transition test candidate that already skipped earlier
       in this run (tracked via ``_skipped_transition_item_ids``), even though
       ``_current_state`` now satisfies its ``requires``. The static plan can
       contain the same underlying test more than once (see
@@ -338,8 +319,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
         return
     if _current_state is None:
         failed_nodeid = _failed_state_test.nodeid if _failed_state_test is not None else "<unknown>"
-        reason = _failed_state_reason or "failed"
-        pytest.skip(f"Skipped: state-marked test {failed_nodeid!r} {reason}: environment state is unknown.")
+        pytest.skip(f"Skipped: state-marked test {failed_nodeid!r} failed: environment state is unknown.")
     if _current_state not in marker.requires:
         pytest.skip(
             f"Skipped: environment is at state {_current_state.value!r}, but this test requires one of "
@@ -537,12 +517,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # recovery (see pytest_runtest_protocol) before any early return below,
     # so recovery works even when the user's selection is unmarked-only.
     global _full_graph, _all_transitions, _current_state, _failed_state_test, _recovery_counter
-    global _skipped_transitions, _skipped_transition_item_ids, _failed_state_reason
+    global _skipped_transitions, _skipped_transition_item_ids
     _full_graph = full_graph
     _all_transitions = dict(all_transitions)
     _current_state = current_state
     _failed_state_test = None
-    _failed_state_reason = None
     _recovery_counter = 0
     _skipped_transitions = set()
     _skipped_transition_item_ids = {}
