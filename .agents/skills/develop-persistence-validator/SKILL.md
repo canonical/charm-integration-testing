@@ -95,8 +95,10 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         derived from the *current* relation_id, so `cleanup()` for the new relation cannot find
         canary data left behind under the old relation_id - that old resource remains orphaned
         rather than being swept up by a later cleanup call. If your backend needs a stronger
-        guarantee, record prior relation_ids somewhere durable (e.g. in the databag/app data) so
-        cleanup can enumerate and drop them too. Must still be safe to call when no canary
+        guarantee, record prior relation_ids somewhere that outlives the relation itself - e.g. the
+        charm's own peer relation databag (if one exists) or `ops.StoredState`, not this relation's
+        databag, which is removed along with the relation and so cannot durably track prior IDs -
+        so cleanup can enumerate and drop them too. Must still be safe to call when no canary
         resource remains (no-op, not an error) - e.g. if `prepare()` was never reached for a given
         relation.
         """
@@ -138,8 +140,11 @@ implementation):
   check reported `FAIL`. This only covers a returned result, not an
   operational failure: if `checkpoint()` raises instead of returning (e.g.
   the connection itself fails), the runner converts that exception to an
-  `ERROR` result and emits no `updated_refs` entry at all for that relation -
-  there is no advanced (or any) state to pick up on the next checkpoint.
+  `ERROR` result and emits no `updated_refs` entry for that relation - the
+  harness leaves the *previously tracked* `PersistenceState` untouched
+  rather than clearing it (see `ValidatorInjectorExtension.post_persistence`),
+  so a later checkpoint still has the old `expected.ref` to retry against; it
+  just never advanced past it for this attempt.
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
@@ -311,17 +316,35 @@ rather than registering multiple entry points for the same interface.
    this interface.
 
 8. Manually verify end-to-end if a live model is available: deploy the
-   two charms, run
-   `run_validators --persistence prepare` on the unit whose role this
-   validator applies to (per its role gating - e.g. the requirer for a
-   requirer-side canary), disrupt the other/remote side of the relation
-   (restart/scale/migrate), then `run_validators --persistence
-   checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'` and confirm
-   a `PASS` result plus an `updated_refs` entry for that `relation_id` with
-   `ref` advanced by one (`ref` is not on the `ValidationResult` itself - see
-   `ValidatorRunnerResults` in `validators/runner/runner.py`), and finally
-   `run_validators --persistence cleanup` and confirm the canary resource is
-   gone.
+   two charms, then from a shell with access to the model run (matching how
+   `ValidatorInjectorExtension._run_persistence_on_unit` invokes it - a bare
+   `run_validators` on `$PATH` won't work; it's not installed there):
+   ```
+   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
+   ```
+   on the unit whose role this validator applies to (per its role gating -
+   e.g. the requirer for a requirer-side canary). `juju exec` runs the
+   command inside the unit's hook execution context, which is what sets
+   `JUJU_CHARM_DIR` (required by the CLI) - invoking the binary directly over
+   a plain SSH session instead won't have it set. Then disrupt the other/
+   remote side of the relation (restart/scale/migrate) **and wait for it to
+   fully settle** (idle/ready again) before checkpointing - checkpointing
+   immediately after triggering the disruption (e.g. right after scaling to
+   zero, before scaling back up and waiting for idle, as
+   `test_scale_in_and_scale_out.py` does) only proves the backend was
+   unreachable mid-disruption and reports `ERROR`, not a real persistence
+   check. Once settled, run:
+   ```
+   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'
+   ```
+   and confirm a `PASS` result plus an `updated_refs` entry for that
+   `relation_id` with `ref` advanced by one (`ref` is not on the
+   `ValidationResult` itself - see `ValidatorRunnerResults` in
+   `validators/runner/runner.py`), and finally
+   ```
+   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
+   ```
+   and confirm the canary resource is gone.
 
 ## Common patterns
 
