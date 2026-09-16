@@ -330,10 +330,11 @@ rather than registering multiple entry points for the same interface.
    remote side of the relation (restart/scale/migrate) **and wait for it to
    fully settle** (idle/ready again) before checkpointing - checkpointing
    immediately after triggering the disruption (e.g. right after scaling to
-   zero, before scaling back up and waiting for idle, as
-   `test_scale_in_and_scale_out.py` does) only proves the backend was
-   unreachable mid-disruption and reports `ERROR`, not a real persistence
-   check. Once settled, run:
+   zero, before scaling back up and reaching idle) only proves the backend
+   was unreachable mid-disruption and reports `ERROR`, not a real persistence
+   check. `test_scale_in_and_scale_out.py` shows the correct ordering: it
+   scales back up and waits for every affected model to reach idle
+   (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
    juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'
    ```
@@ -398,8 +399,12 @@ def cleanup(self) -> None:
     # cleanup() runs for every relation with a registered persistence validator, including one
     # that never got as far as receiving credentials (e.g. the relation is still being set up).
     # Treat a databag with no usable credentials yet as a no-op instead of raising by opening a
-    # connection anyway.
-    if not self.databag.get("uris") and not self.databag.get("secret-user"):
+    # connection anyway. Check the *same* fields _open_connection() requires (via the same
+    # validate_schema() helper) rather than a narrower heuristic like "uris" alone: a relation
+    # that already has "uris" but is still missing "database"/"username"/"password" would
+    # otherwise fall through this guard and raise instead of no-op'ing.
+    creds = self._resolve_credentials()
+    if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
         return
     # `_` and `%` are LIKE wildcards, so a prefix containing underscores must be escaped or it
     # can match unrelated tables (e.g. "validatorXcanaryY1").
