@@ -110,8 +110,11 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def cleanup(self) -> None:
         """Drop all canary data.
 
-        Only invoked from `test_teardown`, once per test run - the harness does not call cleanup
-        mid-session. A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
+        Invoked only from the `test_teardown` state transition, never from `prepare()`/
+        `checkpoint()` or mid-transition - though a single pytest session can execute
+        `test_teardown` more than once (e.g. an injected bridge transition ahead of a later
+        redeployment), so this is "once per `test_teardown` invocation," not strictly "once per
+        pytest session." A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
         instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
         `prepare()` again for the new one. Note that this is a real, accepted limitation, not just
         a delay: the discovery namespace (see `_canary_table_prefix`/"Common patterns" below) is
@@ -187,14 +190,14 @@ implementation):
   backend now actually has `expected.ref + 1` marked records while the
   harness still expects `expected.ref`, so the next retry's read-back will
   see one extra record and can report a false `FAIL` (or, if it advances
-  again, silently drift the state by one). Prefer a backend/write shape
-  where this ambiguous-write window can't occur (e.g. autocommit is already
-  atomic per-statement for a single `INSERT`, so the risk is specifically
-  in the *response* getting lost after the server has already committed);
-  if your backend cannot make the write itself unambiguous, document that
-  operators must reseed (re-run `prepare()`) rather than blindly retry
-  `checkpoint()` after a raised exception, since a retry cannot distinguish
-  "nothing was written" from "the write landed but the response was lost."
+  again, silently drift the state by one). This response-loss ambiguity is
+  not something a single atomic write (e.g. one autocommitted `INSERT`) can
+  eliminate - atomicity only guarantees the write itself is all-or-nothing
+  on the backend, not that its response reaches `checkpoint()`; the two are
+  independent failure modes. Document that operators must reseed (re-run
+  `prepare()`) rather than blindly retry `checkpoint()` after a raised
+  exception, since a retry cannot distinguish "nothing was written" from
+  "the write landed but the response was lost."
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
@@ -312,8 +315,12 @@ rather than registering multiple entry points for the same interface.
    key in a KV store, an object in a bucket, a topic message, etc. It must be:
    - Cheap to create and verify.
    - Uniquely identifiable (via a random identifier chosen at `prepare()` time).
-   - Discoverable by name pattern alone at `cleanup()` time, without needing
-     the identifier.
+   - Discoverable at `cleanup()` time via a durable name/key/marker pattern
+     derived from this validator instance (e.g. a resource name prefix for a
+     SQL table, a key prefix for a KV store, an object key prefix in a
+     bucket, or a separately named/keyed tracking record for a topic where
+     individual messages aren't independently discoverable), without
+     needing the identifier `prepare()` returned.
 
 3. Add a `PostgreSQLClientPersistenceValidator`-style class implementing
    `prepare()`, `checkpoint()`, `cleanup()`, extending
@@ -413,7 +420,11 @@ rather than registering multiple entry points for the same interface.
 8. Manually verify end-to-end if a live model is available: deploy the
    two charms, then run the full test suite against that model at least
    through `test_deploy` (e.g. `pytest ... --current-state=empty_model
-   -k test_deploy`, or the full suite up to the point you want to inspect) -
+   -k "test_deploy and not test_deploy_target_old_revision"`, or an exact
+   node id like `charm_integration_testing/test_suite/test_deploy.py::test_deploy` -
+   a bare `-k test_deploy` also matches `test_deploy_target_old_revision`,
+   which performs an unrelated old-revision transition instead of stopping
+   at the initial deployment) -
    this is what actually injects the validators venv onto each unit via
    `ValidatorInjectorExtension._inject_validators()`
    (`/var/lib/juju/validators/venv/bin/run_validators` does not exist on a
