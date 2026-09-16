@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
@@ -367,6 +368,11 @@ def seed_persistence_state_for_resumed_run(
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:
         models.append(neighbor_model_ref)
+    # prepare() writes through relation credentials, which can race hooks still settling when
+    # resuming with --current-state=deployed. test_deploy (and the other resume points that call
+    # prepare()) always wait for the model(s) to go idle first - match that here so this path
+    # doesn't produce false failures or incomplete seed state.
+    client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
     for model_ref in models:
         client.validate_model(model=model_ref, level=None, persistence="prepare", persistence_state=persistence_state)
 
