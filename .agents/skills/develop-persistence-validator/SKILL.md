@@ -329,7 +329,10 @@ rather than registering multiple entry points for the same interface.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
      with a fresh identifier and `ref=1`.
    - `checkpoint()` passes when the check matches `expected.ref`, fails when
-     it doesn't. On `PASS`, it writes a new marked record and returns
+     it doesn't. On `PASS`, it advances the backend-specific canary state
+     (e.g. writing a new marked row/record for a SQL-style backend;
+     overwriting a value, creating a new version, or writing another
+     backend-specific marker for a KV store/bucket/topic) and returns
      `PersistenceState(ref=expected.ref + 1)`; on `FAIL`, it must not write
      anything and returns `expected` unchanged, so a later retry re-checks
      the same expected count instead of drifting past the failure (see the
@@ -339,7 +342,12 @@ rather than registering multiple entry points for the same interface.
      exists" or "the count matches" (for SQL backends this means filtering
      the row count query on the marker column, not a bare `count(*)`; for a
      KV store, bucket, or topic, the equivalent is asserting the read/list
-     is scoped to the specific key/object/message identifier).
+     is scoped to the specific key/object/message identifier). Also cover
+     `checkpoint()` rejecting an out-of-range `expected.id` (e.g. negative,
+     or one past the maximum your `prepare()` can produce) before any
+     read/write, the way the reference implementation's
+     `test_raises_when_expected_identifier_is_out_of_range`/
+     `test_raises_when_expected_identifier_is_negative` do.
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
      before using it in a DDL statement (where applicable to the backend).
@@ -348,11 +356,14 @@ rather than registering multiple entry points for the same interface.
    ```
    poetry run pytest validators/<name>
    poetry run pytest validators/runner    # confirm discovery/wiring still passes
-   poetry run mypy --explicit-package-bases validators/*
-   poetry run ruff check validators/<name>
-   poetry run ruff format --check validators/<name>
+   ./scripts/format.sh
+   ./scripts/lint.sh
    ```
-   Fix any issues before continuing.
+   `scripts/lint.sh` is the same check the repository CI/reviewers require -
+   beyond ruff/mypy it also runs bandit, yamlfix, and markdownlint-cli2, so
+   running only a subset (e.g. just `ruff check`/`mypy`) can pass locally
+   while still failing the established repository checks. Fix any issues
+   before continuing.
 
 7. No charm-specific harness changes are needed to wire persistence in:
    `ValidatorInjectorExtension.post_persistence` and
@@ -391,8 +402,13 @@ rather than registering multiple entry points for the same interface.
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
-   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"<relation_id>": {"id": ..., "ref": 1}}'
+   juju exec --unit <unit> -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
    ```
+   (`--refs` must be valid JSON - `run_validators` parses/rejects it before
+   `checkpoint()` ever runs, so a placeholder like `...` is not usable here;
+   substitute the real relation ID and the `id`/`ref` values from the
+   `PersistenceState` you're resuming, e.g. as printed by a prior
+   `prepare()`/`checkpoint()` run's `updated_refs`)
    and confirm a `PASS` result plus an `updated_refs` entry for that
    `relation_id` with `ref` advanced by one (`ref` is not on the
    `ValidationResult` itself - see `ValidatorRunnerResults` in
@@ -556,7 +572,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 - Unit tests cover role gating, prepare, checkpoint (pass and fail), and
   cleanup (including the no-canary-resources case).
 - `poetry run pytest validators/<name> validators/runner` passes.
-- `poetry run mypy --explicit-package-bases validators/*` passes.
-- `poetry run ruff check` / `ruff format --check` pass for the changed package.
+- `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
+  yamlfix, and markdownlint-cli2 for the whole repo).
 - No hardcoded charm names, model names, or relation ids inside the
   validator code.
