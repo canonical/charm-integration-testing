@@ -440,6 +440,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     test item(s) into ``session.items`` right after *item* - i.e. before
     *nextitem* - so the environment is corrected before *nextitem* starts.
 
+    If *nextitem* is itself a transition test candidate, any ``requires``
+    state for which this exact original candidate has already skipped as a
+    candidate for the (that state -> ``provides``) edge earlier in the run
+    is excluded from the bridge search: ``pytest_runtest_setup`` would just
+    skip *nextitem* straight back out once reached anyway (see its
+    docstring), so bridging towards that state would only move the
+    environment away from whatever a later, otherwise-runnable test needed,
+    for no benefit. If every ``requires`` state is excluded this way,
+    nothing is injected at all, exactly as if no bridging path existed.
+
     If no bridging path exists, nothing is injected: ``pytest_runtest_setup``
     will skip *nextitem* when its turn comes, and this hook runs again
     afterwards for whatever test follows *nextitem*, repeating the same
@@ -493,12 +503,39 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
     if marker is None or _current_state in marker.requires:
         return  # Unmarked test, or the environment already satisfies it.
 
-    bridge_items = _find_recovery_bridge(_current_state, marker.requires)
+    # If nextitem is itself a transition test candidate, don't bridge
+    # towards a requires-state for which this exact original candidate has
+    # already skipped as a candidate for the (that requires-state ->
+    # provides) edge earlier in the run - pytest_runtest_setup would skip
+    # nextitem right back out once it got there anyway (see its docstring),
+    # so any one-way bridge built to reach that requires-state would only
+    # move the environment away from a state a later, otherwise-runnable
+    # test might have needed, for no benefit.
+    candidate_requires = marker.requires
+    if marker.is_transition:
+        original_id = _duplicate_original_ids.get(id(nextitem), id(nextitem))
+        candidate_requires = tuple(
+            requires_state
+            for requires_state in marker.requires
+            if original_id
+            not in _skipped_transition_item_ids.get(StateTransition(requires_state, marker.provides), set())
+        )
+        if not candidate_requires:
+            logger.warning(
+                "No recovery path from state %r to any of %r: %r will be skipped (every candidate edge for "
+                "this test already skipped earlier in the run).",
+                _current_state.value,
+                [s.value for s in marker.requires],
+                nextitem.nodeid,
+            )
+            return
+
+    bridge_items = _find_recovery_bridge(_current_state, candidate_requires)
     if bridge_items is None:
         logger.warning(
             "No recovery path from state %r to any of %r: %r will be skipped.",
             _current_state.value,
-            [s.value for s in marker.requires],
+            [s.value for s in candidate_requires],
             nextitem.nodeid,
         )
         return
@@ -527,7 +564,9 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> 
         # that loop and so are never wrapped this way. Still, split
         # defensively rather than assume that always holds, and re-raise
         # anything unexpected found inside the group untouched.
-        recoverable, unrecoverable = excgroup.split(_is_recoverable_reconciliation_failure)  # type: ignore[attr-defined]
+        recoverable, unrecoverable = excgroup.split(  # type: ignore[attr-defined]
+            _is_recoverable_reconciliation_failure
+        )
         if unrecoverable is not None:
             raise unrecoverable
         exc: BaseException = recoverable if recoverable is not None else excgroup
