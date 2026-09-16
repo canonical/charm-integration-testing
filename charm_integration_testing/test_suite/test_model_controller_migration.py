@@ -19,6 +19,7 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
@@ -29,10 +30,15 @@ def test_model_controller_migration(
     if juju_client.version(target_model_ref).major >= 4:
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
 
-    # Validate all applications and relations before migration
-    juju_client.validate_model(
-        model=target_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
-    )
+    # Validate all applications and relations before migration. Only target_model_ref's
+    # controller is migrated below; neighbor_model_ref (if present) stays on its own controller
+    # throughout, but is included here and after each migration step for a CMR where the target
+    # application is the provider - the applicable persistence validator and tracked canary state
+    # live on the neighbor's requirer units instead.
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+        )
 
     juju_client.migrate_model(
         model_name=model, source_controller=target_controller, target_controller=temp_juju_controller
@@ -57,9 +63,10 @@ def test_model_controller_migration(
     )
 
     # Validate all applications and relations AFTER migration
-    juju_client.validate_model(
-        model=temp_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
-    )
+    for model_ref in (m for m in (temp_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+        )
 
     # Migrate the model back to the original controller
     juju_client.migrate_model(
@@ -84,6 +91,7 @@ def test_model_controller_migration(
     )
 
     # Validate all applications and relations AFTER second migration
-    juju_client.validate_model(
-        model=target_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
-    )
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+        )

@@ -15,6 +15,7 @@ from .scheduler.states import State
 def test_upgrade_charm(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
@@ -49,3 +50,9 @@ def test_upgrade_charm(
     juju_client.validate_model(
         model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
     )
+    # For a CMR where the upgraded target application is the provider, the applicable persistence
+    # validator and tracked canary state live on the neighbor's requirer units instead.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(
+            model=neighbor_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+        )
