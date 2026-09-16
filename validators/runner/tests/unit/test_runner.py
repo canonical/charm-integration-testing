@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,7 +21,7 @@ from validators.base import (
     ValidationResult,
 )
 from validators.runner import runner
-from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, logger
+from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, _parse_cli_args, logger
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     RelationRoleStub,
@@ -232,6 +233,60 @@ class TestValidatorRunnerLoadPersistenceValidators:
         # THEN both are still registered, but a warning explains the state-overwrite risk
         assert len(validators["test-interface"]) == 2
         assert "Multiple persistence validators registered for interface 'test-interface'" in caplog.text
+
+
+class TestParseCliArgs:
+    def test_defaults_to_simple_level_with_no_flags(self) -> None:
+        # WHEN no flags are passed at all
+        args, refs = _parse_cli_args([])
+
+        # THEN the pre-persistence CLI contract is preserved: level defaults to "simple"
+        assert args.level == "simple"
+        assert args.persistence is None
+        assert refs == {}
+
+    def test_persistence_only_invocation_leaves_level_unset(self) -> None:
+        # WHEN only --persistence is passed
+        args, refs = _parse_cli_args(["--persistence", "prepare"])
+
+        # THEN level stays None rather than defaulting, so main() skips the functional run
+        assert args.level is None
+        assert args.persistence == "prepare"
+
+    def test_level_and_persistence_can_be_combined(self) -> None:
+        # WHEN both --level and --persistence are passed
+        args, refs = _parse_cli_args(["--level", "deep", "--persistence", "cleanup"])
+
+        # THEN both are honoured as given, with no default substitution
+        assert args.level == "deep"
+        assert args.persistence == "cleanup"
+
+    def test_checkpoint_requires_refs(self) -> None:
+        # WHEN --persistence checkpoint is passed without --refs
+        with pytest.raises(SystemExit):
+            # THEN argparse's parser.error() exits the process
+            _parse_cli_args(["--persistence", "checkpoint"])
+
+    def test_checkpoint_parses_refs_json_into_persistence_state(self) -> None:
+        # WHEN --refs is a valid JSON dict of relation_id -> PersistenceState
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        args, refs = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
+
+        # THEN it's decoded into PersistenceState objects keyed by relation_id string
+        assert refs == {"4": PersistenceState(id=1, ref=2)}
+
+    def test_invalid_refs_json_exits(self) -> None:
+        # WHEN --refs is not valid JSON
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "checkpoint", "--refs", "not-json"])
+
+    def test_refs_not_matching_persistence_state_schema_exits(self) -> None:
+        # WHEN --refs is valid JSON but doesn't match PersistenceState's schema
+        refs_json = json.dumps({"4": {"unexpected": "shape"}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
 
 
 class TestValidatorRunnerRun:

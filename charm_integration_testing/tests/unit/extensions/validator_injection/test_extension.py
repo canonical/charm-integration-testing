@@ -344,6 +344,22 @@ class TestValidatorInjectorExtension:
             assert results["myapp/0"][0].endpoint == "canary"
             assert results["myapp/0"][0].status == "FAIL"
 
+        def test_raises_when_no_validators_path_and_venv_absent(
+            self, extension_no_path: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN the venv is absent and no validators_path is configured to inject one
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            persistence_state = {key: PersistenceState(id=1, ref=2)}
+            juju.exec_responses.append(_fail())
+
+            # WHEN / THEN a persistence op with no way to run it raises, rather than silently
+            # returning an empty success-shaped result that would (for cleanup) delete tracking
+            # state without ever having dropped the canary data.
+            with pytest.raises(RuntimeError, match="validators_path"):
+                extension_no_path.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            assert persistence_state == {key: PersistenceState(id=1, ref=2)}
+
     class TestRunValidatorsOnUnit:
         class TestVenvAlreadyInstalled:
             def test_skips_injection_and_runs_validators(
