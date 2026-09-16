@@ -9,7 +9,11 @@ import ops
 import psycopg2
 import pytest
 
-from validators.postgresql_client.validator import PostgreSQLClientValidator
+from validators.base import PersistenceNotApplicable, PersistenceState
+from validators.postgresql_client.validator import (
+    PostgreSQLClientPersistenceValidator,
+    PostgreSQLClientValidator,
+)
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -31,6 +35,15 @@ def _make_validator(
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
+def _make_persistence_validator(
+    databag: dict[str, str], endpoint: str = "db", role: RelationRoleStub = RelationRoleStub.requires
+) -> PostgreSQLClientPersistenceValidator:
+    app = ApplicationStub()
+    relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
+    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client", role=role))
+    return PostgreSQLClientPersistenceValidator(charm, cast(ops.Relation, relation))
+
+
 @dataclass
 class CursorStub:
     """Minimal cursor context manager; raises execute_error if set."""
@@ -38,12 +51,16 @@ class CursorStub:
     execute_error: Exception | None = None
     # Rows returned by fetchone() for each successive call.
     fetchone_rows: list[tuple[Any, ...]] = field(default_factory=list)
+    # Rows returned by fetchall().
+    fetchall_rows: list[tuple[Any, ...]] = field(default_factory=list)
     # Number of execute() calls to allow before raising execute_error.
     execute_succeed_count: int = 0
     _fetch_count: int = field(default=0, init=False, repr=False)
     _execute_count: int = field(default=0, init=False, repr=False)
+    executed_queries: list[str] = field(default_factory=list, init=False, repr=False)
 
     def execute(self, query: str, params: Any = None) -> None:
+        self.executed_queries.append(query)
         if self.execute_error and self._execute_count >= self.execute_succeed_count:
             raise self.execute_error
         self._execute_count += 1
@@ -54,6 +71,9 @@ class CursorStub:
             self._fetch_count += 1
             return row
         return None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.fetchall_rows
 
     def __enter__(self) -> "CursorStub":
         return self
@@ -487,3 +507,160 @@ class TestPostgreSQLClientValidatorDeep:
         write_check = next(c for c in result.checks if c.name == "write_read_verify")
         assert not write_check.passed
         assert "no ID" in write_check.message
+
+
+class TestPostgreSQLClientPersistenceValidatorRole:
+    @pytest.mark.parametrize(
+        "role",
+        [RelationRoleStub.provides, RelationRoleStub.peer],
+    )
+    def test_prepare_raises_not_applicable_for_non_requires_role(self, role: RelationRoleStub) -> None:
+        # GIVEN a validator on the non-requires side of the relation
+        validator = _make_persistence_validator(VALID_DATABAG, role=role)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.prepare()
+
+    def test_checkpoint_raises_not_applicable_for_non_requires_role(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.checkpoint(PersistenceState(id=1, ref=1))
+
+    def test_cleanup_raises_not_applicable_for_non_requires_role(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.cleanup()
+
+
+class TestPostgreSQLClientPersistenceValidatorPrepare:
+    def test_creates_canary_table_and_returns_state(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+        conn = ConnStub()
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            state = validator.prepare()
+
+        # THEN
+        assert isinstance(state, PersistenceState)
+        assert state.ref == 1
+        queries = " ".join(conn.cursor_stub.executed_queries)
+        assert f"validator_canary_{state.id}" in queries
+        assert "DROP TABLE IF EXISTS" in queries
+        assert "CREATE TABLE" in queries
+        assert "INSERT INTO" in queries
+
+    def test_generates_distinct_identifiers_across_calls(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN
+            first = validator.prepare()
+            second = validator.prepare()
+
+        # THEN
+        assert first.id != second.id
+
+
+class TestPostgreSQLClientPersistenceValidatorCheckpoint:
+    def test_passes_when_row_count_matches_expected_ref(self) -> None:
+        # GIVEN the canary table has exactly the expected number of rows
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(2,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=42, ref=2))
+
+        # THEN
+        assert result.status == "PASS"
+        check = next(c for c in result.checks if c.name == "row_count")
+        assert check.passed
+        assert new_state.id == 42
+        assert new_state.ref == 3
+        # A new row is still written to continue the chain
+        assert any("INSERT INTO" in q for q in cursor.executed_queries)
+
+    def test_fails_when_row_count_is_lower_than_expected(self) -> None:
+        # GIVEN data loss: fewer rows than expected
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=3))
+
+        # THEN
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "row_count")
+        assert not check.passed
+        assert "3" in check.message and "1" in check.message
+        # ref still advances so the chain continues to track expected writes
+        assert new_state.ref == 4
+
+    def test_uses_canary_table_name_from_expected_identifier(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN
+        assert any("validator_canary_99" in q for q in cursor.executed_queries)
+
+    def test_result_endpoint_and_interface_are_set(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
+        cursor = CursorStub(fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(id=1, ref=1))
+
+        # THEN
+        assert result.endpoint == "my-db"
+        assert result.interface == "postgresql_client"
+        assert result.level == "deep"
+
+
+class TestPostgreSQLClientPersistenceValidatorCleanup:
+    def test_drops_all_discovered_canary_tables(self) -> None:
+        # GIVEN two leftover canary tables are discovered
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("validator_canary_1",), ("validator_canary_2",)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any("validator_canary_1" in q for q in drop_queries)
+        assert any("validator_canary_2" in q for q in drop_queries)
+
+    def test_noop_when_no_credentials_present(self) -> None:
+        # GIVEN a databag without any credential fields (e.g. relation already gone)
+        validator = _make_persistence_validator({})
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
+            # WHEN
+            validator.cleanup()
+
+        # THEN no connection was attempted
+        mock_connect.assert_not_called()
