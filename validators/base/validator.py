@@ -69,6 +69,10 @@ class _RelationValidatorMixin:
     charm: ops.CharmBase
     relation: ops.Relation
 
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+        self.charm = charm
+        self.relation = relation
+
     @property
     def role(self) -> ValidationRole:
         relation = self.charm.meta.relations[self.relation.name]
@@ -153,10 +157,6 @@ class _RelationValidatorMixin:
 
 
 class BaseValidator(_RelationValidatorMixin, ABC):
-    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
-        self.charm = charm
-        self.relation = relation
-
     def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
         """Return a SKIPPED result indicating this validator does not support *level*."""
         return self._make_result(
@@ -196,10 +196,6 @@ class BasePersistenceValidator(_RelationValidatorMixin, ABC):
     identifier chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the
     canary data it names.
     """
-
-    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
-        self.charm = charm
-        self.relation = relation
 
     @abstractmethod
     def prepare(self) -> PersistenceState:
