@@ -35,10 +35,14 @@ def test_teardown(
     if neighbor_model_ref is not None:
         cleanup_model_refs.add(neighbor_model_ref)
     # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR
-    # result (and propagates any remote-cleanup failure), so a bare loop would abort after the
-    # first failing model and skip cleanup for every model after it. Attempt every model, merge
-    # any failures together, and only raise once all of them have been attempted.
+    # result, but a remote cleanup failure (e.g. a non-zero `run_validators` invocation, or a
+    # transport/parsing failure reaching the unit) surfaces as a bare RuntimeError from
+    # ValidatorInjectorExtension instead - catching only JujuValidationError would abort the loop
+    # on the first such failure and skip cleanup for every model after it. Attempt every model,
+    # merge JujuValidationError failures together, and remember the first other exception; only
+    # raise once every model has been attempted.
     combined_failed_validations: dict[str, list[ValidationResult]] = {}
+    first_other_error: Exception | None = None
     for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
         try:
             juju_client.validate_model(
@@ -47,8 +51,13 @@ def test_teardown(
         except JujuValidationError as exc:
             for unit, results in exc.failed_validations.items():
                 combined_failed_validations.setdefault(unit, []).extend(results)
+        except Exception as exc:  # broad on purpose - see comment above
+            if first_other_error is None:
+                first_other_error = exc
     if combined_failed_validations:
         raise JujuValidationError(combined_failed_validations)
+    if first_other_error is not None:
+        raise first_other_error
 
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
