@@ -904,3 +904,18 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
 
         # THEN no connection was attempted
         mock_connect.assert_not_called()
+
+    def test_noop_when_uris_present_but_other_required_fields_are_missing(self) -> None:
+        # GIVEN a relation that has advertised "uris" but not yet the rest of the fields
+        # _open_connection() requires (database/username/password) - e.g. still mid-setup.
+        # Regression test for: the no-op guard previously only checked "uris"/"secret-user" for
+        # presence, so this partial databag would fail that check, fall through to
+        # _open_connection(), and raise instead of no-op'ing.
+        validator = _make_persistence_validator({"uris": "postgresql://x/y"})
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
+            # WHEN
+            validator.cleanup()
+
+        # THEN no connection was attempted and no exception was raised
+        mock_connect.assert_not_called()
