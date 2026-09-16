@@ -415,10 +415,13 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # search_path into current_schema(). Restrict discovery (and the DROP below) to
                 # that same schema too - otherwise a same-named canary table in another schema
                 # could be left behind, or an unrelated same-named object in a different schema
-                # could be dropped by mistake.
+                # could be dropped by mistake. Also restrict to base tables: a view or foreign
+                # table sharing the prefix would make PostgreSQL reject DROP TABLE and abort
+                # cleanup, leaving any remaining canary tables undropped.
                 cur.execute(
                     "SELECT table_schema, table_name FROM information_schema.tables "
-                    "WHERE table_schema = current_schema() AND table_name LIKE %s ESCAPE '\\'",
+                    "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
+                    "AND table_name LIKE %s ESCAPE '\\'",
                     (f"{escaped_prefix}%",),
                 )
                 tables = [(row[0], row[1]) for row in cur.fetchall()]

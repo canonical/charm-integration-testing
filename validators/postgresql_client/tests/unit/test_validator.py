@@ -696,6 +696,22 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "current_schema()" in select_query
 
+    def test_restricts_discovery_to_base_tables(self) -> None:
+        # Regression test for: information_schema.tables also lists views/foreign tables. A view
+        # sharing the canary prefix would make DROP TABLE fail and abort cleanup, leaving other
+        # discovered canary tables undropped. Discovery must be scoped to table_type = 'BASE TABLE'.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_type = 'BASE TABLE'" in select_query
+
     def test_escapes_like_wildcards_in_prefix_pattern(self) -> None:
         # GIVEN
         # Regression test for: the canary table prefix contains underscores, which are LIKE
