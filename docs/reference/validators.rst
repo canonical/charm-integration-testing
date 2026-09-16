@@ -97,7 +97,8 @@ A persistence validator implements three methods, called at different points in 
   Removes all canary data written by this validator instance. Called during test teardown.
 
 Raise ``PersistenceNotApplicable`` from any of these methods when persistence checking doesn't
-apply to the current side of the relation (e.g. only the ``provides`` role can seed data); the
+apply to the current side of the relation (e.g. only the ``requires`` role can seed data, as
+``PostgreSQLClientPersistenceValidator`` does); the
 runner treats this as "no applicable validator" rather than a failure.
 
 ``PersistenceState`` (``validators/base``) is the opaque state passed between calls: ``id`` is a

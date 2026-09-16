@@ -344,20 +344,25 @@ class TestValidatorInjectorExtension:
             assert results["myapp/0"][0].endpoint == "canary"
             assert results["myapp/0"][0].status == "FAIL"
 
-        def test_raises_when_no_validators_path_and_venv_absent(
+        def test_skips_and_preserves_tracked_state_when_no_validators_path_and_venv_absent(
             self, extension_no_path: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
-            # GIVEN the venv is absent and no validators_path is configured to inject one
+            # GIVEN the venv is absent and no validators_path is configured to inject one - this
+            # is the normal state for a run where no validators (functional or persistence) are
+            # configured at all, so it must be a silent skip (matching
+            # _run_validators_on_unit's convention), not a hard failure.
             juju.units_by_app["myapp"] = ["myapp/0"]
             key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
             persistence_state = {key: PersistenceState(id=1, ref=2)}
             juju.exec_responses.append(_fail())
 
-            # WHEN / THEN a persistence op with no way to run it raises, rather than silently
-            # returning an empty success-shaped result that would (for cleanup) delete tracking
-            # state without ever having dropped the canary data.
-            with pytest.raises(RuntimeError, match="validators_path"):
-                extension_no_path.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            # WHEN cleanup is requested but cannot run
+            results = extension_no_path.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+
+            # THEN no results are reported, and the tracked state is preserved rather than deleted -
+            # deleting it here would mean a cleanup that never ran (and so never dropped the real
+            # canary data) is treated as having succeeded.
+            assert results == {"myapp/0": []}
             assert persistence_state == {key: PersistenceState(id=1, ref=2)}
 
     class TestRunValidatorsOnUnit:
