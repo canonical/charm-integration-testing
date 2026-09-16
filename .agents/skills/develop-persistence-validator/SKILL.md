@@ -133,12 +133,17 @@ implementation):
   tracking, verifies the canary data is still there and has exactly
   `expected.ref` records, then unconditionally writes one more record and
   returns `PersistenceState(id=expected.id, ref=expected.ref + 1)` -
-  regardless of whether the check passed. This lets subsequent checkpoints
-  in the same run keep counting correctly even after a single failure was
-  already reported. Verify a stable, identifier-derived marker value on each
-  record rather than trusting a bare `count(*)` - a resource that was
-  dropped and silently recreated from scratch could otherwise coincidentally
-  satisfy a row-count-only check (see "Common patterns" below).
+  regardless of whether the check *itself* passed. This lets subsequent
+  checkpoints in the same run keep counting correctly even after a single
+  check reported `FAIL`. This only covers a returned result, not an
+  operational failure: if `checkpoint()` raises instead of returning (e.g.
+  the connection itself fails), the runner converts that exception to an
+  `ERROR` result and emits no `updated_refs` entry at all for that relation -
+  there is no advanced (or any) state to pick up on the next checkpoint.
+  Verify a stable, identifier-derived marker value on each record rather
+  than trusting a bare `count(*)` - a resource that was dropped and silently
+  recreated from scratch could otherwise coincidentally satisfy a
+  row-count-only check (see "Common patterns" below).
 - **`cleanup()`** takes no arguments (it runs as a fresh process invocation
   with no state carried over from `prepare`/`checkpoint`), so it must
   discover everything to remove by name pattern rather than by identifier.
@@ -191,6 +196,17 @@ discovers `endpoint_persistence_validators` independently of
 `endpoint_validators`, so a validator package can implement either, both, or
 neither.
 
+Only **one** persistence validator may be registered per interface name. The
+runner tracks a single `PersistenceState` per relation ID (see
+`validators/runner/runner.py:151-171`); if two packages both registered
+`endpoint_persistence_validators` for the same interface, their `prepare()`/
+`checkpoint()` calls would overwrite each other's state, and a checkpoint
+could end up verifying/advancing the wrong validator's canary data (the
+runner logs a warning in this case, but does not prevent it). If an
+interface genuinely needs more than one kind of persistence check, combine
+them into a single validator class's `prepare()`/`checkpoint()`/`cleanup()`
+rather than registering multiple entry points for the same interface.
+
 ## Steps
 
 1. Confirm a package for this interface already exists under
@@ -241,11 +257,16 @@ neither.
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, after any dependency registration above (new package, new
-   runtime/dev dependency, or an `extras` change), run `poetry install` (or
-   `poetry update <package>` for a single path dependency) before running
-   the tests below - otherwise the installed environment stays stale and the
-   runner won't discover the new/changed entry point.
+   way, run `poetry install` (or `poetry update <package>` for a single
+   path dependency) after *any* change to a package's `pyproject.toml` made
+   in this step - not just a new/changed dependency or `extras` - including
+   just adding the `endpoint_persistence_validators` entry-point table
+   itself. The runner discovers entry points through installed package
+   metadata, so leaving the environment stale after any such change (a new
+   package, a new runtime/dev dependency, an `extras` change, or only a new
+   entry point) can make the new/changed validator undiscoverable even
+   though the source file itself is present. Do this before running the
+   tests below.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
