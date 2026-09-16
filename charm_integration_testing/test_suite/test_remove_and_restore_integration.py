@@ -42,11 +42,15 @@ def test_remove_and_restore_integration(
     # given model (see integration_spec.py); application_units() can't resolve a SAAS alias, so
     # only query units for endpoints that are genuinely deployed in that model.
     candidate_models = {m for m in (target_model_ref, neighbor_model_ref) if m is not None}
+    invalidated_models: set[JujuModelHandle] = set()
     for model_ref in candidate_models:
         affected_units: set[str] = set()
         for endpoint in (integration_endpoint_1, integration_endpoint_2):
             if juju_client.application_exists(endpoint.application, model=model_ref):
                 affected_units.update(juju_backend.application_units(model_ref, endpoint.application))
+        if not affected_units:
+            continue
+        invalidated_models.add(model_ref)
         for key in [
             key
             for key in persistence_state
@@ -88,13 +92,13 @@ def test_remove_and_restore_integration(
 
     juju_client.multi_model_idle_for_period(sorted_model_refs, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations in every involved model. The integration's own model
-    # gets a fresh "prepare" (its relation_id changed above); every other involved model is
-    # verified with "checkpoint" as usual.
+    # Validate all applications and relations in every involved model. Every model in
+    # invalidated_models had its tracked state invalidated above (a CMR assigns a new relation_id
+    # in *both* the offering and consuming model, not just integration_model_ref), so all of them
+    # need a fresh "prepare" rather than "checkpoint" - otherwise the non-owning model's checkpoint
+    # would run against an empty refs map and silently skip verifying its persistence validators.
     for model_ref in sorted_model_refs:
-        persistence: Literal["prepare", "checkpoint"] = (
-            "prepare" if model_ref == integration_model_ref else "checkpoint"
-        )
+        persistence: Literal["prepare", "checkpoint"] = "prepare" if model_ref in invalidated_models else "checkpoint"
         juju_client.validate_model(
             model=model_ref, level="simple", persistence=persistence, persistence_state=persistence_state
         )

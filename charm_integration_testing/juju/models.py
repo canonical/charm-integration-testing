@@ -3,12 +3,9 @@
 
 from dataclasses import dataclass, field
 from functools import total_ordering
-from typing import TYPE_CHECKING
+from typing import TypeVar
 
 from .handles import JujuModelHandle
-
-if TYPE_CHECKING:
-    from validators.base import PersistenceState
 
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
@@ -138,14 +135,22 @@ class PersistenceKey:
     relation_id: int
 
 
+_PersistenceStateT = TypeVar("_PersistenceStateT")
+
+
 def rekey_persistence_state_controller(
-    persistence_state: dict["PersistenceKey", "PersistenceState"], model: str, old_controller: str, new_controller: str
+    persistence_state: dict["PersistenceKey", _PersistenceStateT], model: str, old_controller: str, new_controller: str
 ) -> None:
     """Rewrite tracked persistence keys for *model* after it migrates to a new controller.
 
     Model migration changes a model's controller without changing its units or relation ids, so
     the (controller, model, unit, relation_id) tracking key would otherwise stop matching after a
     migration. Mutates *persistence_state* in place.
+
+    Generic over the tracked state's value type (rather than importing ``validators.base``'s
+    ``PersistenceState`` directly) since this function only rewrites keys and never inspects or
+    constructs a value - keeping this data-model module free of a dependency on the higher-level
+    validator package.
     """
     for key in [key for key in persistence_state if key.controller == old_controller and key.model == model]:
         persistence_state[
