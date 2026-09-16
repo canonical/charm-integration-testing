@@ -64,7 +64,12 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # full value if the identifier becomes part of a length-limited resource name - see the
         # "prepare()" design point below.
         identifier = uuid.uuid4().int & ((1 << 63) - 1)
-        # ... create a uniquely-named canary table/object and write one marked row/record ...
+        # ... create a canary table/object named e.g. f"{self._canary_table_prefix()}{identifier:020d}"
+        # - the identifier must be zero-padded to a fixed width (20 digits here, since the 63-bit
+        # mask above never produces more than 19) so cleanup()'s discovery regex, which matches an
+        # exact "prefix + fixed-width digits" shape (see "Common patterns" below), can find it
+        # again. An unpadded/variable-width identifier would never match that regex, leaving the
+        # canary resource undiscoverable and orphaned. Then write one marked row/record ...
         # commit (or use an autocommit connection) before returning - a transactional backend
         # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
         return PersistenceState(id=identifier, ref=1)
@@ -85,10 +90,15 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         Only invoked from `test_teardown`, once per test run - the harness does not call cleanup
         mid-session. A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
         instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
-        `prepare()` again for the new one; the old canary resource is left in place until the
-        final teardown cleanup discovers and drops it by name pattern. Must still be safe to call
-        when no canary resource remains (no-op, not an error) - e.g. if `prepare()` was never
-        reached for a given relation.
+        `prepare()` again for the new one. Note that this is a real, accepted limitation, not just
+        a delay: the discovery namespace (see `_canary_table_prefix`/"Common patterns" below) is
+        derived from the *current* relation_id, so `cleanup()` for the new relation cannot find
+        canary data left behind under the old relation_id - that old resource remains orphaned
+        rather than being swept up by a later cleanup call. If your backend needs a stronger
+        guarantee, record prior relation_ids somewhere durable (e.g. in the databag/app data) so
+        cleanup can enumerate and drop them too. Must still be safe to call when no canary
+        resource remains (no-op, not an error) - e.g. if `prepare()` was never reached for a given
+        relation.
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
@@ -230,7 +240,12 @@ neither.
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
-   regardless of which entry-point group(s) the package declares.
+   regardless of which entry-point group(s) the package declares. Either
+   way, after any dependency registration above (new package, new
+   runtime/dev dependency, or an `extras` change), run `poetry install` (or
+   `poetry update <package>` for a single path dependency) before running
+   the tests below - otherwise the installed environment stays stale and the
+   runner won't discover the new/changed entry point.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
@@ -297,6 +312,12 @@ import re
 
 _CANARY_TABLE_PREFIX = "validator_canary_"
 
+# prepare() masks its identifier to 63 bits (see prepare() above), so a genuine canary identifier
+# never exceeds this value. The discovery regex below only checks the candidate's *shape* (prefix
+# + 20 digits); this bound lets cleanup() also reject an out-of-range, shape-only look-alike
+# (e.g. "..._99999999999999999999") that couldn't possibly have come from prepare().
+_MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+
 
 def _quote_identifier(name: str) -> str:
     """Double any embedded double-quotes - the standard, connection-independent way to escape a
@@ -322,8 +343,10 @@ def _canary_table_prefix(self) -> str:
 def _canary_table_regex(self) -> "re.Pattern[str]":
     # Exact-shape match: prefix + a fixed-width, zero-padded identifier (see prepare()'s masked,
     # zero-padded identifier above). Used to reject a same-prefixed but unrelated resource that a
-    # bare prefix LIKE match would otherwise let through - see cleanup() below.
-    return re.compile(re.escape(self._canary_table_prefix()) + r"[0-9]{20}")
+    # bare prefix LIKE match would otherwise let through - see cleanup() below. Matching this
+    # shape alone isn't sufficient though: cleanup() also checks the captured identifier against
+    # _MAX_CANARY_IDENTIFIER.
+    return re.compile(re.escape(self._canary_table_prefix()) + r"(?P<identifier>[0-9]{20})")
 
 
 def cleanup(self) -> None:
@@ -359,10 +382,14 @@ def cleanup(self) -> None:
         # The LIKE query above only narrows candidates by *prefix* - it can't cheaply assert an
         # exact suffix shape. Re-check every candidate against the fixed-width regex before
         # dropping it, so a same-prefixed but unrelated table (e.g. a hand-created "..._backup")
-        # is skipped instead of destroyed.
+        # is skipped instead of destroyed. The regex alone would still accept a shape-only
+        # look-alike like "..._99999999999999999999" (20 nines) - larger than any identifier
+        # prepare() can produce (masked to 63 bits) - so also check the captured identifier
+        # against _MAX_CANARY_IDENTIFIER.
         name_regex = self._canary_table_regex()
         for schema, table_name in tables:
-            if not name_regex.fullmatch(table_name):
+            match = name_regex.fullmatch(table_name)
+            if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
                 continue
             with conn.cursor() as cur:
                 quoted = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
