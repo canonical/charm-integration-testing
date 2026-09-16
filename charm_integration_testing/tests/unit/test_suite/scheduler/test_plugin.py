@@ -207,6 +207,22 @@ class TestDuplicateItemForRepeat:
         # outcome must not contaminate the template or other occurrences
         assert key not in item.stash
 
+    def test_duplicate_has_independent_store_alias(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN an item duplicated for a recovery bridge - real pytest.Item
+        # instances carry a ``_store`` attribute as a backwards-compatibility
+        # alias of ``stash`` (see pytest.Node.__init__), which copy.copy alone
+        # would leave pointing at the template's original stash object even
+        # after duplicate.stash itself is rebound to a fresh one.
+        item = make_item("test_foo")
+        duplicate = _duplicate_item_for_repeat(item, 2)
+
+        # THEN the duplicate's _store alias points at its OWN fresh stash,
+        # not the template's - otherwise a plugin reading/writing via
+        # ._store (rather than .stash directly) would still leak per-run
+        # state back to the template.
+        assert cast(Any, duplicate)._store is duplicate.stash
+        assert cast(Any, duplicate)._store is not cast(Any, item)._store
+
     def test_duplicate_has_independent_user_properties(self, make_item: Callable[..., pytest.Item]) -> None:
         # GIVEN an item duplicated for a recovery bridge
         item = make_item("test_foo")

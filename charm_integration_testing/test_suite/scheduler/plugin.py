@@ -881,6 +881,13 @@ def _duplicate_item_for_repeat(
         duplicate.own_markers = list(item.own_markers)
     if hasattr(item, "stash"):
         duplicate.stash = type(item.stash)()
+        # pytest.Node.__init__ sets self._store = self.stash as a backwards
+        # -compatibility alias (pre-Stash API); copy.copy leaves it pointing
+        # at *item*'s original stash object even after the line above rebinds
+        # duplicate.stash, so plugins that still read/write via ._store would
+        # otherwise keep sharing state with the template. Rebind it too.
+        if hasattr(duplicate, "_store"):
+            duplicate._store = duplicate.stash
     if hasattr(item, "user_properties"):
         duplicate.user_properties = []
     if hasattr(item, "_report_sections"):
