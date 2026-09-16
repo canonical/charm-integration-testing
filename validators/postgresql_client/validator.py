@@ -379,6 +379,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         self._require_requires_role()
+        if expected.ref < 1:
+            # prepare() always returns ref=1 and checkpoint() only ever advances it, so a
+            # restored/malformed PersistenceState with ref <= 0 can't have come from a real prior
+            # run. Without this check, an empty or partially recreated table (actual == 0) could
+            # coincidentally satisfy `actual == expected.ref` for ref=0 and report a false PASS.
+            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
         table = self._canary_table_name(expected.id)
         marker = self._canary_marker(expected.id)
         conn = self._open_connection()

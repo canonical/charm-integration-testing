@@ -746,6 +746,29 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
             with pytest.raises(ValueError, match="out of range"):
                 validator.checkpoint(PersistenceState(id=-1, ref=1))
 
+    def test_raises_when_expected_ref_is_zero(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously compared `actual == expected.ref` without
+        # validating expected.ref first, so a restored/malformed PersistenceState with ref=0 could
+        # let an empty or partially recreated table (actual == 0) coincidentally satisfy the
+        # comparison and report a false PASS instead of failing safely. prepare() always returns
+        # ref=1, so ref < 1 can never have come from a real prior run.
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=1, ref=0))
+
+    def test_raises_when_expected_ref_is_negative(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=1, ref=-1))
+
 
 class TestPostgreSQLClientPersistenceValidatorCleanup:
     def test_drops_all_discovered_canary_tables(self) -> None:
