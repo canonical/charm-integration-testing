@@ -40,10 +40,14 @@ def _make_persistence_validator(
     endpoint: str = "db",
     role: RelationRoleStub = RelationRoleStub.requires,
     relation_id: int = 0,
+    model_uuid: str = "11111111-1111-1111-1111-111111111111",
 ) -> PostgreSQLClientPersistenceValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=relation_id, app=app, data={app: databag})
-    charm = cast(ops.CharmBase, make_charm_from_relation(relation, interface_name="postgresql_client", role=role))
+    charm = cast(
+        ops.CharmBase,
+        make_charm_from_relation(relation, interface_name="postgresql_client", role=role, local_model_uuid=model_uuid),
+    )
     return PostgreSQLClientPersistenceValidator(charm, cast(ops.Relation, relation))
 
 
@@ -544,6 +548,30 @@ class TestPostgreSQLClientPersistenceValidatorRole:
             validator.cleanup()
 
 
+class TestPostgreSQLClientPersistenceValidatorConnection:
+    def test_prepare_raises_when_uris_is_blank(self) -> None:
+        # GIVEN a databag with a present but blank "uris" field
+        # Regression test for: a blank uri was previously passed straight to psycopg2 as
+        # dsn="", which libpq treats as "use local/default connection parameters" instead of
+        # failing - silently connecting to an unintended database rather than erroring on
+        # missing relation credentials.
+        databag = {**VALID_DATABAG, "uris": ""}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.prepare()
+
+    def test_checkpoint_raises_when_uris_is_missing(self) -> None:
+        # GIVEN a databag missing the "uris" field entirely
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "uris"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.checkpoint(PersistenceState(id=1, ref=1))
+
+
 class TestPostgreSQLClientPersistenceValidatorPrepare:
     def test_creates_canary_table_and_returns_state(self) -> None:
         # GIVEN
@@ -558,7 +586,7 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
         assert isinstance(state, PersistenceState)
         assert state.ref == 1
         queries = " ".join(conn.cursor_stub.executed_queries)
-        assert f"validator_canary_0_{state.id}" in queries
+        assert f"validator_canary_bafde89c_0_{state.id}" in queries
         assert "DROP TABLE IF EXISTS" in queries
         assert "CREATE TABLE" in queries
         assert "INSERT INTO" in queries
@@ -625,7 +653,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
             validator.checkpoint(PersistenceState(id=99, ref=1))
 
         # THEN
-        assert any("validator_canary_0_99" in q for q in cursor.executed_queries)
+        assert any("validator_canary_bafde89c_0_99" in q for q in cursor.executed_queries)
 
     def test_filters_row_count_by_identifier_derived_marker(self) -> None:
         # GIVEN
@@ -703,7 +731,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # Regression test for: discovery previously matched the bare `validator_canary_` prefix
         # shared by every relation, so cleanup for one `postgresql_client` relation could drop
         # canary tables belonging to a different, concurrent relation on the same database/schema.
-        # The LIKE pattern must be scoped to this validator's own relation_id.
+        # The LIKE pattern must be scoped to this validator's own model+relation_id.
         validator = _make_persistence_validator(VALID_DATABAG, relation_id=7)
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
@@ -715,7 +743,29 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "table_name LIKE %s" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_7\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_bafde89c\\_7\\_%",)
+
+    def test_scopes_discovery_to_this_models_uuid(self) -> None:
+        # Regression test for: relation IDs are assigned independently per model, so two
+        # different models can expose the same relation_id for a postgresql_client relation to
+        # the same shared database/schema. Discovery must also be scoped to a model-specific
+        # token so cleanup in one model can't drop another model's canary tables sharing the
+        # same relation_id.
+        validator = _make_persistence_validator(
+            VALID_DATABAG, relation_id=7, model_uuid="22222222-2222-2222-2222-222222222222"
+        )
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN the LIKE pattern is scoped to this model's own token, not the other model's
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_name LIKE %s" in select_query
+        like_pattern = cursor.executed_params[0][0]
+        assert like_pattern != "validator\\_canary\\_bafde89c\\_7\\_%"
 
     def test_restricts_discovery_to_base_tables(self) -> None:
         # Regression test for: information_schema.tables also lists views/foreign tables. A view
@@ -748,7 +798,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "ESCAPE" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_0\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_bafde89c\\_0\\_%",)
 
     def test_noop_when_no_credentials_present(self) -> None:
         # GIVEN a databag without any credential fields (e.g. relation already gone)
