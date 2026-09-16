@@ -24,6 +24,11 @@ from validators.runner import runner
 from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, _parse_cli_args, logger
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
+    ApplicationStub,
+    CharmBaseStub,
+    CharmMetaStub,
+    ModelStub,
+    RelationMetaStub,
     RelationRoleStub,
     RelationStub,
 )
@@ -599,6 +604,36 @@ class TestValidatorRunnerPersistence:
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "Invalid relation_id" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_does_not_resolve_a_ref_to_a_colliding_peer_relation(self) -> None:
+        # Regression test for: _find_relation_by_id() (used by checkpoint_all) previously did not
+        # skip peer relations the way _iter_persistence_targets()/_persistence_load_error_results()
+        # do, so a stale or malformed --refs entry whose relation_id happened to collide with a
+        # peer relation's id could resolve to that peer relation instead of failing loudly.
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        peer_relation = RelationStub(name="cluster", id=5, app=ApplicationStub(name="app"))
+        charm = CharmBaseStub(
+            meta=CharmMetaStub(
+                relations={
+                    "cluster": RelationMetaStub(
+                        relation_name="cluster", role=RelationRoleStub.peer, interface_name="test-interface"
+                    ),
+                }
+            ),
+            model=ModelStub(relations={"cluster": [peer_relation]}),
+            app=ApplicationStub(name="app"),
+        )
+        refs = {"5": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN the peer relation is not resolved; the ref is reported as an ERROR instead of
+        # silently checkpointing against a peer relation
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "not found" in (results.results[0].error or "")
         assert results.updated_refs == {}
 
     def test_checkpoint_all_captures_exception_as_error_result(self) -> None:
