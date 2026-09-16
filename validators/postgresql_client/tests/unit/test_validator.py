@@ -58,9 +58,11 @@ class CursorStub:
     _fetch_count: int = field(default=0, init=False, repr=False)
     _execute_count: int = field(default=0, init=False, repr=False)
     executed_queries: list[str] = field(default_factory=list, init=False, repr=False)
+    executed_params: list[Any] = field(default_factory=list, init=False, repr=False)
 
     def execute(self, query: str, params: Any = None) -> None:
         self.executed_queries.append(query)
+        self.executed_params.append(params)
         if self.execute_error and self._execute_count >= self.execute_succeed_count:
             raise self.execute_error
         self._execute_count += 1
@@ -622,6 +624,26 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # THEN
         assert any("validator_canary_99" in q for q in cursor.executed_queries)
 
+    def test_filters_row_count_by_identifier_derived_marker(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously counted every row in the table, so a table
+        # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN the row count query and the follow-up insert are both scoped to the same marker,
+        # which is derived deterministically from the identifier so it is stable across calls
+        select_index = next(i for i, q in enumerate(cursor.executed_queries) if "count(*)" in q)
+        insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
+        assert "WHERE marker = %s" in cursor.executed_queries[select_index]
+        assert cursor.executed_params[select_index] == ("marker-99",)
+        assert cursor.executed_params[insert_index] == ("marker-99",)
+
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
@@ -653,6 +675,26 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
         assert any("validator_canary_1" in q for q in drop_queries)
         assert any("validator_canary_2" in q for q in drop_queries)
+        # THEN dropped identifiers are safely quoted (defense in depth: they come from
+        # information_schema, not directly from user input, but should not be trusted blindly)
+        assert all('"validator_canary_' in q for q in drop_queries)
+
+    def test_escapes_like_wildcards_in_prefix_pattern(self) -> None:
+        # GIVEN
+        # Regression test for: the canary table prefix contains underscores, which are LIKE
+        # wildcards; an unescaped pattern could match unrelated tables (e.g. "validatorXcanaryY1").
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "ESCAPE" in select_query
+        assert cursor.executed_params[0] == ("validator\\_canary\\_%",)
 
     def test_noop_when_no_credentials_present(self) -> None:
         # GIVEN a databag without any credential fields (e.g. relation already gone)
