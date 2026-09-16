@@ -479,6 +479,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         if not schema_check.passed:
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
         uri = data["uris"].split(",")[0].strip()
+        if not uri:
+            # validate_schema() only sees the raw "uris" string, so a non-blank value that is
+            # still unusable once split/stripped (e.g. a leading comma - ",postgresql://...", or a
+            # whitespace-only first entry) passes that check but would otherwise reach _connect()
+            # as dsn="", which libpq silently treats as "use local/default connection parameters".
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'uris' is blank")
         conn = self._connect(uri)
         conn.autocommit = True
         return conn
