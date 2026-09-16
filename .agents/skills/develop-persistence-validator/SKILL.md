@@ -156,17 +156,19 @@ neither.
 ## Steps
 
 1. Confirm a package for this interface already exists under
-   `validators/<name>/` (with `pyproject.toml`, `__init__.py`, etc.), or
-   create one per the `develop-validator` skill first if it doesn't - that
-   includes registering the new package in the root `pyproject.toml` and
-   `validators/runner/pyproject.toml`, which persistence validators rely on
-   for entry-point discovery just as functional validators do. A functional
-   validator (`endpoint_validators` entry point) is *not* a hard
-   prerequisite: the runner discovers `endpoint_validators` and
-   `endpoint_persistence_validators` independently, so a package may
-   register either, both, or neither. In practice, most interfaces already
-   have a functional validator, and persistence validators are usually
-   additive to that existing package.
+   `validators/<name>/` (with `pyproject.toml`, `__init__.py`, etc.). If it
+   doesn't, create the package skeleton and register it in the root
+   `pyproject.toml` and `validators/runner/pyproject.toml` (reusing only the
+   packaging/dependency-registration steps from the `develop-validator`
+   skill), which persistence validators rely on for entry-point discovery
+   just as functional validators do. A functional validator
+   (`endpoint_validators` entry point) is *not* a hard prerequisite: the
+   runner discovers `endpoint_validators` and `endpoint_persistence_validators`
+   independently, so a package may register either, both, or neither -
+   don't implement a functional validator unless this interface actually
+   needs one. In practice, most interfaces already have a functional
+   validator, and persistence validators are usually additive to that
+   existing package.
 
 2. Identify what "canary data" means for this interface: a row in a table, a
    key in a KV store, an object in a bucket, a topic message, etc. It must be:
@@ -190,9 +192,9 @@ neither.
    dependency (e.g. a client library the functional validator doesn't use)
    or dev dependency (e.g. a test double), which must still be added to the
    package's own `pyproject.toml` under `[project].dependencies` /
-   `[project.optional-dependencies].dev` (matching the format
-   `validators/<name>/pyproject.toml` already uses - not the
-   `[tool.poetry.dependencies]` format used by the root/runner projects). If
+   `[project.optional-dependencies].dev` (matching the PEP 621 format
+   `validators/<name>/pyproject.toml` already uses - not the root project's
+   `[tool.poetry.dependencies]` format). If
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
@@ -313,7 +315,7 @@ def _require_requires_role(self) -> None:
 ```python
 class _PostgreSQLConnectionMixin:
     def _resolve_credentials(self) -> dict[str, str]: ...
-    def _connect(self, ...) -> "Connection": ...
+    def _connect(self, credentials: dict[str, str]) -> "Connection": ...
 
 class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator): ...
 class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersistenceValidator): ...
