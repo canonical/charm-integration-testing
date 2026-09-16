@@ -571,6 +571,19 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
         with pytest.raises(RuntimeError, match="uris"):
             validator.checkpoint(PersistenceState(id=1, ref=1))
 
+    def test_prepare_raises_when_first_uri_is_blank_after_split(self) -> None:
+        # GIVEN a "uris" value that is non-blank (so validate_schema() passes) but whose first
+        # comma-separated entry is blank once split/stripped - e.g. a leading comma or a
+        # whitespace-only first entry.
+        # Regression test for: this previously reached _connect() as dsn="", which libpq treats
+        # as "use local/default connection parameters" instead of failing loudly.
+        databag = {**VALID_DATABAG, "uris": " ,postgresql://10.1.2.3:5432/mydb"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.prepare()
+
 
 class TestPostgreSQLClientPersistenceValidatorPrepare:
     def test_creates_canary_table_and_returns_state(self) -> None:
