@@ -89,8 +89,9 @@ A persistence validator implements three methods, called at different points in 
 ``prepare() -> PersistenceState``
   Seeds canary data (e.g. a marker row) for a relation and returns a ``PersistenceState``
   identifying it. Called when a relation is first established, and again whenever a relation is
-  re-established with a fresh ``relation_id`` (e.g. after ``cleanup()`` runs during an
-  idempotent-redeploy or old-revision test, or when a neighbor relation is re-added).
+  re-established with a fresh ``relation_id`` (e.g. by ``test_idempotent_redeploy`` or
+  ``test_deploy_target_old_revision`` after the preceding ``test_teardown`` already ran
+  ``cleanup()`` and removed the relation, or when a neighbor relation is re-added).
 
 ``checkpoint(expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]``
   Verifies the canary data seeded by ``prepare()`` (or a previous ``checkpoint()``) is still
