@@ -114,9 +114,16 @@ class ValidatorRunnerResults(BaseModel):
 class ValidatorRunner:
     validators: dict[str, list[type[BaseValidator]]]
     persistence_validators: dict[str, list[type[BasePersistenceValidator]]]
+    # Interface names whose endpoint_persistence_validators entry point failed to load, mapped to
+    # the error message. Consulted by prepare_all/checkpoint_all/cleanup_all so a currently
+    # connected relation on one of these interfaces surfaces as an ERROR result instead of
+    # silently looking like "no persistence validator applicable" - which cleanup_all in
+    # particular must not treat as a successful (and therefore state-clearing) cleanup.
+    persistence_load_errors: dict[str, str]
 
     def __init__(self) -> None:
         self.validators = self._load_validators()
+        self.persistence_load_errors = {}
         self.persistence_validators = self._load_persistence_validators()
 
     @staticmethod
@@ -133,8 +140,7 @@ class ValidatorRunner:
                 logger.exception(f"Failed to load validator for '{ep.name}'")
         return validators
 
-    @staticmethod
-    def _load_persistence_validators() -> dict[str, list[type[BasePersistenceValidator]]]:
+    def _load_persistence_validators(self) -> dict[str, list[type[BasePersistenceValidator]]]:
         validators: dict[str, list[type[BasePersistenceValidator]]] = {}
         for ep in entry_points(group="endpoint_persistence_validators"):
             try:
@@ -156,8 +162,12 @@ class ValidatorRunner:
                         "persistence validator per interface."
                     )
                 validators.setdefault(ep.name, []).append(validator_cls)
-            except Exception:
+            except Exception as exc:
                 logger.exception(f"Failed to load persistence validator for '{ep.name}'")
+                # Record the failure so prepare_all/checkpoint_all/cleanup_all can surface an
+                # ERROR result for any relation on this interface, instead of silently treating
+                # it the same as "no persistence validator registered".
+                self.persistence_load_errors[ep.name] = str(exc)
         return validators
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
@@ -248,6 +258,38 @@ class ValidatorRunner:
                 targets.append((integration, interface_name, role))
         return targets
 
+    def _persistence_load_error_results(self, charm: CharmBase) -> list[ValidationResult]:
+        """ERROR results for every live relation on an interface whose persistence validator failed to load.
+
+        Without this, a relation on such an interface is indistinguishable from one with no
+        persistence validator registered at all: both are silently absent from
+        ``_iter_persistence_targets``. That ambiguity is particularly unsafe for cleanup, whose
+        caller treats an empty result list as "nothing to clean up" and deletes tracked state.
+        """
+        if not self.persistence_load_errors:
+            return []
+        results: list[ValidationResult] = []
+        for relation_name, metadata in charm.meta.relations.items():
+            if str_to_validation_role(metadata.role.name) == "peer":
+                continue
+            interface_name = metadata.interface_name or relation_name
+            error = self.persistence_load_errors.get(interface_name)
+            if error is None:
+                continue
+            for integration in charm.model.relations.get(relation_name, []):
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint=relation_name,
+                        interface=interface_name,
+                        role=str_to_validation_role(metadata.role.name),
+                        level=_PERSISTENCE_RESULT_LEVEL,
+                        relation_id=integration.id,
+                        error=f"Persistence validator for interface '{interface_name}' failed to load: {error}",
+                    )
+                )
+        return results
+
     def _find_relation_by_id(self, charm: CharmBase, relation_id: int) -> tuple[Relation, str, ValidationRole] | None:
         """Locate a live relation by its Juju relation_id, along with its interface and role."""
         for relation_name, metadata in charm.meta.relations.items():
@@ -265,7 +307,7 @@ class ValidatorRunner:
         the relation's Juju ``relation_id`` (as a string, matching the ``--refs`` wire format).
         """
         logger.info("Preparing persistence validators")
-        results: list[ValidationResult] = []
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             for validator_cls in self.persistence_validators[interface_name]:
@@ -282,7 +324,7 @@ class ValidatorRunner:
     def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
         """Verify all previously-seeded canary data is still present for every ref in *refs*."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
-        results: list[ValidationResult] = []
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for relation_id_str, expected in refs.items():
             try:
@@ -306,7 +348,30 @@ class ValidatorRunner:
                 )
                 continue
             integration, interface_name, role = found
-            for validator_cls in self.persistence_validators.get(interface_name, []):
+            registered_validators = self.persistence_validators.get(interface_name, [])
+            if not registered_validators:
+                # A ref was supplied for a relation whose interface has no loaded persistence
+                # validator. This can't happen from a ref this same run's prepare_all produced
+                # (it only tracks interfaces it found validators for), so it means the ref is
+                # stale (e.g. the charm's interface changed) or the validator failed to load this
+                # run - either way, silently doing nothing would let a real durability check
+                # pass without ever running.
+                logger.error(
+                    f"No persistence validator registered for interface '{interface_name}'; cannot checkpoint."
+                )
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint=integration.name,
+                        interface=interface_name,
+                        role=role,
+                        level=_PERSISTENCE_RESULT_LEVEL,
+                        relation_id=relation_id,
+                        error=f"No persistence validator registered for interface '{interface_name}'; cannot checkpoint.",
+                    )
+                )
+                continue
+            for validator_cls in registered_validators:
                 outcome, error_result = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.checkpoint(expected)
                 )
@@ -322,7 +387,7 @@ class ValidatorRunner:
     def cleanup_all(self, charm: CharmBase) -> ValidatorRunnerResults:
         """Drop all canary data for every relation with a registered persistence validator."""
         logger.info("Cleaning up persistence validators")
-        results: list[ValidationResult] = []
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             for validator_cls in self.persistence_validators[interface_name]:
                 _, error_result = self._call_persistence_method(

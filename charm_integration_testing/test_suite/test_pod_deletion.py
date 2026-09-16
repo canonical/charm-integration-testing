@@ -17,6 +17,7 @@ def test_pod_deletion(
     _is_running_on_kubernetes: None,
     kubernetes_client: KubernetesClient | None,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
@@ -52,7 +53,10 @@ def test_pod_deletion(
     # Wait for return to idle
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations
-    juju_client.validate_model(
-        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
-    )
+    # Validate all applications and relations. For a CMR where the target application is the
+    # provider, the applicable persistence validator and tracked canary state live on the
+    # neighbor's requirer units instead, so checkpoint the neighbor model too when present.
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+        )
