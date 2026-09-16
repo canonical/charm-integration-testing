@@ -57,6 +57,8 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         self._require_requires_role()
         identifier = uuid.uuid4().int
         # ... create a uniquely-named canary table/object and write one marked row/record ...
+        # commit (or use an autocommit connection) before returning - a transactional backend
+        # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
         return PersistenceState(id=identifier, ref=1)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
@@ -64,7 +66,8 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         self._require_requires_role()
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
-        # ... unconditionally write one more marked row/record ...
+        # ... unconditionally write one more marked row/record, then commit it (or use autocommit)
+        # for the same reason as prepare() above ...
         new_state = PersistenceState(id=expected.id, ref=expected.ref + 1)
         return self._make_result(level="deep", checks=[...]), new_state
 
@@ -97,10 +100,11 @@ implementation):
   satisfy a row-count-only check (see "Common patterns" below).
 - **`cleanup()`** takes no arguments (it runs as a fresh process invocation
   with no state carried over from `prepare`/`checkpoint`). Discover
-  everything to remove by name pattern (e.g. `information_schema.tables
-  WHERE table_name LIKE 'validator_canary_%'`), not by a remembered
-  identifier. Because this discovery is prefix-based rather than
-  identifier-based, it will also drop canary resources left behind by any
+  everything to remove by name pattern - see the escaped, schema-scoped
+  `information_schema.tables` query under "Common patterns" below, not a
+  bare `LIKE 'validator_canary_%'` (`_` is itself a `LIKE` wildcard and can
+  match unrelated tables). Discovery is prefix-based rather than
+  identifier-based, so it will also drop canary resources left behind by any
   other concurrent validator run against the same backend that shares the
   prefix - this is an accepted trade-off of the pattern, so avoid running
   multiple persistence validation runs against the same database/model
@@ -164,13 +168,19 @@ either, both, or neither.
 
 4. Register the `endpoint_persistence_validators` entry point in the
    package's `pyproject.toml` (see above). If the package already existed
-   with a functional validator, it's already registered as a Poetry
-   dependency in the root `pyproject.toml` and in
-   `validators/runner/pyproject.toml`, and no further changes are needed
-   there - only the new entry-point table above. If you just created the
-   package from scratch in step 1, make sure those two registrations are
-   also done (per `develop-validator`); they're required for entry-point
-   discovery regardless of which entry-point group(s) the package declares.
+   with a functional validator, the package itself is already registered as
+   a Poetry dependency in the root `pyproject.toml` and in
+   `validators/runner/pyproject.toml` - the only entry-point registration
+   needed is the new table above. This does not mean no other package
+   metadata can change: persistence support may need its own runtime
+   dependency (e.g. a client library the functional validator doesn't use)
+   or dev dependency (e.g. a test double), which must still be added to the
+   package's own `pyproject.toml` `[tool.poetry.dependencies]` /
+   `[tool.poetry.group.dev.dependencies]`. If you just created the package
+   from scratch in step 1, make sure the root/`validators/runner`
+   registrations are also done (per `develop-validator`); they're required
+   for entry-point discovery regardless of which entry-point group(s) the
+   package declares.
 
 5. Write unit tests in the existing `tests/unit/test_validator.py`, extending
    any connection/cursor stubs already used by the functional validator's
@@ -236,13 +246,26 @@ def cleanup(self) -> None:
     # `_` and `%` are LIKE wildcards, so a prefix containing underscores must be escaped or it
     # can match unrelated tables (e.g. "validatorXcanaryY1").
     escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
-    with self._open_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s ESCAPE '\\'",  # nosec B608
-            (f"{escaped_prefix}%",),
-        )
-        for (table_name,) in cur.fetchall():
-            cur.execute(f"DROP TABLE IF EXISTS {_quote_identifier(table_name)}")  # nosec B608
+    conn = self._open_connection()
+    try:
+        with conn.cursor() as cur:
+            # CREATE TABLE elsewhere is unqualified, so it resolves through search_path into
+            # current_schema(); restrict discovery (and the DROP below) to that same schema, or
+            # a same-named table in another schema could be left behind or wrongly targeted.
+            cur.execute(
+                "SELECT table_schema, table_name FROM information_schema.tables "  # nosec B608
+                "WHERE table_schema = current_schema() AND table_name LIKE %s ESCAPE '\\'",
+                (f"{escaped_prefix}%",),
+            )
+            tables = cur.fetchall()
+        for schema, table_name in tables:
+            with conn.cursor() as cur:
+                quoted = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
+                cur.execute(f"DROP TABLE IF EXISTS {quoted}")  # nosec B608
+    finally:
+        # A `with conn:` block only commits/rolls back on exit for psycopg2 - it does not close
+        # the connection, so always close explicitly or copied code leaks one connection per call.
+        conn.close()
 ```
 
 ### Role gating helper
