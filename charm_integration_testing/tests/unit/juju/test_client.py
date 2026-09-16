@@ -13,10 +13,11 @@ from juju.extension import JujuExtension
 from juju.models import (
     JujuApplicationInfo,
     JujuIntegrationApplication,
+    PersistenceKey,
 )
 from juju.version import JujuVersion
 
-from validators.base.validator import ValidationCheck, ValidationResult
+from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
 from ..extensions.shared import NullJujuBackend
 
@@ -105,6 +106,34 @@ class ExtensionStub(JujuExtension):
         self.results = results
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        return self.results.get(application, {})
+
+
+class PersistenceExtensionStub(JujuExtension):
+    """Extension that returns configurable persistence results and records how it was called."""
+
+    def __init__(
+        self,
+        results: dict[str, dict[str, list[ValidationResult]]],
+        state_updates: dict[PersistenceKey, PersistenceState] | None = None,
+        keys_to_drop: list[PersistenceKey] | None = None,
+    ) -> None:
+        self.results = results
+        self.state_updates = state_updates or {}
+        self.keys_to_drop = keys_to_drop or []
+        self.calls: list[tuple[str, str, dict[PersistenceKey, PersistenceState]]] = []
+
+    def post_persistence(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        persistence: str,
+        persistence_state: dict[PersistenceKey, PersistenceState],
+    ) -> dict[str, list[ValidationResult]]:
+        self.calls.append((application, persistence, dict(persistence_state)))
+        persistence_state.update(self.state_updates)
+        for key in self.keys_to_drop:
+            persistence_state.pop(key, None)
         return self.results.get(application, {})
 
 
@@ -451,6 +480,82 @@ class TestJujuClientValidateModel:
         # THEN the unit is not skipped and validation passed is logged
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
         assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_raises_value_error_when_persistence_given_without_state(self, logger: LoggerStub) -> None:
+        # GIVEN no persistence_state
+        backend = BackendStub(app_list={})
+        client = self._client(logger, backend)
+
+        # WHEN / THEN
+        with pytest.raises(ValueError, match="persistence_state"):
+            client.validate_model(self._model(), persistence="prepare")
+
+    def test_skips_functional_validation_when_level_is_none(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that would FAIL functional validation
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_fail()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN level=None (functional validation skipped entirely) / THEN no exception
+        client.validate_model(self._model(), level=None)
+
+    def test_calls_post_persistence_on_each_extension(self, logger: LoggerStub) -> None:
+        # GIVEN an application and a persistence extension
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}})
+        client = self._client(logger, backend, [extension])
+        state: dict[PersistenceKey, PersistenceState] = {}
+
+        # WHEN
+        client.validate_model(self._model(), level=None, persistence="prepare", persistence_state=state)
+
+        # THEN the extension was invoked with the application and op
+        assert extension.calls == [("myapp", "prepare", {})]
+
+    def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
+        # GIVEN a persistence extension that reports a FAIL
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail()]}})
+        client = self._client(logger, backend, [extension])
+        state: dict[PersistenceKey, PersistenceState] = {}
+
+        # WHEN / THEN
+        with pytest.raises(JujuValidationError) as exc_info:
+            client.validate_model(self._model(), level=None, persistence="checkpoint", persistence_state=state)
+        assert "myapp/0" in exc_info.value.failed_validations
+
+    def test_persistence_extension_mutates_state_in_place(self, logger: LoggerStub) -> None:
+        # GIVEN an extension that adds a new state entry on prepare
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        key = PersistenceKey(controller="ctrl", model="mymodel", unit="myapp/0", relation_id=4)
+        new_state = PersistenceState(id=123, ref=1)
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}}, state_updates={key: new_state})
+        client = self._client(logger, backend, [extension])
+        state: dict[PersistenceKey, PersistenceState] = {}
+
+        # WHEN
+        client.validate_model(self._model(), level=None, persistence="prepare", persistence_state=state)
+
+        # THEN the caller's dict was updated in place
+        assert state == {key: new_state}
+
+    def test_both_functional_and_persistence_run_when_both_requested(self, logger: LoggerStub) -> None:
+        # GIVEN backend validation passes but the persistence extension reports a FAIL
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_pass()]}},
+        )
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail("canary")]}})
+        client = self._client(logger, backend, [extension])
+        state: dict[PersistenceKey, PersistenceState] = {}
+
+        # WHEN / THEN both were run, and the persistence failure is raised
+        with pytest.raises(JujuValidationError) as exc_info:
+            client.validate_model(self._model(), level="simple", persistence="checkpoint", persistence_state=state)
+        assert extension.calls == [("myapp", "checkpoint", {})]
+        assert "canary" in {r.endpoint for r in exc_info.value.failed_validations["myapp/0"]}
 
     def test_delegates_to_backend_with_revision_only(self, logger: LoggerStub) -> None:
         # GIVEN a backend that records refresh calls

@@ -4,9 +4,12 @@
 
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
+from juju import JujuBackend, JujuClient, JujuIntegrationApplication, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -14,6 +17,7 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_remove_and_restore_integration(
     juju_client: JujuClient,
+    juju_backend: JujuBackend,
     integration_model_ref: JujuModelHandle,
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
@@ -21,9 +25,26 @@ def test_remove_and_restore_integration(
     charm_overrides: Path,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if not integration_endpoints_removable:
         pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
+
+    # The relation being removed here gets a brand new relation_id when re-added below, so any
+    # tracked persistence state for this integration's units is about to go stale. Drop it now so
+    # the "prepare" call after re-adding seeds fresh canary data under the new relation_id, rather
+    # than the checkpoint below failing to find a (now nonexistent) relation_id.
+    affected_units = set(
+        juju_backend.application_units(integration_model_ref, integration_endpoint_1.application)
+    ) | set(juju_backend.application_units(integration_model_ref, integration_endpoint_2.application))
+    for key in [
+        key
+        for key in persistence_state
+        if key.controller == integration_model_ref.controller
+        and key.model == integration_model_ref.model
+        and key.unit in affected_units
+    ]:
+        del persistence_state[key]
 
     # Break relation
     juju_client.remove_integration(
@@ -59,6 +80,13 @@ def test_remove_and_restore_integration(
 
     juju_client.multi_model_idle_for_period(sorted_model_refs, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations in every involved model
+    # Validate all applications and relations in every involved model. The integration's own model
+    # gets a fresh "prepare" (its relation_id changed above); every other involved model is
+    # verified with "checkpoint" as usual.
     for model_ref in sorted_model_refs:
-        juju_client.validate_model(model=model_ref, level="simple")
+        persistence: Literal["prepare", "checkpoint"] = (
+            "prepare" if model_ref == integration_model_ref else "checkpoint"
+        )
+        juju_client.validate_model(
+            model=model_ref, level="simple", persistence=persistence, persistence_state=persistence_state
+        )

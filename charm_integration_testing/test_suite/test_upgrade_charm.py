@@ -4,7 +4,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -16,6 +18,7 @@ def test_upgrade_charm(
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if target_revision is None:
         pytest.fail("--target-revision must be provided as an integer for this test.")
@@ -43,4 +46,6 @@ def test_upgrade_charm(
             f"Expected '{target_application}' to be on upgraded revision "
             f"{target_revision}, got {upgraded_revision}."
         )
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    juju_client.validate_model(
+        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+    )
