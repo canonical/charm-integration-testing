@@ -127,8 +127,12 @@ class ValidatorInjectorExtension(JujuExtension):
         # Inject validators
         if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
-                self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
-                return [], {}
+                # Unlike _run_validators_on_unit's best-effort functional checks, an empty,
+                # success-shaped ([], {}) result here would make post_persistence() treat a
+                # cleanup that never ran as having succeeded (deleting the unit's tracking state)
+                # and silently no-op prepare/checkpoint. Fail loudly instead so misconfiguration
+                # doesn't masquerade as passing persistence checks.
+                raise RuntimeError(f"validators_path must be provided to run persistence op '{persistence}' on {unit}")
             self._inject_validators(model, unit, is_k8s=is_k8s)
 
         # Run persistence op

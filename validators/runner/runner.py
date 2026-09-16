@@ -372,9 +372,13 @@ class ValidatorRunner:
             )
 
 
-def main() -> None:
-    _configure_logging()
+def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, dict[str, PersistenceState]]:
+    """Parse and validate CLI args, including the ``--refs`` JSON payload.
 
+    Split out from :func:`main` so the argument-parsing/validation logic (the ``--level``
+    zero-flag default, the ``--refs``-required-for-checkpoint check, and ``--refs`` JSON
+    decoding) can be unit tested without needing a real ``JUJU_CHARM_DIR``/ops ``Model``.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", default=None, choices=get_args(ValidationLevel))
     parser.add_argument("--persistence", default=None, choices=_PERSISTENCE_OPS)
@@ -383,7 +387,7 @@ def main() -> None:
         default=None,
         help='JSON dict of {"<relation_id>": {"id": <identifier>, "ref": <ref>}}. Required for --persistence checkpoint.',
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.persistence == "checkpoint" and args.refs is None:
         parser.error("--refs is required when --persistence checkpoint is used")
@@ -402,6 +406,14 @@ def main() -> None:
             refs = {key: PersistenceState.model_validate(value) for key, value in raw_refs.items()}
         except (json.JSONDecodeError, ValidationError, AttributeError) as exc:
             parser.error(f"Invalid --refs JSON: {exc}")
+
+    return args, refs
+
+
+def main() -> None:
+    _configure_logging()
+
+    args, refs = _parse_cli_args()
 
     logger.info(f"Starting validator run (level={args.level!r}, persistence={args.persistence!r})")
 
