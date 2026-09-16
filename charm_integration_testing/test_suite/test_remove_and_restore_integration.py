@@ -34,9 +34,14 @@ def test_remove_and_restore_integration(
     # tracked persistence state for this integration's units is about to go stale. Drop it now so
     # the "prepare" call after re-adding seeds fresh canary data under the new relation_id, rather
     # than the checkpoint below failing to find a (now nonexistent) relation_id.
-    affected_units = set(
-        juju_backend.application_units(integration_model_ref, integration_endpoint_1.application)
-    ) | set(juju_backend.application_units(integration_model_ref, integration_endpoint_2.application))
+    #
+    # For CMR integrations, integration_endpoint_1/_2 can be a SAAS alias rather than a real
+    # application deployed in integration_model_ref (see integration_spec.py); application_units()
+    # can't resolve a SAAS alias, so skip any endpoint that isn't actually deployed here.
+    affected_units: set[str] = set()
+    for endpoint in (integration_endpoint_1, integration_endpoint_2):
+        if juju_client.application_exists(endpoint.application, model=integration_model_ref):
+            affected_units.update(juju_backend.application_units(integration_model_ref, endpoint.application))
     for key in [
         key
         for key in persistence_state

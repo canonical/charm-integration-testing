@@ -191,6 +191,49 @@ class TestValidatorRunnerLoadValidators:
         assert len(validators["test-interface"]) == 2
 
 
+class TestValidatorRunnerLoadPersistenceValidators:
+    def test_loads_valid_persistence_validator(self) -> None:
+        # GIVEN a well-formed persistence entry point
+        entry_point = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            validators = ValidatorRunner._load_persistence_validators()
+
+        # THEN
+        assert validators["test-interface"] == [PreparingPersistenceValidator]
+
+    def test_skips_non_base_persistence_validator_entry_points(self) -> None:
+        # GIVEN an entry point that loads a class not implementing BasePersistenceValidator
+        class NotAPersistenceValidator:
+            pass
+
+        entry_point = EntryPointStub(name="test-interface", _load_result=NotAPersistenceValidator)
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            validators = ValidatorRunner._load_persistence_validators()
+
+        # THEN
+        assert validators == {}
+
+    def test_warns_when_multiple_persistence_validators_share_an_interface(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # GIVEN two persistence entry points registered under the same interface name
+        ep1 = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
+        ep2 = EntryPointStub(name="test-interface", _load_result=ExplodingPersistenceValidator)
+
+        with caplog.at_level(logging.WARNING, logger="validators"):
+            with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
+                # WHEN
+                validators = ValidatorRunner._load_persistence_validators()
+
+        # THEN both are still registered, but a warning explains the state-overwrite risk
+        assert len(validators["test-interface"]) == 2
+        assert "Multiple persistence validators registered for interface 'test-interface'" in caplog.text
+
+
 class TestValidatorRunnerRun:
     def _runner_with(self, interface: str, validator_cls: type[BaseValidator]) -> ValidatorRunner:
         runner = ValidatorRunner.__new__(ValidatorRunner)

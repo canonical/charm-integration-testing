@@ -22,14 +22,22 @@ def test_teardown(
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
+    neighbor_model_ref: JujuModelHandle | None,
     persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     # Drop all canary data before the applications that host it are torn down: cleanup runs the
     # persistence validators' cleanup() on the units themselves, so it has to happen while those
-    # units (and their persistence_state tracking entries) still exist.
-    juju_client.validate_model(
-        model=target_model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
-    )
+    # units (and their persistence_state tracking entries) still exist. test_deploy prepares every
+    # model in all_bundles (including the neighbor model for CMR runs), so cleanup must cover every
+    # one of those models too, or a persistence-bearing unit living in the neighbor/integration
+    # model would be left with un-dropped canary tables and stale tracking entries.
+    cleanup_model_refs = {target_model_ref}
+    if neighbor_model_ref is not None:
+        cleanup_model_refs.add(neighbor_model_ref)
+    for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
+        juju_client.validate_model(
+            model=model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
+        )
 
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
