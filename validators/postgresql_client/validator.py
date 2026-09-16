@@ -439,7 +439,15 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         catch and destroy.
         """
         self._require_requires_role()
-        if not self.databag.get("uris") and not self.databag.get("secret-user"):
+        # Regression fix: checking only "uris"/"secret-user" for presence was a heuristic that
+        # didn't match what _open_connection() actually requires (uris, database, username,
+        # password after secret resolution) - a relation exposing "uris" before the rest of those
+        # fields resolve would fail this no-op check, fall through to _open_connection(), and raise
+        # instead of no-op'ing, turning an in-progress relation into a failed teardown. Check the
+        # same required fields _open_connection() validates, and no-op only when they're genuinely
+        # absent; a malformed/unreachable connection still raises and surfaces as a real ERROR.
+        creds = self._resolve_credentials()
+        if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
             return
         conn = self._open_connection()
         try:
