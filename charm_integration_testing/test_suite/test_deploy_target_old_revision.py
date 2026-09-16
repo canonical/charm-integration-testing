@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -46,6 +48,7 @@ def test_deploy_target_old_revision(
     target_charm: str,
     tmp_path: Path,
     target_bundle: Path,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -74,5 +77,7 @@ def test_deploy_target_old_revision(
             f"got {deployed_revision}."
         )
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Validate all applications and relations, and seed canary data for later persistence checks
+    juju_client.validate_model(
+        model=target_model_ref, level="simple", persistence="prepare", persistence_state=persistence_state
+    )

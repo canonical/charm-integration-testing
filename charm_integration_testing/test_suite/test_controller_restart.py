@@ -4,18 +4,26 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
-def test_controller_restart(juju_client: JujuClient, target_model_ref: JujuModelHandle) -> None:
+def test_controller_restart(
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    persistence_state: dict[PersistenceKey, PersistenceState],
+) -> None:
     # Reboot our controllers with a rolling reboot
     juju_client.reboot_model_controller(model=target_model_ref)
 
     # Wait until idle
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="deep")
+    # Validate all applications and relations, and verify canary data survived the reboot
+    juju_client.validate_model(
+        model=target_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+    )

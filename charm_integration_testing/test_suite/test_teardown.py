@@ -5,7 +5,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -20,7 +22,15 @@ def test_teardown(
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
+    # Drop all canary data before the applications that host it are torn down: cleanup runs the
+    # persistence validators' cleanup() on the units themselves, so it has to happen while those
+    # units (and their persistence_state tracking entries) still exist.
+    juju_client.validate_model(
+        model=target_model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
+    )
+
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
     # consuming (target or neighbor, depending on the integration), so the relation has to be torn

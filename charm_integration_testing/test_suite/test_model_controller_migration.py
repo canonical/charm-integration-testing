@@ -4,7 +4,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuBackend, JujuClient, JujuModelHandle
+from juju import JujuBackend, JujuClient, JujuModelHandle, PersistenceKey, rekey_persistence_state_controller
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -17,6 +19,7 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
     target_model_ref: JujuModelHandle,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
 
@@ -27,7 +30,9 @@ def test_model_controller_migration(
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
 
     # Validate all applications and relations before migration
-    juju_client.validate_model(model=target_model_ref, level="deep")
+    juju_client.validate_model(
+        model=target_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+    )
 
     juju_client.migrate_model(
         model_name=model, source_controller=target_controller, target_controller=temp_juju_controller
@@ -45,8 +50,16 @@ def test_model_controller_migration(
         juju_client.reboot_model_controller(model=temp_model_ref)
         juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
 
+    # The model kept its units and relation ids, but its controller name changed: remap the
+    # tracking keys so the checkpoint below finds the state seeded before migration.
+    rekey_persistence_state_controller(
+        persistence_state, model=model, old_controller=target_controller, new_controller=temp_juju_controller
+    )
+
     # Validate all applications and relations AFTER migration
-    juju_client.validate_model(model=temp_model_ref, level="deep")
+    juju_client.validate_model(
+        model=temp_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+    )
 
     # Migrate the model back to the original controller
     juju_client.migrate_model(
@@ -65,5 +78,12 @@ def test_model_controller_migration(
         juju_client.reboot_model_controller(model=target_model_ref)
         juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
+    # Remap the tracking keys back to the original controller for the second checkpoint.
+    rekey_persistence_state_controller(
+        persistence_state, model=model, old_controller=temp_juju_controller, new_controller=target_controller
+    )
+
     # Validate all applications and relations AFTER second migration
-    juju_client.validate_model(model=target_model_ref, level="deep")
+    juju_client.validate_model(
+        model=target_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+    )

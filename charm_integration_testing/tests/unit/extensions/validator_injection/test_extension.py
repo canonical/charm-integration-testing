@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -11,10 +12,10 @@ from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
     remote_validators_path,
 )
-from juju import JujuModelHandle
+from juju import JujuModelHandle, PersistenceKey
 from juju.backend import JujuExecOutput
 
-from validators.base import ValidationResult
+from validators.base import PersistenceState, ValidationResult
 from validators.runner import ValidatorRunnerResults
 
 from ..shared import NullJujuBackend
@@ -116,6 +117,12 @@ def _error_result(endpoint: str = "db", error: str = "oops") -> ValidationResult
     )
 
 
+def _persistence_runner_json(
+    results: list[ValidationResult] | None = None, updated_refs: dict[str, PersistenceState] | None = None
+) -> str:
+    return ValidatorRunnerResults(results=results or [], updated_refs=updated_refs or {}).model_dump_json()
+
+
 # Exec responses for a full injection + clean run cycle:
 #   1. test -f venv_runner → rc=1 (not present)
 #   2-4. three install commands → rc=0 each
@@ -207,6 +214,118 @@ class TestValidatorInjectorExtension:
             # THEN the return value maps each unit to its list of results
             assert set(results.keys()) == {"myapp/0", "myapp/1"}
             assert all(len(v) == 1 for v in results.values())
+
+    class TestPostPersistence:
+        def test_prepare_runs_on_each_unit_with_no_refs_argument(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN two units and no prior persistence state
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            for _ in ["myapp/0", "myapp/1"]:
+                juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare", {})
+
+            # THEN each unit's run command has --persistence prepare and no --refs
+            run_cmds = [call[2] for call in juju.exec_calls if "--persistence" in call[2]]
+            assert len(run_cmds) == 2
+            for cmd in run_cmds:
+                assert "--persistence prepare" in cmd
+                assert "--refs" not in cmd
+
+        def test_prepare_updates_persistence_state_with_returned_refs(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a unit whose prepare run returns a new ref for relation 4
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            new_state = PersistenceState(id=99, ref=1)
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(updated_refs={"4": new_state})))
+            state: dict[PersistenceKey, PersistenceState] = {}
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare", state)
+
+            # THEN the state dict was updated with a key scoped to controller/model/unit
+            key = PersistenceKey(
+                controller=TEST_MODEL.controller, model=TEST_MODEL.model, unit="myapp/0", relation_id=4
+            )
+            assert state == {key: new_state}
+
+        def test_checkpoint_passes_refs_scoped_to_the_unit(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN persistence state for two different units
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            state_0 = PersistenceState(id=1, ref=2)
+            state_1 = PersistenceState(id=2, ref=3)
+            persistence_state = {
+                PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4): state_0,
+                PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/1", 5): state_1,
+            }
+            for _ in ["myapp/0", "myapp/1"]:
+                juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", persistence_state)
+
+            # THEN each unit's run command only includes its own refs
+            run_cmds = {call[1]: call[2] for call in juju.exec_calls if "--persistence" in call[2]}
+            refs_0 = json.loads(run_cmds["myapp/0"].split("--refs ", 1)[1].strip("'"))
+            refs_1 = json.loads(run_cmds["myapp/1"].split("--refs ", 1)[1].strip("'"))
+            assert refs_0 == {"4": {"id": 1, "ref": 2}}
+            assert refs_1 == {"5": {"id": 2, "ref": 3}}
+
+        def test_cleanup_drops_state_for_the_unit_and_omits_refs(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN persistence state tracked for the unit being cleaned up
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            persistence_state = {key: PersistenceState(id=1, ref=2)}
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+
+            # THEN the state entry is dropped, and no --refs flag was sent
+            assert persistence_state == {}
+            run_cmd = juju.exec_calls[-1][2]
+            assert "--persistence cleanup" in run_cmd
+            assert "--refs" not in run_cmd
+
+        def test_cleanup_does_not_drop_state_belonging_to_other_units(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN persistence state for this app's unit and an unrelated unit
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            own_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            other_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "otherapp/0", 7)
+            persistence_state = {
+                own_key: PersistenceState(id=1, ref=2),
+                other_key: PersistenceState(id=2, ref=3),
+            }
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+
+            # THEN only this unit's entry is removed
+            assert persistence_state == {other_key: PersistenceState(id=2, ref=3)}
+
+        def test_returns_results_keyed_by_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            # GIVEN one unit whose checkpoint run returns a FAIL result
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            juju.exec_responses.extend(
+                _preinstalled_responses(_persistence_runner_json(results=[_fail_result("canary")]))
+            )
+
+            # WHEN
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", {})
+
+            # THEN the failing result is returned under its unit
+            assert results["myapp/0"][0].endpoint == "canary"
+            assert results["myapp/0"][0].status == "FAIL"
 
     class TestRunValidatorsOnUnit:
         class TestVenvAlreadyInstalled:

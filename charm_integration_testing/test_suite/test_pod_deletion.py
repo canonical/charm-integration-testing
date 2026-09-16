@@ -3,8 +3,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
 from kubernetes_client import KubernetesClient, PodStatus
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -16,6 +18,7 @@ def test_pod_deletion(
     kubernetes_client: KubernetesClient | None,
     target_model_ref: JujuModelHandle,
     target_application: str,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if kubernetes_client is None:
         pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
@@ -50,4 +53,6 @@ def test_pod_deletion(
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    juju_client.validate_model(
+        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+    )

@@ -4,8 +4,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, JujuVersion
+from juju import JujuClient, JujuModelHandle, JujuVersion, PersistenceKey, rekey_persistence_state_controller
 from utils.juju_releases import UpgradeMode, classify_upgrade_mode
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -16,6 +18,7 @@ def test_upgrade_controller(
     target_controller: str,
     target_upgrade_version: JujuVersion | None,
     model: str,
+    persistence_state: dict[PersistenceKey, PersistenceState],
     request: pytest.FixtureRequest,
 ) -> None:
     """
@@ -60,7 +63,18 @@ def test_upgrade_controller(
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
     # And the workload model should still be healthy
-    juju_client.validate_model(model=JujuModelHandle(controller=active_controller, model=model), level="deep")
+    if active_controller != target_controller:
+        # Migration path: the model's controller changed, so remap tracked persistence keys
+        # before checkpointing against them.
+        rekey_persistence_state_controller(
+            persistence_state, model=model, old_controller=target_controller, new_controller=active_controller
+        )
+    juju_client.validate_model(
+        model=JujuModelHandle(controller=active_controller, model=model),
+        level="deep",
+        persistence="checkpoint",
+        persistence_state=persistence_state,
+    )
 
 
 def _upgrade_in_place(
