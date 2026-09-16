@@ -427,7 +427,6 @@ class BundleBuilder:
                     count_tag.charm.charm_id,
                     count_tag.charm.endpoint,
                     domain,
-                    require_cross_model=count_tag.cross_model,
                 )
             )
 
@@ -461,27 +460,23 @@ class BundleBuilder:
         charm_id: int,
         endpoint_name: str,
         domain: Domain,
-        *,
-        require_cross_model: bool = False,
     ) -> bool:
         """Expand the domain to satisfy an unfulfilled endpoint.
 
-        The owning model is preferred over other models (a cheap local integration beats a
-        cross-model one), unless ``require_cross_model`` is set, in which case it's skipped
-        entirely since a local candidate can't satisfy a cross-model-only assertion. Existing
-        compatible charms are reused first. Application charms expose every direct alternative;
-        transitive dependencies add only the first viable candidate to keep the CEGIS domain small.
+        The owning model is tried before other models (which are skipped entirely for
+        container-scoped endpoints). Existing compatible charms are reused first.
+        Application charms expose every direct alternative; transitive dependencies add
+        only the first viable candidate to keep the CEGIS domain small.
         """
         owning_model = domain.charms[charm_id].model
         endpoint = domain.charms[charm_id].spec.endpoints[endpoint_name]
         is_container_scoped = endpoint.scope == EndpointScope.CONTAINER
-        if is_container_scoped:
-            models = [] if require_cross_model else [owning_model]
-        elif require_cross_model:
-            models = [m for m in domain.models if m != owning_model]
-        else:
-            models = [owning_model, *(m for m in domain.models if m != owning_model)]
+        models = (
+            [owning_model] if is_container_scoped else [owning_model, *(m for m in domain.models if m != owning_model)]
+        )
 
+        # Exhaust the owning model before considering any other model, so a cheap local
+        # integration is always preferred over a cross-model one.
         for model_ref in models:
             if self._connect_existing_for_endpoint(charm_id, endpoint_name, domain, model_ref):
                 return True
