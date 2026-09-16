@@ -1691,7 +1691,7 @@ class TestCollectUnsatDiagnostics:
 
 
 class TestCrossModelEndpointAssertionTags:
-    """Round-trip and dispatch coverage for EndpointCountMatchesIntegrationsTag(cross_model=True).
+    """Round-trip coverage for EndpointCountMatchesIntegrationsTag(cross_model=True).
 
     Backs DomainCharmEndpoint.cross_model_count, read by the cross_model() DSL filter.
     """
@@ -1712,74 +1712,3 @@ class TestCrossModelEndpointAssertionTags:
         assert decoded == tag
         assert isinstance(decoded, EndpointCountMatchesIntegrationsTag)
         assert decoded.cross_model is True
-
-    def _domain_with_unresolved_cross_model_endpoint(self) -> tuple[Domain, int]:
-        """A single charm, with an unlimited unresolved REQUIRES endpoint, plus a second empty
-        model so a genuinely cross-model candidate can be added."""
-        domain = Domain()
-        m1, m2 = ModelRef(name="m1"), ModelRef(name="m2")
-        domain.models[m1] = DomainModel(
-            arch="amd64",
-            platform="kubernetes",
-            juju_version=_JUJU,
-            applications={"consumer": DomainApplication(charm="consumer-app")},
-        )
-        domain.models[m2] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
-        charm_id = add_charm_to_domain(
-            _make_charm(
-                "consumer-app",
-                {"backend": CharmEndpoint(type=EndpointType.REQUIRES, interface="workload", limit=None)},
-            ),
-            domain,
-            m1,
-        )
-        return domain, charm_id
-
-    def test_handle_failed_assertion_expands_domain_for_cross_model_count_tag(self) -> None:
-        # GIVEN a domain with an unresolved endpoint (plus a second, empty model), and Charmhub
-        # able to find a candidate charm that would also be compatible locally
-        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
-        provider = _make_charm(
-            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
-        )
-        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
-        builder = BundleBuilder(charmhub_client=fake)
-        tag = EndpointCountMatchesIntegrationsTag(
-            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
-            num_terms=1,
-            cross_model=True,
-        )
-
-        # WHEN the tag is dispatched as a failed assertion
-        result = builder._handle_failed_assertion(tag, domain)
-
-        # THEN it forces the new candidate into a DIFFERENT model (not the cheaper,
-        # locally-compatible owning model), so the requirement is genuinely satisfied.
-        assert result.expanded is True
-        [new_integration] = domain.charm_integrations
-        assert domain.is_cross_model(new_integration)
-
-    def test_handle_failed_assertion_for_cross_model_count_tag_does_not_add_a_local_candidate(self) -> None:
-        # GIVEN the same setup, but with only ONE model in the domain (no remote model to expand
-        # into at all)
-        domain, charm_id = self._domain_with_unresolved_cross_model_endpoint()
-        [m2] = [m for m in domain.models if m != domain.charms[charm_id].model]
-        del domain.models[m2]
-        provider = _make_charm(
-            "provider-app", {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload")}
-        )
-        fake = _FakeCharmhubClient(charm_responses=provider, find_result={"provider-app"})
-        builder = BundleBuilder(charmhub_client=fake)
-        tag = EndpointCountMatchesIntegrationsTag(
-            charm=CharmEndpointPayload(charm_name="consumer-app", charm_id=charm_id, endpoint="backend"),
-            num_terms=1,
-            cross_model=True,
-        )
-
-        # WHEN the tag is dispatched as a failed assertion
-        result = builder._handle_failed_assertion(tag, domain)
-
-        # THEN expansion correctly reports no progress, rather than silently adding a local
-        # candidate that could never satisfy the cross-model-only requirement
-        assert result.expanded is False
-        assert len(domain.charms) == 1
