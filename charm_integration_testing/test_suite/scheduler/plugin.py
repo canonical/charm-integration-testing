@@ -208,12 +208,13 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
       before any state-mutating action, regardless of which pytest phase
       that check happens to execute in.
 
-    * A transition test that resolves to "skipped" via ``xfail`` (either
-      ``@pytest.mark.xfail`` or an imperative ``pytest.xfail()`` call after
-      the test body started) is *not* covered by that convention: the test
-      body actually ran until it hit the expected failure, so it may have
-      mutated the environment partway through. This is treated like a
-      failure, not a skip.
+    * A state-marked test (transition *or* pure) that resolves to "skipped"
+      via ``xfail`` (either ``@pytest.mark.xfail`` or an imperative
+      ``pytest.xfail()`` call after the test body started) is *not* covered
+      by that convention: the test body actually ran until it hit the
+      expected failure, so it may have mutated the environment partway
+      through. This is treated like a failure, not a skip, regardless of
+      whether the test is a transition or a pure test.
 
     Pure tests (``requires == provides``) leave ``_current_state`` unchanged
     when they pass or skip; a failure still halts everything and sets it to
@@ -231,7 +232,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
         marker = None
     if marker is None:
         return
-    if report.failed or (report.skipped and marker.is_transition and getattr(report, "wasxfail", None) is not None):
+    if report.failed or (report.skipped and getattr(report, "wasxfail", None) is not None):
         _failed_state_test = item
         _current_state = None
         logger.error(

@@ -1333,6 +1333,24 @@ class TestPytestRuntestMakereport:
         assert _plugin_module._failed_state_test is item
         assert edge not in _plugin_module._skipped_transitions
 
+    def test_xfail_skip_on_a_pure_test_also_halts_like_a_failure(self, make_item: Callable[..., pytest.Item]) -> None:
+        # GIVEN a *pure* state test (requires == provides, so marker.is_transition
+        # is False) that resolves to "skipped" via xfail: its body actually ran
+        # and hit the expected failure, exactly like the transition case above.
+        item = make_item("test_validate", requires=State.DEPLOYED)
+        _plugin_module._current_state = State.DEPLOYED
+        call = SimpleNamespace(excinfo=None)
+        report = _make_report(when="call", skipped=True, wasxfail="expected to fail")
+
+        # WHEN the hook runs
+        _drive_makereport(item, call, report)
+
+        # THEN the environment is treated as unknown (halted) here too - the
+        # is_transition guard must not exempt pure tests from the same xfail
+        # handling markers.py documents for all state-marked tests.
+        assert _plugin_module._current_state is None
+        assert _plugin_module._failed_state_test is item
+
     def test_edge_not_blacklisted_while_an_untried_candidate_remains(
         self, make_item: Callable[..., pytest.Item]
     ) -> None:
