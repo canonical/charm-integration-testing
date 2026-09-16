@@ -27,12 +27,13 @@ test_teardown              (harness)  --persistence cleanup    -> drop canary da
 ```
 
 Each of the three lifecycle ops is a separate `run_validators` invocation on
-the unit (via `ValidatorInjectorExtension.post_persistence` ->
-`JujuClient.validate_model(persistence=...)`), mirroring how
+the unit, triggered by `JujuClient.validate_model(persistence=...)` calling
+`ValidatorInjectorExtension.post_persistence`, mirroring how
 `post_validate`/`validate_model(level=...)` works for functional checks. The
 `BasePersistenceValidator`/`PersistenceState`/`PersistenceNotApplicable`
 docstrings in `validators/base/validator.py` are the source of truth for the
-protocol; there is no design document checked into this repository.
+protocol; see `docs/reference/validators.rst` for the higher-level design
+overview.
 
 ### The three lifecycle methods
 
@@ -196,7 +197,11 @@ neither.
    package's own `pyproject.toml` under `[project].dependencies` /
    `[project.optional-dependencies].dev` (matching the PEP 621 format
    `validators/<name>/pyproject.toml` already uses - not the root project's
-   `[tool.poetry.dependencies]` format). If
+   `[tool.poetry.dependencies]` format). A new dev dependency there is only
+   installed if the root `pyproject.toml`'s path dependency for this package
+   already lists `extras = ["dev"]` (e.g. `validators-postgresql-client = {
+   path = "./validators/postgresql_client", develop = true, extras = ["dev",
+   ...] }`) - if it's missing `"dev"`, add it. If
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
@@ -272,6 +277,15 @@ def _quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _canary_table_prefix(self) -> str:
+    # Scope discovery to this model *and* relation, not just relation_id: relation_id is
+    # assigned per-model, so two different models could otherwise expose the same numeric
+    # relation_id against a shared database/schema and collide. A short hash of the model UUID
+    # keeps the prefix bounded in length regardless of the UUID's own format.
+    model_token = hashlib.sha256(self.charm.model.uuid.encode()).hexdigest()[:8]
+    return f"{_CANARY_TABLE_PREFIX}{model_token}_{self.relation_id}_"
+
+
 def cleanup(self) -> None:
     self._require_requires_role()
     # cleanup() runs for every relation with a registered persistence validator, including one
@@ -282,7 +296,8 @@ def cleanup(self) -> None:
         return
     # `_` and `%` are LIKE wildcards, so a prefix containing underscores must be escaped or it
     # can match unrelated tables (e.g. "validatorXcanaryY1").
-    escaped_prefix = _CANARY_TABLE_PREFIX.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+    prefix = self._canary_table_prefix()
+    escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
     conn = self._open_connection()
     conn.autocommit = True  # or commit explicitly after each DROP - without this the DDL below
     # is rolled back when the connection closes, so cleanup can report success while leaving the
