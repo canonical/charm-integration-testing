@@ -53,11 +53,11 @@ from validators.base import (
 class MyClientPersistenceValidator(BasePersistenceValidator):
     def prepare(self) -> PersistenceState:
         """Seed canary data for this relation. Called once when a relation is first established,
-        but the harness may also call it again for the same relation_id later in a run (e.g.
-        ``test_idempotent_redeploy`` re-seeds without removing the relation first) - prepare()
-        must not assume the canary resource it creates doesn't already exist, and should always
-        return a state usable from a clean slate. It's also called again after a relation is
-        removed and re-added, since that changes relation_id and so requires fresh canary data."""
+        and again whenever the relation is removed and re-added (which changes relation_id, so
+        the previous canary data - if any survived - is no longer reachable under the new state
+        key and fresh data is needed). prepare() must not assume the canary resource it creates
+        doesn't already exist (e.g. from a previous run's leftover state, or a re-run of a failed
+        prepare), and should always return a state usable from a clean slate."""
         self._require_requires_role()
         identifier = uuid.uuid4().int
         # ... create a uniquely-named canary table/object and write one marked row/record ...
