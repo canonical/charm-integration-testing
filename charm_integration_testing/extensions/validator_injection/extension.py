@@ -91,21 +91,30 @@ class ValidatorInjectorExtension(JujuExtension):
                 # distinct from "ran and found nothing to report", which returns ([], {}) below.
                 results[unit] = []
                 continue
-            unit_results, updated_refs = outcome
+            unit_results, updated_refs, cleaned_relation_ids_list = outcome
             results[unit] = unit_results
 
             if persistence == "cleanup":
-                # Canary tables have been dropped; drop any tracked state for this unit too - but
-                # only once cleanup actually succeeded for every relation. If any result came back
-                # FAIL/ERROR, some canary data may still be sitting on the backend, so keep the
-                # tracking entries around for diagnosis or a retry instead of losing them silently.
-                if not any(result.status in ("FAIL", "ERROR") for result in unit_results):
-                    for key in [
-                        key
-                        for key in persistence_state
-                        if key.controller == model.controller and key.model == model.model and key.unit == unit
-                    ]:
-                        del persistence_state[key]
+                # Canary tables have been dropped; drop tracked state only for relation_ids that
+                # cleanup_all actually visited (i.e. had a live relation with a registered
+                # persistence validator at cleanup time) and that didn't produce a FAIL/ERROR
+                # result. A relation_id with a tracking entry that cleanup never visited (e.g. the
+                # relation is gone, or its interface's persistence validator failed to load) means
+                # cleanup never ran against the backend for it - keep that entry so orphaned
+                # canary data isn't silently forgotten.
+                failed_relation_ids = {
+                    result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
+                }
+                cleaned_relation_ids = set(cleaned_relation_ids_list) - failed_relation_ids
+                for key in [
+                    key
+                    for key in persistence_state
+                    if key.controller == model.controller
+                    and key.model == model.model
+                    and key.unit == unit
+                    and key.relation_id in cleaned_relation_ids
+                ]:
+                    del persistence_state[key]
             else:
                 for relation_id_str, state in updated_refs.items():
                     key = PersistenceKey(
@@ -140,7 +149,7 @@ class ValidatorInjectorExtension(JujuExtension):
         persistence: str,
         refs: dict[int, PersistenceState],
         is_k8s: bool = True,
-    ) -> tuple[list[ValidationResult], dict[str, PersistenceState]] | None:
+    ) -> tuple[list[ValidationResult], dict[str, PersistenceState], list[int]] | None:
         if persistence not in _PERSISTENCE_OPS:
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
 
@@ -178,7 +187,7 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Collect results
         parsed = ValidatorRunnerResults.model_validate_json(run_result.stdout)
-        return parsed.results, parsed.updated_refs
+        return parsed.results, parsed.updated_refs, parsed.cleaned_relation_ids
 
     def _inject_validators(self, model: JujuModelHandle, unit: str, is_k8s: bool = True) -> None:
         # Ensure validators path is provided

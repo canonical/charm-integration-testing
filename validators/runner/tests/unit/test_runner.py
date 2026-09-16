@@ -629,6 +629,7 @@ class TestValidatorRunnerPersistence:
         # THEN
         assert results.results == []
         assert results.updated_refs == {}
+        assert results.cleaned_relation_ids == [5]
         assert PreparingPersistenceValidator.cleanup_calls == [5]
 
     def test_cleanup_all_captures_exception_as_error_result(self) -> None:
@@ -644,8 +645,7 @@ class TestValidatorRunnerPersistence:
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "cleanup exploded" in (results.results[0].error or "")
-
-    def test_persistence_targets_ignored_when_interface_has_no_registered_validator(self) -> None:
+        assert results.cleaned_relation_ids == [0]
         # GIVEN a runner with no persistence validators registered at all
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
@@ -662,6 +662,7 @@ class TestValidatorRunnerPersistence:
         assert prepare_results.results == []
         assert prepare_results.updated_refs == {}
         assert cleanup_results.results == []
+        assert cleanup_results.cleaned_relation_ids == []
 
     def test_prepare_all_reports_error_for_interface_with_load_error(self) -> None:
         # GIVEN a relation on an interface whose persistence validator failed to load
@@ -698,6 +699,9 @@ class TestValidatorRunnerPersistence:
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "failed to load" in (results.results[0].error or "")
+        # The relation was never visited by cleanup_all itself (no validator registered for it),
+        # so it must not appear in cleaned_relation_ids either.
+        assert results.cleaned_relation_ids == []
 
     def test_checkpoint_all_reports_error_when_ref_interface_has_no_registered_validator(self) -> None:
         # GIVEN a ref pointing at a live relation whose interface has no registered validator
@@ -783,7 +787,7 @@ class TestConfigureLogging:
         results = ValidatorRunnerResults(results=[])
         # THEN stdout-bound output (the JSON blob) contains no log noise
         output = results.model_dump_json()
-        assert output == '{"results":[],"updated_refs":{}}'
+        assert output == '{"results":[],"updated_refs":{},"cleaned_relation_ids":[]}'
 
     def test_does_not_propagate_to_root_logger(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "validators"
