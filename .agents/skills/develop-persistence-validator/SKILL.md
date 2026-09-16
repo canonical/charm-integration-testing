@@ -80,6 +80,12 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
         self._require_requires_role()
+        # expected.id comes from --refs, a (possibly restored/malformed) PersistenceState rather
+        # than a freshly minted identifier - validate it's in the range prepare() could have
+        # produced (e.g. 0..(1 << 63) - 1) before interpolating it into any resource name or
+        # query. An out-of-range value could otherwise produce a truncated/different identifier
+        # and silently target the wrong resource instead of failing safely; raise before any
+        # read/write if it's invalid.
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
         passed = ...  # the assertion above
@@ -169,7 +175,15 @@ implementation):
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
-  row-count-only check (see "Common patterns" below).
+  row-count-only check (see "Common patterns" below). `expected.id` comes
+  from `--refs`, a (possibly restored/malformed) `PersistenceState` rather
+  than a value `prepare()` just minted - validate it's within the range
+  `prepare()` could have produced (e.g. the reference implementation's
+  `_canary_table_name()` rejects anything outside `0..(1 << 63) - 1`) before
+  interpolating it into any resource name or query, and raise before any
+  read/write if it's out of range; otherwise a truncated/different
+  identifier could silently target the wrong resource instead of failing
+  safely.
 - **`cleanup()`** takes no arguments (it runs as a fresh process invocation
   with no state carried over from `prepare`/`checkpoint`), so it must
   discover everything to remove by name pattern rather than by identifier.
