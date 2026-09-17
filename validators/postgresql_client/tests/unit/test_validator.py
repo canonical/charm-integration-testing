@@ -633,9 +633,11 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
 
 class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_passes_when_row_count_matches_expected_ref(self) -> None:
-        # GIVEN the canary table has exactly the expected number of rows
+        # GIVEN the canary table has exactly the expected number of rows with each checkpoint represented
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[(2,)])
+        # First fetchone: count(*) query returns 2 rows
+        # Second fetchone: COUNT(DISTINCT checkpoint_ref) query returns 2 (rows from checkpoints 1 and 2)
+        cursor = CursorStub(fetchone_rows=[(2,), (2,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -693,7 +695,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # Regression test for: checkpoint() previously counted every row in the table, so a table
         # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchone_rows=[(1,), (1,)])  # count and distinct checkpoints
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -706,12 +708,13 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
         assert "WHERE marker = %s" in cursor.executed_queries[select_index]
         assert cursor.executed_params[select_index] == ("marker-99",)
-        assert cursor.executed_params[insert_index] == ("marker-99",)
+        # INSERT params now include checkpoint_ref and written_at (the marker is first)
+        assert cursor.executed_params[insert_index][0] == "marker-99"
 
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
-        cursor = CursorStub(fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchone_rows=[(1,), (1,)])  # count and distinct checkpoints
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -806,7 +809,12 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
 
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
-        assert "current_schema()" in select_query
+        # Query should NOT restrict to current_schema() only, since an unqualified CREATE TABLE
+        # resolves through search_path to the first writable schema, which may not be current_schema().
+        # We search all schemas to ensure we find and drop canary tables regardless of which schema
+        # PostgreSQL chose for the unqualified CREATE TABLE.
+        assert "current_schema()" not in select_query
+        assert "WHERE" in select_query  # Should still have some filtering (by table_type and LIKE pattern)
 
     def test_scopes_discovery_to_this_relations_id(self) -> None:
         # Regression test for: discovery previously matched the bare `validator_canary_` prefix
