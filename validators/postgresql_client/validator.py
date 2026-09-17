@@ -595,20 +595,3 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _canary_marker(self, identifier: int) -> str:
         """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""
         return f"marker-{identifier}"
-
-    def _resolve_table_schema(self, conn: "psycopg.Connection[tuple[Any, ...]]", table_name: str) -> str | None:
-        """Resolve the actual schema where an unqualified table name was created.
-        
-        PostgreSQL resolves unqualified CREATE TABLE through search_path, which may not match
-        current_schema() if the first writable schema in search_path differs from current_schema().
-        Query information_schema to find the actual schema where the table exists.
-        
-        Returns the schema name if found, None if the table doesn't exist in any schema.
-        """
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT table_schema FROM information_schema.tables WHERE table_name = %s AND table_type = 'BASE TABLE'",
-                (table_name,)
-            )
-            row = cur.fetchone()
-            return row[0] if row else None
