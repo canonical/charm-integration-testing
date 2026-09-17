@@ -389,43 +389,45 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             # run. Without this check, an empty or partially recreated table (actual == 0) could
             # coincidentally satisfy `actual == expected.ref` for ref=0 and report a false PASS.
             raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
-        table = self._canary_table_name(expected.id)
+        table_name = self._canary_table_name(expected.id)
         marker = self._canary_marker(expected.id)
         conn = self._open_connection()
+        qualified_table: str | None = None
         try:
             with conn.cursor() as cur:
-                # Count rows with this marker and verify that rows from each checkpoint still exist.
-                # By storing and checking per-checkpoint markers, we distinguish "the original rows
-                # survived" from "a table was recreated with the same number of new rows".
-                cur.execute(f"SELECT count(*) FROM {table} WHERE marker = %s", (marker,))  # nosec B608
-                row = cur.fetchone()
-                actual = int(row[0]) if row else 0
-
-                # Verify that each expected checkpoint has at least one row (checkpoint_ref = 1..expected.ref)
-                all_checkpoints_present = True
-                if actual == expected.ref:
-                    # Only check per-checkpoint presence if count matches; if count is wrong, fail early
+                # CREATE TABLE in prepare() is unqualified, so it resolves through search_path at
+                # creation time - which may not match current_schema() here if search_path changed
+                # since. Resolve the table's actual schema via information_schema rather than
+                # assuming current_schema(), so this always addresses the same table prepare() made.
+                schema = self._resolve_table_schema(cur, table_name)
+                if schema is None:
+                    matching = 0
+                else:
+                    qualified_table = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
+                    # Require id = checkpoint_ref, not just a matching row count: SERIAL ids are
+                    # assigned once and never reused, so a row deleted and replaced by a look-alike
+                    # (same marker, same checkpoint_ref) gets a fresh, out-of-sequence id - it fails
+                    # this check even though a bare COUNT(*)/marker match would not have caught it.
                     cur.execute(
-                        f"SELECT COUNT(DISTINCT checkpoint_ref) FROM {table} "  # nosec B608
-                        f"WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s",
+                        f"SELECT COUNT(*) FROM {qualified_table} WHERE marker = %s "  # nosec B608
+                        f"AND id = checkpoint_ref AND checkpoint_ref BETWEEN 1 AND %s",
                         (marker, expected.ref),
                     )
                     row = cur.fetchone()
-                    distinct_checkpoints = int(row[0]) if row else 0
-                    # We expect to have rows from each checkpoint (1 to expected.ref inclusive)
-                    all_checkpoints_present = distinct_checkpoints == expected.ref
+                    matching = int(row[0]) if row else 0
 
-                passed = actual == expected.ref and all_checkpoints_present
+                passed = matching == expected.ref
                 # Only write the next marker row when this checkpoint passed: ValidatorRunner
                 # only carries the advanced PersistenceState forward on a PASS result (a FAIL/ERROR
                 # leaves the harness's tracked `expected` untouched), so writing here unconditionally
                 # would grow `actual` past what the harness will ever compare against again -
                 # masking the original mismatch behind a permanent, un-trackable drift instead of
                 # letting a later checkpoint re-detect the same data loss consistently.
-                if passed:
+                if passed and qualified_table is not None:
                     next_ref = expected.ref + 1
                     cur.execute(
-                        f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())",  # nosec B608
+                        f"INSERT INTO {qualified_table} (marker, checkpoint_ref, written_at) "  # nosec B608
+                        f"VALUES (%s, %s, now())",
                         (marker, next_ref),
                     )
         finally:
@@ -435,11 +437,12 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             name="row_count",
             passed=passed,
             message=(
-                f"Found expected {actual} marked row(s) in '{table}'."
+                f"Found expected {matching} marked row(s) in '{table_name}'."
                 if passed
                 else (
-                    f"Expected {expected.ref} marked row(s) in '{table}', found {actual}. Data may have been "
-                    "lost, or the table was recreated without the original canary rows."
+                    f"Expected {expected.ref} marked row(s) with matching identity in '{table_name}', "
+                    f"found {matching}. Data may have been lost, or the table was recreated without "
+                    "the original canary rows."
                 )
             ),
         )
@@ -602,3 +605,19 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _canary_marker(self, identifier: int) -> str:
         """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""
         return f"marker-{identifier}"
+
+    def _resolve_table_schema(self, cur: "psycopg2.extensions.cursor", table_name: str) -> str | None:
+        """Resolve the schema containing ``table_name``, or ``None`` if it doesn't exist.
+
+        ``CREATE TABLE`` in ``prepare()`` is unqualified, so PostgreSQL resolves it through
+        ``search_path`` at creation time - which may not match ``current_schema()`` when
+        ``checkpoint()`` runs later, if ``search_path`` changed in between. Looking the table up in
+        ``information_schema`` finds its actual schema instead of assuming it matches the current
+        one, so every operation on it stays consistent regardless of ``search_path`` changes.
+        """
+        cur.execute(
+            "SELECT table_schema FROM information_schema.tables " "WHERE table_name = %s AND table_type = 'BASE TABLE'",
+            (table_name,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
