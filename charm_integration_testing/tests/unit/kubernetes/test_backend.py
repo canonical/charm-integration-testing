@@ -126,6 +126,14 @@ class TestDeploymentIsReady:
 
     test_cases = [
         Params(label="ready", expected=True),
+        Params(label="surge-updated", expected=True, updated=3),
+        Params(label="surge-ready", expected=True, ready=3),
+        Params(label="surge-available", expected=True, available=3),
+        Params(label="surge-all", expected=True, updated=3, ready=3, available=3),
+        Params(label="surge-old-pods-not-enough-updated", updated=1, ready=3, available=3),
+        Params(label="surge-not-enough-ready", updated=3, ready=1, available=3),
+        Params(label="surge-not-enough-available", updated=3, ready=3, available=1),
+        Params(label="surge-stale-generation", observed_generation=1, updated=3, ready=3, available=3),
         Params(label="missing-generation", generation=None),
         Params(label="stale-generation", observed_generation=1),
         Params(label="unobserved-generation", observed_generation=None),

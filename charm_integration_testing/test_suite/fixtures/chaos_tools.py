@@ -158,7 +158,7 @@ def prepare_litmus_models(
 
 def require_tool_for_model(backend: JujuBackend, model: JujuModelHandle) -> ChaosTool:
     """Skip tool-dependent tests only for unsupported substrates or unavailable tools."""
-    kubernetes = backend.get_kubernetes_client_for_controller(model.controller)
+    kubernetes = backend.get_kubernetes_client_for_model(model)
     if kubernetes is None:
         pytest.skip("Litmus and Chaos Mesh require a Kubernetes model.")
     tool = select_chaos_tool(kubernetes.backend, model.model)

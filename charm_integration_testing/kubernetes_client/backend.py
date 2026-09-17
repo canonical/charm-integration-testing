@@ -75,9 +75,9 @@ class KubernetesBackend:
         return True
 
     def deployment_is_ready(self, namespace: str, name: str) -> bool:
-        """Return True if the current rollout has nonzero, updated, ready and available replicas.
+        """Return True when updated, ready and available replicas meet the nonzero desired count.
 
-        Does not wait for readiness. API errors other than 404 propagate.
+        Allows surge replicas; does not wait for old pods to terminate. API errors other than 404 propagate.
         """
         try:
             deployment = self.apps_v1_api.read_namespaced_deployment(name=name, namespace=namespace)
@@ -99,9 +99,9 @@ class KubernetesBackend:
         replicas = spec.replicas if spec.replicas is not None else 1
         return bool(
             replicas > 0
-            and status.updated_replicas == replicas
-            and status.ready_replicas == replicas
-            and status.available_replicas == replicas
+            and (status.updated_replicas or 0) >= replicas
+            and (status.ready_replicas or 0) >= replicas
+            and (status.available_replicas or 0) >= replicas
         )
 
     @classmethod

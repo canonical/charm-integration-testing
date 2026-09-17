@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -100,7 +100,7 @@ def _cluster_uid(backend: KubernetesBackend) -> str:
 
 def validate_litmus_target(backend: JujuBackend, model: JujuModelHandle, config: LitmusConfig) -> KubernetesBackend:
     """Require Juju 3.6+ and the same Kubernetes cluster as the configured ChaosCenter."""
-    target = backend.get_kubernetes_client_for_controller(model.controller)
+    target = backend.get_kubernetes_client_for_model(model)
     if target is None:
         raise ValueError(f"Litmus was configured for non-Kubernetes model {model.uri}.")
     if backend.version(model) < JujuVersion(3, 6, 0):
@@ -108,7 +108,7 @@ def validate_litmus_target(backend: JujuBackend, model: JujuModelHandle, config:
     offer = JujuConsumedOfferInfo(config.offer_url).parse_url()
     if offer is None:
         raise ValueError("Litmus offer must use controller:owner/model.offer format.")
-    control_plane = backend.get_kubernetes_client_for_controller(offer.model.controller)
+    control_plane = backend.get_kubernetes_client_for_model(replace(offer.model, owner=offer.owner))
     if control_plane is None or _cluster_uid(target.backend) != _cluster_uid(control_plane.backend):
         raise ValueError(f"Litmus ChaosCenter and {model.uri} must use the same Kubernetes cluster.")
     return target.backend

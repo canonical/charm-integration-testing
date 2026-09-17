@@ -149,7 +149,8 @@ Connect test models to an existing ChaosCenter offer. This provisions
 2. Use Kubernetes test models running Juju 3.6 or newer. Each configured model
   must use the same Kubernetes cluster as its ChaosCenter; cluster identity is
   checked using the `kube-system` namespace UID.
-3. Supply `KUBECONFIG_<cloud>` paths for the test and offering controllers' clouds.
+3. Supply `KUBECONFIG_<cloud>` paths for the test and offering models' clouds,
+  which may differ from their controllers' clouds.
   Replace cloud-name hyphens with underscores, for example
   `KUBECONFIG_local_k8s` for `local-k8s`. The credentials must allow reading
   namespaces, CRDs and Deployments. Do not print or include credentials in reports.
@@ -189,7 +190,8 @@ Connect test models to an existing ChaosCenter offer. This provisions
 
   Check the relation between `litmus-infrastructure-k8s:litmus-infrastructure`
   and `litmus-chaoscenter:litmus-infrastructure`. Readiness requires the CRD and
-  a current, nonzero operator rollout with updated, ready and available replicas.
+  an observed current generation with updated, ready and available replica counts
+  at least equal to the nonzero desired count. Extra rollout replicas are allowed.
 3. Tool-dependent tests use `require_chaos_tool` for the target or
   `chaos_tool_for_model` for a specific model. Availability is checked on demand,
   preferring Litmus over Chaos Mesh. Without configured Litmus, absent tools or

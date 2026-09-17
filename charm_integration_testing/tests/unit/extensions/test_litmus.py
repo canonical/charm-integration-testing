@@ -29,6 +29,7 @@ from .shared import NullJujuBackend
 TARGET = JujuModelHandle(controller="target-controller", model="target-model")
 NEIGHBOR = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
 CONFIG = LitmusConfig("shared:admin/litmus.chaoscenter")
+OFFERING_MODEL = JujuModelHandle(controller="shared", model="litmus", owner="admin")
 
 
 @dataclass
@@ -71,9 +72,9 @@ class LitmusBackendStub(NullJujuBackend):
     def __init__(self) -> None:
         self.kubernetes = KubernetesStub()
         self.clients: dict[str, KubernetesClient | None] = {
-            TARGET.controller: KubernetesClient(self.kubernetes),
-            NEIGHBOR.controller: KubernetesClient(self.kubernetes),
-            "shared": KubernetesClient(KubernetesStub()),
+            TARGET.uri: KubernetesClient(self.kubernetes),
+            NEIGHBOR.uri: KubernetesClient(self.kubernetes),
+            OFFERING_MODEL.uri: KubernetesClient(KubernetesStub()),
         }
         self.resolutions: list[str] = []
         self.applications: dict[JujuModelHandle, dict[str, JujuApplicationInfo]] = {}
@@ -85,9 +86,9 @@ class LitmusBackendStub(NullJujuBackend):
         self.model_version = JujuVersion(3, 6, 28)
         self.establish_relation = True
 
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        self.resolutions.append(controller)
-        return self.clients[controller]
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        self.resolutions.append(model.uri)
+        return self.clients[model.uri]
 
     def version(self, model: JujuModelHandle) -> JujuVersion:
         return self.model_version
@@ -264,10 +265,18 @@ class TestLitmusExtension:
 
 
 class TestValidateTarget:
+    def test_unsupported_backend_fails_explicitly(self) -> None:
+        # GIVEN a backend without model-aware resolution
+        backend = NullJujuBackend()
+
+        # WHEN resolving a model, THEN it does not guess from the controller
+        with pytest.raises(NotImplementedError, match="Model-aware"):
+            backend.get_kubernetes_client_for_model(TARGET)
+
     def test_rejects_different_cluster(self) -> None:
         # GIVEN a remote ChaosCenter on another cluster
         backend = LitmusBackendStub()
-        backend.clients["shared"] = KubernetesClient(KubernetesStub(uid="other-cluster"))
+        backend.clients[OFFERING_MODEL.uri] = KubernetesClient(KubernetesStub(uid="other-cluster"))
 
         # WHEN validating the target, THEN deployment is rejected
         with pytest.raises(ValueError, match="same Kubernetes cluster"):
@@ -277,7 +286,7 @@ class TestValidateTarget:
     def test_rejects_machine_target(self) -> None:
         # GIVEN an offer configured for a machine model
         backend = LitmusBackendStub()
-        backend.clients[TARGET.controller] = None
+        backend.clients[TARGET.uri] = None
 
         # WHEN validating, THEN the configuration error is not skipped
         with pytest.raises(ValueError, match="non-Kubernetes"):
@@ -296,11 +305,34 @@ class TestValidateTarget:
         # GIVEN a previously validated target
         backend = LitmusBackendStub()
         validate_litmus_target(backend, TARGET, CONFIG)
-        backend.clients[TARGET.controller] = KubernetesClient(KubernetesStub(uid="changed-cluster"))
+        backend.clients[TARGET.uri] = KubernetesClient(KubernetesStub(uid="changed-cluster"))
 
-        # WHEN the controller resolves to a different cluster, THEN it is not hidden by a cache
+        # WHEN the model resolves to a different cluster, THEN it is not hidden by a cache
         with pytest.raises(ValueError, match="same Kubernetes cluster"):
             validate_litmus_target(backend, TARGET, CONFIG)
+
+    def test_resolves_workload_and_owned_offering_model(self) -> None:
+        # GIVEN model clients without a controller-model resolver
+        backend = LitmusBackendStub()
+
+        # WHEN validating the target
+        kubernetes = validate_litmus_target(backend, TARGET, CONFIG)
+
+        # THEN both actual models are queried, including the offer owner
+        assert kubernetes is backend.kubernetes
+        assert backend.resolutions == [TARGET.uri, OFFERING_MODEL.uri]
+
+    def test_rejects_different_clusters_on_one_controller(self) -> None:
+        # GIVEN two models on one controller but on different clusters
+        backend = LitmusBackendStub()
+        offer = JujuModelHandle(controller=TARGET.controller, model="litmus", owner="admin")
+        backend.clients[offer.uri] = KubernetesClient(KubernetesStub(uid="other-cluster"))
+        config = LitmusConfig(f"{offer.uri}.chaoscenter")
+
+        # WHEN validating, THEN the shared controller does not imply a shared cluster
+        with pytest.raises(ValueError, match="same Kubernetes cluster"):
+            validate_litmus_target(backend, TARGET, config)
+        assert backend.resolutions == [TARGET.uri, offer.uri]
 
 
 class TestExistingInfrastructure:

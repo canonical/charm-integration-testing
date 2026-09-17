@@ -192,7 +192,7 @@ class TestRequireTool:
     def test_machine_model_skips_dependent_test(self) -> None:
         # GIVEN an authoritative machine-cloud result
         backend = LitmusBackendStub()
-        backend.clients[TARGET.controller] = None
+        backend.clients[TARGET.uri] = None
 
         # WHEN a test requires a tool, THEN only that request is skipped
         with pytest.raises(pytest.skip.Exception, match="Kubernetes model"):
@@ -218,10 +218,10 @@ class TestRequireTool:
             require_tool_for_model(backend, TARGET)
         assert exc_info.value is backend.kubernetes.error
 
-    def test_missing_controller_configuration_is_not_skipped(self) -> None:
-        # GIVEN a controller with no registered Kubernetes client
+    def test_missing_model_configuration_is_not_skipped(self) -> None:
+        # GIVEN a model with no registered Kubernetes client
         backend = LitmusBackendStub()
-        del backend.clients[TARGET.controller]
+        del backend.clients[TARGET.uri]
 
         # WHEN requiring a tool, THEN configuration failure propagates
         with pytest.raises(KeyError):
