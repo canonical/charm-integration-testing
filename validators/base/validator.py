@@ -58,12 +58,136 @@ class PersistenceNotApplicable(Exception):
     """
 
 
-class _RelationValidatorMixin:
-    """Shared relation/databag/result-building helpers for both validator base classes.
+class BaseValidator(ABC):
+    charm: ops.CharmBase
+    relation: ops.Relation
 
-    Factored out of ``BaseValidator`` so ``BasePersistenceValidator`` implementations (which are
-    not stateless health probes and therefore don't share ``BaseValidator``'s contract) can still
-    reuse the same relation-inspection and credential-resolution primitives.
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+        self.charm = charm
+        self.relation = relation
+
+    @property
+    def role(self) -> ValidationRole:
+        relation = self.charm.meta.relations[self.relation.name]
+        return str_to_validation_role(relation.role.value)
+
+    @property
+    def endpoint(self) -> str:
+        return self.relation.name
+
+    @property
+    def relation_id(self) -> int:
+        return self.relation.id
+
+    @property
+    def databag(self) -> dict[str, str]:
+        if self.relation.app not in self.relation.data:
+            return {}
+        return dict(self.relation.data[self.relation.app])
+
+    @property
+    def interface(self) -> str:
+        return self.charm.meta.relations[self.relation.name].interface_name or ""
+
+    def relation_exists(self) -> bool:
+        return self.relation.app in self.relation.data
+
+    def resolve_secret(self, uri_key: str, *fields: str, data: dict[str, str] | None = None) -> dict[str, str]:
+        """Resolve credentials from *data* (default ``self.databag``) or the Juju secret it references."""
+        source = self.databag if data is None else data
+        if uri := source.get(uri_key):
+            return self.charm.model.get_secret(id=uri).get_content()
+        return {f: source[f] for f in fields if f in source}
+
+    def validate_schema(
+        self,
+        required_fields: list[str],
+        creds: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> ValidationCheck:
+        """Check *required_fields* are present in *data* (default ``self.databag``), merged with *creds*."""
+        merged = dict(self.databag if data is None else data)
+        if creds:
+            merged.update(creds)
+        missing = [f for f in required_fields if not merged.get(f)]
+        return ValidationCheck(
+            name="schema",
+            passed=not missing,
+            message="OK" if not missing else f"Missing: {', '.join(missing)}",
+        )
+
+    def _make_result(
+        self,
+        *,
+        level: ValidationLevel,
+        status: ValidationResultStatus | None = None,
+        checks: list[ValidationCheck] | None = None,
+        error: str | None = None,
+        endpoint: str | None = None,
+        interface: str | None = None,
+        role: ValidationRole | None = None,
+        relation_id: int | None = None,
+    ) -> ValidationResult:
+        resolved_checks = [] if checks is None else checks
+        if status is None:
+            status = "PASS" if all(c.passed for c in resolved_checks) else "FAIL"
+        return ValidationResult(
+            status=status,
+            endpoint=self.endpoint if endpoint is None else endpoint,
+            interface=self.interface if interface is None else interface,
+            role=role or self.role,
+            level=level,
+            relation_id=self.relation_id if relation_id is None else relation_id,
+            checks=resolved_checks,
+            error=error,
+        )
+
+    def _error_result(self, level: ValidationLevel, error: str) -> ValidationResult:
+        return self._make_result(status="ERROR", level=level, checks=[], error=error)
+
+    def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
+        return self._make_result(status="FAIL", level=level, checks=checks)
+
+    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *level*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
+        )
+
+    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
+        """Return a SKIPPED result indicating this validator does not support *role*."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
+        )
+
+    @abstractmethod
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        pass
+
+
+class BasePersistenceValidator(ABC):
+    """Two-phase durability probe for a single relation, complementing ``BaseValidator``.
+
+    Where ``BaseValidator.validate()`` is a stateless, idempotent health probe safe to call at any
+    time, ``prepare()``/``checkpoint()`` form an explicitly stateful durability scenario: ``prepare()``
+    seeds known data and establishes a steady state, and each subsequent passing ``checkpoint()``
+    call verifies all previously-written data survived and advances the steady state for the next
+    round. A failing ``checkpoint()`` leaves the steady state unchanged instead of advancing past
+    the failure - see ``checkpoint()`` below.
+    This is only meaningful when the caller (the test harness) controls the sequence and carries
+    ``PersistenceState`` across calls; it is not a general-purpose health check.
+
+    Concrete implementations choose how to map their internal storage (tables, keys, queues, ...)
+    to the interface. They are not required to key storage off ``relation_id`` - it is not a
+    stable identifier: it changes whenever a relation is removed and re-added, whereas the
+    identifier chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the
+    canary data it names.
     """
 
     charm: ops.CharmBase
@@ -154,50 +278,6 @@ class _RelationValidatorMixin:
 
     def _fail_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         return self._make_result(status="FAIL", level=level, checks=checks)
-
-
-class BaseValidator(_RelationValidatorMixin, ABC):
-    def _skipped_result_due_to_level(self, level: ValidationLevel) -> ValidationResult:
-        """Return a SKIPPED result indicating this validator does not support *level*."""
-        return self._make_result(
-            status="SKIPPED",
-            level=level,
-            checks=[],
-            error=f"Level '{level}' is not supported by {self.__class__.__name__}.",
-        )
-
-    def _skipped_result_due_to_role(self, level: ValidationLevel, role: ValidationRole) -> ValidationResult:
-        """Return a SKIPPED result indicating this validator does not support *role*."""
-        return self._make_result(
-            status="SKIPPED",
-            level=level,
-            checks=[],
-            error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
-        )
-
-    @abstractmethod
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        pass
-
-
-class BasePersistenceValidator(_RelationValidatorMixin, ABC):
-    """Two-phase durability probe for a single relation, complementing ``BaseValidator``.
-
-    Where ``BaseValidator.validate()`` is a stateless, idempotent health probe safe to call at any
-    time, ``prepare()``/``checkpoint()`` form an explicitly stateful durability scenario: ``prepare()``
-    seeds known data and establishes a steady state, and each subsequent passing ``checkpoint()``
-    call verifies all previously-written data survived and advances the steady state for the next
-    round. A failing ``checkpoint()`` leaves the steady state unchanged instead of advancing past
-    the failure - see ``checkpoint()`` below.
-    This is only meaningful when the caller (the test harness) controls the sequence and carries
-    ``PersistenceState`` across calls; it is not a general-purpose health check.
-
-    Concrete implementations choose how to map their internal storage (tables, keys, queues, ...)
-    to the interface. They are not required to key storage off ``relation_id`` - it is not a
-    stable identifier: it changes whenever a relation is removed and re-added, whereas the
-    identifier chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the
-    canary data it names.
-    """
 
     @abstractmethod
     def prepare(self) -> PersistenceState:
