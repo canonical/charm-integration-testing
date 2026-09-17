@@ -251,48 +251,14 @@ class SpecFile(BaseModel):
                     )
 
                 if remote_model_key in all_models:
-                    # In-spec CMR: remote model must have the referenced application
-                    remote_model_spec = all_models[remote_model_key]
-                    if integration.remote_application not in remote_model_spec.applications:
-                        raise ValueError(
-                            f"Model '{model_name}': cross-model integration references application "
-                            f"'{integration.remote_application}' in model '{remote_model_key}', "
-                            f"but that application is not defined there"
-                        )
-                    # In-spec CMR: remote model must have controller set (unless url is provided explicitly)
-                    if integration.url is None and remote_model_spec.controller is None:
-                        raise ValueError(
-                            f"Model '{model_name}': cross-model integration references model "
-                            f"'{remote_model_key}' which has no 'controller' set"
-                        )
-                    # An explicit url requires offer_name since Bundle Builder X synthesizes it.
-                    if integration.url is not None and integration.offer_name is None:
-                        raise ValueError(
-                            f"Model '{model_name}': cross-model integration to in-spec model "
-                            f"'{remote_model_key}' provides an explicit 'url' but no 'offer_name'; "
-                            "the offer name Bundle Builder X assigns this integration must be known "
-                            "explicitly so the url can be guaranteed to point at it -- set 'offer_name' "
-                            "to match the offer name embedded in 'url'"
-                        )
-                    # offer_name and url must name the same offer.
-                    if integration.url is not None and integration.offer_name is not None:
-                        url_offer_name = _offer_name_from_url(integration.url)
-                        if url_offer_name != integration.offer_name:
-                            raise ValueError(
-                                f"Model '{model_name}': cross-model integration to in-spec model "
-                                f"'{remote_model_key}' declares 'offer_name' ({integration.offer_name!r}) "
-                                f"that does not match the offer name embedded in 'url' "
-                                f"({url_offer_name!r}); the two must agree"
-                            )
-                    # Check against every other CMR (in-spec or external) in this model.
-                    if integration.url is not None and integration.offer_name is not None:
-                        self._check_cmr_offer_consistency(
-                            model_name=model_name,
-                            url=integration.url,
-                            resolved_offer_name=integration.offer_name,
-                            seen_cmr_urls=seen_cmr_urls,
-                            seen_cmr_offer_names=seen_cmr_offer_names,
-                        )
+                    self._validate_in_spec_cmr(
+                        model_name=model_name,
+                        remote_model_key=remote_model_key,
+                        remote_model_spec=all_models[remote_model_key],
+                        integration=integration,
+                        seen_cmr_urls=seen_cmr_urls,
+                        seen_cmr_offer_names=seen_cmr_offer_names,
+                    )
                 else:
                     # External CMR: url is required
                     if integration.url is None:
@@ -311,6 +277,59 @@ class SpecFile(BaseModel):
                         seen_cmr_offer_names=seen_cmr_offer_names,
                     )
         return self
+
+    @classmethod
+    def _validate_in_spec_cmr(
+        cls,
+        *,
+        model_name: str,
+        remote_model_key: str,
+        remote_model_spec: "ModelSpec",
+        integration: "IntegrationSpec",
+        seen_cmr_urls: dict[str, str],
+        seen_cmr_offer_names: dict[str, str],
+    ) -> None:
+        """Validate one cross-model integration whose remote model is defined in this spec."""
+        if integration.remote_application not in remote_model_spec.applications:
+            raise ValueError(
+                f"Model '{model_name}': cross-model integration references application "
+                f"'{integration.remote_application}' in model '{remote_model_key}', "
+                f"but that application is not defined there"
+            )
+        # Remote model must have controller set (unless url is provided explicitly)
+        if integration.url is None and remote_model_spec.controller is None:
+            raise ValueError(
+                f"Model '{model_name}': cross-model integration references model "
+                f"'{remote_model_key}' which has no 'controller' set"
+            )
+        if integration.url is None:
+            return
+        # An explicit url requires offer_name since Bundle Builder X synthesizes it.
+        if integration.offer_name is None:
+            raise ValueError(
+                f"Model '{model_name}': cross-model integration to in-spec model "
+                f"'{remote_model_key}' provides an explicit 'url' but no 'offer_name'; "
+                "the offer name Bundle Builder X assigns this integration must be known "
+                "explicitly so the url can be guaranteed to point at it -- set 'offer_name' "
+                "to match the offer name embedded in 'url'"
+            )
+        # offer_name and url must name the same offer.
+        url_offer_name = _offer_name_from_url(integration.url)
+        if url_offer_name != integration.offer_name:
+            raise ValueError(
+                f"Model '{model_name}': cross-model integration to in-spec model "
+                f"'{remote_model_key}' declares 'offer_name' ({integration.offer_name!r}) "
+                f"that does not match the offer name embedded in 'url' "
+                f"({url_offer_name!r}); the two must agree"
+            )
+        # Check against every other CMR (in-spec or external) in this model.
+        cls._check_cmr_offer_consistency(
+            model_name=model_name,
+            url=integration.url,
+            resolved_offer_name=integration.offer_name,
+            seen_cmr_urls=seen_cmr_urls,
+            seen_cmr_offer_names=seen_cmr_offer_names,
+        )
 
     @staticmethod
     def _check_cmr_offer_consistency(

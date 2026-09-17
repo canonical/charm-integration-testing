@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import DiagnosticEndpoint, UnresolvedIntegrationDiagnostic
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.overrides import OverridesClient
 from bundle_builder_x.snapstore import SnapstoreClient
@@ -70,9 +71,22 @@ def test_purely_local_mesh_companion_is_rejected(
     )
     builder = BundleBuilder(charmhub_client=mesh_charmhub_client, snapstore_client=snapstore_client)
 
-    # THEN building fails: cross_model_mesh only makes sense alongside a genuine CMR (#980)
-    with pytest.raises(UncompletableBundleError):
+    # THEN building fails specifically because the provide-cmr-mesh/require-cmr-mesh
+    # integration itself could not be resolved (cross_model_mesh only makes sense alongside
+    # a genuine CMR, #980) -- not because of an unrelated, coincidental failure elsewhere.
+    with pytest.raises(UncompletableBundleError) as exc_info:
         builder.build(spec)
+    expected_diagnostic = UnresolvedIntegrationDiagnostic(
+        endpoints=(
+            DiagnosticEndpoint(
+                charm_name="blackbox-exporter-k8s", endpoint="provide-cmr-mesh", application="exporter1"
+            ),
+            DiagnosticEndpoint(
+                charm_name="blackbox-exporter-k8s", endpoint="require-cmr-mesh", application="exporter2"
+            ),
+        )
+    )
+    assert expected_diagnostic in exc_info.value.diagnostics
 
 
 def test_matching_external_cmr_mesh_companion_is_accepted_and_shares_one_offer(
