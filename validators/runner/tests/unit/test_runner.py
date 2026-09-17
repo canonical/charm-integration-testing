@@ -146,6 +146,23 @@ class NotApplicablePersistenceValidator(BasePersistenceValidator):
         raise PersistenceNotApplicable("not applicable")
 
 
+class MisbehavingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator that violates its contract by returning None instead of raising.
+
+    Used to verify that an invalid (but non-exception) return from prepare()/checkpoint() is
+    reported as an ERROR, not silently treated the same as a PersistenceNotApplicable skip.
+    """
+
+    def prepare(self) -> PersistenceState:
+        return None  # type: ignore[return-value]
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        return None  # type: ignore[return-value]
+
+    def cleanup(self) -> None:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Charm / entry-point stubs
 # ---------------------------------------------------------------------------
@@ -594,6 +611,23 @@ class TestValidatorRunnerPersistence:
         assert "prepare exploded" in (results.results[0].error or "")
         assert results.updated_refs == {}
 
+    def test_prepare_all_reports_error_when_prepare_returns_invalid_state(self) -> None:
+        # GIVEN a validator that returns None instead of raising or returning a PersistenceState
+        # Regression test for: this was previously silently treated the same as a legitimate
+        # PersistenceNotApplicable skip, hiding a broken implementation and never seeding state.
+        runner = self._runner_with("test-interface", MisbehavingPersistenceValidator)
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "PersistenceState" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
     def test_checkpoint_all_verifies_and_advances_state(self) -> None:
         # GIVEN
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
@@ -705,6 +739,24 @@ class TestValidatorRunnerPersistence:
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "checkpoint exploded" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_reports_error_when_checkpoint_returns_invalid_outcome(self) -> None:
+        # GIVEN a validator that returns None instead of raising or returning a result/state pair
+        # Regression test for: this was previously silently treated the same as a legitimate
+        # PersistenceNotApplicable skip, hiding a broken implementation.
+        runner = self._runner_with("test-interface", MisbehavingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "ValidationResult, PersistenceState" in (results.results[0].error or "")
         assert results.updated_refs == {}
 
     def test_cleanup_all_calls_cleanup_on_every_target(self) -> None:
