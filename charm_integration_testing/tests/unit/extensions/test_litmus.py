@@ -14,6 +14,7 @@ from extensions.litmus.extension import (
     INFRASTRUCTURE_CHARM,
     INFRASTRUCTURE_ENDPOINT,
     LitmusConfig,
+    infrastructure_bundle,
     infrastructure_is_connected,
     validate_litmus_target,
     wait_for_litmus,
@@ -381,6 +382,50 @@ class TestExistingInfrastructure:
         # WHEN the relation is removed, THEN the next check observes the change
         backend.connected.remove(TARGET)
         assert not infrastructure_is_connected(backend, TARGET, CONFIG)
+
+
+class TestPartialInfrastructure:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        application: bool
+        offer: bool
+
+    test_cases = [
+        Params(label="application-only", application=True, offer=False),
+        Params(label="offer-only", application=False, offer=True),
+        Params(label="missing-relation", application=True, offer=True),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
+    def test_requests_bundle_for_partial_connection(self, params: Params, tmp_path: Path) -> None:
+        # GIVEN matching but incomplete infrastructure in an existing model
+        backend = LitmusBackendStub()
+        backend.install(TARGET)
+        backend.connected.clear()
+        if not params.application:
+            backend.applications[TARGET].clear()
+        if not params.offer:
+            backend.offers[TARGET].clear()
+        client = make_client(backend, {TARGET: CONFIG})
+        path = tmp_path / "workload.yaml"
+        path.write_text("applications: {}\n")
+
+        # WHEN a workload deployment triggers the extension through JujuClient
+        client.deploy_bundle_file(str(path), TARGET)
+
+        # THEN it requests infrastructure completion without force or trust escalation
+        assert len(backend.deployments) == 2
+        model, content, trust, force = backend.deployments[1]
+        assert model == TARGET
+        assert yaml.safe_load(content) == yaml.safe_load(infrastructure_bundle(CONFIG))
+        assert trust is False
+        assert force is False
+        assert TARGET in backend.connected
+
+        # WHEN the stub reports a completed connection, THEN no further infrastructure deploy is requested
+        client.deploy_bundle_file(str(path), TARGET)
+        assert len(backend.deployments) == 3
 
 
 class TestWaitForLitmus:

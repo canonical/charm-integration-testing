@@ -110,13 +110,30 @@ def detect_initial_tools(
 
 @pytest.fixture(scope="session", autouse=True)
 def detect_chaos_tools(
+    request: pytest.FixtureRequest,
+    juju_backend: JujuBackend,
     cloud_kubeconfigs: dict[str, Path],
     target_cloud: str,
     target_model_ref: JujuModelHandle,
     neighbor_cloud: str | None,
     neighbor_model_ref: JujuModelHandle | None,
     logger: logging.Logger,
+    register_preexisting_resources: None,
 ) -> None:
+    """Use live model clouds when models exist, configured clouds before creation."""
+    if State(request.config.getoption("--current-state")) not in STATES_WITHOUT_EXISTING_MODEL:
+        models = [target_model_ref]
+        if neighbor_model_ref is not None:
+            models.append(neighbor_model_ref)
+        for model in {model.uri: model for model in models}.values():
+            kubernetes = juju_backend.get_kubernetes_client_for_model(model)
+            if kubernetes is None:
+                logger.info("Chaos detection not performed for model %s: non-Kubernetes model.", model.uri)
+                continue
+            # The backend owns this client and may reuse it after the snapshot.
+            tool = select_chaos_tool(kubernetes.backend, model.model)
+            logger.info("Initial chaos tool for %s: %s.", model.uri, tool.value if tool else "none")
+        return
     scopes = [(target_cloud, target_model_ref.model)]
     if neighbor_cloud is not None and neighbor_model_ref is not None:
         scopes.append((neighbor_cloud, neighbor_model_ref.model))

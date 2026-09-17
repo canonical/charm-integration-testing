@@ -178,8 +178,10 @@ Connect test models to an existing ChaosCenter offer. This provisions
 
 ### Verify
 
-1. Review the `Initial chaos tool` log for each cloud/model. This is a snapshot
-  taken before provisioning, so `none` can be expected for a new model.
+1. Review the `Initial chaos tool` log. For existing models, detection uses each
+  model's actual Kubernetes cloud and logs its controller/model address. Before
+  models exist, it uses the configured target/neighbor clouds and logs cloud/model.
+  This snapshot is taken before provisioning, so `none` can be expected for a new model.
 2. While the test model exists, inspect its relation and operator:
 
   ```bash
@@ -202,8 +204,10 @@ Connect test models to an existing ChaosCenter offer. This provisions
 ### Troubleshoot
 
 1. Missing kubeconfig or controller: supply the correct cloud mapping and register
-  the offering controller. A missing initial kubeconfig does not identify a
-  cloud as a machine substrate.
+  the offering controller. Before model creation, a missing kubeconfig is logged
+  as detection not performed, not as a machine substrate. For existing models,
+  model lookup and missing Kubernetes configuration errors fail without falling
+  back to the controller's cloud. Machine models are logged without skipping the session.
 2. Cluster or Juju version mismatch: select a compatible model and offer; do not
   bypass validation.
 3. Application, channel or offer conflict: inspect existing resources and correct

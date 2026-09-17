@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 from juju import JujuClient, JujuExtension, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.fixtures import chaos_tools
 from test_suite.fixtures.chaos_tools import (
     CHAOS_MESH_CRDS,
@@ -186,6 +186,135 @@ class TestInitialDetection:
             )
         assert exc_info.value is backend.error
         assert backend.api_client.closed
+
+
+class TestInitialDetectionFixture:
+    @pytest.mark.parametrize("state", list(State), ids=lambda state: state.value)
+    def test_state_selects_model_or_configured_cloud(self, state: State, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN configured controller clouds without kubeconfigs and live model clients
+        backend = LitmusBackendStub()
+        backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
+        neighbor = KubernetesStub()
+        neighbor.crds.add("chaosengines.litmuschaos.io")
+        neighbor.ready_namespaces.add(NEIGHBOR.model)
+        backend.clients[NEIGHBOR.uri] = KubernetesClient(neighbor)
+
+        # WHEN taking the initial snapshot for a fresh or resumed session
+        with caplog.at_level(logging.INFO):
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=state.value),
+                backend,
+                {},
+                "target-controller-cloud",
+                TARGET,
+                "neighbor-controller-cloud",
+                NEIGHBOR,
+                logging.getLogger(__name__),
+                None,
+            )
+
+        # THEN only pre-model states use the configured clouds without querying Juju
+        if state in STATES_WITHOUT_EXISTING_MODEL:
+            assert backend.resolutions == []
+            assert "cloud target-controller-cloud: no kubeconfig supplied" in caplog.text
+            assert "cloud neighbor-controller-cloud: no kubeconfig supplied" in caplog.text
+        else:
+            assert backend.resolutions == [TARGET.uri, NEIGHBOR.uri]
+            assert f"{TARGET.uri}: chaos-mesh" in caplog.text
+            assert f"{NEIGHBOR.uri}: litmus" in caplog.text
+            assert "controller-cloud" not in caplog.text
+        assert not backend.kubernetes.api_client.closed
+        assert not neighbor.api_client.closed
+
+    def test_duplicate_model_is_checked_once(self) -> None:
+        # GIVEN the same model configured as target and neighbor
+        backend = LitmusBackendStub()
+
+        # WHEN taking the snapshot
+        unwrap(chaos_tools.detect_chaos_tools)(
+            make_request(current_state=State.DEPLOYED.value),
+            backend,
+            {},
+            "unused",
+            TARGET,
+            "unused",
+            TARGET,
+            logging.getLogger(__name__),
+            None,
+        )
+
+        # THEN the model is resolved only once
+        assert backend.resolutions == [TARGET.uri]
+
+    def test_machine_model_is_logged_without_skipping_session(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN an existing machine model
+        backend = LitmusBackendStub()
+        backend.clients[TARGET.uri] = None
+
+        # WHEN taking the snapshot
+        with caplog.at_level(logging.INFO):
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=State.DEPLOYED.value),
+                backend,
+                {},
+                "unused",
+                TARGET,
+                None,
+                None,
+                logging.getLogger(__name__),
+                None,
+            )
+
+        # THEN the substrate is reported without skipping the session
+        assert f"model {TARGET.uri}: non-Kubernetes model" in caplog.text
+        assert backend.resolutions == [TARGET.uri]
+
+    def test_model_resolution_error_does_not_fall_back(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN a model lookup or configuration failure
+        class FailingBackend(LitmusBackendStub):
+            def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+                raise error
+
+        error = RuntimeError("Model lookup failed")
+        backend = FailingBackend()
+
+        # WHEN taking the snapshot, THEN the original error propagates
+        with pytest.raises(RuntimeError) as exc_info:
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=State.DEPLOYED.value),
+                backend,
+                {},
+                "unused",
+                TARGET,
+                None,
+                None,
+                logging.getLogger(__name__),
+                None,
+            )
+        assert exc_info.value is error
+        assert "not performed" not in caplog.text
+
+    @pytest.mark.parametrize("status", [401, 403, 500])
+    def test_api_error_propagates_without_closing_shared_client(self, status: int) -> None:
+        # GIVEN an API error from a backend-owned Kubernetes client
+        backend = LitmusBackendStub()
+        backend.kubernetes.error = ApiException(status=status)
+
+        # WHEN taking the snapshot, THEN the error propagates and ownership is preserved
+        with pytest.raises(ApiException) as exc_info:
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=State.DEPLOYED.value),
+                backend,
+                {},
+                "unused",
+                TARGET,
+                None,
+                None,
+                logging.getLogger(__name__),
+                None,
+            )
+        assert exc_info.value is backend.kubernetes.error
+        assert not backend.kubernetes.api_client.closed
 
 
 class TestRequireTool:
