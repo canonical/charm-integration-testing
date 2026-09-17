@@ -82,6 +82,7 @@ pytest_plugins = [
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.resource_tracking",
+    "test_suite.fixtures.chaos_mesh",
 ]
 
 
@@ -1079,6 +1080,7 @@ def record_failure_execution_metadata(
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
                     continue
+                execution_metadata("failure:charm", application.charm)
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
                     f"application:{application.status}:{normalize_string(application.message)}",
@@ -1086,6 +1088,7 @@ def record_failure_execution_metadata(
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
+                execution_metadata("failure:charm", unit.charm)
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
@@ -1093,6 +1096,7 @@ def record_failure_execution_metadata(
             for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
                 if unit_agent is None:
                     continue
+                execution_metadata("failure:charm", unit_agent.charm)
                 execution_metadata(
                     f"failure:charm:{unit_agent.charm}:status",
                     f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",
