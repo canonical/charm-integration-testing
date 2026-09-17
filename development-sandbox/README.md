@@ -26,7 +26,8 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 
 | Command | Purpose |
 |---|---|
-| `bin/setup-k8s.sh` | Install Canonical k8s and register as Juju cloud |
+| `bin/setup-k8s.sh` | Install Canonical k8s and Chaos Mesh, and register as Juju cloud |
+| `bash bin/setup-chaos-mesh.sh` | Install or verify Chaos Mesh on an existing sandbox cluster |
 | `bin/setup-lxd.sh` | Install/initialize LXD for Juju's built-in `localhost` cloud |
 | `bin/verify-validator.sh` | Run quality gates and workload-up/down evidence |
 | `bin/dev-validate.py` | Inject validators into a unit and report results |
@@ -36,6 +37,15 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 1. `scripts/sandbox.sh up` - provision or resume the VM.
 2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
 3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
+
+## Chaos Mesh
+
+Sandbox Kubernetes setup includes Chaos Mesh. It installs the components but
+does not run chaos experiments. Shared CI clusters are provisioned separately.
+
+See the [setup-k8s skill](../.agents/skills/setup-k8s/SKILL.md) for installation
+and checks, and [setup-charm-tests](../.agents/skills/setup-charm-tests/SKILL.md)
+for test prerequisites.
 
 ## Token setup
 

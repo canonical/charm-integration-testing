@@ -1,6 +1,6 @@
 ---
 name: setup-charm-tests
-description: Install charm testing prerequisites - cloud substrates and logging tools. The test suite handles controller bootstrap.
+description: Install charm testing prerequisites, including Chaos Mesh for Kubernetes sandbox tests, cloud substrates, and logging tools. The test suite handles controller bootstrap.
 ---
 
 # Skill: setup-charm-tests
@@ -8,46 +8,61 @@ description: Install charm testing prerequisites - cloud substrates and logging 
 ## Goal
 
 Install only the prerequisites needed for charm integration testing:
+
 1. **Cloud substrates** (LXD and/or Kubernetes) - only what you need
 2. **Logging tools** (always installed for all scenarios)
 
 The test suite automatically bootstraps controllers when you use `--current-state "no_bundle"` or `--current-state "no_controller"`.
+
+Kubernetes and mixed setup also install or check Chaos Mesh through
+`setup-k8s.sh`. Do not run the Chaos Mesh script again after successful setup.
+For an existing sandbox cluster that only needs Chaos Mesh, follow the
+[existing cluster steps](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
+Do not use the manual controller bootstrap steps when the test suite manages it.
 
 ---
 
 ## Quick Start
 
 ### Machine Charm Testing (LXD only)
+
 ```bash
 /setup-charm-tests --platform machine
 ```
+
 - ✅ Install and configure LXD
 - ✅ Install logging tools
 - ✅ Skip Kubernetes setup
 - ⏳ Test suite will bootstrap LXD controller when needed
 
 ### Kubernetes Charm Testing (K8s only)
+
 ```bash
 /setup-charm-tests --platform kubernetes
 ```
+
 - ✅ Install and configure Canonical k8s
 - ✅ Install logging tools
 - ✅ Skip LXD setup
 - ⏳ Test suite will bootstrap K8s controller when needed
 
 ### Cross-Model Relation Testing (LXD + K8s)
+
 ```bash
 /setup-charm-tests --platform mixed
 ```
+
 - ✅ Install and configure LXD
 - ✅ Install and configure Canonical k8s
 - ✅ Install logging tools
 - ⏳ Test suite will bootstrap both controllers when needed
 
 ### Default (Everything)
+
 ```bash
 /setup-charm-tests
 ```
+
 - ✅ Installs all substrates and tools (same as `--platform mixed`)
 
 ---
@@ -74,11 +89,13 @@ Always install these regardless of platform, since log collection needs both too
 ### Cloud Substrates (Optional based on `--platform`)
 
 **LXD** (when `--platform machine` or `--platform mixed`)
+
 - Juju cloud name: `localhost`
 - Platform: machine (LXD containers)
 - Use for: Traditional machine charms
 
 **Canonical Kubernetes** (when `--platform kubernetes` or `--platform mixed`)
+
 - Juju cloud name: `local-k8s`
 - Platform: Kubernetes (pod-based)
 - Use for: Kubernetes-native charms
@@ -152,6 +169,13 @@ pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caae
 ---
 
 ## Running Tests After Setup
+
+For Kubernetes sandbox tests, set
+`KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
+Tests that require Chaos Mesh should request `require_chaos_mesh`. It checks
+for the StressChaos CRD and skips on non-Kubernetes targets or when that CRD
+is absent. Missing configuration and API errors fail rather than skip.
+This check does not prove that a chaos experiment will succeed.
 
 Once setup is complete, run tests with the test suite. The suite handles controller bootstrap based on `--current-state`:
 
