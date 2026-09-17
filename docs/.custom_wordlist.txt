@@ -160,3 +160,6 @@ Unioning
 istio
 ConfigMap
 istiod's
+checkpointing
+walkthrough
+Juju's
