@@ -56,8 +56,9 @@ class CursorStub:
     """Minimal cursor context manager; raises execute_error if set."""
 
     execute_error: Exception | None = None
-    # Rows returned by fetchone() for each successive call.
-    fetchone_rows: list[tuple[Any, ...]] = field(default_factory=list)
+    # Rows returned by fetchone() for each successive call. An entry of None simulates a query
+    # that found no matching row (e.g. an information_schema lookup for a nonexistent table).
+    fetchone_rows: list[tuple[Any, ...] | None] = field(default_factory=list)
     # Rows returned by fetchall().
     fetchall_rows: list[tuple[Any, ...]] = field(default_factory=list)
     # Number of execute() calls to allow before raising execute_error.
@@ -633,11 +634,11 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
 
 class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_passes_when_row_count_matches_expected_ref(self) -> None:
-        # GIVEN the canary table has exactly the expected number of rows with each checkpoint represented
+        # GIVEN the canary table has exactly the expected number of rows with matching identity
         validator = _make_persistence_validator(VALID_DATABAG)
-        # First fetchone: count(*) query returns 2 rows
-        # Second fetchone: COUNT(DISTINCT checkpoint_ref) query returns 2 (rows from checkpoints 1 and 2)
-        cursor = CursorStub(fetchone_rows=[(2,), (2,)])
+        # First fetchone: schema-resolution query returns the table's schema.
+        # Second fetchone: the id=checkpoint_ref identity-matching count query returns 2.
+        cursor = CursorStub(fetchone_rows=[("public",), (2,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -654,9 +655,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert any("INSERT INTO" in q for q in cursor.executed_queries)
 
     def test_fails_when_row_count_is_lower_than_expected(self) -> None:
-        # GIVEN data loss: fewer rows than expected
+        # GIVEN data loss: fewer matching rows than expected
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -677,10 +678,25 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert new_state == PersistenceState(id=7, ref=3)
         assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
+    def test_fails_when_table_is_not_found(self) -> None:
+        # GIVEN the canary table doesn't exist in any schema (e.g. it was dropped/never created)
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[None])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=1))
+
+        # THEN
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(id=7, ref=1)
+        assert not any("INSERT INTO" in q for q in cursor.executed_queries)
+
     def test_uses_canary_table_name_from_expected_identifier(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -695,7 +711,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # Regression test for: checkpoint() previously counted every row in the table, so a table
         # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[(1,), (1,)])  # count and distinct checkpoints
+        cursor = CursorStub(fetchone_rows=[("public",), (1,)])  # schema, then identity-matching count
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -704,17 +720,17 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         # THEN the row count query and the follow-up insert are both scoped to the same marker,
         # which is derived deterministically from the identifier so it is stable across calls
-        select_index = next(i for i, q in enumerate(cursor.executed_queries) if "count(*)" in q)
+        select_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
         insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
         assert "WHERE marker = %s" in cursor.executed_queries[select_index]
-        assert cursor.executed_params[select_index] == ("marker-99",)
+        assert cursor.executed_params[select_index] == ("marker-99", 1)
         # INSERT params now include checkpoint_ref and written_at (the marker is first)
         assert cursor.executed_params[insert_index][0] == "marker-99"
 
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
-        cursor = CursorStub(fetchone_rows=[(1,), (1,)])  # count and distinct checkpoints
+        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -795,10 +811,10 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # and schema-qualified, so a same-named table in another schema can't be targeted instead.
         assert all('"public"."validator_canary_' in q for q in drop_queries)
 
-    def test_restricts_discovery_to_the_current_schema(self) -> None:
+    def test_searches_all_schemas_for_discovery(self) -> None:
         # Regression test for: an unqualified information_schema query and DROP TABLE can miss a
         # canary outside the connection's current schema, or drop an unrelated same-named object
-        # in a different schema. Discovery must be scoped to current_schema().
+        # in a different schema. Discovery must search all schemas, not just current_schema().
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
