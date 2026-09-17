@@ -607,16 +607,22 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return f"marker-{identifier}"
 
     def _resolve_table_schema(self, cur: "psycopg2.extensions.cursor", table_name: str) -> str | None:
-        """Resolve the schema containing ``table_name``, or ``None`` if it doesn't exist.
+        """Resolve the schema of the table an unqualified reference to ``table_name`` would hit.
 
         ``CREATE TABLE`` in ``prepare()`` is unqualified, so PostgreSQL resolves it through
         ``search_path`` at creation time - which may not match ``current_schema()`` when
-        ``checkpoint()`` runs later, if ``search_path`` changed in between. Looking the table up in
-        ``information_schema`` finds its actual schema instead of assuming it matches the current
-        one, so every operation on it stays consistent regardless of ``search_path`` changes.
+        ``checkpoint()`` runs later, if ``search_path`` changed in between. A plain
+        ``information_schema`` lookup by name is ambiguous if more than one schema on the search
+        path happens to contain a same-named table (e.g. a leftover canary from an earlier,
+        interrupted run) - it would return an arbitrary match rather than the one an unqualified
+        reference actually resolves to. ``pg_catalog.pg_table_is_visible()`` implements the same
+        name resolution PostgreSQL itself uses for unqualified references, so this always agrees
+        with what ``prepare()``'s (and a later unqualified reference's) ``CREATE TABLE`` addressed.
         """
         cur.execute(
-            "SELECT table_schema FROM information_schema.tables " "WHERE table_name = %s AND table_type = 'BASE TABLE'",
+            "SELECT n.nspname FROM pg_catalog.pg_class c "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = %s AND c.relkind = 'r' AND pg_catalog.pg_table_is_visible(c.oid)",
             (table_name,),
         )
         row = cur.fetchone()
