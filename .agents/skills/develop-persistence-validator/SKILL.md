@@ -83,11 +83,13 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # expected.id and expected.ref both come from --refs, a (possibly restored/malformed)
         # PersistenceState rather than values prepare() just minted - validate expected.id is in
         # the range prepare() could have produced (e.g. 0..(1 << 63) - 1) before interpolating it
-        # into any resource name or query, and validate expected.ref is >= 1 (matching what
-        # prepare() always returns). An out-of-range id could otherwise produce a truncated/
-        # different identifier and silently target the wrong resource; an unvalidated ref <= 0
-        # could let an empty or partially recreated canary satisfy `actual == expected.ref` and
-        # report a false PASS. Raise before any read/write if either is invalid.
+        # into any resource name or query. Also validate expected.ref against the range your
+        # prepare() declares (e.g. PostgreSQL starts at ref=1, but a KV validator might start at
+        # ref=0; see the validator-specific initial state below). An out-of-range id could
+        # otherwise produce a truncated/different identifier and silently target the wrong
+        # resource; an invalid ref (outside your declared range) could let an empty or partially
+        # recreated canary satisfy `actual == expected.ref` and report a false PASS. Raise
+        # before any read/write if either is invalid.
         # ... read back and assert the marked row/record count matches expected.ref (filter on a
         # stable marker value, not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
@@ -196,10 +198,14 @@ implementation):
   not something a single atomic write (e.g. one autocommitted `INSERT`) can
   eliminate - atomicity only guarantees the write itself is all-or-nothing
   on the backend, not that its response reaches `checkpoint()`; the two are
-  independent failure modes. Document that operators must reseed (re-run
-  `prepare()`) rather than blindly retry `checkpoint()` after a raised
-  exception, since a retry cannot distinguish "nothing was written" from
-  "the write landed but the response was lost."
+  independent failure modes. When `checkpoint()` raises after a disruption,
+  the original data persists but we cannot distinguish "write succeeded but
+  response was lost" from "write never executed" - a simple retry cannot
+  resolve this ambiguity. Document that operators must reseed (re-run
+  `prepare()`) to establish a fresh baseline after a raised exception before
+  repeating the disruptive operation or continuing testing. Alternatively,
+  mark the scenario inconclusive rather than retrying blindly, since a retry
+  cannot disambiguate the two failure modes.
   Verify a stable, identifier-derived marker value on each record rather
   than trusting a bare `count(*)` - a resource that was dropped and silently
   recreated from scratch could otherwise coincidentally satisfy a
@@ -316,7 +322,11 @@ rather than registering multiple entry points for the same interface.
 2. Identify what "canary data" means for this interface: a row in a table, a
    key in a KV store, an object in a bucket, a topic message, etc. It must be:
    - Cheap to create and verify.
-   - Uniquely identifiable (via a random identifier chosen at `prepare()` time).
+   - Uniquely identifiable via a random identifier chosen at `prepare()` time.
+     (Backend-specific naming conventions may format this into a resource name
+     or key string, but `PersistenceState.id` returned from `prepare()` and
+     passed to `checkpoint()` must be an integer, as declared in
+     `validators/base/validator.py`.)
    - Discoverable at `cleanup()` time via a durable name/key/marker pattern
      derived from this validator instance (e.g. a resource name prefix for a
      SQL table, a key prefix for a KV store, an object key prefix in a
@@ -372,12 +382,14 @@ rather than registering multiple entry points for the same interface.
    - Role gating: each of `prepare`/`checkpoint`/`cleanup` raises
      `PersistenceNotApplicable` when `self.role` isn't the applicable side.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
-     with a fresh identifier and `ref=1`. Also cover calling `prepare()`
-     twice while forcing the same identifier both times (e.g. patch/mock the
-     identifier source so it returns a fixed value instead of a fresh
-     `uuid.uuid4()`) and assert the resulting resource/state is still usable
-     by `checkpoint()`. The reference `prepare()` always mints a fresh random
-     identifier, so this scenario cannot occur through normal use of that
+     with a fresh identifier and `ref` set to the initial value your validator
+     declares (the reference PostgreSQL implementation starts at `ref=1`, but
+     other backends may use a different initial value; see the validator-specific
+     initial state pattern below). Also cover calling `prepare()` twice while
+     forcing the same identifier both times (e.g. patch/mock the identifier
+     source so it returns a fixed value instead of a fresh `uuid.uuid4()`) and
+     assert the resulting resource/state is still usable by `checkpoint()`. The
+     reference `prepare()` always mints a fresh random identifier, so this
      implementation alone - but a non-idempotent `CREATE`-style
      implementation could still pass a "creates a fresh resource" test while
      failing the second time it targets an identifier that already has a
@@ -400,9 +412,10 @@ rather than registering multiple entry points for the same interface.
      is scoped to the specific key/object/message identifier). Also cover
      `checkpoint()` rejecting an out-of-range `expected.id` (e.g. negative,
      or one past the maximum your `prepare()` can produce) and rejecting an
-     invalid `expected.ref` (e.g. zero or negative, since `prepare()` always
-     returns `ref=1`) before any read/write, the way the reference
-     implementation's `test_raises_when_expected_identifier_is_out_of_range`/
+     invalid `expected.ref` (e.g. outside the range your validator declares -
+     the reference PostgreSQL implementation rejects ref <= 0, but another
+     backend might allow ref=0 as valid) before any read/write, the way the
+     reference implementation's `test_raises_when_expected_identifier_is_out_of_range`/
      `test_raises_when_expected_identifier_is_negative` do.
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
@@ -482,10 +495,12 @@ rather than registering multiple entry points for the same interface.
    migrate) **and wait for it to fully settle** (idle/ready again) before
    checkpointing - checkpointing immediately after triggering the disruption
    (e.g. right after scaling to zero, before scaling back up and reaching
-   idle) only proves the backend was unreachable mid-disruption and reports
-   `ERROR`, not a real persistence check. Which side to disrupt depends on
-   the scenario: most tests (e.g. `test_scale_in_and_scale_out.py`) disrupt
-   the remote/provider side of the relation and checkpoint the requirer, but
+   idle) may produce `ERROR` (if no units are available for the validator to
+   run on), a skipped result (if the validator finds no applicable units), or
+   other failures (if units on the targeted side are affected). This does not
+   constitute a valid persistence check - wait for full settlement. Which side
+   to disrupt depends on the scenario: most tests (e.g. `test_scale_in_and_scale_out.py`)
+   disrupt the remote/provider side of the relation and checkpoint the requirer, but
    some (e.g. `test_pod_deletion.py`) disrupt the application the persistence
    validator itself runs on - checkpoint whichever unit you ran `prepare()`
    on above, regardless of which side was disrupted.
@@ -506,9 +521,11 @@ rather than registering multiple entry points for the same interface.
    `ValidationResult` itself - see `ValidatorRunnerResults` in
    `validators/runner/runner.py`), and finally
    ```
-   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
+   juju exec -m <model> --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence cleanup
    ```
-   and confirm the canary resource is gone.
+   (`-m <model>` specifies which Juju model the unit belongs to; this is
+   required for consistency with the prior `prepare()` and `checkpoint()`
+   commands) and confirm the canary resource is gone.
 
 ## Common patterns
 
