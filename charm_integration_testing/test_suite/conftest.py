@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -16,16 +16,20 @@ from extensions import (
     IstioMeshExtension,
     LegoExtension,
     MetacontrollerExtension,
+    MysqlDatabaseReplicationExtension,
+    MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
-    S3IntegratorMinIOBackendExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
 from juju import (
+    JujuApplicationInfo,
     JujuBackend,
     JujuClient,
+    JujuConsumedOfferInfo,
+    JujuIntegrationApplication,
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
@@ -257,8 +261,6 @@ def juju_client(
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
-    minio_client_file: Path | None,
-    minio_server_file: Path | None,
     ubuntu_pro_token: str | None,
     uv_file: Path | None,
     validators_path: Path | None,
@@ -272,9 +274,10 @@ def juju_client(
             IstioMeshExtension(juju_backend, logger),
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
+            MysqlDatabaseReplicationExtension(juju_backend, logger),
+            MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
@@ -659,22 +662,6 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture
-def minio_client_file() -> Path | None:
-    file_path = os.environ.get("MINIO_CLIENT_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
-def minio_server_file() -> Path | None:
-    file_path = os.environ.get("MINIO_SERVER_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
 def uv_file() -> Path | None:
     file_path = os.environ.get("UV_FILE")
     if file_path:
@@ -825,6 +812,41 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
+def _integration_endpoint_str(
+    juju_client: JujuClient,
+    side: JujuIntegrationApplication,
+    applications: dict[str, JujuApplicationInfo],
+    consumed_offers: dict[str, JujuConsumedOfferInfo],
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None],
+) -> str:
+    """Render one side of an integration as ``<charm>:<endpoint>``, normalized for matching.
+
+    Local applications are identified by charm name. Remote SAAS entries backed by a consumed
+    offer are resolved to the actual charm behind the offer (via a status check against the
+    offering model), so cross-model integrations are recorded identically to same-model ones.
+    The offer URL itself is never used for this: it embeds the offering controller/model names,
+    which are randomly generated per test run and would make the recorded value useless for
+    matching across runs. If the offering model can't be resolved (e.g. unreachable controller),
+    fall back to the offer's local alias, which -- unlike the URL -- is stable across runs.
+
+    ``resolved_offer_applications`` caches resolutions by offer alias across calls for the same
+    model, so each consumed offer is only resolved (i.e. status-queried) at most once per
+    recording pass, even if it's referenced by multiple integrations or by both integration sides.
+    """
+    if side.application in applications:
+        return f"{applications[side.application].charm}:{side.endpoint}"
+    if side.application in consumed_offers:
+        if side.application not in resolved_offer_applications:
+            resolved_offer_applications[side.application] = juju_client.resolve_consumed_offer_application(
+                consumed_offers[side.application]
+            )
+        offer_application = resolved_offer_applications[side.application]
+        if offer_application is not None:
+            return f"{offer_application.charm}:{side.endpoint}"
+        return f"offer:{side.application}:{side.endpoint}"
+    raise KeyError(f"'{side.application}' is neither a known application nor a consumed offer")
+
+
 def record_charm_info_execution_metadata_instantaneous(
     juju_client: JujuClient, model: JujuModelHandle, execution_metadata: Callable[[str, str], None]
 ) -> None:
@@ -843,30 +865,21 @@ def record_charm_info_execution_metadata_instantaneous(
             # Risk is always present in a valid channel string
             execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
-    consumed_offers = juju_client.list_consumed_offers(model=model).keys()
+    consumed_offers = juju_client.list_consumed_offers(model=model)
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None] = {}
 
-    # Get all integrations and record them
+    # Get all integrations (including CMRs) and record them.
+    # Only integrations actually reported by ``list_integrations`` are recorded, so
+    # consumed offers that aren't integrated with anything are naturally excluded.
     for integration in juju_client.list_integrations(model=model):
-        # Skip cross-model integrations where one side is a remote SAAS entry
-        # TODO: record CMRs in a future iteration
-        if integration.provider.application not in applications or integration.requirer.application not in applications:
-            continue
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        try:
-            integration_str = (
-                f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
-                f"{integration.interface}/"
-                f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
-            )
-            execution_metadata("integration", integration_str)
-        except KeyError as err:
-            if consumed_offers.isdisjoint({integration.provider.application, integration.requirer.application}):
-                raise KeyError("neither app nor consumed offer") from err
-
-            # FIXME(@motjuste): not recording execution metadata for consumed offers
-            #   either use the URL which does not have charm info,
-            #   or do a second status-check for offering model to get that info,
-            #   AND, only do it for **actually** integrated offers
+        provider_str = _integration_endpoint_str(
+            juju_client, integration.provider, applications, consumed_offers, resolved_offer_applications
+        )
+        requirer_str = _integration_endpoint_str(
+            juju_client, integration.requirer, applications, consumed_offers, resolved_offer_applications
+        )
+        execution_metadata("integration", f"{provider_str}/{integration.interface}/{requirer_str}")
 
 
 @pytest.fixture
@@ -1067,6 +1080,7 @@ def record_failure_execution_metadata(
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
                     continue
+                execution_metadata("failure:charm", application.charm)
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
                     f"application:{application.status}:{normalize_string(application.message)}",
@@ -1074,6 +1088,7 @@ def record_failure_execution_metadata(
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
+                execution_metadata("failure:charm", unit.charm)
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
@@ -1081,6 +1096,7 @@ def record_failure_execution_metadata(
             for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
                 if unit_agent is None:
                     continue
+                execution_metadata("failure:charm", unit_agent.charm)
                 execution_metadata(
                     f"failure:charm:{unit_agent.charm}:status",
                     f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",

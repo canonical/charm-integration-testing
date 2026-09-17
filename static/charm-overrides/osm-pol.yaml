@@ -1,3 +1,6 @@
 ---
 # https://warthogs.atlassian.net/browse/IQA-3315 - pending delisting
 priority: 0.25
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

@@ -351,3 +351,54 @@ jobs:
               openstack floating ip delete "$fip_id" || true
             fi
           done
+      - name: Find and delete orphaned ports that are in the DOWN state and older
+          than age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: |-
+          lb_output=$(openstack loadbalancer list -f value -c id) || {
+            echo "Failed to read active load balancers; refusing to delete orphaned ports"
+            exit 1
+          }
+          active_lbs=()
+          if [[ -n $lb_output ]]; then
+            mapfile -t active_lbs <<<"$lb_output"
+          fi
+          is_active_lb() {
+            local id=$1
+            for lb in "${active_lbs[@]}"; do
+              [[ $lb == "$id" ]] && return 0
+            done
+            return 1
+          }
+          port_ids_output=$(openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID') || {
+            echo "Failed to list DOWN ports; refusing to continue orphaned port cleanup"
+            exit 1
+          }
+          down_port_ids=()
+          if [[ -n $port_ids_output ]]; then
+            mapfile -t down_port_ids <<<"$port_ids_output"
+          fi
+          for port_id in "${down_port_ids[@]}"; do
+            port_data=$(openstack port show "$port_id" --format json) || {
+              echo "Failed to read port $port_id; refusing to continue orphaned port cleanup"
+              exit 1
+            }
+            device_owner=$(jq -r '.device_owner' <<<"$port_data")
+            device_id=$(jq -r '.device_id' <<<"$port_data")
+            created=$(jq -r '.created_at' <<<"$port_data")
+            created_ts=$(date -d "$created" +%s) || {
+              echo "Failed to parse port $port_id created_at timestamp; refusing to continue orphaned port cleanup"
+              exit 1
+            }
+            age_minutes=$(( ($(date +%s) - created_ts) / 60 ))
+            [[ $device_owner != "Octavia" ]] && continue
+            [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
+            lb_id=${device_id#lb-}
+            if is_active_lb "$lb_id"; then
+              echo "Skipping port $port_id — still used by load balancer $lb_id"
+            else
+              echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
+              openstack port delete "$port_id" || true
+            fi
+          done
