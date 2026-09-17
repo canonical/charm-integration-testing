@@ -171,3 +171,6 @@ requirer
 CRDs
 kubeconfig
 sqa
+checkpointing
+walkthrough
+Juju's
