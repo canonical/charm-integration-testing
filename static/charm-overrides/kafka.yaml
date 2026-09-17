@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/kafka-operator
+# Track 4 is KRaft-only; track 3 retains the ZooKeeper integration.
+default_channel: 3/stable
+overrides:
+  - criteria:
+      - track: '3'
+    provides:
+      cos-agent:
+        optional: true  # observability integration; Kafka source has no readiness dependency on it
+      kafka-client:
+        optional: true  # consumer integration; Kafka source reaches readiness without clients
+      peer-cluster-orchestrator:
+        optional: true  # optional peer-cluster integration; not needed for ZooKeeper operation
+    constraints:
+      - 'bool(endpoint[zookeeper]) => tracks(charms(endpoint[zookeeper])) == tracks({self})'
