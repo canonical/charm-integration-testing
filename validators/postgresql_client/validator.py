@@ -373,7 +373,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                     f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL, checkpoint_ref BIGINT NOT NULL, written_at TIMESTAMPTZ)"
                 )  # nosec B608
                 # checkpoint_ref=1 tracks that this row was written at prepare() time (ref=1)
-                cur.execute(f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())", (marker, 1))  # nosec B608
+                cur.execute(
+                    f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())",  # nosec B608
+                    (marker, 1),
+                )
         finally:
             conn.close()
         return PersistenceState(id=identifier, ref=1)
@@ -397,20 +400,21 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 cur.execute(f"SELECT count(*) FROM {table} WHERE marker = %s", (marker,))  # nosec B608
                 row = cur.fetchone()
                 actual = int(row[0]) if row else 0
-                
+
                 # Verify that each expected checkpoint has at least one row (checkpoint_ref = 1..expected.ref)
                 all_checkpoints_present = True
                 if actual == expected.ref:
                     # Only check per-checkpoint presence if count matches; if count is wrong, fail early
                     cur.execute(
-                        f"SELECT COUNT(DISTINCT checkpoint_ref) FROM {table} WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s",
-                        (marker, expected.ref)
+                        f"SELECT COUNT(DISTINCT checkpoint_ref) FROM {table} "  # nosec B608
+                        f"WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s",
+                        (marker, expected.ref),
                     )
                     row = cur.fetchone()
                     distinct_checkpoints = int(row[0]) if row else 0
                     # We expect to have rows from each checkpoint (1 to expected.ref inclusive)
                     all_checkpoints_present = distinct_checkpoints == expected.ref
-                
+
                 passed = actual == expected.ref and all_checkpoints_present
                 # Only write the next marker row when this checkpoint passed: ValidatorRunner
                 # only carries the advanced PersistenceState forward on a PASS result (a FAIL/ERROR
@@ -420,7 +424,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # letting a later checkpoint re-detect the same data loss consistently.
                 if passed:
                     next_ref = expected.ref + 1
-                    cur.execute(f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())", (marker, next_ref))  # nosec B608
+                    cur.execute(
+                        f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())",  # nosec B608
+                        (marker, next_ref),
+                    )
         finally:
             conn.close()
 
