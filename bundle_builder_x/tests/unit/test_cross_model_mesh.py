@@ -1080,14 +1080,64 @@ class TestCrossModelMeshCompanionOverrideConstraint:
         # THEN satisfiable: both sets contain exactly {provider-app}
         assert solver.check() == z3.sat
 
+    def test_charms_parity_rejects_two_unrelated_external_cmr_peers(self) -> None:
+        # GIVEN a provider whose "serve" endpoint has a genuine external CMR to one remote
+        # application, and whose provide-cmr-mesh endpoint has a genuine external CMR to a
+        # DIFFERENT, unrelated remote application (same interface, different real peer).
+        integrations = [
+            DomainApplicationIntegration(
+                endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve"),
+                endpoint_2=DomainApplicationEndpoint(
+                    application="consumer-1", endpoint="backend", model=ModelRef(name="external-model-1")
+                ),
+                offer_name="external-serve-offer",
+            ),
+            DomainApplicationIntegration(
+                endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="provide-cmr-mesh"),
+                endpoint_2=DomainApplicationEndpoint(
+                    application="consumer-2", endpoint="require-cmr-mesh", model=ModelRef(name="external-model-2")
+                ),
+                offer_name="external-mesh-offer",
+            ),
+        ]
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=integrations,
+                ),
+            }
+        )
+        _, provider = _mesh_pair_charms()
+        provider_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[provider_id].exists)
+        solver.add(self._companion_constraint_expr(provider_id, domain))
+
+        # THEN unsatisfiable: external-model-1/consumer-1 and external-model-2/consumer-2 are
+        # distinct external CMR peers, so charms(cross_model(serve)) != charms(cross_model(
+        # provide-cmr-mesh)) even though both sides are non-empty. Before external CMR peers got
+        # synthetic ids (Domain.external_cmr_peer_ids), both sides read as the same empty set and
+        # this incorrectly passed as satisfiable.
+        assert solver.check() == z3.unsat
+
 
 class TestCrossModelMeshExternalCmrCountParityConstraint:
     """The static/charm-overrides files add a second guard alongside the ``charms()`` equality
-    (see :class:`TestCrossModelMeshCompanionOverrideConstraint`): ``charms()`` can't represent
-    an external-CMR peer (there's no in-domain charm id for a model outside the domain), so the
-    equality is vacuously true whenever both sides are external CMRs -- even if they connect to
-    unrelated peers. A count-based check closes that gap, since ``len()``/``bool()`` DO fold in
-    external-CMR contributions (via cross_model_count, same mechanism as plain endpoint.count).
+    (see :class:`TestCrossModelMeshCompanionOverrideConstraint`). Historically this existed
+    because ``charms()`` couldn't represent an external-CMR peer (there was no in-domain charm id
+    for a model outside the domain), making the equality vacuously true whenever both sides were
+    external CMRs -- even if they connected to unrelated peers. ``Domain.external_cmr_peer_ids``
+    closed that specific gap by giving external peers a stable synthetic identity (see
+    ``test_charms_parity_rejects_two_unrelated_external_cmr_peers``), but the ``bool()``/``len()``
+    count-based checks below remain independently useful/documented here for their own semantics
+    (e.g. ``len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))``
+    enforces "provide-cmr-mesh is 100% cross-model", which ``charms()`` alone doesn't express).
 
     An exact ``len() == len()`` count-parity check over-constrains charms with more than one
     managed endpoint: multiple managed endpoints can legitimately coalesce onto a SINGLE shared
