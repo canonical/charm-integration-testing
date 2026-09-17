@@ -8,6 +8,15 @@ that exposes provide-cmr-mesh/require-cmr-mesh/self-metrics-endpoint.
 The override used here is a minimal, self-contained copy of the constraint shape
 landed for real charms in #1021 - kept local so this test does not depend on that
 PR having merged.
+
+No longer includes a ``bool() == bool()`` parity check alongside ``charms() ==
+charms()``: before external CMR peers had a synthetic identity (see
+Domain.external_cmr_peer_ids), charms() alone couldn't distinguish "same external
+peer on both sides" from "two different, unrelated external peers", so bool() was
+needed to at least catch the "one side local, other cross-model" case. Now that
+charms() can represent external peers too, it subsumes bool() entirely -- see
+TestCrossModelMeshCompanionOverrideConstraint.test_charms_parity_rejects_two_unrelated_external_cmr_peers
+in tests/unit/test_cross_model_mesh.py.
 """
 
 from pathlib import Path
@@ -29,7 +38,6 @@ overrides:
       - track: dev
     constraints:
       - 'charms(cross_model(endpoint[self-metrics-endpoint])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      - 'bool(cross_model(endpoint[self-metrics-endpoint])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 """
 
