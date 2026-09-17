@@ -10,6 +10,30 @@ from typing import Any, cast
 
 import pytest
 from test_suite.scheduler import plugin as _plugin_module
+from test_suite.scheduler.states import State
+
+
+class FakeKeywords:
+    """Minimal mimic of pytest's private ``NodeKeywords``.
+
+    Just enough to exercise the scheduler's keywords-copying logic in
+    ``_duplicate_item_for_repeat``: seeds itself with ``{node.name: True}``
+    at construction time, like the real one, and stores further entries in
+    a plain dict.
+    """
+
+    def __init__(self, node: "FakeItem") -> None:
+        self.node = node
+        self._markers: dict[str, Any] = {node.name: True}
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._markers[key] = value
+
+    def __getitem__(self, key: str) -> Any:
+        return self._markers[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._markers
 
 
 class FakeItem:
@@ -22,10 +46,32 @@ class FakeItem:
     def __init__(self, name: str, **state_marker_kwargs: object) -> None:
         self.name = name
         self._nodeid = f"fake_tests/{name}.py::{name}"
-        # Markers added via add_marker, keyed by name for fast lookup.
-        self._added_marks: dict[str, Any] = {}
+        # Mirrors real pytest.Item.own_markers: a plain list, shared by
+        # reference across a bare copy.copy() the same way pytest's own
+        # attribute is, until _duplicate_item_for_repeat explicitly isolates
+        # it. Deliberately *not* isolated in __copy__ below, so tests
+        # actually exercise that production isolation logic rather than
+        # relying on the fake to isolate it itself.
+        self.own_markers: list[Any] = []
         # Build a real pytest Mark so read_state_marker sees genuine kwargs.
         self._state_mark = pytest.mark.state(**state_marker_kwargs).mark if state_marker_kwargs else None
+        # Real pytest.Item instances carry a per-node Stash; mirrored here so
+        # tests can exercise _duplicate_item_for_repeat's stash-isolation fix.
+        self.stash: pytest.Stash = pytest.Stash()
+        # Real pytest.Node.__init__ aliases self._store = self.stash (pre-Stash API);
+        # mirrored so tests can exercise the _store-rebinding fix.
+        self._store = self.stash
+        # Mirrors real pytest.Item.keywords, so tests can exercise
+        # _duplicate_item_for_repeat's keywords-copying logic.
+        self.keywords: FakeKeywords = FakeKeywords(self)
+        # Mirrors real pytest.Item.user_properties (populated via
+        # record_property), so tests can exercise
+        # _duplicate_item_for_repeat's user_properties-isolation fix.
+        self.user_properties: list[tuple[str, object]] = []
+        # Mirrors real pytest.Item._report_sections (captured output
+        # attached to test reports), so tests can exercise
+        # _duplicate_item_for_repeat's report-sections-isolation fix.
+        self._report_sections: list[tuple[str, str, str]] = []
 
     @property
     def nodeid(self) -> str:
@@ -33,18 +79,20 @@ class FakeItem:
         return self._nodeid
 
     def get_closest_marker(self, marker_name: str) -> Any:
-        """Return a previously added marker or the state marker by name."""
-        if marker_name in self._added_marks:
-            return self._added_marks[marker_name]
+        """Return a previously added marker (most recent first) or the state marker by name."""
+        for mark in reversed(self.own_markers):
+            if getattr(mark, "name", None) == marker_name:
+                return mark
         if marker_name == "state":
             return self._state_mark
         return None
 
     def add_marker(self, marker: Any) -> None:
         """Store *marker* so it can be retrieved by get_closest_marker."""
+        self.own_markers.append(marker)
         name = getattr(marker, "name", None)
         if name is not None:
-            self._added_marks[str(name)] = marker
+            self.keywords[str(name)] = marker
 
 
 @pytest.fixture()
@@ -72,14 +120,31 @@ def reset_injected_ids() -> Iterator[None]:
     """Clear all module-level plugin globals before and after every test.
 
     Prevents state leaking between unit tests that call the plugin hooks
-    directly.
+    directly. ``_current_state`` defaults to ``State.EMPTY_MODEL`` (an
+    arbitrary non-terminal state, not the plugin's actual ``--current-state``
+    default of ``State.NO_BUNDLE``) rather than ``None``, since ``None``
+    means "unknown" and would make every hook under test behave as if a
+    prior failure had already halted the run. Tests that depend on the exact
+    starting state should set ``_plugin_module._current_state`` explicitly.
     """
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._current_state = State.EMPTY_MODEL
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
     yield
     _plugin_module._injected_item_ids.clear()
     _plugin_module._all_collected.clear()
     _plugin_module._duplicate_original_ids.clear()
     _plugin_module._failed_state_test = None
+    _plugin_module._current_state = None
+    _plugin_module._full_graph = None
+    _plugin_module._all_transitions = {}
+    _plugin_module._recovery_counter = 0
+    _plugin_module._skipped_transitions = set()
+    _plugin_module._skipped_transition_item_ids = {}
