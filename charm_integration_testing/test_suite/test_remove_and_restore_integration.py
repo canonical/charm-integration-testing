@@ -54,6 +54,12 @@ def test_remove_and_restore_integration(
 
     candidate_models = {m for m in (target_model_ref, neighbor_model_ref) if m is not None}
     invalidated_models: set[JujuModelHandle] = set()
+    # Compute which tracked entries will go stale, but don't remove them from persistence_state
+    # yet: if remove_integration()/wait_for_removal_of_integration()/integrate() below fails, the
+    # old relation may still be present (or have no replacement), and teardown still needs these
+    # entries to retry cleanup() for them. Only actually invalidate them once the remove/re-add
+    # sequence has succeeded, immediately before the final prepare/checkpoint loop.
+    keys_to_invalidate: set[PersistenceKey] = set()
     for model_ref in candidate_models:
         affected_units: set[str] = set()
         for application in model_applications.get(model_ref, set()):
@@ -61,12 +67,11 @@ def test_remove_and_restore_integration(
         if not affected_units:
             continue
         invalidated_models.add(model_ref)
-        for key in [
+        keys_to_invalidate.update(
             key
             for key in persistence_state
             if key.controller == model_ref.controller and key.model == model_ref.model and key.unit in affected_units
-        ]:
-            del persistence_state[key]
+        )
 
     # Break relation
     juju_client.remove_integration(
@@ -89,6 +94,12 @@ def test_remove_and_restore_integration(
         endpoint_1=integration_endpoint_1,
         endpoint_2=integration_endpoint_2,
     )
+
+    # The remove/re-add sequence above succeeded, so the relation_id(s) computed into
+    # keys_to_invalidate are now genuinely stale - only now is it safe to drop them (see the
+    # comment where keys_to_invalidate was built).
+    for key in keys_to_invalidate:
+        del persistence_state[key]
 
     # For CMR integrations, the provider side databag is populated by a unit agent that lives in
     # a different model to the one that owns the integration. Waiting for idle only on

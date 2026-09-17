@@ -327,12 +327,38 @@ class ValidatorRunner:
         updated_refs: dict[str, PersistenceState] = {}
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             for validator_cls in self.persistence_validators[interface_name]:
-                state, error_result = self._call_persistence_method(
+                state, error_result, skipped = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.prepare()
                 )
                 if error_result is not None:
                     results.append(error_result)
-                elif state is not None:
+                elif skipped:
+                    continue
+                elif not isinstance(state, PersistenceState):
+                    # The abstract contract requires prepare() to return a PersistenceState; a
+                    # validator that instead returns None (or any other value) leaves this
+                    # relation with no tracked state, which would silently skip every later
+                    # checkpoint for it rather than surfacing the broken implementation.
+                    logger.error(
+                        f"Persistence validator '{validator_cls.__name__}' for endpoint "
+                        f"'{integration.name}' returned {state!r} from prepare() instead of a "
+                        "PersistenceState."
+                    )
+                    results.append(
+                        ValidationResult(
+                            status="ERROR",
+                            endpoint=integration.name,
+                            interface=interface_name,
+                            role=role,
+                            level=_PERSISTENCE_RESULT_LEVEL,
+                            relation_id=integration.id,
+                            error=(
+                                f"Persistence validator '{validator_cls.__name__}' returned "
+                                f"{state!r} from prepare() instead of a PersistenceState."
+                            ),
+                        )
+                    )
+                else:
                     updated_refs[str(integration.id)] = state
         logger.info(f"Finished preparing persistence validators: {len(updated_refs)} relation(s) seeded")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
@@ -406,12 +432,45 @@ class ValidatorRunner:
                 )
                 continue
             for validator_cls in registered_validators:
-                outcome, error_result = self._call_persistence_method(
+                outcome, error_result, skipped = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.checkpoint(expected)
                 )
                 if error_result is not None:
                     results.append(error_result)
-                elif outcome is not None:
+                elif skipped:
+                    continue
+                elif not (
+                    isinstance(outcome, tuple)
+                    and len(outcome) == 2
+                    and isinstance(outcome[0], ValidationResult)
+                    and isinstance(outcome[1], PersistenceState)
+                ):
+                    # The abstract contract requires checkpoint() to return a
+                    # (ValidationResult, PersistenceState) pair; a validator that instead returns
+                    # None (or any other value) would otherwise be silently treated the same as a
+                    # legitimate PersistenceNotApplicable skip, hiding a broken implementation and
+                    # never checkpointing this relation again.
+                    logger.error(
+                        f"Persistence validator '{validator_cls.__name__}' for endpoint "
+                        f"'{integration.name}' returned {outcome!r} from checkpoint() instead of a "
+                        "(ValidationResult, PersistenceState) pair."
+                    )
+                    results.append(
+                        ValidationResult(
+                            status="ERROR",
+                            endpoint=integration.name,
+                            interface=interface_name,
+                            role=role,
+                            level=_PERSISTENCE_RESULT_LEVEL,
+                            relation_id=relation_id,
+                            error=(
+                                f"Persistence validator '{validator_cls.__name__}' returned "
+                                f"{outcome!r} from checkpoint() instead of a "
+                                "(ValidationResult, PersistenceState) pair."
+                            ),
+                        )
+                    )
+                else:
                     result, new_state = outcome
                     results.append(result)
                     # Only carry the new state forward on PASS: checkpoint() can return an advanced
@@ -433,7 +492,7 @@ class ValidatorRunner:
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             cleaned_relation_ids.append(integration.id)
             for validator_cls in self.persistence_validators[interface_name]:
-                _, error_result = self._call_persistence_method(
+                _, error_result, _ = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.cleanup()
                 )
                 if error_result is not None:
@@ -449,34 +508,41 @@ class ValidatorRunner:
         interface_name: str,
         role: ValidationRole,
         call: "Callable[[BasePersistenceValidator], _T]",
-    ) -> tuple[_T | None, ValidationResult | None]:
+    ) -> tuple[_T | None, ValidationResult | None, bool]:
         """Instantiate *validator_cls* and invoke *call* on it, translating outcomes uniformly.
 
-        Returns ``(value, None)`` on success, or ``(None, error_result)`` if the validator raised
-        (``PersistenceNotApplicable`` is treated as a silent skip, not an error). Shared by
-        prepare_all/checkpoint_all/cleanup_all so each only has to handle its own return shape.
+        Returns ``(value, None, False)`` on success, ``(None, error_result, False)`` if the
+        validator raised, or ``(None, None, True)`` if it raised ``PersistenceNotApplicable`` (a
+        silent skip, not an error). The third element distinguishes that silent-skip case from a
+        validator returning ``None``/an invalid value on success (see ``prepare_all``/
+        ``checkpoint_all``, which must treat the latter as an ERROR rather than silently discard
+        it - a validator's returned state is otherwise indistinguishable from a legitimate skip).
         """
         try:
             validator = validator_cls(charm, integration)
-            return call(validator), None
+            return call(validator), None, False
         except PersistenceNotApplicable:
             logger.debug(
                 f"Persistence validator '{validator_cls.__name__}' for endpoint '{integration.name}' "
                 "is not applicable to this relation side; skipping."
             )
-            return None, None
+            return None, None, True
         except Exception as exc:
             logger.exception(
                 f"Persistence validator '{validator_cls.__name__}' for endpoint '{integration.name}' raised an exception"
             )
-            return None, ValidationResult(
-                status="ERROR",
-                endpoint=integration.name,
-                interface=interface_name,
-                role=role,
-                level=_PERSISTENCE_RESULT_LEVEL,
-                relation_id=integration.id,
-                error=f"Persistence validator '{validator_cls.__name__}' raised an exception: {exc}",
+            return (
+                None,
+                ValidationResult(
+                    status="ERROR",
+                    endpoint=integration.name,
+                    interface=interface_name,
+                    role=role,
+                    level=_PERSISTENCE_RESULT_LEVEL,
+                    relation_id=integration.id,
+                    error=f"Persistence validator '{validator_cls.__name__}' raised an exception: {exc}",
+                ),
+                False,
             )
 
 
