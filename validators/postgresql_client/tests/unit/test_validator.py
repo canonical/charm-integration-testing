@@ -706,6 +706,26 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # THEN
         assert any("validator_canary_e88ccf2f7c3cde3c_00000000000000000099" in q for q in cursor.executed_queries)
 
+    def test_resolves_schema_by_search_path_visibility_not_an_arbitrary_match(self) -> None:
+        # GIVEN
+        # Regression test for: a plain information_schema lookup by table name is ambiguous if
+        # more than one schema on the search path contains a same-named table (e.g. a leftover
+        # canary from an earlier, interrupted run) - it would return an arbitrary match instead of
+        # the one an unqualified reference actually resolves to. pg_table_is_visible() must be
+        # used to match PostgreSQL's own unqualified-name resolution.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN
+        schema_query = next(q for q in cursor.executed_queries if "pg_table_is_visible" in q)
+        assert "pg_catalog.pg_class" in schema_query
+        assert "pg_catalog.pg_namespace" in schema_query
+
     def test_filters_row_count_by_identifier_derived_marker(self) -> None:
         # GIVEN
         # Regression test for: checkpoint() previously counted every row in the table, so a table
