@@ -165,8 +165,9 @@ Integration
        Bundle Builder X reuses any explicit ``offer_name`` already declared by another active
        cross-model integration between the same provider/requirer charm pair; only if the pair
        has no declared name does it synthesize
-       ``<providing_charm>-<providing_endpoint>-<interface>-offer``. If omitted for an external
-       CMR, it defaults to ``<remote_application>-offer``.
+       ``<providing_charm>-<providing_endpoint>-<interface>-offer``, with every underscore in
+       those three components replaced by a hyphen. If omitted for an external CMR, it
+       defaults to ``<remote_application>-offer``.
    * - ``url``
      - no
      - --

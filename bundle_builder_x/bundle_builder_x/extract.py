@@ -407,7 +407,8 @@ def extract_solution(
 
 
 def _validate_resolved_cmr_offer_consistency(bundles: dict[ModelRef, Bundle]) -> None:
-    """Reject any two resolved CMRs whose url/offer_name disagree.
+    """Reject any two resolved CMRs whose url/offer_name disagree, or whose offer_name
+    collides across two distinct provider applications.
 
     ``spec.py``'s check runs pre-solve and can't see offer names synthesized later by
     ``domain.integration_offer_name()``, which can collide across different provider
@@ -417,7 +418,23 @@ def _validate_resolved_cmr_offer_consistency(bundles: dict[ModelRef, Bundle]) ->
     for model_ref, bundle in bundles.items():
         seen_urls: dict[str, str] = {}
         seen_offer_names: dict[str, str] = {}
+        seen_offer_owners: dict[str, str] = {}
         for cmr in bundle.cross_model_integrations:
+            if cmr.local_role == EndpointType.PROVIDES:
+                # Two different provider applications synthesizing the same offer_name is a
+                # collision distinct from the url/offer_name-disagreement case below: same
+                # model, same offer_name, same (derived) url -- everything "agrees" from the
+                # requirer's point of view, yet Juju can't have two offers share a name in one
+                # model, and this provides side would silently keep only one.
+                prior_owner = seen_offer_owners.get(cmr.offer_name)
+                if prior_owner is not None and prior_owner != cmr.local.application:
+                    raise ValueError(
+                        f"Model '{model_ref.key}': applications {prior_owner!r} and "
+                        f"{cmr.local.application!r} both synthesize offer_name "
+                        f"{cmr.offer_name!r}; distinct provider applications cannot share a "
+                        "Juju offer name"
+                    )
+                seen_offer_owners[cmr.offer_name] = cmr.local.application
             if cmr.local_role != EndpointType.REQUIRES or cmr.url is None:
                 continue
             prior_offer_name = seen_urls.get(cmr.url)
