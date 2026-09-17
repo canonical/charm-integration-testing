@@ -372,19 +372,23 @@ rather than registering multiple entry points for the same interface.
    - Role gating: each of `prepare`/`checkpoint`/`cleanup` raises
      `PersistenceNotApplicable` when `self.role` isn't the applicable side.
    - `prepare()` creates the canary resource and returns a `PersistenceState`
-     with a fresh identifier and `ref=1`. Also cover rerunning `prepare()`
-     against an identifier that already has a canary resource (e.g. a
-     resumed/retried run per `seed_persistence_state_for_resumed_run`) and
-     assert the resulting resource/state is still usable by `checkpoint()`
-     - a non-idempotent `CREATE`-style implementation could otherwise pass
-     a "creates a fresh resource" test while failing on a second `prepare()`
-     against the same identifier.
+     with a fresh identifier and `ref=1`. Also cover calling `prepare()`
+     twice while forcing the same identifier both times (e.g. patch/mock the
+     identifier source so it returns a fixed value instead of a fresh
+     `uuid.uuid4()`) and assert the resulting resource/state is still usable
+     by `checkpoint()`. The reference `prepare()` always mints a fresh random
+     identifier, so this scenario cannot occur through normal use of that
+     implementation alone - but a non-idempotent `CREATE`-style
+     implementation could still pass a "creates a fresh resource" test while
+     failing the second time it targets an identifier that already has a
+     canary resource, so cover it explicitly rather than relying on the
+     identifier's randomness to avoid ever exercising this path.
    - `checkpoint()` passes when the check matches `expected.ref`, fails when
      it doesn't. On `PASS`, it advances the backend-specific canary state
      (e.g. writing a new marked row/record for a SQL-style backend;
      overwriting a value, creating a new version, or writing another
      backend-specific marker for a KV store/bucket/topic) and returns
-     `PersistenceState(ref=expected.ref + 1)`; on `FAIL`, it must not write
+     `PersistenceState(id=expected.id, ref=expected.ref + 1)`; on `FAIL`, it must not write
      anything and returns `expected` unchanged, so a later retry re-checks
      the same expected count instead of drifting past the failure (see the
      `checkpoint()` design point above). Also cover that a check based only
