@@ -370,9 +370,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             with conn.cursor() as cur:
                 cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - table name is UUID-derived, not user input
                 cur.execute(
-                    f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL, written_at TIMESTAMPTZ)"
+                    f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL, checkpoint_ref BIGINT NOT NULL, written_at TIMESTAMPTZ)"
                 )  # nosec B608
-                cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
+                # checkpoint_ref=1 tracks that this row was written at prepare() time (ref=1)
+                cur.execute(f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())", (marker, 1))  # nosec B608
         finally:
             conn.close()
         return PersistenceState(id=identifier, ref=1)
@@ -390,13 +391,27 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
-                # Filter on `marker` (set once, deterministically, from the canary identifier) rather than
-                # counting every row in the table: a table recreated from scratch with unrelated rows could
-                # otherwise coincidentally match the expected count without any of the original data surviving.
+                # Count rows with this marker and verify that rows from each checkpoint still exist.
+                # By storing and checking per-checkpoint markers, we distinguish "the original rows
+                # survived" from "a table was recreated with the same number of new rows".
                 cur.execute(f"SELECT count(*) FROM {table} WHERE marker = %s", (marker,))  # nosec B608
                 row = cur.fetchone()
                 actual = int(row[0]) if row else 0
-                passed = actual == expected.ref
+                
+                # Verify that each expected checkpoint has at least one row (checkpoint_ref = 1..expected.ref)
+                all_checkpoints_present = True
+                if actual == expected.ref:
+                    # Only check per-checkpoint presence if count matches; if count is wrong, fail early
+                    cur.execute(
+                        f"SELECT COUNT(DISTINCT checkpoint_ref) FROM {table} WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s",
+                        (marker, expected.ref)
+                    )
+                    row = cur.fetchone()
+                    distinct_checkpoints = int(row[0]) if row else 0
+                    # We expect to have rows from each checkpoint (1 to expected.ref inclusive)
+                    all_checkpoints_present = distinct_checkpoints == expected.ref
+                
+                passed = actual == expected.ref and all_checkpoints_present
                 # Only write the next marker row when this checkpoint passed: ValidatorRunner
                 # only carries the advanced PersistenceState forward on a PASS result (a FAIL/ERROR
                 # leaves the harness's tracked `expected` untouched), so writing here unconditionally
@@ -404,7 +419,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # masking the original mismatch behind a permanent, un-trackable drift instead of
                 # letting a later checkpoint re-detect the same data loss consistently.
                 if passed:
-                    cur.execute(f"INSERT INTO {table} (marker, written_at) VALUES (%s, now())", (marker,))  # nosec B608
+                    next_ref = expected.ref + 1
+                    cur.execute(f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())", (marker, next_ref))  # nosec B608
         finally:
             conn.close()
 
@@ -472,15 +488,14 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 prefix = self._canary_table_prefix()
                 escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
                 # CREATE TABLE in prepare()/checkpoint() is unqualified, so it resolves through
-                # search_path into current_schema(). Restrict discovery (and the DROP below) to
-                # that same schema too - otherwise a same-named canary table in another schema
-                # could be left behind, or an unrelated same-named object in a different schema
-                # could be dropped by mistake. Also restrict to base tables: a view or foreign
-                # table sharing the prefix would make PostgreSQL reject DROP TABLE and abort
+                # search_path into the first writable schema (which may not be current_schema()).
+                # Search all schemas to find the canary tables, not just current_schema(), to avoid
+                # leaving canary tables behind in other schemas. Also restrict to base tables: a view
+                # or foreign table sharing the prefix would make PostgreSQL reject DROP TABLE and abort
                 # cleanup, leaving any remaining canary tables undropped.
                 cur.execute(
                     "SELECT table_schema, table_name FROM information_schema.tables "
-                    "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
+                    "WHERE table_type = 'BASE TABLE' "
                     "AND table_name LIKE %s ESCAPE '\\'",
                     (f"{escaped_prefix}%",),
                 )
@@ -580,3 +595,20 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _canary_marker(self, identifier: int) -> str:
         """Deterministic per-instance marker written to every canary row (see ``checkpoint()``)."""
         return f"marker-{identifier}"
+
+    def _resolve_table_schema(self, conn: "psycopg.Connection[tuple[Any, ...]]", table_name: str) -> str | None:
+        """Resolve the actual schema where an unqualified table name was created.
+        
+        PostgreSQL resolves unqualified CREATE TABLE through search_path, which may not match
+        current_schema() if the first writable schema in search_path differs from current_schema().
+        Query information_schema to find the actual schema where the table exists.
+        
+        Returns the schema name if found, None if the table doesn't exist in any schema.
+        """
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT table_schema FROM information_schema.tables WHERE table_name = %s AND table_type = 'BASE TABLE'",
+                (table_name,)
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
