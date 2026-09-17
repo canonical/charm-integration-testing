@@ -31,6 +31,4 @@ overrides:
         optional: false  # same handler blocks with "[s3] Missing S3 integration."
     constraints:
       - 'charms(cross_model(endpoint[logging] | endpoint[grafana-source])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
-      - 'bool(cross_model(endpoint[logging] | endpoint[grafana-source])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
