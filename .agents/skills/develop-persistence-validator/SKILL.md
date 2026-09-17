@@ -425,13 +425,16 @@ rather than registering multiple entry points for the same interface.
      resource (e.g. a hand-created backup) must survive cleanup, an
      out-of-range look-alike identifier (larger than any `prepare()` could
      have produced) must be rejected before dropping, and - for SQL
-     backends - discovery must be scoped to the current schema and escape
-     any `LIKE` wildcards in the prefix pattern. For PostgreSQL specifically,
-     use `information_schema.tables` with `current_schema()` filtering and
-     identifier quoting as in the reference implementation's
+     backends - discovery must search every schema (an unqualified
+     `CREATE TABLE` can resolve through `search_path` to a schema other than
+     `current_schema()`, and the path can change between invocations), and
+     escape any `LIKE` wildcards in the prefix pattern. For PostgreSQL
+     specifically, use `information_schema.tables` (all schemas, not just
+     `current_schema()`) with identifier quoting as in the reference
+     implementation's
      `test_rejects_discovered_tables_that_only_share_the_prefix`/
      `test_rejects_discovered_tables_with_an_out_of_range_identifier`/
-     `test_restricts_discovery_to_the_current_schema`/
+     `test_searches_all_schemas_for_discovery`/
      `test_escapes_like_wildcards_in_prefix_pattern` tests. Implementers of
      other SQL dialects (e.g. MySQL) must provide equivalent schema-scoping
      and identifier-escaping safeguards appropriate to that backend's
@@ -485,7 +488,7 @@ rather than registering multiple entry points for the same interface.
    depending on your Juju client version - check with `juju version`
    first:
    ```
-   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
+   juju exec -m <model> --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence prepare
    ```
    on the unit whose role this validator applies to (per its role gating -
    e.g. the requirer for a requirer-side canary). `juju exec` runs the
@@ -596,14 +599,15 @@ def cleanup(self) -> None:
     # canary tables in place.
     try:
         with conn.cursor() as cur:
-            # CREATE TABLE elsewhere is unqualified, so it resolves through search_path into
-            # current_schema(); restrict discovery (and the DROP below) to that same schema, or
-            # a same-named table in another schema could be left behind or wrongly targeted. Also
+            # CREATE TABLE elsewhere is unqualified, so it resolves through search_path - which can
+            # land in a schema other than current_schema(), and that path can change between
+            # invocations. Search every schema in information_schema.tables rather than filtering
+            # to current_schema(), or a table created in another schema could be left behind. Also
             # restrict to base tables: a view/foreign table sharing the prefix would make DROP
             # TABLE fail and abort cleanup, leaving any remaining canary tables undropped.
             cur.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "  # nosec B608
-                "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' "
+                "WHERE table_type = 'BASE TABLE' "
                 "AND table_name LIKE %s ESCAPE '\\'",
                 (f"{escaped_prefix}%",),
             )
