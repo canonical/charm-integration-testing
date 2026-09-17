@@ -662,6 +662,74 @@ class TestExtractSingleModel:
         with pytest.raises(ValueError, match="disagreeing url"):
             extract_solution(model, domain, logger=_LOGGER)
 
+    def test_two_distinct_provider_applications_in_one_model_synthesizing_same_offer_name_rejected(
+        self,
+    ) -> None:
+        # GIVEN two provider applications in the *same* model, both instances of the same
+        # charm/endpoint/interface, so both CMRs synthesize the identical offer_name (and,
+        # since they share one model, the identical url too) -- an agreeing pair that the
+        # url/offer_name disagreement check alone can't catch
+        from bundle_builder_x.domain import add_charm_to_domain, pair_charms_in_domain
+
+        provider = _make_charm(
+            "postgresql-k8s",
+            endpoints={"database": CharmEndpoint(type=EndpointType.PROVIDES, interface="postgresql", optional=True)},
+        )
+        requirer = _make_charm(
+            "app",
+            endpoints={"db": CharmEndpoint(type=EndpointType.REQUIRES, interface="postgresql", optional=True)},
+        )
+        cmr_a = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="app-a", endpoint="db"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="pg-a", endpoint="database", model=ModelRef(name="provider-model")
+            ),
+        )
+        cmr_b = DomainApplicationIntegration(
+            endpoint_1=DomainApplicationEndpoint(application="app-b", endpoint="db"),
+            endpoint_2=DomainApplicationEndpoint(
+                application="pg-b", endpoint="database", model=ModelRef(name="provider-model")
+            ),
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="provider-model"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "pg-a": DomainApplication(charm="postgresql-k8s"),
+                        "pg-b": DomainApplication(charm="postgresql-k8s"),
+                    },
+                    ref=ModelRef(controller="lxd"),
+                ),
+                ModelRef(name="consumer-model"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "app-a": DomainApplication(charm="app"),
+                        "app-b": DomainApplication(charm="app"),
+                    },
+                    application_integrations=[cmr_a, cmr_b],
+                ),
+            }
+        )
+
+        provider_a_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        provider_b_id = add_charm_to_domain(provider, domain, ModelRef(name="provider-model"))
+        requirer_a_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        requirer_b_id = add_charm_to_domain(requirer, domain, ModelRef(name="consumer-model"))
+        pair_charms_in_domain(domain, provider_a_id, requirer_a_id)
+        pair_charms_in_domain(domain, provider_b_id, requirer_b_id)
+
+        # WHEN extracting
+        model = _solve(domain)
+
+        # THEN extraction rejects the collision instead of silently keeping only one offer
+        with pytest.raises(ValueError, match="cannot share a Juju offer name"):
+            extract_solution(model, domain, logger=_LOGGER)
+
 
 class TestExtractMultiModel:
     def test_bundles_per_model(self) -> None:
