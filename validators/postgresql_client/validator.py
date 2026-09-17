@@ -607,23 +607,34 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return f"marker-{identifier}"
 
     def _resolve_table_schema(self, cur: "psycopg2.extensions.cursor", table_name: str) -> str | None:
-        """Resolve the schema of the table an unqualified reference to ``table_name`` would hit.
+        """Resolve the schema this validator's canary table currently lives in.
 
         ``CREATE TABLE`` in ``prepare()`` is unqualified, so PostgreSQL resolves it through
-        ``search_path`` at creation time - which may not match ``current_schema()`` when
-        ``checkpoint()`` runs later, if ``search_path`` changed in between. A plain
-        ``information_schema`` lookup by name is ambiguous if more than one schema on the search
-        path happens to contain a same-named table (e.g. a leftover canary from an earlier,
-        interrupted run) - it would return an arbitrary match rather than the one an unqualified
-        reference actually resolves to. ``pg_catalog.pg_table_is_visible()`` implements the same
-        name resolution PostgreSQL itself uses for unqualified references, so this always agrees
-        with what ``prepare()``'s (and a later unqualified reference's) ``CREATE TABLE`` addressed.
+        ``search_path`` at creation time. Rather than re-deriving that same resolution later via
+        ``pg_table_is_visible()`` - which depends on the *current* connection's ``search_path`` and
+        so can disagree with prepare()'s if the path changed in between (e.g. a different role
+        default, or a session-level override) - look the table up by its exact name across every
+        schema in the database, independent of visibility. ``table_name`` is derived from a random,
+        effectively-unique per-run identifier (see ``_canary_table_name``), so in the overwhelming
+        common case exactly one table anywhere matches; that unambiguously identifies our canary
+        regardless of search_path drift between calls.
+
+        Only if more than one schema happens to contain a same-named table (e.g. a leftover canary
+        from an earlier, interrupted run coincidentally reusing this run's random name - vanishingly
+        unlikely, but not impossible) is there genuine ambiguity: in that case, fall back to
+        ``pg_table_is_visible()`` to pick whichever match the *current* connection's unqualified
+        name resolution would actually address, preserving the original tie-breaking behavior.
         """
         cur.execute(
-            "SELECT n.nspname FROM pg_catalog.pg_class c "
+            "SELECT n.nspname, pg_catalog.pg_table_is_visible(c.oid) FROM pg_catalog.pg_class c "
             "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE c.relname = %s AND c.relkind = 'r' AND pg_catalog.pg_table_is_visible(c.oid)",
+            "WHERE c.relname = %s AND c.relkind = 'r'",
             (table_name,),
         )
-        row = cur.fetchone()
-        return row[0] if row else None
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return str(rows[0][0])
+        visible = [schema for schema, is_visible in rows if is_visible]
+        return visible[0] if visible else str(rows[0][0])

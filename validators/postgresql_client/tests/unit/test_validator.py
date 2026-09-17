@@ -636,9 +636,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_passes_when_row_count_matches_expected_ref(self) -> None:
         # GIVEN the canary table has exactly the expected number of rows with matching identity
         validator = _make_persistence_validator(VALID_DATABAG)
-        # First fetchone: schema-resolution query returns the table's schema.
-        # Second fetchone: the id=checkpoint_ref identity-matching count query returns 2.
-        cursor = CursorStub(fetchone_rows=[("public",), (2,)])
+        # Schema-resolution query (fetchall) finds one match; then the id=checkpoint_ref
+        # identity-matching count query (fetchone) returns 2.
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(2,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -657,7 +657,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_fails_when_row_count_is_lower_than_expected(self) -> None:
         # GIVEN data loss: fewer matching rows than expected
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -681,7 +681,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_fails_when_table_is_not_found(self) -> None:
         # GIVEN the canary table doesn't exist in any schema (e.g. it was dropped/never created)
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[None])
+        cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -696,7 +696,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_uses_canary_table_name_from_expected_identifier(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -706,32 +706,51 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # THEN
         assert any("validator_canary_e88ccf2f7c3cde3c_00000000000000000099" in q for q in cursor.executed_queries)
 
-    def test_resolves_schema_by_search_path_visibility_not_an_arbitrary_match(self) -> None:
-        # GIVEN
-        # Regression test for: a plain information_schema lookup by table name is ambiguous if
-        # more than one schema on the search path contains a same-named table (e.g. a leftover
-        # canary from an earlier, interrupted run) - it would return an arbitrary match instead of
-        # the one an unqualified reference actually resolves to. pg_table_is_visible() must be
-        # used to match PostgreSQL's own unqualified-name resolution.
+    def test_resolves_schema_by_exact_name_across_all_schemas_regardless_of_visibility(self) -> None:
+        # GIVEN a single table anywhere in the database matches this canary's exact (random,
+        # effectively-unique) name.
+        # Regression test for: resolving the schema via pg_table_is_visible() alone depends on the
+        # *current* connection's search_path, which can disagree with the search_path prepare()
+        # used, causing a false FAIL (or, in a contrived multi-match case, the wrong table). Since
+        # the table name is derived from a random per-run identifier, an exact-name match anywhere
+        # in the database - visible or not - unambiguously identifies our canary.
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
+        cursor = CursorStub(fetchall_rows=[("some_schema", False)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN the single match is used even though it isn't currently visible
+        assert result.status == "PASS"
+        schema_query = next(q for q in cursor.executed_queries if "pg_catalog.pg_class" in q)
+        assert "pg_catalog.pg_namespace" in schema_query
+
+    def test_tie_breaks_multiple_same_named_tables_by_search_path_visibility(self) -> None:
+        # GIVEN the (vanishingly unlikely, but not impossible) case where more than one schema
+        # contains a same-named table - e.g. a leftover canary from an earlier, interrupted run
+        # coincidentally reusing this run's random name. Genuine ambiguity like this must be
+        # resolved the same way PostgreSQL itself would resolve an unqualified reference: whichever
+        # match is visible under the *current* search_path.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("stale_schema", False), ("public", True)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
             validator.checkpoint(PersistenceState(id=99, ref=1))
 
-        # THEN
-        schema_query = next(q for q in cursor.executed_queries if "pg_table_is_visible" in q)
-        assert "pg_catalog.pg_class" in schema_query
-        assert "pg_catalog.pg_namespace" in schema_query
+        # THEN the visible schema ("public") is used to qualify the count query, not the first row
+        count_query_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
+        assert '"public".' in cursor.executed_queries[count_query_index]
 
     def test_filters_row_count_by_identifier_derived_marker(self) -> None:
         # GIVEN
         # Regression test for: checkpoint() previously counted every row in the table, so a table
         # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
         validator = _make_persistence_validator(VALID_DATABAG)
-        cursor = CursorStub(fetchone_rows=[("public",), (1,)])  # schema, then identity-matching count
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])  # schema, then identity-matching count
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
@@ -750,7 +769,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
-        cursor = CursorStub(fetchone_rows=[("public",), (1,)])
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
