@@ -53,9 +53,6 @@ overrides:
         or bool(endpoint[cloud-config])'
       - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
         | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
-      - 'bool(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces] |
-        endpoint[receive-profiles])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 
   # dev: CMR mesh + send-otlp/receive-otlp added as valid pipeline backends
@@ -86,7 +83,4 @@ overrides:
         or bool(endpoint[send-traces]) or bool(endpoint[send-loki-logs]) or bool(endpoint[send-remote-write])'
       - 'charms(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces]
         | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
-      - 'bool(cross_model(endpoint[receive-loki-logs] | endpoint[receive-traces] |
-        endpoint[receive-profiles])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

@@ -14,7 +14,4 @@ overrides:
     constraints:
       - 'charms(cross_model(endpoint[receive-remote-write] | endpoint[grafana-source]
         | endpoint[prometheus-api])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
-      - 'bool(cross_model(endpoint[receive-remote-write] | endpoint[grafana-source]
-        | endpoint[prometheus-api])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'

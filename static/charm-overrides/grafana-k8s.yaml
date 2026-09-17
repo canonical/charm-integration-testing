@@ -23,7 +23,4 @@ overrides:
       - 'bool(endpoint[provide-cmr-mesh]) => bool(endpoint[service-mesh])'
       - 'charms(cross_model(endpoint[metrics-endpoint] | endpoint[profiling-endpoint]))
         == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      # charms/bool/len equality together confirm the same real CMR; see GH-980 and CrossModelExpr's docstring.
-      - 'bool(cross_model(endpoint[metrics-endpoint] | endpoint[profiling-endpoint]))
-        == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
