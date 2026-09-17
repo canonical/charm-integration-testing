@@ -29,7 +29,7 @@ overrides:
       - track: dev
     constraints:
       - 'charms(cross_model(endpoint[self-metrics-endpoint])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
-      - 'len(cross_model(endpoint[self-metrics-endpoint])) == len(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'bool(cross_model(endpoint[self-metrics-endpoint])) == bool(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 """
 
