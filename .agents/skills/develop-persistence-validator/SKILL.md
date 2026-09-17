@@ -413,13 +413,18 @@ rather than registering multiple entry points for the same interface.
      out-of-range look-alike identifier (larger than any `prepare()` could
      have produced) must be rejected before dropping, and - for SQL
      backends - discovery must be scoped to the current schema and escape
-     any `LIKE` wildcards in the prefix pattern, the way the reference
-     implementation's `test_rejects_discovered_tables_that_only_share_the_prefix`/
+     any `LIKE` wildcards in the prefix pattern. For PostgreSQL specifically,
+     use `information_schema.tables` with `current_schema()` filtering and
+     identifier quoting as in the reference implementation's
+     `test_rejects_discovered_tables_that_only_share_the_prefix`/
      `test_rejects_discovered_tables_with_an_out_of_range_identifier`/
      `test_restricts_discovery_to_the_current_schema`/
-     `test_escapes_like_wildcards_in_prefix_pattern` do. A prefix-only
-     implementation could otherwise pass a "drops matching resources" test
-     while still deleting unrelated data.
+     `test_escapes_like_wildcards_in_prefix_pattern` tests. Implementers of
+     other SQL dialects (e.g. MySQL) must provide equivalent schema-scoping
+     and identifier-escaping safeguards appropriate to that backend's
+     capabilities and syntax. A prefix-only implementation could otherwise
+     pass a "drops matching resources" test while still deleting unrelated
+     data.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
@@ -488,9 +493,10 @@ rather than registering multiple entry points for the same interface.
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
-   juju exec --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
+   juju exec -m <model> --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
    ```
-   (`--refs` must be valid JSON - `run_validators` parses/rejects it before
+   (`-m <model>` specifies which Juju model the unit belongs to; `--refs`
+   must be valid JSON - `run_validators` parses/rejects it before
    `checkpoint()` ever runs, so a placeholder like `...` is not usable here;
    substitute the real relation ID and the `id`/`ref` values from the
    `PersistenceState` you're resuming, e.g. as printed by a prior
@@ -666,6 +672,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
   cleanup (including the no-canary-resources case).
 - `poetry run pytest validators/<name> validators/runner` passes.
 - `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
-  yamlfix, and markdownlint-cli2 for the whole repo).
+  yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
+  includes nested markdown documentation, run markdownlint-cli2 explicitly on
+  those files).
 - No hardcoded charm names, model names, or relation ids inside the
   validator code.
