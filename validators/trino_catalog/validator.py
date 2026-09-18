@@ -13,7 +13,7 @@ import trino.dbapi
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
-_DEFAULT_HTTP_PORT = 80
+_DEFAULT_HTTP_PORT = 8080
 _DEFAULT_HTTPS_PORT = 443
 _REQUEST_TIMEOUT_SECONDS = 10
 

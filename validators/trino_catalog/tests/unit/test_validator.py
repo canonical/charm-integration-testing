@@ -206,6 +206,23 @@ def test_invalid_catalog_json_fails() -> None:
     assert result.checks[-1].name == "catalogs"
 
 
+def test_deep_defaults_portless_http_url_to_trino_port() -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_url": "trino-k8s.model.svc.cluster.local"})
+    connection = ConnectionStub()
+
+    with patch(
+        "validators.trino_catalog.validator.trino.dbapi.connect",
+        return_value=connection,
+    ) as connect:
+        # WHEN
+        result = validator.validate(level="deep")
+
+    # THEN
+    assert result.status == "PASS"
+    assert connect.call_args.kwargs["port"] == 8080
+
+
 def test_deep_queries_advertised_catalogs() -> None:
     # GIVEN
     validator = _make_validator(VALID_DATABAG)
