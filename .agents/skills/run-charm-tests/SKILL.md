@@ -136,6 +136,94 @@ ERROR failed to bootstrap model: creating controller stack: creating statefulset
 
 ---
 
+## Using an Existing Litmus ChaosCenter
+
+Connect test models to an existing ChaosCenter offer. This provisions
+`litmus-infrastructure-k8s`, not the shared ChaosCenter or experiment clients.
+
+### Prepare
+
+1. Obtain an accessible offer URL in `controller:owner/model.offer` format,
+  exposing the `litmus-infrastructure` endpoint. The offering controller must
+  be registered in the local Juju client.
+2. Use Kubernetes test models running Juju 3.6 or newer. Each configured model
+  must use the same Kubernetes cluster as its ChaosCenter; cluster identity is
+  checked using the `kube-system` namespace UID.
+3. Supply `KUBECONFIG_<cloud>` paths for the test and offering models' clouds,
+  which may differ from their controllers' clouds.
+  Replace cloud-name hyphens with underscores, for example
+  `KUBECONFIG_local_k8s` for `local-k8s`. The credentials must allow reading
+  namespaces, CRDs and Deployments. Do not print or include credentials in reports.
+
+### Run
+
+1. Append these options to the test command for your scenario, replacing the
+  example offer URL:
+
+  ```bash
+  --litmus-offer "shared-controller:admin/litmus.chaoscenter" \
+  --litmus-channel "dev/edge" \
+  --litmus-timeout 600
+  ```
+
+  The channel and readiness timeout shown are the defaults. The suite deploys
+  infrastructure and connects it to the offer after model creation, or at
+  startup when `--current-state` refers to existing models.
+2. For a separate neighbor model, add `--neighbor-litmus-offer` with its
+  ChaosCenter offer URL. It does not inherit `--litmus-offer`; the same-cluster
+  requirement applies independently to each model.
+3. To resume, supply the existing controller/model options and matching
+  `--current-state`. Existing infrastructure is checked before reuse; conflicting
+  names, channels or offers are rejected rather than replaced.
+
+### Verify
+
+1. Review the `Initial chaos tool` log. For existing models, detection uses each
+  model's actual Kubernetes cloud and logs its controller/model address. Before
+  models exist, it uses the configured target/neighbor clouds and logs cloud/model.
+  This snapshot is taken before provisioning, so `none` can be expected for a new model.
+2. While the test model exists, inspect its relation and operator:
+
+  ```bash
+  juju status -m "<test-controller>:<test-model>" --relations
+  kubectl --kubeconfig "<kubeconfig-path>" get crd chaosengines.litmuschaos.io
+  kubectl --kubeconfig "<kubeconfig-path>" -n "<test-model>" get deployment chaos-operator-ce
+  ```
+
+  Check the relation between `litmus-infrastructure-k8s:litmus-infrastructure`
+  and `litmus-chaoscenter:litmus-infrastructure`. Readiness requires the CRD and
+  an observed current generation with updated, ready and available replica counts
+  at least equal to the nonzero desired count. Extra rollout replicas are allowed.
+3. Tool-dependent tests use `require_chaos_tool` for the target or
+  `chaos_tool_for_model` for a specific model. Availability is checked on demand,
+  preferring Litmus over Chaos Mesh. Without configured Litmus, absent tools or
+  a machine model skip only dependent tests. Configured setup failures and API
+  errors fail instead of falling back or skipping. Detection does not verify
+  experiment execution.
+
+### Troubleshoot
+
+1. Missing kubeconfig or controller: supply the correct cloud mapping and register
+  the offering controller. Before model creation, a missing kubeconfig is logged
+  as detection not performed, not as a machine substrate. For existing models,
+  model lookup and missing Kubernetes configuration errors fail without falling
+  back to the controller's cloud. Machine models are logged without skipping the session.
+2. Cluster or Juju version mismatch: select a compatible model and offer; do not
+  bypass validation.
+3. Application, channel or offer conflict: inspect existing resources and correct
+  the configuration before rerunning. Do not overwrite unrelated resources.
+4. API error or readiness timeout: check permissions, the relation, ChaosCenter
+  logs and operator events. Do not treat the error as tool absence or increase
+  the timeout without identifying the cause.
+
+### Clean Up
+
+1. Use the test suite's controller lifecycle for resources it created. Pre-existing
+  controllers/models are not automatically destroyed by registration alone.
+2. Inspect resources left by interrupted runs before removing only those owned by
+  the test. Do not delete the shared `litmus` model, ChaosCenter or its offer.
+  Remote Litmus cleanup after forced controller destruction is not guaranteed.
+
 ## Critical Parameters
 
 These parameters MUST be included when reproducing test observer executions (matching charm-testing.yaml workflow):
