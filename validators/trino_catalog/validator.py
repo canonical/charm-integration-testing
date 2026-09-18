@@ -166,7 +166,10 @@ def _parse_trino_url(value: str) -> tuple[TrinoConnectionInfo | None, Validation
     raw_url = value if "://" in value else f"//{value}"
     try:
         parsed = urllib.parse.urlsplit(raw_url)
-        explicit_port = parsed.port
+        try:
+            explicit_port = parsed.port
+        except ValueError as exc:
+            raise ValueError("port must be an integer between 1 and 65535") from exc
         if explicit_port == 0:
             raise ValueError("port must be between 1 and 65535")
         scheme = parsed.scheme.lower() or ("https" if explicit_port == _DEFAULT_HTTPS_PORT else "http")

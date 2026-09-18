@@ -253,6 +253,22 @@ def test_simple_rejects_explicit_port_zero() -> None:
     connect.assert_not_called()
 
 
+def test_simple_redacts_malformed_port_from_diagnostic() -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_url": "http://admin:hunter2"})
+
+    with patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect:
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "trino_url"
+    assert result.checks[-1].message == "Invalid trino_url: port must be an integer between 1 and 65535"
+    assert "hunter2" not in result.checks[-1].message
+    connect.assert_not_called()
+
+
 def test_deep_defaults_portless_http_url_to_trino_port() -> None:
     # GIVEN
     validator = _make_validator({**VALID_DATABAG, "trino_url": "trino-k8s.model.svc.cluster.local"})
