@@ -6,7 +6,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-from juju import JujuBackend, JujuExtension, JujuModelHandle
+from juju import JujuBackend, JujuExecOutput, JujuExtension, JujuModelHandle
 
 from validators.base.validator import ValidationResult
 from validators.runner import ValidatorRunnerResults
@@ -57,20 +57,38 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if not self._is_venv_runner_present(model, unit, is_k8s):
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
             self._inject_validators(model, unit, is_k8s=is_k8s)
 
-        # Run validators
-        self.logger.debug(f"Running validation on unit {unit}")
-        run_result = self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}", operator=is_k8s)
+        # Run validators. Only retry when the runner binary is missing (rc=127, "command not
+        # found"), which indicates the unit/pod was rescheduled and lost the injected runner.
+        # A genuine validator failure returns a different rc and must not trigger a re-check
+        # or reinjection that could mask the real failure.
+        run_result = self._run_validators_once(model, unit, level, is_k8s)
+        if run_result.return_code == 127 and not self._is_venv_runner_present(model, unit, is_k8s):
+            if not self.validators_path:
+                raise RuntimeError(
+                    f"Validators runner missing on {unit} and no validators_path configured to reinject "
+                    f"(rc={run_result.return_code}): {run_result.stderr}"
+                )
+            self.logger.warning(f"Validators no longer present on {unit}; reinjecting and retrying")
+            self._inject_validators(model, unit, is_k8s=is_k8s)
+            run_result = self._run_validators_once(model, unit, level, is_k8s)
         if run_result.return_code != 0:
             raise RuntimeError(f"Validators failed on {unit} (rc={run_result.return_code}): {run_result.stderr}")
 
         # Collect results
         return ValidatorRunnerResults.model_validate_json(run_result.stdout).results
+
+    def _run_validators_once(self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool) -> JujuExecOutput:
+        self.logger.debug(f"Running validation on unit {unit}")
+        return self.juju.exec_unit(model, unit, f"{venv_runner} --level {level}", operator=is_k8s)
+
+    def _is_venv_runner_present(self, model: JujuModelHandle, unit: str, is_k8s: bool) -> bool:
+        return self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code == 0
 
     def _inject_validators(self, model: JujuModelHandle, unit: str, is_k8s: bool = True) -> None:
         # Ensure validators path is provided
