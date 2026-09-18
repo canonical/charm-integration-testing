@@ -14,7 +14,7 @@ overrides:
         optional: true  # optional peer-cluster integration; not needed for ZooKeeper operation
     requires:
       certificates:
-        optional: true  # track 3 metadata marks tls-certificates as optional for non-TLS deployments
+        optional: true  # conditional on oauth/trusted-ca/trusted-certificate/zookeeper TLS constraints below
       oauth:
         features: [tls]
       trusted-ca:

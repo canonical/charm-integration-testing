@@ -1,32 +1,16 @@
 ---
 # Source: https://github.com/canonical/lego-operator
-#
-# One block covers all published tracks; the config options used here are stable across
-# generations. lego blocks (never reaches active) without a valid `email`, so the solver
-# must be given a value for it. `plugin-config-secret-id` (also required to reach active -
-# see src/charm.py `_validate_charm_config_options`) cannot be expressed here because it
-# needs a live Juju secret URI that only exists after deploy; that part is handled at
-# runtime by the LegoExtension (charm_integration_testing/extensions/lego), not by this
-# static override.
-#
-# email (config): REQUIRED - `_validate_charm_config_options` returns "email address was
-#   not provided" and blocks when `email` is unset (canonical/lego-operator src/charm.py).
-# plugin (config): fixed to "httpreq" - `LegoExtension.configure_lego` always sets `plugin`
-#   to "httpreq" post-deploy unless it is already set (charm_integration_testing/extensions/lego),
-#   so every lego deployment under test uses the httpreq DNS plugin, never an http-01 one.
-# ingress (requires): optional - `_on_collect_status` only blocks on a missing ingress relation
-#   when `self._is_http_plugin` is true (i.e. `plugin` is "http-01" or "http"); other ACME
-#   plugins, including httpreq, reach active without it.
-# receive-ca-cert (requires): optional - never checked in `_on_collect_status`; the charm
-#   reaches active regardless of whether it is related.
+# `plugin-config-secret-id` (also required to reach active) needs a live Juju secret URI
+# only available post-deploy, so it's set at runtime by LegoExtension instead of here.
 overrides:
   - requires:
       ingress:
-        optional: true
+        optional: true  # only blocks when plugin is http-01/http; see constraint below
       receive-ca-cert:
-        optional: true
+        optional: true  # never checked in _on_collect_status
     configs:
-      email: [test@example.com]
-      plugin: [httpreq]
+      email: [test@example.com]  # required; charm blocks without it
+      plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin
     constraints:
       - 'config[plugin] in {"http-01", "http"} => bool(endpoint[ingress])'
+

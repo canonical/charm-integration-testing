@@ -1,8 +1,6 @@
 ---
-# Track 3 and latest/edge share the modern (jammy) metadata: certificates is
-# optional and the zookeeper endpoint supports TLS. latest/stable is the old
-# Apache Bigtop charm with no certificates endpoint at all, so it is excluded
-# below and gets no TLS feature/constraint.
+# latest/stable is the old Apache Bigtop charm (no certificates endpoint), so it's split
+# out below and excluded from the TLS feature/constraint given to track 3 and latest/edge.
 overrides:
   # latest non-edge channels lack cos-agent
   - criteria:
