@@ -38,10 +38,14 @@ class TrinoCatalogValidator(BaseValidator):
 
         checks: list[ValidationCheck] = []
         prepared = self._prepare_relation_data(checks)
-        if prepared is None or level == "simple":
+        if prepared is None:
             return self._make_result(level=level, checks=checks)
 
         connection_info, catalogs, credentials = prepared
+        if level == "simple":
+            checks.append(self._check_connectivity(connection_info, credentials))
+            return self._make_result(level=level, checks=checks)
+
         checks.append(self._query_catalogs(connection_info, catalogs, credentials))
         return self._make_result(level=level, checks=checks)
 
@@ -82,6 +86,38 @@ class TrinoCatalogValidator(BaseValidator):
             return None
 
         return connection_info, catalogs, credentials
+
+    def _check_connectivity(
+        self,
+        connection_info: TrinoConnectionInfo,
+        credentials: dict[str, str],
+    ) -> ValidationCheck:
+        connection: trino.dbapi.Connection | None = None
+        try:
+            connection = _connect(connection_info, credentials)
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                row = cursor.fetchone()
+            if row != (1,):
+                return ValidationCheck(
+                    name="connectivity",
+                    passed=False,
+                    message=f"Unexpected SELECT 1 result: {row!r}.",
+                )
+            return ValidationCheck(
+                name="connectivity",
+                passed=True,
+                message="Authenticated SELECT 1 succeeded.",
+            )
+        except Exception as exc:
+            return ValidationCheck(
+                name="connectivity",
+                passed=False,
+                message=f"Could not query Trino: {exc}",
+            )
+        finally:
+            if connection is not None:
+                connection.close()  # type: ignore[no-untyped-call]
 
     def _query_catalogs(
         self,

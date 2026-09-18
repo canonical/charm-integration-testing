@@ -65,6 +65,7 @@ class CharmStub:
 @dataclass
 class CursorStub:
     rows: list[tuple[str]] = field(default_factory=lambda: [("system",), ("sales",)])
+    row: tuple[int] | None = (1,)
     error: Exception | None = None
 
     def execute(self, query: str) -> None:
@@ -73,6 +74,9 @@ class CursorStub:
 
     def fetchall(self) -> list[tuple[str]]:
         return self.rows
+
+    def fetchone(self) -> tuple[int] | None:
+        return self.row
 
     def __enter__(self) -> "CursorStub":
         return self
@@ -127,9 +131,14 @@ def _make_validator(
 def test_simple_happy_path_passes() -> None:
     # GIVEN
     validator = _make_validator(VALID_DATABAG)
+    connection = ConnectionStub()
 
-    # WHEN
-    result = validator.validate(level="simple")
+    with patch(
+        "validators.trino_catalog.validator.trino.dbapi.connect",
+        return_value=connection,
+    ):
+        # WHEN
+        result = validator.validate(level="simple")
 
     # THEN
     assert result.status == "PASS"
@@ -138,7 +147,9 @@ def test_simple_happy_path_passes() -> None:
         "trino_url",
         "catalogs",
         "credentials",
+        "connectivity",
     }
+    assert connection.closed
 
 
 def test_missing_fields_fail() -> None:
@@ -204,6 +215,23 @@ def test_invalid_catalog_json_fails() -> None:
     # THEN
     assert result.status == "FAIL"
     assert result.checks[-1].name == "catalogs"
+
+
+def test_simple_fails_when_endpoint_is_unreachable() -> None:
+    # GIVEN
+    validator = _make_validator(VALID_DATABAG)
+
+    with patch(
+        "validators.trino_catalog.validator.trino.dbapi.connect",
+        side_effect=ConnectionError("unreachable"),
+    ):
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "connectivity"
+    assert "unreachable" in result.checks[-1].message
 
 
 def test_deep_defaults_portless_http_url_to_trino_port() -> None:
