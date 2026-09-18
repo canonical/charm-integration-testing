@@ -5,9 +5,9 @@
 overrides:
   - requires:
       ingress:
-        optional: true  # unconditional: plugin is pinned to httpreq below, never http-01/http
+        optional: true  # unconditional: plugin pinned to httpreq below, never http-01/http (src/charm.py LegoCharm._on_collect_status)
       receive-ca-cert:
-        optional: true  # never checked in _on_collect_status
+        optional: true  # never checked in src/charm.py LegoCharm._on_collect_status
     configs:
-      email: [test@example.com]  # required; charm blocks without it
+      email: [test@example.com]  # required; src/charm.py LegoCharm._validate_charm_config_options blocks without it
       plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin

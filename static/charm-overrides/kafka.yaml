@@ -7,9 +7,9 @@ overrides:
       - track: '3'
     provides:
       cos-agent:
-        optional: true  # observability integration; Kafka reaches active without it
+        optional: true  # observability integration; not in src/literals.py Status enum (kafka-operator 3/stable)
       kafka-client:
-        optional: true  # consumer integration; Kafka reaches active without clients
+        optional: true  # consumer integration; not in src/literals.py Status enum (kafka-operator 3/stable)
       peer-cluster-orchestrator:
         optional: true  # optional peer-cluster integration; not needed for ZooKeeper operation
     requires:
