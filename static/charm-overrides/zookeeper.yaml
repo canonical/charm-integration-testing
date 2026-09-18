@@ -1,15 +1,15 @@
 ---
 # latest/* non-edge risks (stable/beta/candidate) are the old Apache Bigtop charm (no
 # certificates endpoint), so they're split out below and excluded from the TLS
-# feature/constraint given to track 3 and latest/edge.
+# feature/constraint given to every other channel (currently track 3 and latest/edge).
 overrides:
   # latest non-edge channels lack cos-agent
   - criteria:
       - track: 'latest'
         none_of:
           - risk: 'edge'
-  # default (track 3 and latest/edge): cos-agent, and TLS support on the
-  # zookeeper relation tied to whether this charm itself has certificates.
+  # default (everything else, currently track 3 and latest/edge): cos-agent, and TLS
+  # support on the zookeeper relation tied to whether this charm itself has certificates.
   # See: https://github.com/canonical/charm-integration-testing/issues/309
   - provides:
       cos-agent:
