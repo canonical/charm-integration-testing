@@ -5,11 +5,9 @@
 overrides:
   - requires:
       ingress:
-        optional: true  # only blocks when plugin is http-01/http; see constraint below
+        optional: true  # unconditional: plugin is pinned to httpreq below, never http-01/http
       receive-ca-cert:
         optional: true  # never checked in _on_collect_status
     configs:
       email: [test@example.com]  # required; charm blocks without it
       plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin
-    constraints:
-      - 'config[plugin] in {"http-01", "http"} => bool(endpoint[ingress])'
