@@ -210,11 +210,18 @@ def test_deep_queries_advertised_catalogs() -> None:
     # GIVEN
     validator = _make_validator(VALID_DATABAG)
     connection = ConnectionStub()
+    auth = object()
 
-    with patch(
-        "validators.trino_catalog.validator.trino.dbapi.connect",
-        return_value=connection,
-    ) as connect:
+    with (
+        patch(
+            "validators.trino_catalog.validator.trino.dbapi.connect",
+            return_value=connection,
+        ) as connect,
+        patch(
+            "validators.trino_catalog.validator.trino.auth.BasicAuthentication",
+            return_value=auth,
+        ) as basic_auth,
+    ):
         # WHEN
         result = validator.validate(level="deep")
 
@@ -222,7 +229,8 @@ def test_deep_queries_advertised_catalogs() -> None:
     assert result.status == "PASS"
     assert result.checks[-1].name == "catalog_query"
     assert connect.call_args.kwargs["user"] == "catalog-user"
-    assert "auth" not in connect.call_args.kwargs
+    basic_auth.assert_called_once_with("catalog-user", "secret")
+    assert connect.call_args.kwargs["auth"] is auth
     assert connection.closed
 
 

@@ -211,7 +211,6 @@ def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) 
         "http_scheme": connection_info.http_scheme,
         "user": username,
         "request_timeout": _REQUEST_TIMEOUT_SECONDS,
+        "auth": trino.auth.BasicAuthentication(username, credentials["password"]),
     }
-    if connection_info.http_scheme == "https":
-        kwargs["auth"] = trino.auth.BasicAuthentication(username, credentials["password"])
     return trino.dbapi.connect(**kwargs)  # type: ignore[no-any-return,no-untyped-call]
