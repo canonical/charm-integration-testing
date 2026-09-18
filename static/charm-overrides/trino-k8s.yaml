@@ -1,22 +1,50 @@
 ---
+# Source: https://github.com/canonical/trino-k8s-operator
 # trino-coordinator and trino-worker are mutually exclusive roles
 overrides:
-  - provides:
+  - criteria:
+      - track: latest
+      - risk: edge
+    provides:
       metrics-endpoint:
-        optional: true
+        optional: true  # observability hook; MetricsEndpointProvider does not affect status
       grafana-dashboard:
-        optional: true
+        optional: true  # observability hook; GrafanaDashboardProvider does not affect status
+      trino-catalog:
+        optional: true  # per-relation users are reconciled only when related; charm.py::_reconcile
       trino-coordinator:
-        optional: true
+        optional: true  # standalone "all" mode needs no worker relation; charm.py::_validate_relations
     requires:
+      ingress:
+        optional: true  # only used when related; charm.py::_on_collect_unit_status
+      policy:
+        optional: true  # Ranger is enabled only when relation data exists; charm.py::_reconcile
       trino-worker:
-        optional: true
+        optional: true  # only worker mode validates this relation; charm.py::_validate_relations
     configs:
       charm-function: [all, worker, coordinator]
     constraints:
       # A Trino instance cannot be both coordinator and worker
       - 'not (bool(endpoint[trino-coordinator]) and bool(endpoint[trino-worker]))'
       # charm.py::_validate_relations -> trino_coordinator.py/trino_worker.py::_validate()
+      - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "coordinator"'
+      - 'bool(endpoint[trino-worker]) => config[charm-function] == "worker"'
+      - 'not bool(endpoint[trino-coordinator]) and not bool(endpoint[trino-worker])
+        => config[charm-function] == "all"'
+  - provides:
+      metrics-endpoint:
+        optional: true  # observability hook; MetricsEndpointProvider does not affect status
+      grafana-dashboard:
+        optional: true  # observability hook; GrafanaDashboardProvider does not affect status
+      trino-coordinator:
+        optional: true  # standalone "all" mode needs no worker relation; charm.py::_validate_relations
+    requires:
+      trino-worker:
+        optional: true  # only worker mode validates this relation; charm.py::_validate_relations
+    configs:
+      charm-function: [all, worker, coordinator]
+    constraints:
+      - 'not (bool(endpoint[trino-coordinator]) and bool(endpoint[trino-worker]))'
       - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "coordinator"'
       - 'bool(endpoint[trino-worker]) => config[charm-function] == "worker"'
       - 'not bool(endpoint[trino-coordinator]) and not bool(endpoint[trino-worker])
