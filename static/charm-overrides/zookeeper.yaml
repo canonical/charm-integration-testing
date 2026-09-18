@@ -1,11 +1,21 @@
 ---
+# Track 3 and latest/edge share the modern (jammy) metadata: certificates is
+# optional and the zookeeper endpoint supports TLS. latest/stable is the old
+# Apache Bigtop charm with no certificates endpoint at all, so it is excluded
+# below and gets no TLS feature/constraint.
 overrides:
   # latest non-edge channels lack cos-agent
   - criteria:
       - track: 'latest'
         none_of:
           - risk: 'edge'
-  # default (track 3 and future tracks): cos-agent
+  # default (track 3 and latest/edge): cos-agent, and TLS support on the
+  # zookeeper relation tied to whether this charm itself has certificates.
+  # See: https://github.com/canonical/charm-integration-testing/issues/309
   - provides:
       cos-agent:
         optional: true
+      zookeeper:
+        features: [tls]
+    constraints:
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'

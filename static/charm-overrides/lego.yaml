@@ -11,6 +11,22 @@
 #
 # email (config): REQUIRED - `_validate_charm_config_options` returns "email address was
 #   not provided" and blocks when `email` is unset (canonical/lego-operator src/charm.py).
+# plugin (config): fixed to "httpreq" - `LegoExtension.configure_lego` always sets `plugin`
+#   to "httpreq" post-deploy unless it is already set (charm_integration_testing/extensions/lego),
+#   so every lego deployment under test uses the httpreq DNS plugin, never an http-01 one.
+# ingress (requires): optional - `_on_collect_status` only blocks on a missing ingress relation
+#   when `self._is_http_plugin` is true (i.e. `plugin` is "http-01" or "http"); other ACME
+#   plugins, including httpreq, reach active without it.
+# receive-ca-cert (requires): optional - never checked in `_on_collect_status`; the charm
+#   reaches active regardless of whether it is related.
 overrides:
-  - configs:
+  - requires:
+      ingress:
+        optional: true
+      receive-ca-cert:
+        optional: true
+    configs:
       email: [test@example.com]
+      plugin: [httpreq]
+    constraints:
+      - 'config[plugin] in {"http-01", "http"} => bool(endpoint[ingress])'

@@ -1,16 +1,31 @@
 ---
 # Source: https://github.com/canonical/kafka-operator
-# Track 4 is KRaft-only; track 3 retains the ZooKeeper integration.
+# Track 4 is KRaft-only; track 3 retains the legacy TLS and ZooKeeper relations.
 default_channel: 3/stable
 overrides:
   - criteria:
       - track: '3'
     provides:
       cos-agent:
-        optional: true  # observability integration; Kafka source has no readiness dependency on it
+        optional: true  # observability integration; Kafka reaches active without it
       kafka-client:
-        optional: true  # consumer integration; Kafka source reaches readiness without clients
+        optional: true  # consumer integration; Kafka reaches active without clients
       peer-cluster-orchestrator:
         optional: true  # optional peer-cluster integration; not needed for ZooKeeper operation
+    requires:
+      certificates:
+        optional: true  # track 3 metadata marks tls-certificates as optional for non-TLS deployments
+      oauth:
+        features: [tls]
+      trusted-ca:
+        optional: true  # legacy CA distribution endpoint; active without it in track 3
+      trusted-certificate:
+        optional: true  # legacy certificate transfer endpoint; active without it in track 3
+      zookeeper:
+        features: [tls]
     constraints:
+      - 'bool(endpoint[oauth]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[trusted-ca]) or bool(endpoint[trusted-certificate]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[zookeeper]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'
       - 'bool(endpoint[zookeeper]) => tracks(charms(endpoint[zookeeper])) == tracks({self})'
