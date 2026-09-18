@@ -234,6 +234,21 @@ def test_simple_fails_when_endpoint_is_unreachable() -> None:
     assert "unreachable" in result.checks[-1].message
 
 
+def test_simple_rejects_explicit_port_zero() -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_url": "trino.example.com:0"})
+
+    with patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect:
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "trino_url"
+    assert "port must be between 1 and 65535" in result.checks[-1].message
+    connect.assert_not_called()
+
+
 def test_deep_defaults_portless_http_url_to_trino_port() -> None:
     # GIVEN
     validator = _make_validator({**VALID_DATABAG, "trino_url": "trino-k8s.model.svc.cluster.local"})
