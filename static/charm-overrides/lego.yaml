@@ -13,4 +13,3 @@ overrides:
       plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin
     constraints:
       - 'config[plugin] in {"http-01", "http"} => bool(endpoint[ingress])'
-
