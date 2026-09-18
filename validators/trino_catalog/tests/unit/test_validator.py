@@ -65,7 +65,7 @@ class CharmStub:
 @dataclass
 class CursorStub:
     rows: list[tuple[str]] = field(default_factory=lambda: [("system",), ("sales",)])
-    row: tuple[int] | None = (1,)
+    row: list[int] | None = field(default_factory=lambda: [1])
     error: Exception | None = None
 
     def execute(self, query: str) -> None:
@@ -75,7 +75,7 @@ class CursorStub:
     def fetchall(self) -> list[tuple[str]]:
         return self.rows
 
-    def fetchone(self) -> tuple[int] | None:
+    def fetchone(self) -> list[int] | None:
         return self.row
 
     def __enter__(self) -> "CursorStub":

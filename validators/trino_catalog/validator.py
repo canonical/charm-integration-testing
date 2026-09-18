@@ -98,7 +98,7 @@ class TrinoCatalogValidator(BaseValidator):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 row = cursor.fetchone()
-            if row != (1,):
+            if row is None or row[0] != 1:
                 return ValidationCheck(
                     name="connectivity",
                     passed=False,
