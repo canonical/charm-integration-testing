@@ -71,8 +71,10 @@ class CursorStub:
     rows: list[tuple[str]] = field(default_factory=lambda: [("system",), ("sales",)])
     row: list[int] | None = field(default_factory=lambda: [1])
     error: Exception | None = None
+    executed_queries: list[str] = field(default_factory=list)
 
     def execute(self, query: str) -> None:
+        self.executed_queries.append(query)
         if self.error:
             raise self.error
 
@@ -153,6 +155,7 @@ def test_simple_happy_path_passes() -> None:
         "credentials",
         "connectivity",
     }
+    assert connection.cursor_stub.executed_queries == ["SELECT 1"]
     assert connection.closed
 
 
@@ -355,6 +358,7 @@ def test_deep_queries_advertised_catalogs() -> None:
     assert connect.call_args.kwargs["user"] == "catalog-user"
     basic_auth.assert_not_called()
     assert "auth" not in connect.call_args.kwargs
+    assert connection.cursor_stub.executed_queries == ["SHOW CATALOGS"]
     assert connection.closed
 
 
