@@ -8,7 +8,11 @@ from unittest.mock import patch
 
 import ops
 
-from validators.trino_catalog.validator import TrinoCatalogValidator
+from validators.trino_catalog.validator import (
+    TrinoCatalogValidator,
+    TrinoConnectionInfo,
+    _connect,
+)
 
 
 class RelationRoleStub(Enum):
@@ -270,24 +274,6 @@ def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
     # GIVEN
     validator = _make_validator({**VALID_DATABAG, "trino_url": "trino.example.com:443"})
     connection = ConnectionStub()
-
-    with patch(
-        "validators.trino_catalog.validator.trino.dbapi.connect",
-        return_value=connection,
-    ) as connect:
-        # WHEN
-        result = validator.validate(level="deep")
-
-    # THEN
-    assert result.status == "PASS"
-    assert connect.call_args.kwargs["http_scheme"] == "https"
-    assert connect.call_args.kwargs["port"] == 443
-
-
-def test_deep_queries_advertised_catalogs() -> None:
-    # GIVEN
-    validator = _make_validator(VALID_DATABAG)
-    connection = ConnectionStub()
     auth = object()
 
     with (
@@ -305,10 +291,54 @@ def test_deep_queries_advertised_catalogs() -> None:
 
     # THEN
     assert result.status == "PASS"
-    assert result.checks[-1].name == "catalog_query"
-    assert connect.call_args.kwargs["user"] == "catalog-user"
+    assert connect.call_args.kwargs["http_scheme"] == "https"
+    assert connect.call_args.kwargs["port"] == 443
     basic_auth.assert_called_once_with("catalog-user", "secret")
     assert connect.call_args.kwargs["auth"] is auth
+
+
+def test_real_client_accepts_internal_http_connection_without_basic_auth() -> None:
+    # GIVEN
+    connection_info = TrinoConnectionInfo(
+        host="trino-k8s.model.svc.cluster.local",
+        port=8080,
+        http_scheme="http",
+    )
+
+    # WHEN
+    connection = _connect(
+        connection_info,
+        {"username": "catalog-user", "password": "secret"},
+    )
+
+    # THEN
+    assert connection is not None
+    connection.close()  # type: ignore[no-untyped-call]
+
+
+def test_deep_queries_advertised_catalogs() -> None:
+    # GIVEN
+    validator = _make_validator(VALID_DATABAG)
+    connection = ConnectionStub()
+
+    with (
+        patch(
+            "validators.trino_catalog.validator.trino.dbapi.connect",
+            return_value=connection,
+        ) as connect,
+        patch(
+            "validators.trino_catalog.validator.trino.auth.BasicAuthentication",
+        ) as basic_auth,
+    ):
+        # WHEN
+        result = validator.validate(level="deep")
+
+    # THEN
+    assert result.status == "PASS"
+    assert result.checks[-1].name == "catalog_query"
+    assert connect.call_args.kwargs["user"] == "catalog-user"
+    basic_auth.assert_not_called()
+    assert "auth" not in connect.call_args.kwargs
     assert connection.closed
 
 
