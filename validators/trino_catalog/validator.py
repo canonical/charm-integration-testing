@@ -159,14 +159,15 @@ def _parse_trino_url(value: str) -> tuple[TrinoConnectionInfo | None, Validation
     raw_url = value if "://" in value else f"//{value}"
     try:
         parsed = urllib.parse.urlsplit(raw_url)
-        scheme = parsed.scheme.lower() or "http"
+        explicit_port = parsed.port
+        scheme = parsed.scheme.lower() or ("https" if explicit_port == _DEFAULT_HTTPS_PORT else "http")
         if scheme not in {"http", "https"}:
             raise ValueError(f"unsupported scheme '{scheme}'")
         if not parsed.hostname:
             raise ValueError("hostname is missing")
         if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
             raise ValueError("URL must contain only a scheme, hostname, and port")
-        port = parsed.port or (_DEFAULT_HTTPS_PORT if scheme == "https" else _DEFAULT_HTTP_PORT)
+        port = explicit_port or (_DEFAULT_HTTPS_PORT if scheme == "https" else _DEFAULT_HTTP_PORT)
     except ValueError as exc:
         return None, ValidationCheck(
             name="trino_url",
