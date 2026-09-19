@@ -2,7 +2,10 @@
 # See LICENSE file for licensing details.
 
 from .validator import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
@@ -12,7 +15,10 @@ from .validator import (
 )
 
 __all__ = [
+    "BasePersistenceValidator",
     "BaseValidator",
+    "PersistenceNotApplicable",
+    "PersistenceState",
     "ValidationCheck",
     "ValidationLevel",
     "ValidationRole",
