@@ -19,6 +19,7 @@ def make_charm_from_relation(
     integrations_count: int = 1,
     local_app_name: str = "app",
     local_model_name: str = "test-model",
+    local_model_uuid: str = "11111111-1111-1111-1111-111111111111",
 ) -> CharmBaseStub:
     if integrations_count == 1:
         relations_list = [relation]
@@ -28,7 +29,7 @@ def make_charm_from_relation(
             for idx in range(integrations_count)
         ]
 
-    model = ModelStub(relations={relation.name: relations_list}, name=local_model_name)
+    model = ModelStub(relations={relation.name: relations_list}, name=local_model_name, uuid=local_model_uuid)
     return CharmBaseStub(
         meta=CharmMetaStub(
             relations={

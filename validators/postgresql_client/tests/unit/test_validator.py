@@ -9,7 +9,11 @@ import ops
 import psycopg2
 import pytest
 
-from validators.postgresql_client.validator import PostgreSQLClientValidator
+from validators.base import PersistenceNotApplicable, PersistenceState
+from validators.postgresql_client.validator import (
+    PostgreSQLClientPersistenceValidator,
+    PostgreSQLClientValidator,
+)
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -31,19 +35,42 @@ def _make_validator(
     return PostgreSQLClientValidator(charm, cast(ops.Relation, relation))
 
 
+def _make_persistence_validator(
+    databag: dict[str, str],
+    endpoint: str = "db",
+    role: RelationRoleStub = RelationRoleStub.requires,
+    relation_id: int = 0,
+    model_uuid: str = "11111111-1111-1111-1111-111111111111",
+) -> PostgreSQLClientPersistenceValidator:
+    app = ApplicationStub()
+    relation = RelationStub(name=endpoint, id=relation_id, app=app, data={app: databag})
+    charm = cast(
+        ops.CharmBase,
+        make_charm_from_relation(relation, interface_name="postgresql_client", role=role, local_model_uuid=model_uuid),
+    )
+    return PostgreSQLClientPersistenceValidator(charm, cast(ops.Relation, relation))
+
+
 @dataclass
 class CursorStub:
     """Minimal cursor context manager; raises execute_error if set."""
 
     execute_error: Exception | None = None
-    # Rows returned by fetchone() for each successive call.
-    fetchone_rows: list[tuple[Any, ...]] = field(default_factory=list)
+    # Rows returned by fetchone() for each successive call. An entry of None simulates a query
+    # that found no matching row (e.g. an information_schema lookup for a nonexistent table).
+    fetchone_rows: list[tuple[Any, ...] | None] = field(default_factory=list)
+    # Rows returned by fetchall().
+    fetchall_rows: list[tuple[Any, ...]] = field(default_factory=list)
     # Number of execute() calls to allow before raising execute_error.
     execute_succeed_count: int = 0
     _fetch_count: int = field(default=0, init=False, repr=False)
     _execute_count: int = field(default=0, init=False, repr=False)
+    executed_queries: list[str] = field(default_factory=list, init=False, repr=False)
+    executed_params: list[Any] = field(default_factory=list, init=False, repr=False)
 
     def execute(self, query: str, params: Any = None) -> None:
+        self.executed_queries.append(query)
+        self.executed_params.append(params)
         if self.execute_error and self._execute_count >= self.execute_succeed_count:
             raise self.execute_error
         self._execute_count += 1
@@ -54,6 +81,9 @@ class CursorStub:
             self._fetch_count += 1
             return row
         return None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.fetchall_rows
 
     def __enter__(self) -> "CursorStub":
         return self
@@ -487,3 +517,497 @@ class TestPostgreSQLClientValidatorDeep:
         write_check = next(c for c in result.checks if c.name == "write_read_verify")
         assert not write_check.passed
         assert "no ID" in write_check.message
+
+
+class TestPostgreSQLClientPersistenceValidatorRole:
+    @pytest.mark.parametrize(
+        "role",
+        [RelationRoleStub.provides, RelationRoleStub.peer],
+    )
+    def test_prepare_raises_not_applicable_for_non_requires_role(self, role: RelationRoleStub) -> None:
+        # GIVEN a validator on the non-requires side of the relation
+        validator = _make_persistence_validator(VALID_DATABAG, role=role)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.prepare()
+
+    def test_checkpoint_raises_not_applicable_for_non_requires_role(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.checkpoint(PersistenceState(id=1, ref=1))
+
+    def test_cleanup_raises_not_applicable_for_non_requires_role(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, role=RelationRoleStub.provides)
+
+        # WHEN / THEN
+        with pytest.raises(PersistenceNotApplicable):
+            validator.cleanup()
+
+
+class TestPostgreSQLClientPersistenceValidatorConnection:
+    def test_prepare_raises_when_uris_is_blank(self) -> None:
+        # GIVEN a databag with a present but blank "uris" field
+        # Regression test for: a blank uri was previously passed straight to psycopg2 as
+        # dsn="", which libpq treats as "use local/default connection parameters" instead of
+        # failing - silently connecting to an unintended database rather than erroring on
+        # missing relation credentials.
+        databag = {**VALID_DATABAG, "uris": ""}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.prepare()
+
+    def test_checkpoint_raises_when_uris_is_missing(self) -> None:
+        # GIVEN a databag missing the "uris" field entirely
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "uris"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.checkpoint(PersistenceState(id=1, ref=1))
+
+    def test_prepare_raises_when_first_uri_is_blank_after_split(self) -> None:
+        # GIVEN a "uris" value that is non-blank (so validate_schema() passes) but whose first
+        # comma-separated entry is blank once split/stripped - e.g. a leading comma or a
+        # whitespace-only first entry.
+        # Regression test for: this previously reached _connect() as dsn="", which libpq treats
+        # as "use local/default connection parameters" instead of failing loudly.
+        databag = {**VALID_DATABAG, "uris": " ,postgresql://10.1.2.3:5432/mydb"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="uris"):
+            validator.prepare()
+
+    def test_prepare_raises_when_uri_database_does_not_match_databag_database(self) -> None:
+        # GIVEN a "uris" value pointing at "mydb" but a "database" field claiming a different
+        # database.
+        # Regression test for: unlike _validate_simple()/_validate_deep(), _open_connection() (used
+        # by prepare()/checkpoint()/cleanup()) previously skipped this consistency check entirely,
+        # so a relation advertising uris=".../other_db" alongside a stale "database" field would
+        # silently write and verify canary data against the wrong database.
+        databag = {**VALID_DATABAG, "database": "otherdb"}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.prepare()
+
+
+class TestPostgreSQLClientPersistenceValidatorPrepare:
+    def test_creates_canary_table_and_returns_state(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+        conn = ConnStub()
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            state = validator.prepare()
+
+        # THEN
+        assert isinstance(state, PersistenceState)
+        assert state.ref == 1
+        queries = " ".join(conn.cursor_stub.executed_queries)
+        assert f"validator_canary_e88ccf2f7c3cde3c_{state.id:020d}" in queries
+        assert "DROP TABLE IF EXISTS" in queries
+        assert "CREATE TABLE" in queries
+        assert "INSERT INTO" in queries
+
+    def test_generates_distinct_identifiers_across_calls(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN
+            first = validator.prepare()
+            second = validator.prepare()
+
+        # THEN
+        assert first.id != second.id
+
+
+class TestPostgreSQLClientPersistenceValidatorCheckpoint:
+    def test_passes_when_row_count_matches_expected_ref(self) -> None:
+        # GIVEN the canary table has exactly the expected number of rows with matching identity
+        validator = _make_persistence_validator(VALID_DATABAG)
+        # Schema-resolution query (fetchall) finds one match; then the id=checkpoint_ref
+        # identity-matching count query (fetchone) returns 2.
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(2,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=42, ref=2))
+
+        # THEN
+        assert result.status == "PASS"
+        check = next(c for c in result.checks if c.name == "row_count")
+        assert check.passed
+        assert new_state.id == 42
+        assert new_state.ref == 3
+        # A new row is still written to continue the chain
+        assert any("INSERT INTO" in q for q in cursor.executed_queries)
+
+    def test_fails_when_row_count_is_lower_than_expected(self) -> None:
+        # GIVEN data loss: fewer matching rows than expected
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=3))
+
+        # THEN
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "row_count")
+        assert not check.passed
+        assert "3" in check.message and "1" in check.message
+        # Regression test for: checkpoint() previously wrote a new marker row and advanced `ref`
+        # even on FAIL, but ValidatorRunner only carries the returned state forward on PASS -
+        # writing here anyway would grow the actual row count past what a later checkpoint could
+        # ever compare against again, masking the original data loss behind permanent drift.
+        # Neither should happen on FAIL: the returned state must match `expected` unchanged, and
+        # no INSERT should have been issued.
+        assert new_state == PersistenceState(id=7, ref=3)
+        assert not any("INSERT INTO" in q for q in cursor.executed_queries)
+
+    def test_fails_when_table_is_not_found(self) -> None:
+        # GIVEN the canary table doesn't exist in any schema (e.g. it was dropped/never created)
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=1))
+
+        # THEN
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(id=7, ref=1)
+        assert not any("INSERT INTO" in q for q in cursor.executed_queries)
+
+    def test_uses_canary_table_name_from_expected_identifier(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN
+        assert any("validator_canary_e88ccf2f7c3cde3c_00000000000000000099" in q for q in cursor.executed_queries)
+
+    def test_resolves_schema_by_exact_name_across_all_schemas_regardless_of_visibility(self) -> None:
+        # GIVEN a single table anywhere in the database matches this canary's exact (random,
+        # effectively-unique) name.
+        # Regression test for: resolving the schema via pg_table_is_visible() alone depends on the
+        # *current* connection's search_path, which can disagree with the search_path prepare()
+        # used, causing a false FAIL (or, in a contrived multi-match case, the wrong table). Since
+        # the table name is derived from a random per-run identifier, an exact-name match anywhere
+        # in the database - visible or not - unambiguously identifies our canary.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("some_schema", False)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN the single match is used even though it isn't currently visible
+        assert result.status == "PASS"
+        schema_query = next(q for q in cursor.executed_queries if "pg_catalog.pg_class" in q)
+        assert "pg_catalog.pg_namespace" in schema_query
+
+    def test_tie_breaks_multiple_same_named_tables_by_search_path_visibility(self) -> None:
+        # GIVEN the (vanishingly unlikely, but not impossible) case where more than one schema
+        # contains a same-named table - e.g. a leftover canary from an earlier, interrupted run
+        # coincidentally reusing this run's random name. Genuine ambiguity like this must be
+        # resolved the same way PostgreSQL itself would resolve an unqualified reference: whichever
+        # match is visible under the *current* search_path.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("stale_schema", False), ("public", True)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN the visible schema ("public") is used to qualify the count query, not the first row
+        count_query_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
+        assert '"public".' in cursor.executed_queries[count_query_index]
+
+    def test_filters_row_count_by_identifier_derived_marker(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously counted every row in the table, so a table
+        # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])  # schema, then identity-matching count
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.checkpoint(PersistenceState(id=99, ref=1))
+
+        # THEN the row count query and the follow-up insert are both scoped to the same marker,
+        # which is derived deterministically from the identifier so it is stable across calls
+        select_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
+        insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
+        assert "WHERE marker = %s" in cursor.executed_queries[select_index]
+        assert cursor.executed_params[select_index] == ("marker-99", 1)
+        # INSERT params now include checkpoint_ref and written_at (the marker is first)
+        assert cursor.executed_params[insert_index][0] == "marker-99"
+
+    def test_result_endpoint_and_interface_are_set(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG, endpoint="my-db")
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(1,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(id=1, ref=1))
+
+        # THEN
+        assert result.endpoint == "my-db"
+        assert result.interface == "postgresql_client"
+        assert result.level == "deep"
+
+    def test_raises_when_expected_identifier_is_out_of_range(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously formatted expected.id into the table name
+        # without validating it, so a restored/malformed PersistenceState with an out-of-range id
+        # (larger than any identifier prepare() can produce, masked to 63 bits) could silently
+        # produce an overlong/invalid table name instead of failing safely.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        out_of_range_id = 1 << 63  # one past _MAX_CANARY_IDENTIFIER
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=out_of_range_id, ref=1))
+
+    def test_raises_when_expected_identifier_is_negative(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=-1, ref=1))
+
+    def test_raises_when_expected_ref_is_zero(self) -> None:
+        # GIVEN
+        # Regression test for: checkpoint() previously compared `actual == expected.ref` without
+        # validating expected.ref first, so a restored/malformed PersistenceState with ref=0 could
+        # let an empty or partially recreated table (actual == 0) coincidentally satisfy the
+        # comparison and report a false PASS instead of failing safely. prepare() always returns
+        # ref=1, so ref < 1 can never have come from a real prior run.
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=1, ref=0))
+
+    def test_raises_when_expected_ref_is_negative(self) -> None:
+        # GIVEN
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="out of range"):
+                validator.checkpoint(PersistenceState(id=1, ref=-1))
+
+
+class TestPostgreSQLClientPersistenceValidatorCleanup:
+    def test_drops_all_discovered_canary_tables(self) -> None:
+        # GIVEN two leftover canary tables are discovered, in the current schema
+        validator = _make_persistence_validator(VALID_DATABAG)
+        table_1 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        table_2 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000002"
+        cursor = CursorStub(fetchall_rows=[("public", table_1), ("public", table_2)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any(table_1 in q for q in drop_queries)
+        assert any(table_2 in q for q in drop_queries)
+        # THEN dropped identifiers are safely quoted (defense in depth: they come from
+        # information_schema, not directly from user input, but should not be trusted blindly)
+        # and schema-qualified, so a same-named table in another schema can't be targeted instead.
+        assert all('"public"."validator_canary_' in q for q in drop_queries)
+
+    def test_searches_all_schemas_for_discovery(self) -> None:
+        # Regression test for: an unqualified information_schema query and DROP TABLE can miss a
+        # canary outside the connection's current schema, or drop an unrelated same-named object
+        # in a different schema. Discovery must search all schemas, not just current_schema().
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        # Query should NOT restrict to current_schema() only, since an unqualified CREATE TABLE
+        # resolves through search_path to the first writable schema, which may not be current_schema().
+        # We search all schemas to ensure we find and drop canary tables regardless of which schema
+        # PostgreSQL chose for the unqualified CREATE TABLE.
+        assert "current_schema()" not in select_query
+        assert "WHERE" in select_query  # Should still have some filtering (by table_type and LIKE pattern)
+
+    def test_scopes_discovery_to_this_relations_id(self) -> None:
+        # Regression test for: discovery previously matched the bare `validator_canary_` prefix
+        # shared by every relation, so cleanup for one `postgresql_client` relation could drop
+        # canary tables belonging to a different, concurrent relation on the same database/schema.
+        # The LIKE pattern must be scoped to a token derived from this validator's own
+        # model+relation_id.
+        validator = _make_persistence_validator(VALID_DATABAG, relation_id=7)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_name LIKE %s" in select_query
+        assert cursor.executed_params[0] == ("validator\\_canary\\_64dc56c7ce45d7d9\\_%",)
+
+    def test_scopes_discovery_to_this_models_uuid(self) -> None:
+        # Regression test for: relation IDs are assigned independently per model, so two
+        # different models can expose the same relation_id for a postgresql_client relation to
+        # the same shared database/schema. Discovery must also be scoped to a model-specific
+        # token so cleanup in one model can't drop another model's canary tables sharing the
+        # same relation_id.
+        validator = _make_persistence_validator(
+            VALID_DATABAG, relation_id=7, model_uuid="22222222-2222-2222-2222-222222222222"
+        )
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN the LIKE pattern is scoped to this model's own token, not the other model's
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_name LIKE %s" in select_query
+        like_pattern = cursor.executed_params[0][0]
+        assert like_pattern != "validator\\_canary\\_64dc56c7ce45d7d9\\_%"
+
+    def test_rejects_discovered_tables_that_only_share_the_prefix(self) -> None:
+        # Regression test for: the information_schema LIKE query only narrows candidates by
+        # *prefix*, so a same-prefixed but unrelated table (e.g. a hand-created backup table)
+        # would previously be dropped unconditionally. Cleanup must re-check the exact shape
+        # (prefix + fixed-width digits) before dropping, and skip anything that doesn't match.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        look_alike = "validator_canary_e88ccf2f7c3cde3c_backup"
+        cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", look_alike)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any(good_table in q for q in drop_queries)
+        assert not any(look_alike in q for q in drop_queries)
+
+    def test_rejects_discovered_tables_with_an_out_of_range_identifier(self) -> None:
+        # Regression test for: the discovery regex only checked the *shape* of the identifier
+        # suffix (20 digits), but prepare() masks identifiers to 63 bits (max
+        # 9223372036854775807, 19 digits) - a 20-digit suffix can represent a value far larger
+        # than that. Without an explicit bound check, cleanup would still drop a shape-only
+        # look-alike such as "..._99999999999999999999" that prepare() could never have produced.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
+        out_of_range_table = "validator_canary_e88ccf2f7c3cde3c_99999999999999999999"
+        cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", out_of_range_table)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        drop_queries = [q for q in cursor.executed_queries if "DROP TABLE" in q]
+        assert any(good_table in q for q in drop_queries)
+        assert not any(out_of_range_table in q for q in drop_queries)
+
+    def test_restricts_discovery_to_base_tables(self) -> None:
+        # Regression test for: information_schema.tables also lists views/foreign tables. A view
+        # sharing the canary prefix would make DROP TABLE fail and abort cleanup, leaving other
+        # discovered canary tables undropped. Discovery must be scoped to table_type = 'BASE TABLE'.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_type = 'BASE TABLE'" in select_query
+
+    def test_escapes_like_wildcards_in_prefix_pattern(self) -> None:
+        # GIVEN
+        # Regression test for: the canary table prefix contains underscores, which are LIKE
+        # wildcards; an unescaped pattern could match unrelated tables (e.g. "validatorXcanaryY1").
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "ESCAPE" in select_query
+        assert cursor.executed_params[0] == ("validator\\_canary\\_e88ccf2f7c3cde3c\\_%",)
+
+    def test_noop_when_no_credentials_present(self) -> None:
+        # GIVEN a databag without any credential fields (e.g. relation already gone)
+        validator = _make_persistence_validator({})
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
+            # WHEN
+            validator.cleanup()
+
+        # THEN no connection was attempted
+        mock_connect.assert_not_called()
+
+    def test_noop_when_uris_present_but_other_required_fields_are_missing(self) -> None:
+        # GIVEN a relation that has advertised "uris" but not yet the rest of the fields
+        # _open_connection() requires (database/username/password) - e.g. still mid-setup.
+        # Regression test for: the no-op guard previously only checked "uris"/"secret-user" for
+        # presence, so this partial databag would fail that check, fall through to
+        # _open_connection(), and raise instead of no-op'ing.
+        validator = _make_persistence_validator({"uris": "postgresql://x/y"})
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
+            # WHEN
+            validator.cleanup()
+
+        # THEN no connection was attempted and no exception was raised
+        mock_connect.assert_not_called()

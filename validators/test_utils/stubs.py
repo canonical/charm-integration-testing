@@ -60,6 +60,7 @@ class ModelStub:
     requested_ids: list[str] = field(default_factory=list)
     relations: dict[str, list[RelationStub]] = field(default_factory=dict)
     name: str = "test-model"
+    uuid: str = "11111111-1111-1111-1111-111111111111"
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)
