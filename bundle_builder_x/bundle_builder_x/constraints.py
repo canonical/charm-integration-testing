@@ -206,12 +206,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
 
 def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Snapshot aggregated mapping once to avoid rebuilding the dict in nested loops.
-    app_to_charm: dict[tuple[str, int], z3.BoolRef] = {
-        (app, cid): var
-        for mc in domain.models.values()
-        for app, domain_app in mc.applications.items()
-        for cid, var in domain_app.charm_ids.items()
-    }
+    app_to_charm = domain.app_to_charm_map()
 
     # Ensure both charms exist if integration exists (local and cross-model)
     for integration in domain.charm_integrations:
@@ -229,18 +224,9 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Only covers external CMRs - in-domain CMRs have their endpoint count handled
     # through DomainCharmIntegration.exists (forced True by the user-CMR mapping constraint).
     cmr_counts: dict[tuple[ModelRef, str, str], int] = {}
-    for model_ref, mc in domain.models.items():
-        for app_int in mc.application_integrations:
-            # Identify external CMR: one endpoint has a model that is NOT in the domain
-            ep1_model = app_int.endpoint_1.model
-            ep2_model = app_int.endpoint_2.model
-            if ep1_model == ep2_model:
-                continue  # local integration
-            if (ep1_model if ep1_model != ModelRef() else ep2_model) in domain.models:
-                continue  # in-domain CMR - endpoint count flows through integration.exists
-            local_ep = app_int.endpoint_1 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_2
-            key = (model_ref, local_ep.application, local_ep.endpoint)
-            cmr_counts[key] = cmr_counts.get(key, 0) + 1
+    for model_ref, local_ep, _remote_ep in domain.external_cmr_integrations():
+        key = (model_ref, local_ep.application, local_ep.endpoint)
+        cmr_counts[key] = cmr_counts.get(key, 0) + 1
 
     # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
