@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,13 +9,27 @@ from typing import Iterator, Optional, cast
 from unittest.mock import patch
 
 import ops
+import pydantic
 import pytest
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
+from validators.base import (
+    BasePersistenceValidator,
+    BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
+    ValidationCheck,
+    ValidationLevel,
+    ValidationResult,
+)
 from validators.runner import runner
-from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, logger
+from validators.runner.runner import ValidatorRunner, ValidatorRunnerResults, _parse_cli_args, logger
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
+    ApplicationStub,
+    CharmBaseStub,
+    CharmMetaStub,
+    ModelStub,
+    RelationMetaStub,
     RelationRoleStub,
     RelationStub,
 )
@@ -67,6 +82,85 @@ class SkippingValidator(BaseValidator):
             level=level,
             relation_id=self.relation_id,
         )
+
+
+class PreparingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator that succeeds at every lifecycle stage."""
+
+    cleanup_calls: list[int] = []
+
+    def prepare(self) -> PersistenceState:
+        return PersistenceState(id=self.relation_id + 100, ref=1)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        check = ValidationCheck(name="row_count", passed=True, message="OK")
+        result = self._make_result(status="PASS", level="deep", interface="test-interface", checks=[check])
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+
+    def cleanup(self) -> None:
+        PreparingPersistenceValidator.cleanup_calls.append(self.relation_id)
+
+
+class ExplodingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator that raises on every lifecycle stage."""
+
+    def prepare(self) -> PersistenceState:
+        raise RuntimeError("prepare exploded")
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        raise RuntimeError("checkpoint exploded")
+
+    def cleanup(self) -> None:
+        raise RuntimeError("cleanup exploded")
+
+
+class FailingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator whose checkpoint() fails but still returns an advanced state.
+
+    Mirrors the reference PostgreSQL persistence validator, which increments and returns the ref
+    alongside a failed row-count check.
+    """
+
+    def prepare(self) -> PersistenceState:
+        return PersistenceState(id=self.relation_id + 100, ref=1)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        check = ValidationCheck(name="row_count", passed=False, message="mismatch")
+        result = self._make_result(status="FAIL", level="deep", interface="test-interface", checks=[check])
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+
+    def cleanup(self) -> None:
+        pass
+
+
+class NotApplicablePersistenceValidator(BasePersistenceValidator):
+    """Persistence validator that is never applicable (e.g. wrong relation side)."""
+
+    def prepare(self) -> PersistenceState:
+        raise PersistenceNotApplicable("not applicable")
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        raise PersistenceNotApplicable("not applicable")
+
+    def cleanup(self) -> None:
+        raise PersistenceNotApplicable("not applicable")
+
+
+class MisbehavingPersistenceValidator(BasePersistenceValidator):
+    """Persistence validator that violates its contract by returning None instead of raising.
+
+    Used to verify that an invalid (but non-exception) return from prepare()/checkpoint() is
+    reported as an ERROR, not silently treated the same as a PersistenceNotApplicable skip.
+    """
+
+    def prepare(self) -> PersistenceState:
+        return None  # type: ignore[return-value]
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        return None  # type: ignore[return-value]
+
+    def cleanup(self) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +232,139 @@ class TestValidatorRunnerLoadValidators:
 
         # THEN
         assert len(validators["test-interface"]) == 2
+
+
+class TestValidatorRunnerLoadPersistenceValidators:
+    def _runner(self) -> ValidatorRunner:
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.persistence_load_errors = {}
+        return runner
+
+    def test_loads_valid_persistence_validator(self) -> None:
+        # GIVEN a well-formed persistence entry point
+        entry_point = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            validators = self._runner()._load_persistence_validators()
+
+        # THEN
+        assert validators["test-interface"] == [PreparingPersistenceValidator]
+
+    def test_skips_non_base_persistence_validator_entry_points(self) -> None:
+        # GIVEN an entry point that loads a class not implementing BasePersistenceValidator
+        class NotAPersistenceValidator:
+            pass
+
+        entry_point = EntryPointStub(name="test-interface", _load_result=NotAPersistenceValidator)
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            validators = self._runner()._load_persistence_validators()
+
+        # THEN
+        assert validators == {}
+
+    def test_warns_when_multiple_persistence_validators_share_an_interface(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # GIVEN two persistence entry points registered under the same interface name
+        ep1 = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
+        ep2 = EntryPointStub(name="test-interface", _load_result=ExplodingPersistenceValidator)
+
+        with caplog.at_level(logging.WARNING, logger="validators"):
+            with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
+                # WHEN
+                validators = self._runner()._load_persistence_validators()
+
+        # THEN both are still registered, but a warning explains the state-overwrite risk
+        assert len(validators["test-interface"]) == 2
+        assert "Multiple persistence validators registered for interface 'test-interface'" in caplog.text
+
+    def test_records_load_error_for_interface_when_entry_point_load_raises(self) -> None:
+        # GIVEN an entry point whose load() raises (e.g. a broken/incompatible package)
+        entry_point = EntryPointStub(name="test-interface", _load_error=RuntimeError("broken import"))
+
+        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+            # WHEN
+            runner = self._runner()
+            validators = runner._load_persistence_validators()
+
+        # THEN the interface has no registered validator, but the failure is recorded so
+        # prepare_all/checkpoint_all/cleanup_all can surface it instead of silently treating a
+        # relation on this interface as having no applicable persistence validator
+        assert validators == {}
+        assert "broken import" in runner.persistence_load_errors["test-interface"]
+
+
+class TestParseCliArgs:
+    def test_defaults_to_simple_level_with_no_flags(self) -> None:
+        # WHEN no flags are passed at all
+        args, refs = _parse_cli_args([])
+
+        # THEN the pre-persistence CLI contract is preserved: level defaults to "simple"
+        assert args.level == "simple"
+        assert args.persistence is None
+        assert refs == {}
+
+    def test_persistence_only_invocation_leaves_level_unset(self) -> None:
+        # WHEN only --persistence is passed
+        args, refs = _parse_cli_args(["--persistence", "prepare"])
+
+        # THEN level stays None rather than defaulting, so main() skips the functional run
+        assert args.level is None
+        assert args.persistence == "prepare"
+
+    def test_level_and_persistence_can_be_combined(self) -> None:
+        # WHEN both --level and --persistence are passed
+        args, refs = _parse_cli_args(["--level", "deep", "--persistence", "cleanup"])
+
+        # THEN both are honoured as given, with no default substitution
+        assert args.level == "deep"
+        assert args.persistence == "cleanup"
+
+    def test_checkpoint_requires_refs(self) -> None:
+        # WHEN --persistence checkpoint is passed without --refs
+        with pytest.raises(SystemExit):
+            # THEN argparse's parser.error() exits the process
+            _parse_cli_args(["--persistence", "checkpoint"])
+
+    def test_checkpoint_parses_refs_json_into_persistence_state(self) -> None:
+        # WHEN --refs is a valid JSON dict of relation_id -> PersistenceState
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        args, refs = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
+
+        # THEN it's decoded into PersistenceState objects keyed by relation_id string
+        assert refs == {"4": PersistenceState(id=1, ref=2)}
+
+    def test_invalid_refs_json_exits(self) -> None:
+        # WHEN --refs is not valid JSON
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "checkpoint", "--refs", "not-json"])
+
+    def test_refs_not_matching_persistence_state_schema_exits(self) -> None:
+        # WHEN --refs is valid JSON but doesn't match PersistenceState's schema
+        refs_json = json.dumps({"4": {"unexpected": "shape"}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
+
+    def test_refs_rejected_when_persistence_is_not_checkpoint(self) -> None:
+        # Regression test for: --refs was silently ignored when combined with --persistence
+        # prepare/cleanup or with no --persistence at all, so a typo like
+        # "--persistence prepare --refs ..." would run a different lifecycle op than the
+        # supplied --refs implied, instead of failing loudly.
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "prepare", "--refs", refs_json])
+
+    def test_refs_rejected_when_persistence_is_cleanup(self) -> None:
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "cleanup", "--refs", refs_json])
 
 
 class TestValidatorRunnerRun:
@@ -319,6 +546,362 @@ class TestValidatorRunnerRun:
             assert results.results[0].role == role.value
 
 
+class TestValidatorRunnerPersistence:
+    def _runner_with(self, interface: str, validator_cls: type[BasePersistenceValidator]) -> ValidatorRunner:
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {interface: [validator_cls]}
+        runner.persistence_load_errors = {}
+        return runner
+
+    def setup_method(self) -> None:
+        PreparingPersistenceValidator.cleanup_calls = []
+
+    def test_prepare_all_seeds_state_keyed_by_relation_id(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert results.results == []
+        assert "5" in results.updated_refs
+        assert results.updated_refs["5"].ref == 1
+
+    def test_prepare_all_ignores_peer_relations(self) -> None:
+        # GIVEN a peer relation whose interface has a registered persistence validator
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="cluster", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.peer)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert results.updated_refs == {}
+
+    def test_prepare_all_skips_not_applicable_validators(self) -> None:
+        # GIVEN a validator that is never applicable (e.g. wrong relation side)
+        runner = self._runner_with("test-interface", NotApplicablePersistenceValidator)
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN it's skipped silently, not reported as an error
+        assert results.results == []
+        assert results.updated_refs == {}
+
+    def test_prepare_all_captures_exception_as_error_result(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", ExplodingPersistenceValidator)
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "prepare exploded" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_prepare_all_reports_error_when_prepare_returns_invalid_state(self) -> None:
+        # GIVEN a validator that returns None instead of raising or returning a PersistenceState
+        # Regression test for: this was previously silently treated the same as a legitimate
+        # PersistenceNotApplicable skip, hiding a broken implementation and never seeding state.
+        runner = self._runner_with("test-interface", MisbehavingPersistenceValidator)
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "PersistenceState" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_verifies_and_advances_state(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=105, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "PASS"
+        assert results.updated_refs["5"].ref == 2
+        assert results.updated_refs["5"].id == 105
+
+    def test_checkpoint_all_does_not_advance_state_on_fail(self) -> None:
+        # Regression test for: checkpoint_all() previously recorded the new state returned
+        # alongside a FAIL result unconditionally, overwriting the last-known-good baseline before
+        # JujuClient raises on the failure. A retry/continued run would then checkpoint against the
+        # post-failure state instead of the original baseline, and could spuriously pass.
+        runner = self._runner_with("test-interface", FailingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=105, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN the FAIL result is still reported, but the previous baseline is preserved rather
+        # than being overwritten with the failed checkpoint's advanced state.
+        assert len(results.results) == 1
+        assert results.results[0].status == "FAIL"
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_reports_error_for_missing_relation(self) -> None:
+        # GIVEN a ref pointing at a relation_id no longer present in the model
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"999": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_reports_error_for_non_integer_relation_ids(self) -> None:
+        # GIVEN a malformed ref key
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"not-an-int": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN no crash, and the malformed entry is reported as an ERROR rather than silently
+        # discarded, so a real durability check can't pass without ever running
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "Invalid relation_id" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_does_not_resolve_a_ref_to_a_colliding_peer_relation(self) -> None:
+        # Regression test for: _find_relation_by_id() (used by checkpoint_all) previously did not
+        # skip peer relations the way _iter_persistence_targets()/_persistence_load_error_results()
+        # do, so a stale or malformed --refs entry whose relation_id happened to collide with a
+        # peer relation's id could resolve to that peer relation instead of failing loudly.
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        peer_relation = RelationStub(name="cluster", id=5, app=ApplicationStub(name="app"))
+        charm = CharmBaseStub(
+            meta=CharmMetaStub(
+                relations={
+                    "cluster": RelationMetaStub(
+                        relation_name="cluster", role=RelationRoleStub.peer, interface_name="test-interface"
+                    ),
+                }
+            ),
+            model=ModelStub(relations={"cluster": [peer_relation]}),
+            app=ApplicationStub(name="app"),
+        )
+        refs = {"5": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN the peer relation is not resolved; the ref is reported as an ERROR instead of
+        # silently checkpointing against a peer relation
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "not found" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_captures_exception_as_error_result(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", ExplodingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "checkpoint exploded" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_reports_error_when_checkpoint_returns_invalid_outcome(self) -> None:
+        # GIVEN a validator that returns None instead of raising or returning a result/state pair
+        # Regression test for: this was previously silently treated the same as a legitimate
+        # PersistenceNotApplicable skip, hiding a broken implementation.
+        runner = self._runner_with("test-interface", MisbehavingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        refs = {"5": PersistenceState(id=1, ref=1)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "ValidationResult, PersistenceState" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_cleanup_all_calls_cleanup_on_every_target(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        relation = RelationStub(name="db", id=5)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert results.results == []
+        assert results.updated_refs == {}
+        assert results.cleaned_relation_ids == [5]
+        assert PreparingPersistenceValidator.cleanup_calls == [5]
+
+    def test_cleanup_all_captures_exception_as_error_result(self) -> None:
+        # GIVEN
+        runner = self._runner_with("test-interface", ExplodingPersistenceValidator)
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "cleanup exploded" in (results.results[0].error or "")
+        assert results.cleaned_relation_ids == [0]
+
+    def test_persistence_targets_ignored_when_interface_has_no_registered_validator(self) -> None:
+        # GIVEN a runner with no persistence validators registered at all
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {}
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        prepare_results = runner.prepare_all(cast(ops.CharmBase, charm))
+        cleanup_results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN
+        assert prepare_results.results == []
+        assert prepare_results.updated_refs == {}
+        assert cleanup_results.results == []
+        assert cleanup_results.cleaned_relation_ids == []
+
+    def test_prepare_all_reports_error_for_interface_with_load_error(self) -> None:
+        # GIVEN a relation on an interface whose persistence validator failed to load
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN the load failure surfaces as an ERROR instead of being silently skipped, so
+        # post_persistence doesn't mistake "nothing loaded" for "nothing to do"
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+
+    def test_cleanup_all_reports_error_for_interface_with_load_error(self) -> None:
+        # GIVEN a relation on an interface whose persistence validator failed to load
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN cleanup reports an ERROR rather than an empty (and therefore state-clearing)
+        # result list
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+        # The relation was never visited by cleanup_all itself (no validator registered for it),
+        # so it must not appear in cleaned_relation_ids either.
+        assert results.cleaned_relation_ids == []
+
+    def test_checkpoint_all_reports_error_when_ref_interface_has_no_registered_validator(self) -> None:
+        # GIVEN a ref pointing at a live relation whose interface has no registered validator
+        # (e.g. it was removed since the ref was produced, or failed to load this run)
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {}
+        relation = RelationStub(name="db", id=7)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+
+        # THEN the checkpoint is reported as an ERROR rather than silently succeeding with no
+        # results, which would let a real durability check pass without ever running
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "No persistence validator registered" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_checkpoint_all_does_not_duplicate_error_for_ref_on_interface_with_load_error(self) -> None:
+        # GIVEN a ref pointing at a live relation whose interface's persistence validator failed
+        # to load this run
+        # Regression test for: _persistence_load_error_results() already adds one ERROR per live
+        # relation on a load-failed interface; the ref-checkpointing loop below used to add a
+        # second, more generic ERROR for the same relation_id, reporting one load failure twice.
+        runner = ValidatorRunner.__new__(ValidatorRunner)
+        runner.validators = {}
+        runner.persistence_validators = {}
+        runner.persistence_load_errors = {"test-interface": "boom"}
+        relation = RelationStub(name="db", id=7)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+
+        # THEN only the single load-error ERROR is reported for this relation, not two
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "failed to load" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+
+class TestValidatorRunnerResultsModel:
+    """Regression tests for ValidatorRunnerResults' wire model."""
+
+    def test_results_field_is_required(self) -> None:
+        # `results` was previously required by the wire model; making it optional would let a
+        # malformed or truncated runner payload (e.g. `{}`) parse as an empty successful run,
+        # silently reporting a checkpoint/cleanup as passing without executing or reporting
+        # anything.
+        with pytest.raises(pydantic.ValidationError):
+            ValidatorRunnerResults.model_validate_json("{}")
+
+
 class TestConfigureLogging:
     """Tests for the file logging set up on the "validators" logger."""
 
@@ -382,7 +965,7 @@ class TestConfigureLogging:
         results = ValidatorRunnerResults(results=[])
         # THEN stdout-bound output (the JSON blob) contains no log noise
         output = results.model_dump_json()
-        assert output == '{"results":[]}'
+        assert output == '{"results":[],"updated_refs":{},"cleaned_relation_ids":[]}'
 
     def test_does_not_propagate_to_root_logger(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "validators"

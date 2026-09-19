@@ -5,7 +5,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, JujuValidationError, PersistenceKey
+
+from validators.base import PersistenceState, ValidationResult
 
 from .scheduler.states import State
 
@@ -20,7 +22,49 @@ def test_teardown(
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
+    neighbor_model_ref: JujuModelHandle | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
+    # Drop all canary data before the applications that host it are torn down: cleanup runs the
+    # persistence validators' cleanup() on the units themselves, so it has to happen while those
+    # units (and their persistence_state tracking entries) still exist. test_deploy prepares every
+    # model in all_bundles (including the neighbor model for CMR runs), so cleanup must cover every
+    # one of those models too, or a persistence-bearing unit living in the neighbor/integration
+    # model would be left with un-dropped canary tables and stale tracking entries.
+    cleanup_model_refs = {target_model_ref}
+    if neighbor_model_ref is not None:
+        cleanup_model_refs.add(neighbor_model_ref)
+    # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR
+    # result. ValidatorInjectorExtension.post_persistence() itself converts a per-unit remote
+    # cleanup failure (e.g. a non-zero `run_validators` exit, or a malformed result payload) into
+    # an ERROR result rather than raising, so those surface via JujuValidationError too - but
+    # application/model-discovery failures (e.g. `application_units()`/`is_k8s_model()` raising
+    # because the application or model itself is gone) happen outside that per-unit try/except and
+    # still surface as a bare exception. Catching only JujuValidationError would abort the loop on
+    # the first such failure and skip cleanup for every model after it. Attempt every model, merge
+    # JujuValidationError failures together, and remember the first other exception; only raise
+    # once every model has been attempted.
+    combined_failed_validations: dict[str, list[ValidationResult]] = {}
+    first_other_error: Exception | None = None
+    for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
+        try:
+            juju_client.validate_model(
+                model=model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
+            )
+        except JujuValidationError as exc:
+            for unit, results in exc.failed_validations.items():
+                combined_failed_validations.setdefault(unit, []).extend(results)
+        except Exception as exc:  # broad on purpose - see comment above
+            if first_other_error is None:
+                first_other_error = exc
+    if combined_failed_validations:
+        # Chain first_other_error (if any model also raised a non-validation exception) as the
+        # cause, rather than silently discarding it - otherwise a remote/transport cleanup
+        # failure on one model would be invisible whenever another model also failed validation.
+        raise JujuValidationError(combined_failed_validations) from first_other_error
+    if first_other_error is not None:
+        raise first_other_error
+
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
     # consuming (target or neighbor, depending on the integration), so the relation has to be torn

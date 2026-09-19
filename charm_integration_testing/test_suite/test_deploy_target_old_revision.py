@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -42,10 +44,12 @@ def test_deploy_target_old_revision(
     juju_client: JujuClient,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
     target_bundle: Path,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -63,8 +67,11 @@ def test_deploy_target_old_revision(
     # Deploy the original bundle with only the target app revision overridden
     juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
 
-    # Wait until idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Wait until idle. Also wait on the neighbor model (already deployed, but the CMR relation
+    # this deploy establishes/updates is settled asynchronously by agents in that model), so the
+    # persistence prepare below doesn't race a neighbor-side databag that isn't ready yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Verify the application is deployed at the target revision and the model is healthy
     deployed_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
@@ -74,5 +81,11 @@ def test_deploy_target_old_revision(
             f"got {deployed_revision}."
         )
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Validate all applications and relations, and seed canary data for later persistence checks.
+    # For a CMR where the target application is the provider, the applicable persistence
+    # validator and canary state live on the neighbor's requirer units instead, so prepare the
+    # neighbor model too when present.
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="simple", persistence="prepare", persistence_state=persistence_state
+        )

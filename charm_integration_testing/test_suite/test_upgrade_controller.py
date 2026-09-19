@@ -4,8 +4,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, JujuVersion
+from juju import JujuClient, JujuModelHandle, JujuVersion, PersistenceKey, rekey_persistence_state_controller
 from utils.juju_releases import UpgradeMode, classify_upgrade_mode
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -16,6 +18,8 @@ def test_upgrade_controller(
     target_controller: str,
     target_upgrade_version: JujuVersion | None,
     model: str,
+    neighbor_model_ref: JujuModelHandle | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
     request: pytest.FixtureRequest,
 ) -> None:
     """
@@ -59,8 +63,32 @@ def test_upgrade_controller(
         post_version > pre_version
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
-    # And the workload model should still be healthy
-    juju_client.validate_model(model=JujuModelHandle(controller=active_controller, model=model), level="deep")
+    # And the workload model should still be healthy. Also wait on the neighbor model (the
+    # upgrade/migration above can trigger relation hooks there), so the neighbor-side checkpoint
+    # doesn't race a hook that hasn't settled yet.
+    workload_model_ref = JujuModelHandle(controller=active_controller, model=model)
+    models_to_settle = [workload_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
+
+    if active_controller != target_controller:
+        # Migration path: the model's controller changed, so remap tracked persistence keys
+        # before checkpointing against them.
+        rekey_persistence_state_controller(
+            persistence_state, model=model, old_controller=target_controller, new_controller=active_controller
+        )
+    juju_client.validate_model(
+        model=workload_model_ref,
+        level="deep",
+        persistence="checkpoint",
+        persistence_state=persistence_state,
+    )
+    # For a CMR where the target application is the provider, the applicable persistence
+    # validator and tracked canary state live on the neighbor's requirer units instead.
+    # neighbor_model_ref's own controller is unaffected by this upgrade, so no rekey is needed.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(
+            model=neighbor_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
+        )
 
 
 def _upgrade_in_place(

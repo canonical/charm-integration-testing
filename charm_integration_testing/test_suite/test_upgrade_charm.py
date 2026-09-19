@@ -4,7 +4,9 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -13,9 +15,11 @@ from .scheduler.states import State
 def test_upgrade_charm(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if target_revision is None:
         pytest.fail("--target-revision must be provided as an integer for this test.")
@@ -34,7 +38,10 @@ def test_upgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Also wait on the neighbor model (refreshing the target can trigger relation/databag work
+    # there), so the neighbor-side checkpoint below doesn't race a hook that hasn't settled yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Verify the application is upgraded to the target revision and the model is healthy
     upgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
@@ -43,4 +50,12 @@ def test_upgrade_charm(
             f"Expected '{target_application}' to be on upgraded revision "
             f"{target_revision}, got {upgraded_revision}."
         )
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    juju_client.validate_model(
+        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+    )
+    # For a CMR where the upgraded target application is the provider, the applicable persistence
+    # validator and tracked canary state live on the neighbor's requirer units instead.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(
+            model=neighbor_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+        )

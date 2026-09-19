@@ -3,8 +3,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, PersistenceKey
 from kubernetes_client import KubernetesClient, PodStatus
+
+from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -15,7 +17,9 @@ def test_pod_deletion(
     _is_running_on_kubernetes: None,
     kubernetes_client: KubernetesClient | None,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
+    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if kubernetes_client is None:
         pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
@@ -46,8 +50,16 @@ def test_pod_deletion(
         timeout=timedelta(minutes=15),
     )
 
-    # Wait for return to idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    # Wait for return to idle. Also wait on the neighbor model (pod deletion/recreation can
+    # trigger relation hooks there), so the neighbor-side checkpoint below doesn't race a hook
+    # that hasn't settled yet.
+    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
+    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Validate all applications and relations. For a CMR where the target application is the
+    # provider, the applicable persistence validator and tracked canary state live on the
+    # neighbor's requirer units instead, so checkpoint the neighbor model too when present.
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(
+            model=model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
+        )
