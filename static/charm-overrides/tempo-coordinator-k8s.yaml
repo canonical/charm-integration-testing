@@ -2,3 +2,20 @@
 # https://github.com/canonical/observability-libs/issues/128
 # https://github.com/canonical/charm-integration-testing/issues/163
 default_channel: 2/stable
+#
+# Source: https://github.com/canonical/tempo-coordinator-k8s-operator
+#
+# require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides) are already
+# optional: true upstream. They are only present on track 2.10 and dev (not track 1 or plain
+# track 2); older tracks predate the service_mesh integration.
+#
+# provide-cmr-mesh must track tempo-api/tracing/grafana-source's cross-model status; see GH-980.
+overrides:
+  - criteria:
+      - any_of:
+          - track: '2.10'
+          - track: dev
+    constraints:
+      - 'charms(cross_model(endpoint[tempo-api] | endpoint[tracing] | endpoint[grafana-source]))
+        == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
