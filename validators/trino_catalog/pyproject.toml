@@ -10,7 +10,8 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "trino>=0.320.0",
+    # Pin until the allow_insecure_auth option merged upstream is released.
+    "trino @ git+https://github.com/trinodb/trino-python-client.git@1a4ba08981e079a891ee7bcdcf0d0482a4ce217e",
     "validators-base",
 ]
 

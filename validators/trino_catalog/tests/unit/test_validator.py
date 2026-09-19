@@ -314,9 +314,10 @@ def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
     assert connect.call_args.kwargs["port"] == 443
     basic_auth.assert_called_once_with("catalog-user", "secret")
     assert connect.call_args.kwargs["auth"] is auth
+    assert "allow_insecure_auth" not in connect.call_args.kwargs
 
 
-def test_real_client_accepts_internal_http_connection_without_basic_auth() -> None:
+def test_real_client_accepts_authenticated_internal_http_connection() -> None:
     # GIVEN
     connection_info = TrinoConnectionInfo(
         host="trino-k8s.model.svc.cluster.local",
@@ -339,6 +340,7 @@ def test_deep_queries_advertised_catalogs() -> None:
     # GIVEN
     validator = _make_validator(VALID_DATABAG)
     connection = ConnectionStub()
+    auth = object()
 
     with (
         patch(
@@ -347,6 +349,7 @@ def test_deep_queries_advertised_catalogs() -> None:
         ) as connect,
         patch(
             "validators.trino_catalog.validator.trino.auth.BasicAuthentication",
+            return_value=auth,
         ) as basic_auth,
     ):
         # WHEN
@@ -356,8 +359,9 @@ def test_deep_queries_advertised_catalogs() -> None:
     assert result.status == "PASS"
     assert result.checks[-1].name == "catalog_query"
     assert connect.call_args.kwargs["user"] == "catalog-user"
-    basic_auth.assert_not_called()
-    assert "auth" not in connect.call_args.kwargs
+    basic_auth.assert_called_once_with("catalog-user", "secret")
+    assert connect.call_args.kwargs["auth"] is auth
+    assert connect.call_args.kwargs["allow_insecure_auth"] is True
     assert connection.cursor_stub.executed_queries == ["SHOW CATALOGS"]
     assert connection.closed
 

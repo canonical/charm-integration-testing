@@ -107,14 +107,7 @@ class TrinoCatalogValidator(BaseValidator):
             return ValidationCheck(
                 name="connectivity",
                 passed=True,
-                message=(
-                    "Authenticated SELECT 1 succeeded."
-                    if connection_info.http_scheme == "https"
-                    else (
-                        "SELECT 1 succeeded over the internal HTTP endpoint using the "
-                        "published username; password authentication is unavailable over HTTP."
-                    )
-                ),
+                message="Authenticated SELECT 1 succeeded.",
             )
         except Exception as exc:
             return ValidationCheck(
@@ -264,7 +257,8 @@ def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) 
         "http_scheme": connection_info.http_scheme,
         "user": username,
         "request_timeout": _REQUEST_TIMEOUT_SECONDS,
+        "auth": trino.auth.BasicAuthentication(username, credentials["password"]),
     }
-    if connection_info.http_scheme == "https":
-        kwargs["auth"] = trino.auth.BasicAuthentication(username, credentials["password"])
+    if connection_info.http_scheme == "http":
+        kwargs["allow_insecure_auth"] = True
     return trino.dbapi.connect(**kwargs)  # type: ignore[no-any-return,no-untyped-call]
