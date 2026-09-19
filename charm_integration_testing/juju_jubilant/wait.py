@@ -280,6 +280,15 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
     )
 
 
+def saas_is_removed(status: jubilant.Status, alias: str) -> tuple[bool, JujuWaitState]:
+    if alias in status.app_endpoints:
+        return False, JujuWaitState(
+            message=f"waiting for removal of SAAS proxy {alias!r}",
+            noncompliant_applications={alias: None},
+        )
+    return True, JujuWaitState(message=f"waiting for removal of SAAS proxy {alias!r}")
+
+
 def integrations_are_removed(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
