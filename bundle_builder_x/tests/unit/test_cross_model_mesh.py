@@ -365,6 +365,144 @@ class TestCrossModelExprDSL:
         # two sets unequal and this comparison unsatisfiable.
         assert solver.check(result_b.expr) == z3.sat
 
+    def test_external_cmr_charm_set_is_equal_for_the_same_remote_peer(self) -> None:
+        # GIVEN one charm whose two endpoints are both CMR'd to the *same* remote application
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve-a": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+                "serve-b": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+            },
+        )
+        remote = DomainApplicationEndpoint(
+            application="consumer", endpoint="backend", model=ModelRef(name="external-model")
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve-a"),
+                            endpoint_2=remote,
+                            offer_name="serve-a-offer",
+                        ),
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve-b"),
+                            endpoint_2=remote,
+                            offer_name="serve-b-offer",
+                        ),
+                    ],
+                ),
+            }
+        )
+        charm_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+
+        ctx = LoweringContext(charm_id=charm_id, domain_charm=domain.charms[charm_id], domain=domain)
+        result = lower(
+            parse_constraint("charms(cross_model(endpoint[serve-a])) == charms(cross_model(endpoint[serve-b]))"), ctx
+        )
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[charm_id].exists)
+
+        # THEN the same (remote model, application) key maps to one synthetic id, so both
+        # endpoints yield the same charm set
+        assert solver.check(result.expr) == z3.sat
+
+    def test_external_cmr_charm_set_distinguishes_same_app_name_in_different_remote_models(self) -> None:
+        # GIVEN two endpoints CMR'd to applications that share a name but live in different
+        # remote models -- these are distinct peers, so their charm sets must not compare equal
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve-a": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+                "serve-b": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve-a"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="consumer", endpoint="backend", model=ModelRef(name="external-model-1")
+                            ),
+                            offer_name="serve-a-offer",
+                        ),
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve-b"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="consumer", endpoint="backend", model=ModelRef(name="external-model-2")
+                            ),
+                            offer_name="serve-b-offer",
+                        ),
+                    ],
+                ),
+            }
+        )
+        charm_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+
+        ctx = LoweringContext(charm_id=charm_id, domain_charm=domain.charms[charm_id], domain=domain)
+        result = lower(
+            parse_constraint("charms(cross_model(endpoint[serve-a])) == charms(cross_model(endpoint[serve-b]))"), ctx
+        )
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[charm_id].exists)
+
+        # THEN the remote model key is part of the synthetic id, so the two sets differ
+        assert solver.check(result.expr) == z3.unsat
+
+    def test_reachable_excludes_external_cmr_peers(self) -> None:
+        # GIVEN a charm with an external CMR on the endpoint reachable() is asked about
+        provider = _make_charm(
+            "provider-app",
+            {"serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True)},
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="consumer", endpoint="backend", model=ModelRef(name="external-model")
+                            ),
+                            offer_name="external-offer",
+                        )
+                    ],
+                ),
+            }
+        )
+        charm_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+
+        ctx = LoweringContext(charm_id=charm_id, domain_charm=domain.charms[charm_id], domain=domain)
+        result = lower(parse_constraint("reachable(endpoint[serve]) == charms(cross_model(endpoint[serve]))"), ctx)
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[charm_id].exists)
+
+        # THEN the sets differ: charms() carries the synthetic external peer id while reachable()
+        # stays in-domain, since only real DomainCharm ids can be reduced against units()/tracks()/
+        # risks()/channels()/revisions()
+        assert solver.check(z3.Not(result.expr)) == z3.sat
+
     def test_features_of_cross_model_endpoint_is_rejected(self) -> None:
         # GIVEN a plain endpoint reference wrapped in cross_model()
         domain = _make_domain(

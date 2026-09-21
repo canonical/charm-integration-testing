@@ -303,6 +303,9 @@ class CrossModelExpr(BaseModel):
     _charm_set_for_endpoints in dsl_lowering.py). External peers therefore cannot be *named*,
     but distinct external peers still yield distinct set elements, so equality between two
     charms(cross_model(...)) sets remains meaningful.
+
+    Only charms() adds external peers; reachable() (and the channel/resource reductions over
+    it) stays in-domain, since those reduce against real DomainCharm attributes.
     """
 
     model_config = ConfigDict(frozen=True)

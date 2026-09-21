@@ -198,30 +198,42 @@ class Domain(BaseModel):
     def is_cross_model(self, integration: DomainCharmIntegration) -> bool:
         return self.charms[integration.requires_charm_id].model != self.charms[integration.provides_charm_id].model
 
+    def is_external_cmr(self, app_integration: DomainApplicationIntegration) -> bool:
+        """Return True if ``app_integration`` is a CMR whose remote model is not in this domain.
+
+        The single definition of "external CMR" shared by ``external_cmr_integrations``,
+        ``constraints.add_application_constraints`` and ``constraints.add_charm_constraints``.
+        In-domain CMRs (remote model present in ``self.models``) are not external: their endpoint
+        counts and charm identities already flow through ``charm_integrations``.
+        """
+        ep1_model = app_integration.endpoint_1.model
+        ep2_model = app_integration.endpoint_2.model
+        if ep1_model == ep2_model:
+            return False  # local integration
+        return (ep1_model if ep1_model != ModelRef() else ep2_model) not in self.models
+
+    def external_cmr_local_endpoint(self, app_integration: DomainApplicationIntegration) -> DomainApplicationEndpoint:
+        """Return the endpoint of an external CMR that lives in this domain (the local side)."""
+        return (
+            app_integration.endpoint_1 if app_integration.endpoint_1.model == ModelRef() else app_integration.endpoint_2
+        )
+
     def external_cmr_integrations(
         self,
     ) -> list[tuple[ModelRef, DomainApplicationEndpoint, DomainApplicationEndpoint]]:
         """Return every user-declared external CMR as ``(local_model_ref, local_ep, remote_ep)``.
 
         An external CMR is one whose remote model is not itself part of this domain -- the remote
-        application has no ``DomainCharm``/id here (see ``external_cmr_peer_ids``). In-domain CMRs
-        (remote model present in ``self.models``) are excluded: their endpoint counts and charm
-        identities already flow through ``charm_integrations``.
+        application has no ``DomainCharm``/id here (see ``external_cmr_peer_ids``). See
+        ``is_external_cmr`` for the classification itself.
         """
         results: list[tuple[ModelRef, DomainApplicationEndpoint, DomainApplicationEndpoint]] = []
         for model_ref, mc in self.models.items():
             for app_int in mc.application_integrations:
-                ep1_model = app_int.endpoint_1.model
-                ep2_model = app_int.endpoint_2.model
-                if ep1_model == ep2_model:
-                    continue  # local integration
-                if (ep1_model if ep1_model != ModelRef() else ep2_model) in self.models:
-                    continue  # in-domain CMR
-                local_ep, remote_ep = (
-                    (app_int.endpoint_1, app_int.endpoint_2)
-                    if app_int.endpoint_1.model == ModelRef()
-                    else (app_int.endpoint_2, app_int.endpoint_1)
-                )
+                if not self.is_external_cmr(app_int):
+                    continue
+                local_ep = self.external_cmr_local_endpoint(app_int)
+                remote_ep = app_int.endpoint_2 if local_ep is app_int.endpoint_1 else app_int.endpoint_1
                 results.append((model_ref, local_ep, remote_ep))
         return results
 

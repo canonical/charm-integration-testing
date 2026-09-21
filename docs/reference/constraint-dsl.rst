@@ -250,6 +250,10 @@ equality across charms and two unrelated external peers compare unequal.
    current domain. Two external peers that happen to share a remote model key and
    application name are treated as the same peer.
 
+   Only ``charms()`` adds external peers. ``reachable()`` (and therefore the
+   channel/resource reductions over it) stays in-domain, since its result is
+   reduced against real ``DomainCharm`` attributes.
+
 .. list-table::
    :header-rows: 1
    :widths: 35 65
