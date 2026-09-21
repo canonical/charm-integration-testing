@@ -152,6 +152,9 @@ def rekey_persistence_state_controller(
     constructs a value - keeping this data-model module free of a dependency on the higher-level
     validator package.
     """
+    if old_controller == new_controller:
+        # Rewriting a key to itself would pop the entry after assigning it back, dropping it.
+        return
     for key in [key for key in persistence_state if key.controller == old_controller and key.model == model]:
         persistence_state[
             PersistenceKey(controller=new_controller, model=model, unit=key.unit, relation_id=key.relation_id)

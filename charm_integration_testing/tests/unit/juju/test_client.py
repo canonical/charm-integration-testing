@@ -21,6 +21,8 @@ from validators.base.validator import PersistenceState, ValidationCheck, Validat
 
 from ..extensions.shared import NullJujuBackend
 
+TEST_TOKEN = "test-token"
+
 # ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
@@ -546,7 +548,7 @@ class TestJujuClientValidateModel:
         # GIVEN an extension that adds a new state entry on prepare
         backend = BackendStub(app_list={"myapp": _app_info()})
         key = PersistenceKey(controller="ctrl", model="mymodel", unit="myapp/0", relation_id=4)
-        new_state = PersistenceState(id=123, ref=1)
+        new_state = PersistenceState(id=123, ref=1, token=TEST_TOKEN)
         extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}}, state_updates={key: new_state})
         client = self._client(logger, backend, [extension])
         state: dict[PersistenceKey, PersistenceState] = {}
