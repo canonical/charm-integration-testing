@@ -455,7 +455,8 @@ class TestValidatorInjectorExtension:
             existing_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
             persistence_state = {existing_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
             malformed_stdout = (
-                '{"results": [], "updated_refs": {"not-an-int": {"id": 1, "ref": 2}}, ' '"cleaned_relation_ids": []}'
+                '{"results": [], "updated_refs": {"not-an-int": {"id": 1, "ref": 2, "token": "t"}}, '
+                '"cleaned_relation_ids": []}'
             )
             juju.exec_responses.extend(_preinstalled_responses(malformed_stdout))  # myapp/0
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))  # myapp/1
