@@ -545,14 +545,17 @@ rather than registering multiple entry points for the same interface.
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
    ```
-   juju exec -m <model> --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1}}'
+   juju exec -m <model> --unit <unit> [--operator] -- /var/lib/juju/validators/venv/bin/run_validators --persistence checkpoint --refs '{"4": {"id": 123, "ref": 1, "token": "9f3c..."}}'
    ```
    (`-m <model>` specifies which Juju model the unit belongs to; `--refs`
    must be valid JSON - `run_validators` parses/rejects it before
    `checkpoint()` ever runs, so a placeholder like `...` is not usable here;
-   substitute the real relation ID and the `id`/`ref` values from the
+   substitute the real relation ID and the `id`/`ref`/`token` values from the
    `PersistenceState` you're resuming, e.g. as printed by a prior
-   `prepare()`/`checkpoint()` run's `updated_refs`)
+   `prepare()`/`checkpoint()` run's `updated_refs`. Pass the state through
+   verbatim: `token` is required and non-empty, and it is the token - not the
+   identifier - that `checkpoint()` matches the canary records on, so
+   reconstructing the state without it is rejected outright)
    and confirm a `PASS` result plus an `updated_refs` entry for that
    `relation_id` with `ref` advanced by one (`ref` is not on the
    `ValidationResult` itself - see `ValidatorRunnerResults` in
