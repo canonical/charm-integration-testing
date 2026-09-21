@@ -254,7 +254,7 @@ class TestValidatorRunnerLoadPersistenceValidators:
         # THEN
         assert validators["test-interface"] == [PreparingPersistenceValidator]
 
-    def test_skips_non_base_persistence_validator_entry_points(self) -> None:
+    def test_records_load_error_for_non_base_persistence_validator_entry_point(self) -> None:
         # GIVEN an entry point that loads a class not implementing BasePersistenceValidator
         class NotAPersistenceValidator:
             pass
@@ -263,10 +263,14 @@ class TestValidatorRunnerLoadPersistenceValidators:
 
         with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
             # WHEN
-            validators = self._runner()._load_persistence_validators()
+            runner = self._runner()
+            validators = runner._load_persistence_validators()
 
-        # THEN
+        # THEN the interface has no registered validator, but the failure is recorded so
+        # prepare_all/checkpoint_all/cleanup_all surface it instead of silently reporting success
+        # for a relation whose persistence validator was never actually run
         assert validators == {}
+        assert "does not implement BasePersistenceValidator" in runner.persistence_load_errors["test-interface"]
 
     def test_warns_when_multiple_persistence_validators_share_an_interface(
         self, caplog: pytest.LogCaptureFixture
