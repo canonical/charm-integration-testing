@@ -41,10 +41,17 @@ class PersistenceState(BaseModel):
     ``id`` is a unique identifier chosen by the validator at ``prepare()`` time (not the Juju
     ``relation_id``, which is unstable across a relation remove/re-add). ``ref`` is a monotonically
     increasing counter the validator uses to assert no data was lost between calls.
+
+    ``token`` is a random, unguessable value generated at ``prepare()`` time and written alongside
+    the data the validator tracks. Validators must match records on ``token`` rather than on a value
+    derived from ``id``/``ref``: those are reproducible, so a backend that loses the data and
+    recreates it from scratch (resetting a sequence, for example) would otherwise still satisfy the
+    check and report a false PASS.
     """
 
     id: int
     ref: int = 0
+    token: str = ""
 
 
 class PersistenceNotApplicable(Exception):
