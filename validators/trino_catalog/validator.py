@@ -158,7 +158,10 @@ class TrinoCatalogValidator(BaseValidator):
 def _parse_trino_url(value: str) -> tuple[TrinoConnectionInfo | None, ValidationCheck]:
     raw_url = value if "://" in value else f"//{value}"
     try:
-        parsed = urllib.parse.urlsplit(raw_url)
+        try:
+            parsed = urllib.parse.urlsplit(raw_url)
+        except ValueError as exc:
+            raise ValueError("URL could not be parsed") from exc
         try:
             explicit_port = parsed.port
         except ValueError as exc:

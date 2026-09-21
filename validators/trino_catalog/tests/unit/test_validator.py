@@ -263,6 +263,23 @@ def test_simple_redacts_malformed_port_from_diagnostic() -> None:
     connect.assert_not_called()
 
 
+def test_simple_redacts_urlsplit_error_from_diagnostic() -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_url": "http://admin:hunter2\uff20trino.example"})
+
+    with patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect:
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "trino_url"
+    assert result.checks[-1].message == "Invalid trino_url: URL could not be parsed"
+    assert "admin" not in result.checks[-1].message
+    assert "hunter2" not in result.checks[-1].message
+    connect.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "case",
     [
