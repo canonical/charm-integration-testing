@@ -554,10 +554,10 @@ class TestValidatorRunnerRun:
 
 
 class TestValidatorRunnerPersistence:
-    def _runner_with(self, interface: str, validator_cls: type[BasePersistenceValidator]) -> ValidatorRunner:
+    def _runner_with(self, interface: str, *validator_classes: type[BasePersistenceValidator]) -> ValidatorRunner:
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
-        runner.persistence_validators = {interface: [validator_cls]}
+        runner.persistence_validators = {interface: list(validator_classes)}
         runner.persistence_load_errors = {}
         return runner
 
@@ -795,6 +795,33 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "ERROR"
         assert "cleanup exploded" in (results.results[0].error or "")
         assert results.cleaned_relation_ids == [0]
+
+    def test_cleanup_all_omits_relation_when_cleanup_is_not_applicable(self) -> None:
+        # GIVEN a relation whose only persistence validator is not applicable to this side
+        runner = self._runner_with("test-interface", NotApplicablePersistenceValidator)
+        relation = RelationStub(name="db", id=6)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN cleanup never ran against the backend, so the relation must not be reported as
+        # cleaned - otherwise post_persistence() would forget tracked state for it
+        assert results.results == []
+        assert results.cleaned_relation_ids == []
+
+    def test_cleanup_all_reports_relation_when_one_validator_cleans_and_another_skips(self) -> None:
+        # GIVEN a relation with two persistence validators, one applicable and one not
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator, NotApplicablePersistenceValidator)
+        relation = RelationStub(name="db", id=8)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN the relation is reported as cleaned because at least one cleanup() actually ran
+        assert results.results == []
+        assert results.cleaned_relation_ids == [8]
 
     def test_persistence_targets_ignored_when_interface_has_no_registered_validator(self) -> None:
         # GIVEN a runner with no persistence validators registered at all
