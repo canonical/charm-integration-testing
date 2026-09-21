@@ -109,8 +109,11 @@ runner treats this as "no applicable validator" rather than a failure.
 
 ``PersistenceState`` (``validators/base``) is the opaque state passed between calls: ``id`` is a
 validator-chosen identifier for the canary (stable for the lifetime of the canary data it names,
-unlike Juju's ``relation_id`` which changes across a relation remove/re-add), and ``ref`` is a
-monotonically increasing counter used to detect lost writes. The harness tracks state keyed by
+unlike Juju's ``relation_id`` which changes across a relation remove/re-add), ``ref`` is a
+monotonically increasing counter used to detect lost writes, and ``token`` is a random value the
+validator mints in ``prepare()`` and matches on in ``checkpoint()``. The token exists because
+``id`` and ``ref`` are reproducible: a canary resource dropped and recreated from scratch would
+otherwise reproduce the same identifier-derived values and report a false ``PASS``. The harness tracks state keyed by
 ``PersistenceKey`` (controller, model, unit, and ``relation_id`` together - see
 ``charm_integration_testing/juju/models.py``), so a relation remove/re-add invalidates the old
 entry and runs ``prepare()`` again for that relation under its new ``relation_id``, rather than
@@ -128,7 +131,7 @@ CLI and wire format
   registered persistence validator. Can be combined with ``--level`` in the same invocation, or
   used on its own for a persistence-only run.
 
-``--refs '{"<relation_id>": {"id": <identifier>, "ref": <ref>}}'``
+``--refs '{"<relation_id>": {"id": <identifier>, "ref": <ref>, "token": <token>}}'``
   A JSON dict mapping relation IDs to their current ``PersistenceState``, required when
   ``--persistence checkpoint`` is used (``checkpoint()`` needs the state ``prepare()`` returned).
 
