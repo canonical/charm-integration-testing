@@ -46,12 +46,14 @@ class PersistenceState(BaseModel):
     the data the validator tracks. Validators must match records on ``token`` rather than on a value
     derived from ``id``/``ref``: those are reproducible, so a backend that loses the data and
     recreates it from scratch (resetting a sequence, for example) would otherwise still satisfy the
-    check and report a false PASS.
+    check and report a false PASS. It is required and must be non-empty, so a state that could not
+    have come from ``prepare()`` (e.g. one restored from an older serialised form) is rejected
+    rather than silently matching records that carry no token at all.
     """
 
     id: int
     ref: int = 0
-    token: str = ""
+    token: str = Field(min_length=1)
 
 
 class PersistenceNotApplicable(Exception):

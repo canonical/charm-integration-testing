@@ -5,6 +5,7 @@ from typing import cast
 
 import ops
 import pytest
+from pydantic import ValidationError
 
 from validators.base import (
     BasePersistenceValidator,
@@ -36,12 +37,12 @@ class ConcretePersistenceValidator(BasePersistenceValidator):
     """Minimal in-memory concrete implementation for testing BasePersistenceValidator."""
 
     def prepare(self) -> PersistenceState:
-        return PersistenceState(id=1, ref=1)
+        return PersistenceState(id=1, ref=1, token="test-token")
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         check = ValidationCheck(name="row_count", passed=True, message="OK")
         result = self._make_result(status="PASS", level="deep", interface="test-interface", checks=[check])
-        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)
 
     def cleanup(self) -> None:
         pass
@@ -248,17 +249,20 @@ class TestBaseValidator:
 class TestPersistenceState:
     def test_ref_defaults_to_zero(self) -> None:
         # GIVEN / WHEN
-        state = PersistenceState(id=7)
+        state = PersistenceState(id=7, token="abc123")
 
         # THEN
         assert state.ref == 0
 
-    def test_token_defaults_to_empty(self) -> None:
-        # GIVEN / WHEN
-        state = PersistenceState(id=7)
+    def test_token_is_required(self) -> None:
+        # GIVEN / WHEN / THEN a state that could not have come from prepare() is rejected
+        with pytest.raises(ValidationError):
+            PersistenceState(id=7)
 
-        # THEN
-        assert state.token == ""
+    def test_token_must_be_non_empty(self) -> None:
+        # GIVEN / WHEN / THEN an empty token would match records carrying no token at all
+        with pytest.raises(ValidationError):
+            PersistenceState(id=7, token="")
 
     def test_serialises_to_json(self) -> None:
         # GIVEN
@@ -297,7 +301,7 @@ class TestBasePersistenceValidator:
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation)
         validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
-        expected = PersistenceState(id=1, ref=3)
+        expected = PersistenceState(id=1, ref=3, token="test-token")
 
         # WHEN
         result, new_state = validator.checkpoint(expected)
