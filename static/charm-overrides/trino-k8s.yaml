@@ -10,8 +10,6 @@ overrides:
         optional: true  # observability hook; MetricsEndpointProvider does not affect status
       grafana-dashboard:
         optional: true  # observability hook; GrafanaDashboardProvider does not affect status
-      trino-catalog:
-        optional: true  # per-relation users are reconciled only when related; charm.py::_reconcile
       trino-coordinator:
         optional: true  # standalone "all" mode needs no worker relation; charm.py::_validate_relations
     requires:
