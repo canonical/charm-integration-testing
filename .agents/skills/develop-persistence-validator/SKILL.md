@@ -72,10 +72,15 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # mask above never produces more than 19) so cleanup()'s discovery regex, which matches an
         # exact "prefix + fixed-width digits" shape (see "Common patterns" below), can find it
         # again. An unpadded/variable-width identifier would never match that regex, leaving the
-        # canary resource undiscoverable and orphaned. Then write one marked row/record ...
+        # canary resource undiscoverable and orphaned. Then write one tagged row/record ...
+        # Mint a second, independent random value and write it alongside the canary data. This
+        # token - not the identifier-derived resource name - is what checkpoint() matches on:
+        # the name is reproducible, so a resource dropped and recreated from scratch would
+        # otherwise satisfy the check and report a false PASS.
+        token = uuid.uuid4().hex
         # commit (or use an autocommit connection) before returning - a transactional backend
         # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
-        return PersistenceState(id=identifier, ref=1)
+        return PersistenceState(id=identifier, ref=1, token=token)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
@@ -88,10 +93,13 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # ref=0; see the validator-specific initial state below). An out-of-range id could
         # otherwise produce a truncated/different identifier and silently target the wrong
         # resource; an invalid ref (outside your declared range) could let an empty or partially
-        # recreated canary satisfy `actual == expected.ref` and report a false PASS. Raise
-        # before any read/write if either is invalid.
-        # ... read back and assert the marked row/record count matches expected.ref (filter on a
-        # stable marker value, not a bare row count - see "Common patterns" below) ...
+        # recreated canary satisfy `actual == expected.ref` and report a false PASS. Also reject
+        # an empty expected.token: prepare() always mints one, so an empty value can only come
+        # from a state serialised before the token existed, or otherwise restored/malformed -
+        # matching on it would count records carrying no token at all. Raise before any
+        # read/write if any of these is invalid.
+        # ... read back and assert the tagged row/record count matches expected.ref (filter on the
+        # random token written by prepare(), not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
         # Gate the extra write and the returned state on the *overall* result, not just the one
         # assertion above - if this method later adds more checks (e.g. a schema/connection
@@ -103,8 +111,8 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # later checkpoint re-detect it. Commit the write (or use autocommit) for the same reason
         # as prepare() above.
         if result.status == "PASS":
-            # ... write one more marked row/record ...
-            new_state = PersistenceState(id=expected.id, ref=expected.ref + 1)
+            # ... write one more tagged row/record, carrying the same token forward ...
+            new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)
         else:
             new_state = expected
         return result, new_state
@@ -169,7 +177,8 @@ implementation):
 - **`checkpoint()`** takes the `PersistenceState` the harness has been
   tracking, verifies the canary data is still there and has exactly
   `expected.ref` records, and only on a *passing* check writes one more
-  record and returns `PersistenceState(id=expected.id, ref=expected.ref + 1)`.
+  record and returns
+  `PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)`.
   This matters because `ValidatorRunner.checkpoint_all()` only carries a
   returned state forward into `updated_refs` when the result is `PASS` - a
   `FAIL`/`ERROR` result leaves the harness's tracked state untouched. If
@@ -191,7 +200,7 @@ implementation):
   perfectly safe either: if the write itself is durably committed to the
   backend but the connection/response fails before `checkpoint()` can
   return normally (an ambiguous write - see "Common patterns" below), the
-  backend now actually has `expected.ref + 1` marked records while the
+  backend now actually has `expected.ref + 1` tagged records while the
   harness still expects `expected.ref`, so the next retry's read-back will
   see one extra record and can report a false `FAIL` (or, if it advances
   again, silently drift the state by one). This response-loss ambiguity is
@@ -206,10 +215,18 @@ implementation):
   repeating the disruptive operation or continuing testing. Alternatively,
   mark the scenario inconclusive rather than retrying blindly, since a retry
   cannot disambiguate the two failure modes.
-  Verify a stable, identifier-derived marker value on each record rather
-  than trusting a bare `count(*)` - a resource that was dropped and silently
-  recreated from scratch could otherwise coincidentally satisfy a
-  row-count-only check (see "Common patterns" below). `expected.id` comes
+  Verify a random, per-run token value on each record rather than trusting
+  a bare `count(*)` - a resource that was dropped and silently recreated
+  from scratch could otherwise coincidentally satisfy a row-count-only
+  check (see "Common patterns" below). The token must be random, not
+  derived from `expected.id`/`expected.ref`: those values are reproducible,
+  so a backend that lost the data and recreated it (resetting a sequence,
+  for example) would regenerate the same derived marker and pass falsely.
+  Generate the token in `prepare()`, write it alongside the canary data,
+  return it as `PersistenceState.token`, and match on it in `checkpoint()`;
+  reject an empty `expected.token` (it can only come from a state
+  serialised before the token existed, or otherwise restored/malformed).
+  `expected.id` comes
   from `--refs`, a (possibly restored/malformed) `PersistenceState` rather
   than a value `prepare()` just minted - validate it's within the range
   `prepare()` could have produced (e.g. the reference implementation's
@@ -222,16 +239,21 @@ implementation):
   with no state carried over from `prepare`/`checkpoint`), so it must
   discover everything to remove by name pattern rather than by identifier.
   Scope the discovery pattern to *this validator instance* - a token derived
-  from both the model UUID and `relation_id`, not just a bare interface-wide
-  prefix - or cleanup for one relation/interface will drop canary resources
-  belonging to a different relation or interface that happens to share the
-  same backend during the same test run (the runner calls `cleanup()` once
-  per live relation with a registered persistence validator, so this is not
-  just a concern for concurrent external runs). This model+relation scoping
+  from the model UUID, `relation_id` and unit name, not just a bare
+  interface-wide prefix - or cleanup for one relation/interface will drop
+  canary resources belonging to a different relation or interface that
+  happens to share the same backend during the same test run (the runner
+  calls `cleanup()` once per live relation with a registered persistence
+  validator, so this is not just a concern for concurrent external runs).
+  The unit name matters because the runner injects and runs persistence
+  validators on *every* unit of the application: two units of the same
+  application share both `model.uuid` and `relation_id` while owning
+  separate canary resources. This model+relation+unit scoping
   still does not distinguish two *simultaneous* test runs against the same
   relation and backend - the reference implementation has no execution-
-  scoped token beyond model UUID and `relation_id`, so one run's `cleanup()`
-  can still drop another concurrent run's canaries for that same relation.
+  scoped token beyond model UUID, `relation_id` and unit name, so one run's
+  `cleanup()` can still drop another concurrent run's canaries for that same
+  relation.
   Running more than one test session against the same deployed relation at
   once is not supported by this scoping scheme; if that's a real
   requirement for your backend, add an additional execution-scoped token
@@ -327,7 +349,12 @@ rather than registering multiple entry points for the same interface.
      or key string, but `PersistenceState.id` returned from `prepare()` and
      passed to `checkpoint()` must be an integer, as declared in
      `validators/base/validator.py`.)
-   - Discoverable at `cleanup()` time via a durable name/key/marker pattern
+   - Tagged with a second, independent random value (`PersistenceState.token`)
+     minted in `prepare()` and matched on in `checkpoint()`. The resource name
+     is derived from `id`, which is reproducible across a drop-and-recreate, so
+     identity must be established by the token rather than by the name or by a
+     value derived from `id`/`ref`.
+   - Discoverable at `cleanup()` time via a durable name/key pattern
      derived from this validator instance (e.g. a resource name prefix for a
      SQL table, a key prefix for a KV store, an object key prefix in a
      bucket, or a separately named/keyed tracking record for a topic where
@@ -397,26 +424,33 @@ rather than registering multiple entry points for the same interface.
      identifier's randomness to avoid ever exercising this path.
    - `checkpoint()` passes when the check matches `expected.ref`, fails when
      it doesn't. On `PASS`, it advances the backend-specific canary state
-     (e.g. writing a new marked row/record for a SQL-style backend;
+     (e.g. writing a new tagged row/record for a SQL-style backend;
      overwriting a value, creating a new version, or writing another
      backend-specific marker for a KV store/bucket/topic) and returns
-     `PersistenceState(id=expected.id, ref=expected.ref + 1)`; on `FAIL`, it must not write
+     `PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)`; on `FAIL`, it must not write
      anything and returns `expected` unchanged, so a later retry re-checks
      the same expected count instead of drifting past the failure (see the
      `checkpoint()` design point above). Also cover that a check based only
      on a bare existence/count check would be insufficient - assert it scopes
-     on the marker/identifier written by `prepare()`, not just "the resource
+     on the token written by `prepare()`, not just "the resource
      exists" or "the count matches" (for SQL backends this means filtering
-     the row count query on the marker column, not a bare `count(*)`; for a
+     the row count query on the token column, not a bare `count(*)`; for a
      KV store, bucket, or topic, the equivalent is asserting the read/list
-     is scoped to the specific key/object/message identifier). Also cover
+     is scoped to the specific key/object/message identifier). Also cover a
+     table/resource dropped and recreated from scratch: reinserting rows with
+     the same `ref` reproduces the same `id == ref` relationship, so only the
+     random token distinguishes the original canary from the recreated one -
+     assert the recreated case FAILs rather than reporting a false PASS.
+     Also cover
      `checkpoint()` rejecting an out-of-range `expected.id` (e.g. negative,
      or one past the maximum your `prepare()` can produce) and rejecting an
      invalid `expected.ref` (e.g. outside the range your validator declares -
      the reference PostgreSQL implementation rejects ref <= 0, but another
      backend might allow ref=0 as valid) before any read/write, the way the
      reference implementation's `test_raises_when_expected_identifier_is_out_of_range`/
-     `test_raises_when_expected_identifier_is_negative` do.
+     `test_raises_when_expected_identifier_is_negative` do. Also cover
+     rejecting an empty `expected.token`, which can only come from a state
+     serialised before the token existed or otherwise restored/malformed.
    - `cleanup()` discovers and drops every matching canary resource, is a
      no-op when none exist, and safely quotes any discovered identifier
      before using it in a DDL statement (where applicable to the backend).
@@ -555,12 +589,15 @@ def _quote_identifier(name: str) -> str:
 
 
 def _canary_scope_token(self) -> str:
-    # A single fixed-width token derived from *both* the model UUID and relation_id: relation_id
-    # is assigned per-model, so two different models could otherwise expose the same numeric
-    # relation_id against a shared database/schema and collide, and folding relation_id into the
-    # hash (rather than appending it as a raw decimal) keeps the token's length independent of
-    # how large relation_id gets.
-    digest_input = f"{self.charm.model.uuid}:{self.relation_id}".encode()
+    # A single fixed-width token derived from the model UUID, relation_id *and* unit name:
+    # relation_id is assigned per-model, so two different models could otherwise expose the same
+    # numeric relation_id against a shared database/schema and collide; the unit name is needed
+    # because the runner injects and runs persistence validators on every unit of the
+    # application, and two units of the same application share both model UUID and relation_id
+    # while owning separate canary tables. Folding these into the hash (rather than appending
+    # them as raw values) keeps the token's length independent of how large relation_id gets.
+    unit_name = self.charm.model.unit.name
+    digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
     return hashlib.sha256(digest_input).hexdigest()[:16]
 
 
