@@ -30,6 +30,12 @@ class InvalidUrlCase:
     expected_message: str
 
 
+@dataclass(frozen=True)
+class InvalidCredentialsCase:
+    secrets: dict[str, dict[str, str]]
+    expected_message_fragment: str
+
+
 @dataclass
 class CursorStub:
     rows: list[tuple[str]] = field(default_factory=lambda: [("system",), ("sales",)])
@@ -213,6 +219,29 @@ def test_invalid_catalog_schema_fails(case: CatalogValidationCase) -> None:
     assert result.status == "FAIL"
     assert result.checks[-1].name == "trino_catalogs"
     assert result.checks[-1].message == case.expected_message
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        InvalidCredentialsCase({}, "Could not resolve Trino credentials"),
+        InvalidCredentialsCase({"secret:catalog": {"password": "secret"}}, "username"),
+        InvalidCredentialsCase({"secret:catalog": {"username": "catalog-user"}}, "password"),
+    ],
+)
+def test_invalid_credentials_fail_without_connecting(case: InvalidCredentialsCase) -> None:
+    # GIVEN
+    validator = _make_validator(VALID_DATABAG, secrets=case.secrets)
+
+    with patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect:
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "credentials"
+    assert case.expected_message_fragment in result.checks[-1].message
+    connect.assert_not_called()
 
 
 def test_simple_fails_when_endpoint_is_unreachable() -> None:
