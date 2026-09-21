@@ -2,68 +2,32 @@
 # See LICENSE file for licensing details.
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import cast
 from unittest.mock import patch
 
 import ops
+import pytest
 
+from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
+from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
 from validators.trino_catalog.validator import (
     TrinoCatalogValidator,
     TrinoConnectionInfo,
     _connect,
+    _parse_trino_url,
 )
 
 
-class RelationRoleStub(Enum):
-    requires = "requires"
-    provides = "provides"
-    peer = "peer"
+@dataclass(frozen=True)
+class CatalogValidationCase:
+    value: str
+    expected_message: str
 
 
-class AppStub:
-    pass
-
-
-@dataclass
-class RelationStub:
-    name: str
-    id: int
-    app: AppStub | None
-    data: dict[AppStub | None, dict[str, str]]
-
-
-@dataclass
-class RelationMetaStub:
-    interface_name: str
-    role: RelationRoleStub
-
-
-@dataclass
-class CharmMetaStub:
-    relations: dict[str, RelationMetaStub]
-
-
-@dataclass
-class SecretStub:
-    content: dict[str, str]
-
-    def get_content(self) -> dict[str, str]:
-        return self.content
-
-
-@dataclass
-class ModelStub:
-    secrets: dict[str, dict[str, str]]
-
-    def get_secret(self, id: str) -> SecretStub:  # noqa: A002
-        return SecretStub(self.secrets[id])
-
-
-@dataclass
-class CharmStub:
-    meta: CharmMetaStub
-    model: ModelStub
+@dataclass(frozen=True)
+class InvalidUrlCase:
+    value: str
+    expected_message: str
 
 
 @dataclass
@@ -104,7 +68,7 @@ class ConnectionStub:
 
 
 VALID_DATABAG = {
-    "trino_url": "trino-k8s.model.svc.cluster.local:8080",
+    "trino_url": "https://trino.example.com:443",
     "trino_catalogs": '[{"name": "sales", "connector": "postgresql", "description": ""}]',
     "trino_credentials_secret_id": "secret:catalog",
 }
@@ -116,21 +80,19 @@ def _make_validator(
     role: RelationRoleStub = RelationRoleStub.requires,
     secrets: dict[str, dict[str, str]] | None = None,
 ) -> TrinoCatalogValidator:
-    remote_app = AppStub()
+    remote_app = ApplicationStub()
     relation = RelationStub(
         name="trino-catalog",
         id=1,
         app=remote_app,
         data={remote_app: databag},
     )
-    charm = CharmStub(
-        meta=CharmMetaStub(relations={relation.name: RelationMetaStub(interface_name="trino_catalog", role=role)}),
-        model=ModelStub(
-            secrets=(
-                {"secret:catalog": {"username": "catalog-user", "password": "secret"}} if secrets is None else secrets
-            )
-        ),
+    charm = make_charm_from_relation_and_secrets(
+        relation,
+        {"secret:catalog": {"username": "catalog-user", "password": "secret"}} if secrets is None else secrets,
+        role=role,
     )
+    charm.meta.relations[relation.name].interface_name = "trino_catalog"
     return TrinoCatalogValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
@@ -151,7 +113,7 @@ def test_simple_happy_path_passes() -> None:
     assert {check.name for check in result.checks} == {
         "schema",
         "trino_url",
-        "catalogs",
+        "trino_catalogs",
         "credentials",
         "connectivity",
     }
@@ -175,12 +137,7 @@ def test_missing_fields_fail() -> None:
 def test_no_remote_app_returns_error() -> None:
     # GIVEN
     relation = RelationStub(name="trino-catalog", id=1, app=None, data={})
-    charm = CharmStub(
-        meta=CharmMetaStub(
-            relations={relation.name: RelationMetaStub(interface_name="trino_catalog", role=RelationRoleStub.requires)}
-        ),
-        model=ModelStub(secrets={}),
-    )
+    charm = make_charm_from_relation(relation, interface_name="trino_catalog")
     validator = TrinoCatalogValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
     # WHEN
@@ -221,7 +178,41 @@ def test_invalid_catalog_json_fails() -> None:
 
     # THEN
     assert result.status == "FAIL"
-    assert result.checks[-1].name == "catalogs"
+    assert result.checks[-1].name == "trino_catalogs"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        CatalogValidationCase("{}", "trino_catalogs must be a JSON list."),
+        CatalogValidationCase("[{}]", "Catalog at index 0 must contain a string name."),
+        CatalogValidationCase('[{"name": 1}]', "Catalog at index 0 must contain a string name."),
+        CatalogValidationCase('[{"name": "  "}]', "Catalog at index 0 has an empty name."),
+        CatalogValidationCase(
+            '[{"name": "sales", "connector": 1}]',
+            "Catalog 'sales' field 'connector' must be a string.",
+        ),
+        CatalogValidationCase(
+            '[{"name": "sales", "description": 1}]',
+            "Catalog 'sales' field 'description' must be a string.",
+        ),
+        CatalogValidationCase(
+            '[{"name": "sales"}, {"name": "sales"}]',
+            "trino_catalogs contains duplicate names.",
+        ),
+    ],
+)
+def test_invalid_catalog_schema_fails(case: CatalogValidationCase) -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_catalogs": case.value})
+
+    # WHEN
+    result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "trino_catalogs"
+    assert result.checks[-1].message == case.expected_message
 
 
 def test_simple_fails_when_endpoint_is_unreachable() -> None:
@@ -272,21 +263,57 @@ def test_simple_redacts_malformed_port_from_diagnostic() -> None:
     connect.assert_not_called()
 
 
-def test_deep_defaults_portless_http_url_to_trino_port() -> None:
+@pytest.mark.parametrize(
+    "case",
+    [
+        InvalidUrlCase("http://@trino.example:8080", "URL must contain only a scheme, hostname, and port"),
+        InvalidUrlCase("trino.example:8080?", "URL must contain only a scheme, hostname, and port"),
+        InvalidUrlCase("trino.example:8080#", "URL must contain only a scheme, hostname, and port"),
+    ],
+)
+def test_simple_rejects_empty_forbidden_url_components(case: InvalidUrlCase) -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_url": case.value})
+
+    with patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect:
+        # WHEN
+        result = validator.validate(level="simple")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "trino_url"
+    assert case.expected_message in result.checks[-1].message
+    connect.assert_not_called()
+
+
+def test_portless_url_defaults_to_http_trino_port() -> None:
+    # WHEN
+    connection_info, check = _parse_trino_url("trino-k8s.model.svc.cluster.local")
+
+    # THEN
+    assert check.passed
+    assert connection_info == TrinoConnectionInfo(
+        host="trino-k8s.model.svc.cluster.local",
+        port=8080,
+        http_scheme="http",
+    )
+
+
+def test_deep_rejects_portless_http_url_without_sending_credentials() -> None:
     # GIVEN
     validator = _make_validator({**VALID_DATABAG, "trino_url": "trino-k8s.model.svc.cluster.local"})
-    connection = ConnectionStub()
 
     with patch(
         "validators.trino_catalog.validator.trino.dbapi.connect",
-        return_value=connection,
     ) as connect:
         # WHEN
         result = validator.validate(level="deep")
 
     # THEN
-    assert result.status == "PASS"
-    assert connect.call_args.kwargs["port"] == 8080
+    assert result.status == "FAIL"
+    assert result.checks[-1].name == "catalog_query"
+    assert "requires HTTPS" in result.checks[-1].message
+    connect.assert_not_called()
 
 
 def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
@@ -317,7 +344,7 @@ def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
     assert "allow_insecure_auth" not in connect.call_args.kwargs
 
 
-def test_real_client_accepts_authenticated_internal_http_connection() -> None:
+def test_connect_rejects_authenticated_internal_http_connection() -> None:
     # GIVEN
     connection_info = TrinoConnectionInfo(
         host="trino-k8s.model.svc.cluster.local",
@@ -325,15 +352,20 @@ def test_real_client_accepts_authenticated_internal_http_connection() -> None:
         http_scheme="http",
     )
 
-    # WHEN
-    connection = _connect(
-        connection_info,
-        {"username": "catalog-user", "password": "secret"},
-    )
+    with (
+        patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect,
+        patch("validators.trino_catalog.validator.trino.auth.BasicAuthentication") as basic_auth,
+    ):
+        # WHEN
+        with pytest.raises(ValueError, match="requires HTTPS"):
+            _connect(
+                connection_info,
+                {"username": "catalog-user", "password": "secret"},
+            )
 
     # THEN
-    assert connection is not None
-    connection.close()  # type: ignore[no-untyped-call]
+    basic_auth.assert_not_called()
+    connect.assert_not_called()
 
 
 def test_deep_queries_advertised_catalogs() -> None:
@@ -361,7 +393,7 @@ def test_deep_queries_advertised_catalogs() -> None:
     assert connect.call_args.kwargs["user"] == "catalog-user"
     basic_auth.assert_called_once_with("catalog-user", "secret")
     assert connect.call_args.kwargs["auth"] is auth
-    assert connect.call_args.kwargs["allow_insecure_auth"] is True
+    assert "allow_insecure_auth" not in connect.call_args.kwargs
     assert connection.cursor_stub.executed_queries == ["SHOW CATALOGS"]
     assert connection.closed
 
@@ -381,6 +413,23 @@ def test_deep_fails_when_advertised_catalog_is_missing() -> None:
     # THEN
     assert result.status == "FAIL"
     assert "sales" in result.checks[-1].message
+
+
+def test_deep_preserves_advertised_catalog_name_whitespace() -> None:
+    # GIVEN
+    validator = _make_validator({**VALID_DATABAG, "trino_catalogs": '[{"name": " sales "}]'})
+    connection = ConnectionStub(cursor_stub=CursorStub(rows=[("sales",)]))
+
+    with patch(
+        "validators.trino_catalog.validator.trino.dbapi.connect",
+        return_value=connection,
+    ):
+        # WHEN
+        result = validator.validate(level="deep")
+
+    # THEN
+    assert result.status == "FAIL"
+    assert " sales " in result.checks[-1].message
 
 
 def test_deep_fails_when_query_raises() -> None:

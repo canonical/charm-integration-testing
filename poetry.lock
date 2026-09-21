@@ -2410,8 +2410,10 @@ description = "Client for the Trino distributed SQL Engine"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "trino-0.339.0-py3-none-any.whl", hash = "sha256:effef3ffaec4c0b6519c78bab208b0d7e96f20caa7e779e91dba81c4298fefa7"},
+    {file = "trino-0.339.0.tar.gz", hash = "sha256:8915dcaa08fa531539b361db2ea35d6055498204b572120f6d70742b0654daa0"},
+]
 
 [package.dependencies]
 lz4 = "*"
@@ -2429,12 +2431,6 @@ gssapi = ["krb5 (==0.5.1)", "requests_gssapi"]
 kerberos = ["requests_kerberos"]
 sqlalchemy = ["sqlalchemy (>=1.3)"]
 tests = ["black", "boto3", "httpretty (<1.1)", "isort", "keyring", "pre-commit", "pytest", "pytest-runner", "requests_kerberos", "sqlalchemy (>=1.3)", "testcontainers"]
-
-[package.source]
-type = "git"
-url = "https://github.com/trinodb/trino-python-client.git"
-reference = "1a4ba08981e079a891ee7bcdcf0d0482a4ce217e"
-resolved_reference = "1a4ba08981e079a891ee7bcdcf0d0482a4ce217e"
 
 [[package]]
 name = "typer"
@@ -3342,8 +3338,12 @@ files = []
 develop = true
 
 [package.dependencies]
-trino = {git = "https://github.com/trinodb/trino-python-client.git", rev = "1a4ba08981e079a891ee7bcdcf0d0482a4ce217e"}
+trino = ">=0.320.0"
 validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
 
 [package.source]
 type = "directory"
@@ -3555,4 +3555,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "f1bcda1f886085c87a332cab189b013e3411bbbbd6523f6e64070e3a8759164e"
+content-hash = "882124e7d2d34fb044b9160159f49bc8b40bd6418abc0840424d9ac599ee0492"

@@ -170,7 +170,7 @@ def _parse_trino_url(value: str) -> tuple[TrinoConnectionInfo | None, Validation
             raise ValueError(f"unsupported scheme '{scheme}'")
         if not parsed.hostname:
             raise ValueError("hostname is missing")
-        if parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+        if parsed.username is not None or parsed.password is not None or parsed.path or "?" in value or "#" in value:
             raise ValueError("URL must contain only a scheme, hostname, and port")
         port = (
             explicit_port
@@ -199,14 +199,14 @@ def _parse_catalogs(value: str) -> tuple[list[str] | None, ValidationCheck]:
         raw_catalogs = json.loads(value)
     except json.JSONDecodeError as exc:
         return None, ValidationCheck(
-            name="catalogs",
+            name="trino_catalogs",
             passed=False,
             message=f"trino_catalogs is not valid JSON: {exc}",
         )
 
     if not isinstance(raw_catalogs, list):
         return None, ValidationCheck(
-            name="catalogs",
+            name="trino_catalogs",
             passed=False,
             message="trino_catalogs must be a JSON list.",
         )
@@ -215,21 +215,21 @@ def _parse_catalogs(value: str) -> tuple[list[str] | None, ValidationCheck]:
     for index, catalog in enumerate(raw_catalogs):
         if not isinstance(catalog, dict) or not isinstance(catalog.get("name"), str):
             return None, ValidationCheck(
-                name="catalogs",
+                name="trino_catalogs",
                 passed=False,
                 message=f"Catalog at index {index} must contain a string name.",
             )
-        name = catalog["name"].strip()
-        if not name:
+        name = catalog["name"]
+        if not name.strip():
             return None, ValidationCheck(
-                name="catalogs",
+                name="trino_catalogs",
                 passed=False,
                 message=f"Catalog at index {index} has an empty name.",
             )
         for field in ("connector", "description"):
             if field in catalog and not isinstance(catalog[field], str):
                 return None, ValidationCheck(
-                    name="catalogs",
+                    name="trino_catalogs",
                     passed=False,
                     message=f"Catalog '{name}' field '{field}' must be a string.",
                 )
@@ -237,19 +237,22 @@ def _parse_catalogs(value: str) -> tuple[list[str] | None, ValidationCheck]:
 
     if len(names) != len(set(names)):
         return None, ValidationCheck(
-            name="catalogs",
+            name="trino_catalogs",
             passed=False,
             message="trino_catalogs contains duplicate names.",
         )
 
     return names, ValidationCheck(
-        name="catalogs",
+        name="trino_catalogs",
         passed=True,
         message=f"Validated {len(names)} advertised catalog(s).",
     )
 
 
 def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) -> trino.dbapi.Connection:
+    if connection_info.http_scheme != "https":
+        raise ValueError("Authenticated Trino validation requires HTTPS; refusing to send credentials over HTTP.")
+
     username = credentials["username"]
     kwargs: dict[str, Any] = {
         "host": connection_info.host,
@@ -259,6 +262,4 @@ def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) 
         "request_timeout": _REQUEST_TIMEOUT_SECONDS,
         "auth": trino.auth.BasicAuthentication(username, credentials["password"]),
     }
-    if connection_info.http_scheme == "http":
-        kwargs["allow_insecure_auth"] = True
     return trino.dbapi.connect(**kwargs)  # type: ignore[no-any-return,no-untyped-call]
