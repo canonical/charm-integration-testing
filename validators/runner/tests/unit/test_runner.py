@@ -34,6 +34,9 @@ from validators.test_utils.stubs import (
     RelationStub,
 )
 
+TEST_TOKEN = "test-token"
+
+
 # ---------------------------------------------------------------------------
 # Validator stubs
 # ---------------------------------------------------------------------------
@@ -90,12 +93,12 @@ class PreparingPersistenceValidator(BasePersistenceValidator):
     cleanup_calls: list[int] = []
 
     def prepare(self) -> PersistenceState:
-        return PersistenceState(id=self.relation_id + 100, ref=1)
+        return PersistenceState(id=self.relation_id + 100, ref=1, token=TEST_TOKEN)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         check = ValidationCheck(name="row_count", passed=True, message="OK")
         result = self._make_result(status="PASS", level="deep", interface="test-interface", checks=[check])
-        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1, token=TEST_TOKEN)
 
     def cleanup(self) -> None:
         PreparingPersistenceValidator.cleanup_calls.append(self.relation_id)
@@ -122,12 +125,12 @@ class FailingPersistenceValidator(BasePersistenceValidator):
     """
 
     def prepare(self) -> PersistenceState:
-        return PersistenceState(id=self.relation_id + 100, ref=1)
+        return PersistenceState(id=self.relation_id + 100, ref=1, token=TEST_TOKEN)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         check = ValidationCheck(name="row_count", passed=False, message="mismatch")
         result = self._make_result(status="FAIL", level="deep", interface="test-interface", checks=[check])
-        return result, PersistenceState(id=expected.id, ref=expected.ref + 1)
+        return result, PersistenceState(id=expected.id, ref=expected.ref + 1, token=TEST_TOKEN)
 
     def cleanup(self) -> None:
         pass
@@ -331,12 +334,12 @@ class TestParseCliArgs:
 
     def test_checkpoint_parses_refs_json_into_persistence_state(self) -> None:
         # WHEN --refs is a valid JSON dict of relation_id -> PersistenceState
-        refs_json = json.dumps({"4": {"id": 1, "ref": 2}})
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
 
         args, refs = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
 
         # THEN it's decoded into PersistenceState objects keyed by relation_id string
-        assert refs == {"4": PersistenceState(id=1, ref=2)}
+        assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
 
     def test_invalid_refs_json_exits(self) -> None:
         # WHEN --refs is not valid JSON
@@ -633,7 +636,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"5": PersistenceState(id=105, ref=1)}
+        refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -652,7 +655,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", FailingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"5": PersistenceState(id=105, ref=1)}
+        refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -668,7 +671,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"999": PersistenceState(id=1, ref=1)}
+        refs = {"999": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -683,7 +686,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"not-an-int": PersistenceState(id=1, ref=1)}
+        refs = {"not-an-int": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -713,7 +716,7 @@ class TestValidatorRunnerPersistence:
             model=ModelStub(relations={"cluster": [peer_relation]}),
             app=ApplicationStub(name="app"),
         )
-        refs = {"5": PersistenceState(id=1, ref=1)}
+        refs = {"5": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -730,7 +733,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", ExplodingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"5": PersistenceState(id=1, ref=1)}
+        refs = {"5": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -748,7 +751,7 @@ class TestValidatorRunnerPersistence:
         runner = self._runner_with("test-interface", MisbehavingPersistenceValidator)
         relation = RelationStub(name="db", id=5)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
-        refs = {"5": PersistenceState(id=1, ref=1)}
+        refs = {"5": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
@@ -858,7 +861,9 @@ class TestValidatorRunnerPersistence:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+        results = runner.checkpoint_all(
+            cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
+        )
 
         # THEN the checkpoint is reported as an ERROR rather than silently succeeding with no
         # results, which would let a real durability check pass without ever running
@@ -881,7 +886,9 @@ class TestValidatorRunnerPersistence:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
 
         # WHEN
-        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1)})
+        results = runner.checkpoint_all(
+            cast(ops.CharmBase, charm), refs={"7": PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
+        )
 
         # THEN only the single load-error ERROR is reported for this relation, not two
         assert len(results.results) == 1

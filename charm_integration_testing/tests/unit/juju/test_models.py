@@ -16,6 +16,8 @@ from juju import (
 
 from validators.base import PersistenceState
 
+TEST_TOKEN = "test-token"
+
 
 class TestCharmChannel:
     class TestParse:
@@ -250,7 +252,7 @@ class TestRekeyPersistenceStateController:
     def test_moves_matching_keys_to_new_controller(self) -> None:
         # GIVEN persistence state tracked under the old controller for the migrating model
         old_key = PersistenceKey(controller="old-ctrl", model="my-model", unit="myapp/0", relation_id=4)
-        state = PersistenceState(id=1, ref=2)
+        state = PersistenceState(id=1, ref=2, token=TEST_TOKEN)
         persistence_state = {old_key: state}
 
         # WHEN the model migrates to a new controller
@@ -270,9 +272,9 @@ class TestRekeyPersistenceStateController:
             controller="unrelated-ctrl", model="my-model", unit="myapp/1", relation_id=9
         )
         persistence_state = {
-            migrating_key: PersistenceState(id=1, ref=2),
-            other_model_key: PersistenceState(id=2, ref=3),
-            other_controller_key: PersistenceState(id=3, ref=4),
+            migrating_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+            other_model_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN),
+            other_controller_key: PersistenceState(id=3, ref=4, token=TEST_TOKEN),
         }
 
         # WHEN the model migrates to a new controller
@@ -283,15 +285,29 @@ class TestRekeyPersistenceStateController:
         # THEN only the migrating model's entry under the old controller moved; the rest are untouched
         new_key = PersistenceKey(controller="new-ctrl", model="my-model", unit="myapp/0", relation_id=4)
         assert persistence_state == {
-            new_key: PersistenceState(id=1, ref=2),
-            other_model_key: PersistenceState(id=2, ref=3),
-            other_controller_key: PersistenceState(id=3, ref=4),
+            new_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+            other_model_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN),
+            other_controller_key: PersistenceState(id=3, ref=4, token=TEST_TOKEN),
         }
+
+    def test_noop_when_controller_is_unchanged(self) -> None:
+        # GIVEN persistence state for the model, and a "migration" to the controller it already uses
+        key = PersistenceKey(controller="same-ctrl", model="my-model", unit="myapp/0", relation_id=4)
+        state = PersistenceState(id=1, ref=2, token=TEST_TOKEN)
+        persistence_state = {key: state}
+
+        # WHEN
+        rekey_persistence_state_controller(
+            persistence_state, model="my-model", old_controller="same-ctrl", new_controller="same-ctrl"
+        )
+
+        # THEN the entry is left in place rather than re-keyed to itself and dropped
+        assert persistence_state == {key: state}
 
     def test_noop_when_no_matching_keys(self) -> None:
         # GIVEN persistence state that has nothing to do with the migrating (model, controller)
         unrelated_key = PersistenceKey(controller="old-ctrl", model="other-model", unit="otherapp/0", relation_id=1)
-        persistence_state = {unrelated_key: PersistenceState(id=1, ref=1)}
+        persistence_state = {unrelated_key: PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
 
         # WHEN
         rekey_persistence_state_controller(
@@ -299,4 +315,4 @@ class TestRekeyPersistenceStateController:
         )
 
         # THEN nothing changed
-        assert persistence_state == {unrelated_key: PersistenceState(id=1, ref=1)}
+        assert persistence_state == {unrelated_key: PersistenceState(id=1, ref=1, token=TEST_TOKEN)}
