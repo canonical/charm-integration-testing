@@ -44,6 +44,7 @@ dependencies = [
     "validators-alertmanager-dispatch",
     "validators-certificate-transfer",
     "validators-trino-client",
+    "validators-trino-catalog",
     "validators-cross-model-mesh",
 ]
 
