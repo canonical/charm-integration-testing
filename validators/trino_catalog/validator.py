@@ -107,7 +107,14 @@ class TrinoCatalogValidator(BaseValidator):
             return ValidationCheck(
                 name="connectivity",
                 passed=True,
-                message="Authenticated SELECT 1 succeeded.",
+                message=(
+                    "Authenticated SELECT 1 succeeded."
+                    if connection_info.http_scheme == "https"
+                    else (
+                        "SELECT 1 succeeded over HTTP using the published username; "
+                        "Trino does not authenticate passwords on insecure HTTP connections."
+                    )
+                ),
             )
         except Exception as exc:
             return ValidationCheck(
@@ -253,9 +260,6 @@ def _parse_catalogs(value: str) -> tuple[list[str] | None, ValidationCheck]:
 
 
 def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) -> trino.dbapi.Connection:
-    if connection_info.http_scheme != "https":
-        raise ValueError("Authenticated Trino validation requires HTTPS; refusing to send credentials over HTTP.")
-
     username = credentials["username"]
     kwargs: dict[str, Any] = {
         "host": connection_info.host,
@@ -263,6 +267,9 @@ def _connect(connection_info: TrinoConnectionInfo, credentials: dict[str, str]) 
         "http_scheme": connection_info.http_scheme,
         "user": username,
         "request_timeout": _REQUEST_TIMEOUT_SECONDS,
-        "auth": trino.auth.BasicAuthentication(username, credentials["password"]),
     }
+    # Trino's insecure HTTP path trusts the user header and bypasses password authentication;
+    # sending Basic Authentication there would expose the password without validating it.
+    if connection_info.http_scheme == "https":
+        kwargs["auth"] = trino.auth.BasicAuthentication(username, credentials["password"])
     return trino.dbapi.connect(**kwargs)  # type: ignore[no-any-return,no-untyped-call]

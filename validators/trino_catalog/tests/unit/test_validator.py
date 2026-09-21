@@ -74,7 +74,7 @@ class ConnectionStub:
 
 
 VALID_DATABAG = {
-    "trino_url": "https://trino.example.com:443",
+    "trino_url": "trino-k8s.model.svc.cluster.local:8080",
     "trino_catalogs": '[{"name": "sales", "connector": "postgresql", "description": ""}]',
     "trino_credentials_secret_id": "secret:catalog",
 }
@@ -124,6 +124,7 @@ def test_simple_happy_path_passes() -> None:
         "connectivity",
     }
     assert connection.cursor_stub.executed_queries == ["SELECT 1"]
+    assert "does not authenticate passwords" in result.checks[-1].message
     assert connection.closed
 
 
@@ -345,21 +346,26 @@ def test_portless_url_defaults_to_http_trino_port() -> None:
     )
 
 
-def test_deep_rejects_portless_http_url_without_sending_credentials() -> None:
+def test_deep_defaults_portless_http_url_to_trino_port() -> None:
     # GIVEN
     validator = _make_validator({**VALID_DATABAG, "trino_url": "trino-k8s.model.svc.cluster.local"})
+    connection = ConnectionStub()
 
-    with patch(
-        "validators.trino_catalog.validator.trino.dbapi.connect",
-    ) as connect:
+    with (
+        patch(
+            "validators.trino_catalog.validator.trino.dbapi.connect",
+            return_value=connection,
+        ) as connect,
+        patch("validators.trino_catalog.validator.trino.auth.BasicAuthentication") as basic_auth,
+    ):
         # WHEN
         result = validator.validate(level="deep")
 
     # THEN
-    assert result.status == "FAIL"
-    assert result.checks[-1].name == "catalog_query"
-    assert "requires HTTPS" in result.checks[-1].message
-    connect.assert_not_called()
+    assert result.status == "PASS"
+    assert connect.call_args.kwargs["port"] == 8080
+    assert "auth" not in connect.call_args.kwargs
+    basic_auth.assert_not_called()
 
 
 def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
@@ -390,7 +396,7 @@ def test_deep_infers_https_for_scheme_less_port_443_url() -> None:
     assert "allow_insecure_auth" not in connect.call_args.kwargs
 
 
-def test_connect_rejects_authenticated_internal_http_connection() -> None:
+def test_real_client_accepts_internal_http_connection_without_basic_auth() -> None:
     # GIVEN
     connection_info = TrinoConnectionInfo(
         host="trino-k8s.model.svc.cluster.local",
@@ -398,27 +404,22 @@ def test_connect_rejects_authenticated_internal_http_connection() -> None:
         http_scheme="http",
     )
 
-    with (
-        patch("validators.trino_catalog.validator.trino.dbapi.connect") as connect,
-        patch("validators.trino_catalog.validator.trino.auth.BasicAuthentication") as basic_auth,
-    ):
+    with patch("validators.trino_catalog.validator.trino.auth.BasicAuthentication") as basic_auth:
         # WHEN
-        with pytest.raises(ValueError, match="requires HTTPS"):
-            _connect(
-                connection_info,
-                {"username": "catalog-user", "password": "secret"},
-            )
+        connection = _connect(
+            connection_info,
+            {"username": "catalog-user", "password": "secret"},
+        )
 
     # THEN
     basic_auth.assert_not_called()
-    connect.assert_not_called()
+    connection.close()  # type: ignore[no-untyped-call]
 
 
 def test_deep_queries_advertised_catalogs() -> None:
     # GIVEN
     validator = _make_validator(VALID_DATABAG)
     connection = ConnectionStub()
-    auth = object()
 
     with (
         patch(
@@ -427,7 +428,6 @@ def test_deep_queries_advertised_catalogs() -> None:
         ) as connect,
         patch(
             "validators.trino_catalog.validator.trino.auth.BasicAuthentication",
-            return_value=auth,
         ) as basic_auth,
     ):
         # WHEN
@@ -437,8 +437,8 @@ def test_deep_queries_advertised_catalogs() -> None:
     assert result.status == "PASS"
     assert result.checks[-1].name == "catalog_query"
     assert connect.call_args.kwargs["user"] == "catalog-user"
-    basic_auth.assert_called_once_with("catalog-user", "secret")
-    assert connect.call_args.kwargs["auth"] is auth
+    basic_auth.assert_not_called()
+    assert "auth" not in connect.call_args.kwargs
     assert "allow_insecure_auth" not in connect.call_args.kwargs
     assert connection.cursor_stub.executed_queries == ["SHOW CATALOGS"]
     assert connection.closed
