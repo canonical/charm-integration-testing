@@ -15,6 +15,7 @@ overrides:
     requires:
       ingress:
         optional: true  # only used when related; charm.py::_on_collect_unit_status
+        features: [tls]  # trino-catalog credentials require a TLS-terminating ingress
       policy:
         optional: true  # Ranger is enabled only when relation data exists; charm.py::_reconcile
       trino-worker:
@@ -24,6 +25,8 @@ overrides:
     constraints:
       # A Trino instance cannot be both coordinator and worker
       - 'not (bool(endpoint[trino-coordinator]) and bool(endpoint[trino-worker]))'
+      # trino_catalog.py::_get_url advertises HTTPS only through the TLS-terminating ingress
+      - 'bool(endpoint[trino-catalog]) => bool(endpoint[ingress])'
       # charm.py::_validate_relations -> trino_coordinator.py/trino_worker.py::_validate()
       - 'bool(endpoint[trino-coordinator]) => config[charm-function] == "coordinator"'
       - 'bool(endpoint[trino-worker]) => config[charm-function] == "worker"'
