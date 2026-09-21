@@ -253,15 +253,22 @@ class TestPersistenceState:
         # THEN
         assert state.ref == 0
 
+    def test_token_defaults_to_empty(self) -> None:
+        # GIVEN / WHEN
+        state = PersistenceState(id=7)
+
+        # THEN
+        assert state.token == ""
+
     def test_serialises_to_json(self) -> None:
         # GIVEN
-        state = PersistenceState(id=4, ref=2)
+        state = PersistenceState(id=4, ref=2, token="abc123")
 
         # WHEN
         json_str = state.model_dump_json()
 
         # THEN
-        assert json_str == '{"id":4,"ref":2}'
+        assert json_str == '{"id":4,"ref":2,"token":"abc123"}'
 
 
 class TestBasePersistenceValidator:
