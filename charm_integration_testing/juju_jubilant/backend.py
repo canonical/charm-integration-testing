@@ -49,6 +49,7 @@ from .wait import (
     applications_have_no_units,
     bundle_applications_integrations_exist,
     integrations_are_removed,
+    saas_is_removed,
     units_have_message,
 )
 
@@ -349,6 +350,9 @@ class JubilantBackend(JujuCmdBackend):
     def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
         if alias in self.status(model).app_endpoints:
             self.client.model(model).cli("remove-saas", alias)
+
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        self.wait(model, lambda status: saas_is_removed(status, alias), timeout=timeout)
 
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None

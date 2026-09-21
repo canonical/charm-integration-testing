@@ -54,3 +54,9 @@ def test_teardown(
     if is_cmr_integration:
         assert consumed_offer_alias is not None
         juju_client.remove_saas(consumed_offer_alias, model=integration_model_ref)
+        # Removal is asynchronous on the controller; a later re-consumption of the same
+        # alias (e.g. a redeploy) can otherwise race with the still-in-progress teardown.
+        # See https://github.com/canonical/charm-integration-testing/issues/1045.
+        juju_client.wait_for_removal_of_saas(
+            consumed_offer_alias, model=integration_model_ref, timeout=timedelta(minutes=10)
+        )

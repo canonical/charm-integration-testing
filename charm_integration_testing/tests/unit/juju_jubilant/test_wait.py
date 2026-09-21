@@ -17,6 +17,7 @@ from juju_jubilant.wait import (
     get_unit_info,
     get_unit_state,
     integrations_are_removed,
+    saas_is_removed,
     units_have_message,
 )
 
@@ -545,6 +546,22 @@ class TestWaitConditions:
         result, wait = integrations_are_removed(sample_cmr_consumer_status, integration)
 
         # THEN - the relation for this exact pair doesn't exist in the status, so it's "removed"
+        assert result is True
+        assert wait.noncompliant_applications == {}
+
+    def test_saas_is_removed_still_present(self, sample_cmr_consumer_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = saas_is_removed(sample_cmr_consumer_status, "remote-offer")
+
+        # THEN
+        assert result is False
+        assert "remote-offer" in wait.noncompliant_applications
+
+    def test_saas_is_removed_gone(self, sample_minimal_status: jubilant.Status) -> None:
+        # GIVEN / WHEN - sample_minimal_status has no app_endpoints at all
+        result, wait = saas_is_removed(sample_minimal_status, "remote-offer")
+
+        # THEN
         assert result is True
         assert wait.noncompliant_applications == {}
 
