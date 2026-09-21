@@ -41,12 +41,19 @@ def _make_persistence_validator(
     role: RelationRoleStub = RelationRoleStub.requires,
     relation_id: int = 0,
     model_uuid: str = "11111111-1111-1111-1111-111111111111",
+    unit_name: str = "app/0",
 ) -> PostgreSQLClientPersistenceValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=relation_id, app=app, data={app: databag})
     charm = cast(
         ops.CharmBase,
-        make_charm_from_relation(relation, interface_name="postgresql_client", role=role, local_model_uuid=model_uuid),
+        make_charm_from_relation(
+            relation,
+            interface_name="postgresql_client",
+            role=role,
+            local_model_uuid=model_uuid,
+            local_unit_name=unit_name,
+        ),
     )
     return PostgreSQLClientPersistenceValidator(charm, cast(ops.Relation, relation))
 
@@ -614,7 +621,7 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
         assert isinstance(state, PersistenceState)
         assert state.ref == 1
         queries = " ".join(conn.cursor_stub.executed_queries)
-        assert f"validator_canary_e88ccf2f7c3cde3c_{state.id:020d}" in queries
+        assert f"validator_canary_da7d88bc9ad4d4fd_{state.id:020d}" in queries
         assert "DROP TABLE IF EXISTS" in queries
         assert "CREATE TABLE" in queries
         assert "INSERT INTO" in queries
@@ -704,7 +711,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
             validator.checkpoint(PersistenceState(id=99, ref=1))
 
         # THEN
-        assert any("validator_canary_e88ccf2f7c3cde3c_00000000000000000099" in q for q in cursor.executed_queries)
+        assert any("validator_canary_da7d88bc9ad4d4fd_00000000000000000099" in q for q in cursor.executed_queries)
 
     def test_resolves_schema_by_exact_name_across_all_schemas_regardless_of_visibility(self) -> None:
         # GIVEN a single table anywhere in the database matches this canary's exact (random,
@@ -832,8 +839,8 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
     def test_drops_all_discovered_canary_tables(self) -> None:
         # GIVEN two leftover canary tables are discovered, in the current schema
         validator = _make_persistence_validator(VALID_DATABAG)
-        table_1 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
-        table_2 = "validator_canary_e88ccf2f7c3cde3c_00000000000000000002"
+        table_1 = "validator_canary_da7d88bc9ad4d4fd_00000000000000000001"
+        table_2 = "validator_canary_da7d88bc9ad4d4fd_00000000000000000002"
         cursor = CursorStub(fetchall_rows=[("public", table_1), ("public", table_2)])
         conn = ConnStub(cursor_stub=cursor)
 
@@ -888,7 +895,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "table_name LIKE %s" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_64dc56c7ce45d7d9\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_9c1f7f01a01956b9\\_%",)
 
     def test_scopes_discovery_to_this_models_uuid(self) -> None:
         # Regression test for: relation IDs are assigned independently per model, so two
@@ -910,7 +917,28 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "table_name LIKE %s" in select_query
         like_pattern = cursor.executed_params[0][0]
-        assert like_pattern != "validator\\_canary\\_64dc56c7ce45d7d9\\_%"
+        assert like_pattern != "validator\\_canary\\_9c1f7f01a01956b9\\_%"
+
+    def test_scopes_discovery_to_this_unit(self) -> None:
+        # Regression test for: the harness runs persistence validators on every unit of the
+        # application, so two units of the same application share both model.uuid and relation_id
+        # while owning separate canary tables. Discovery scoped to model+relation only would let
+        # cleanup on one unit drop another unit's still-active table, making that unit's next
+        # checkpoint report a data loss that never happened. The token must include the unit name.
+        validator = _make_persistence_validator(VALID_DATABAG, relation_id=7, unit_name="app/0")
+        other_unit = _make_persistence_validator(VALID_DATABAG, relation_id=7, unit_name="app/1")
+        cursor = CursorStub(fetchall_rows=[])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            validator.cleanup()
+
+        # THEN the LIKE pattern is scoped to this unit's own token, not the sibling unit's
+        select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
+        assert "table_name LIKE %s" in select_query
+        assert cursor.executed_params[0] == ("validator\\_canary\\_9c1f7f01a01956b9\\_%",)
+        assert other_unit._canary_table_prefix() != validator._canary_table_prefix()
 
     def test_rejects_discovered_tables_that_only_share_the_prefix(self) -> None:
         # Regression test for: the information_schema LIKE query only narrows candidates by
@@ -918,8 +946,8 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # would previously be dropped unconditionally. Cleanup must re-check the exact shape
         # (prefix + fixed-width digits) before dropping, and skip anything that doesn't match.
         validator = _make_persistence_validator(VALID_DATABAG)
-        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
-        look_alike = "validator_canary_e88ccf2f7c3cde3c_backup"
+        good_table = "validator_canary_da7d88bc9ad4d4fd_00000000000000000001"
+        look_alike = "validator_canary_da7d88bc9ad4d4fd_backup"
         cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", look_alike)])
         conn = ConnStub(cursor_stub=cursor)
 
@@ -939,8 +967,8 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # than that. Without an explicit bound check, cleanup would still drop a shape-only
         # look-alike such as "..._99999999999999999999" that prepare() could never have produced.
         validator = _make_persistence_validator(VALID_DATABAG)
-        good_table = "validator_canary_e88ccf2f7c3cde3c_00000000000000000001"
-        out_of_range_table = "validator_canary_e88ccf2f7c3cde3c_99999999999999999999"
+        good_table = "validator_canary_da7d88bc9ad4d4fd_00000000000000000001"
+        out_of_range_table = "validator_canary_da7d88bc9ad4d4fd_99999999999999999999"
         cursor = CursorStub(fetchall_rows=[("public", good_table), ("public", out_of_range_table)])
         conn = ConnStub(cursor_stub=cursor)
 
@@ -984,7 +1012,7 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         # THEN
         select_query = next(q for q in cursor.executed_queries if "information_schema" in q)
         assert "ESCAPE" in select_query
-        assert cursor.executed_params[0] == ("validator\\_canary\\_e88ccf2f7c3cde3c\\_%",)
+        assert cursor.executed_params[0] == ("validator\\_canary\\_da7d88bc9ad4d4fd\\_%",)
 
     def test_noop_when_no_credentials_present(self) -> None:
         # GIVEN a databag without any credential fields (e.g. relation already gone)

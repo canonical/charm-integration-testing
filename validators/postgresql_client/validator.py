@@ -341,7 +341,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 
     Each validator instance owns a dedicated canary table named
     ``validator_canary_{scope_token}_{identifier}``, where ``scope_token`` is a fixed-width hash of
-    this model's UUID and relation ID (see ``_canary_table_prefix``) and ``identifier`` is a
+    this model's UUID, relation ID and unit name (see ``_canary_table_prefix``) and ``identifier`` is a
     fixed-width, zero-padded value chosen by ``prepare()`` and carried forward by the caller (the
     test harness) as ``PersistenceState.id``. Both components have a fixed length so ``cleanup()``
     can validate the *exact* shape of a candidate table name (not just a prefix) before dropping
@@ -451,22 +451,27 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return result, new_state
 
     def cleanup(self) -> None:
-        """Drop every canary table this relation (or a prior instance of it) created.
+        """Drop every canary table this validator instance (or a prior instance of it) created.
 
         ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so instead
-        of dropping one table by identifier, every table matching this relation's canary name
-        pattern is discovered via ``information_schema`` and dropped. This also mops up a canary
-        table left behind by an interrupted run (e.g. a crash between ``prepare()`` and the next
+        of dropping one table by identifier, every table matching this validator instance's canary
+        name pattern is discovered via ``information_schema`` and dropped. This also mops up a
+        canary table left behind by an interrupted run (e.g. a crash between ``prepare()`` and the next
         ``cleanup()``).
 
-        Discovery is scoped to a model+relation namespace (see ``_canary_table_prefix``) rather
+        Discovery is scoped to a model+relation+unit namespace (see ``_canary_table_prefix``) rather
         than the bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client`` relations
         sharing the same database/schema - even across different models, whose relation IDs are
         assigned independently and so can collide numerically - can no longer drop each other's
-        canary tables. The namespace is stable for the lifetime of a given relation, so this still
-        finds a table left behind by an interrupted run of *this* relation; it does not sweep up a
-        stray table from a relation that was removed and re-added under a new ID, which is an
-        accepted trade-off since a fresh ``prepare()`` for the new ID starts its own table anyway.
+        canary tables. The unit is part of that namespace because the harness runs persistence
+        validators on every unit of the application (see the validator injection extension), and
+        those units share a model UUID and relation ID while owning separate canary tables: without
+        it, cleanup on one unit would drop another unit's still-active table and make that unit's
+        next ``checkpoint()`` report a data loss that never happened. The namespace is stable for
+        the lifetime of a given relation on a given unit, so this still finds a table left behind by
+        an interrupted run of *this* instance; it does not sweep up a stray table from a relation
+        that was removed and re-added under a new ID, which is an accepted trade-off since a fresh
+        ``prepare()`` for the new ID starts its own table anyway.
 
         The initial ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE``
         can't cheaply assert an exact suffix shape), so every candidate is re-checked against
@@ -555,26 +560,30 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return conn
 
     def _canary_table_prefix(self) -> str:
-        """Prefix scoped to this model and relation, so cleanup discovery can't cross boundaries.
+        """Prefix scoped to this model, relation and unit, so cleanup discovery can't cross boundaries.
 
         ``self.relation_id`` is stable for the lifetime of a given relation (it only changes if
         the relation is removed and re-added), but relation IDs are assigned independently per
         model and can collide numerically across two different models relating to the same
-        backend, and can themselves be arbitrarily long. Rather than embedding the raw
+        backend, and can themselves be arbitrarily long. The unit name is also part of the scope:
+        the runner injects and runs persistence validators on *every* unit of the application, so
+        two units of the same application share both ``model.uuid`` and ``relation_id`` while
+        owning separate canary tables (see ``cleanup()``). Rather than embedding the raw
         ``relation_id`` (variable length) and a short model hash (narrow collision resistance) in
-        the table name directly, both are folded into a single fixed-width, collision-resistant
-        ``scope_token``: the first 16 hex characters (64 bits) of a SHA-256 hash of
-        ``f"{model_uuid}:{relation_id}"``. A fixed-width token, combined with the fixed-width
-        identifier written by ``_canary_table_name()``, lets ``cleanup()`` validate the *exact*
-        shape of a table name (via ``_canary_table_regex()``) instead of relying on a prefix match
-        alone, and keeps the total name safely within PostgreSQL's 63-byte identifier limit
-        regardless of how large ``relation_id`` gets.
+        the table name directly, all three are folded into a single fixed-width,
+        collision-resistant ``scope_token``: the first 16 hex characters (64 bits) of a SHA-256
+        hash of ``f"{model_uuid}:{relation_id}:{unit_name}"``. A fixed-width token, combined with
+        the fixed-width identifier written by ``_canary_table_name()``, lets ``cleanup()`` validate
+        the *exact* shape of a table name (via ``_canary_table_regex()``) instead of relying on a
+        prefix match alone, and keeps the total name safely within PostgreSQL's 63-byte identifier
+        limit regardless of how large ``relation_id`` gets.
         """
         scope_token = self._canary_scope_token()
         return f"{_CANARY_TABLE_PREFIX}{scope_token}_"
 
     def _canary_scope_token(self) -> str:
-        digest_input = f"{self.charm.model.uuid}:{self.relation_id}".encode()
+        unit_name = self.charm.model.unit.name
+        digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
         return hashlib.sha256(digest_input).hexdigest()[:16]
 
     def _canary_table_regex(self) -> "re.Pattern[str]":
