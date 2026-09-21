@@ -437,10 +437,15 @@ rather than registering multiple entry points for the same interface.
      the row count query on the token column, not a bare `count(*)`; for a
      KV store, bucket, or topic, the equivalent is asserting the read/list
      is scoped to the specific key/object/message identifier). Also cover a
-     table/resource dropped and recreated from scratch: reinserting rows with
-     the same `ref` reproduces the same `id == ref` relationship, so only the
-     random token distinguishes the original canary from the recreated one -
-     assert the recreated case FAILs rather than reporting a false PASS.
+     resource dropped and recreated from scratch: recreating it with the same
+     count/ref state reproduces the same observable shape, so only the random
+     token distinguishes the original canary from the recreated one - assert
+     the recreated case FAILs rather than reporting a false PASS. (For SQL
+     backends, a table recreated from scratch also resets any database-generated
+     row identity such as a `SERIAL` `id`, so the reference implementation
+     additionally asserts the original `id` is still present; treat that as an
+     implementation-specific strengthening, not a requirement for backends
+     without such an identity.)
      Also cover
      `checkpoint()` rejecting an out-of-range `expected.id` (e.g. negative,
      or one past the maximum your `prepare()` can produce) and rejecting an
@@ -537,10 +542,12 @@ rather than registering multiple entry points for the same interface.
    other failures (if units on the targeted side are affected). This does not
    constitute a valid persistence check - wait for full settlement. Which side
    to disrupt depends on the scenario: most tests (e.g. `test_scale_in_and_scale_out.py`)
-   disrupt the remote/provider side of the relation and checkpoint the requirer, but
-   some (e.g. `test_pod_deletion.py`) disrupt the application the persistence
-   validator itself runs on - checkpoint whichever unit you ran `prepare()`
-   on above, regardless of which side was disrupted.
+   disrupt `target_application`, whose role (provider or requirer) varies by
+   integration, and then checkpoint every model that holds applicable state
+   (the target model, plus the neighbor model in a CMR where the target is the
+   provider), while some (e.g. `test_pod_deletion.py`) disrupt the application
+   the persistence validator itself runs on - checkpoint whichever unit you ran
+   `prepare()` on above, regardless of which side was disrupted.
    `test_scale_in_and_scale_out.py` shows the correct ordering: it
    scales back up and waits for every affected model to reach idle
    (`multi_model_idle_for_period`) before checkpointing. Once settled, run:
