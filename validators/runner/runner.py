@@ -561,7 +561,10 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
     parser.add_argument(
         "--refs",
         default=None,
-        help='JSON dict of {"<relation_id>": {"id": <identifier>, "ref": <ref>}}. Required for --persistence checkpoint.',
+        help=(
+            'JSON dict of {"<relation_id>": {"id": <identifier>, "ref": <ref>, "token": <token>}}, '
+            "matching the state returned by --persistence prepare. Required for --persistence checkpoint."
+        ),
     )
     args = parser.parse_args(argv)
 
