@@ -313,8 +313,12 @@ def _charm_set_for_endpoints(charm_id: int, endpoint_refs: _EndpointNames, domai
     # constraints.add_charm_constraints.
     app_to_charm = domain.app_to_charm_map()
     peer_ids = domain.external_cmr_peer_ids()
-    for _model_ref, local_ep, remote_ep in domain.external_cmr_integrations():
-        if local_ep.endpoint not in endpoint_names:
+    local_model = domain.charms[charm_id].model
+    for model_ref, local_ep, remote_ep in domain.external_cmr_integrations():
+        # Scope to the model owning this charm: another model can hold an identically named
+        # application, whose CMR must not contribute here (see the same guard in
+        # constraints.add_charm_constraints).
+        if model_ref != local_model or local_ep.endpoint not in endpoint_names:
             continue
         mapping_var = app_to_charm.get((local_ep.application, charm_id))
         if mapping_var is None:

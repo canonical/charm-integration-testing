@@ -292,12 +292,17 @@ class CrossModelExpr(BaseModel):
     plain ones. Unlike bool(endpoint[x]), which is True for any active integration (local or
     cross-model), bool(cross_model(endpoint[x])) is True only for cross-model ones.
 
-    For charms() specifically, only in-domain integrations count: an integration counts as
-    cross-model when Domain.is_cross_model() reports its peer charm is assigned to a different
-    model. External CMR peers have no DomainCharm/id to add to the resulting charm set, so they
-    are excluded (see _charm_set_for_endpoints in dsl_lowering.py). bool() and len(), by
-    contrast, also include external CMR contributions (tracked separately as cmr_counts in
-    constraints.py), since those only need a count, not a charm identity.
+    All three reducers include external CMR contributions -- cross-model integrations whose
+    remote application/model is not part of this domain. An integration counts as cross-model
+    when Domain.is_cross_model() reports its peer charm is assigned to a different model;
+    external CMRs have no DomainCharm here at all. bool() and len() read these from cmr_counts
+    (see constraints.py), which only needs a count.
+
+    charms() instead represents each external peer by a stable synthetic id derived from the
+    remote (model, application) pair (see Domain.external_cmr_peer_ids and
+    _charm_set_for_endpoints in dsl_lowering.py). External peers therefore cannot be *named*,
+    but distinct external peers still yield distinct set elements, so equality between two
+    charms(cross_model(...)) sets remains meaningful.
     """
 
     model_config = ConfigDict(frozen=True)

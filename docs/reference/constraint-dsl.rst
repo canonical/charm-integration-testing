@@ -235,8 +235,20 @@ those integrations is a genuine cross-model relation (CMR).
 ``bool()`` and ``len()`` both include external CMR contributions -- cross-model
 integrations whose remote application/model is not part of the current domain, tracked
 separately as ``cmr_counts`` in ``constraints.py`` -- since they only need a count, not a
-charm identity. ``charms()`` is stricter: only *in-domain* integrations contribute a charm
-ID, since external CMR peers have no ``DomainCharm``/charm ID to add to the resulting set.
+charm identity.
+
+``charms()`` also includes external CMR contributions, using a stable synthetic id
+derived from the remote ``(model, application)`` pair. Distinct external peers produce
+distinct set elements, so ``charms(cross_model(endpoint[x]))`` can be compared for
+equality across charms and two unrelated external peers compare unequal.
+
+.. note::
+
+   The synthetic id is opaque: external peers have no ``DomainCharm``, so a
+   ``charms(...)`` set containing them cannot be intersected with, or tested for
+   membership against, named charms, and the ids carry no meaning outside the
+   current domain. Two external peers that happen to share a remote model key and
+   application name are treated as the same peer.
 
 .. list-table::
    :header-rows: 1
@@ -249,7 +261,7 @@ ID, since external CMR peers have no ``DomainCharm``/charm ID to add to the resu
    * - ``len(cross_model(endpoint[x]))``
      - Yes
    * - ``charms(cross_model(endpoint[x]))``
-     - No -- external CMR peers have no charm ID
+     - Yes -- via a synthetic id per remote (model, application)
 
 A common use is requiring an endpoint to only ever ride an existing cross-model relation,
 never pair purely locally::

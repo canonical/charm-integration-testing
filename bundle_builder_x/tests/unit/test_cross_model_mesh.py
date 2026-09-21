@@ -308,6 +308,63 @@ class TestCrossModelExprDSL:
         solver2.add(domain.charms[model_b_id].exists)
         assert solver2.check(result_b.expr) == z3.sat
 
+    def test_external_cmr_charm_set_does_not_leak_to_same_named_app_in_another_model(self) -> None:
+        # GIVEN two unrelated models that both name their application "provider", where only
+        # model-a's "provider" has a real external CMR (remote model not in the domain)
+        provider = _make_charm(
+            "provider-app",
+            {
+                "serve": CharmEndpoint(type=EndpointType.PROVIDES, interface="workload", optional=True),
+                "spare": CharmEndpoint(type=EndpointType.PROVIDES, interface="spare", optional=True),
+            },
+        )
+        domain = _make_domain(
+            {
+                ModelRef(name="model-a"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                    application_integrations=[
+                        DomainApplicationIntegration(
+                            endpoint_1=DomainApplicationEndpoint(application="provider", endpoint="serve"),
+                            endpoint_2=DomainApplicationEndpoint(
+                                application="consumer-1",
+                                endpoint="backend",
+                                model=ModelRef(name="external-model-1"),
+                            ),
+                            offer_name="external-serve-offer",
+                        )
+                    ],
+                ),
+                ModelRef(name="model-b"): DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={"provider": DomainApplication(charm="provider-app")},
+                ),
+            }
+        )
+        model_a_id = add_charm_to_domain(provider, domain, ModelRef(name="model-a"))
+        model_b_id = add_charm_to_domain(provider, domain, ModelRef(name="model-b"))
+
+        # model-b's "provider" has no CMR, so its cross_model(serve) charm set is empty; comparing
+        # it against a genuinely empty endpoint set must therefore hold.
+        ctx_b = LoweringContext(charm_id=model_b_id, domain_charm=domain.charms[model_b_id], domain=domain)
+        result_b = lower(
+            parse_constraint("charms(cross_model(endpoint[serve])) == charms(cross_model(endpoint[spare]))"), ctx_b
+        )
+
+        solver = z3.Solver()
+        add_constraints(solver, domain)
+        solver.add(domain.charms[model_a_id].exists)
+        solver.add(domain.charms[model_b_id].exists)
+
+        # THEN satisfiable: without the model-scoping guard on the external-CMR loop, model-a's
+        # synthetic peer id leaked into model-b's set (keyed only by application name), making the
+        # two sets unequal and this comparison unsatisfiable.
+        assert solver.check(result_b.expr) == z3.sat
+
     def test_features_of_cross_model_endpoint_is_rejected(self) -> None:
         # GIVEN a plain endpoint reference wrapped in cross_model()
         domain = _make_domain(
