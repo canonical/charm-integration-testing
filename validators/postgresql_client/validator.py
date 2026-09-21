@@ -397,12 +397,6 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             # run. Without this check, an empty or partially recreated table (actual == 0) could
             # coincidentally satisfy `actual == expected.ref` for ref=0 and report a false PASS.
             raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
-        if not expected.token:
-            # prepare() always returns a non-empty token, so an empty one can only come from a
-            # state serialised before the token existed (or otherwise restored/malformed). Matching
-            # on an empty marker would count rows that carry no token at all, so fail loudly rather
-            # than silently degrading the identity check.
-            raise ValueError("expected.token is empty; cannot verify canary row identity")
         table_name = self._canary_table_name(expected.id)
         marker = expected.token
         conn = self._open_connection()

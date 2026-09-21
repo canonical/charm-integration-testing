@@ -8,6 +8,7 @@ from unittest.mock import patch
 import ops
 import psycopg2
 import pytest
+from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
 from validators.postgresql_client.validator import (
@@ -802,16 +803,13 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
         assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
-    def test_raises_when_expected_token_is_empty(self) -> None:
+    def test_rejects_state_without_a_token(self) -> None:
         # GIVEN a state serialised before the token existed (or otherwise restored/malformed)
         # Regression test for: matching on an empty marker would count rows carrying no token at
-        # all, silently degrading the identity check instead of failing safely.
-        validator = _make_persistence_validator(VALID_DATABAG)
-
-        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
-            # WHEN / THEN
-            with pytest.raises(ValueError, match="token is empty"):
-                validator.checkpoint(PersistenceState(id=1, ref=1))
+        # all, silently degrading the identity check instead of failing safely. The base protocol
+        # rejects such a state at construction, so it can never reach checkpoint().
+        with pytest.raises(ValidationError):
+            PersistenceState(id=1, ref=1)
 
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
