@@ -492,13 +492,23 @@ class ValidatorRunner:
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
         cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
-            cleaned_relation_ids.append(integration.id)
+            # Only report the relation as cleaned once a cleanup() invocation actually ran. A
+            # PersistenceNotApplicable skip means the validator is not applicable to this relation
+            # side, so no canary data was dropped; reporting it as cleaned would make
+            # post_persistence() forget tracked state for a relation whose cleanup never ran.
+            # Ordinary errors still count as "ran", so the existing FAIL/ERROR filtering in
+            # post_persistence() preserves the tracked state for them.
+            cleanup_ran = False
             for validator_cls in self.persistence_validators[interface_name]:
-                _, error_result, _ = self._call_persistence_method(
+                _, error_result, skipped = self._call_persistence_method(
                     validator_cls, charm, integration, interface_name, role, lambda v: v.cleanup()
                 )
                 if error_result is not None:
                     results.append(error_result)
+                if not skipped:
+                    cleanup_ran = True
+            if cleanup_ran:
+                cleaned_relation_ids.append(integration.id)
         logger.info("Finished cleaning up persistence validators")
         return ValidatorRunnerResults(results=results, updated_refs={}, cleaned_relation_ids=cleaned_relation_ids)
 
