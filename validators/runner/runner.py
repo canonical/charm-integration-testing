@@ -154,8 +154,10 @@ class ValidatorRunner:
             try:
                 validator_cls = ep.load()
                 if not issubclass(validator_cls, BasePersistenceValidator):
-                    logger.warning(f"Entry point '{ep.name}' does not implement BasePersistenceValidator. Skipping.")
-                    continue
+                    raise TypeError(
+                        f"entry point '{ep.name}' does not implement BasePersistenceValidator "
+                        f"(got {validator_cls!r})"
+                    )
                 # Unlike functional validators, persistence state (PersistenceState per relation_id
                 # in --refs/updated_refs) has no room to distinguish which validator a state entry
                 # belongs to. Two persistence validators registered for the same interface would
