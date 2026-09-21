@@ -25,6 +25,9 @@ from validators.test_utils.stubs import (
 # Stubs
 # ---------------------------------------------------------------------------
 
+# Arbitrary non-empty token used by checkpoint() tests; prepare() generates a random one per run.
+TEST_TOKEN = "test-token-abc123"
+
 
 def _make_validator(
     databag: dict[str, str], endpoint: str = "db", role: RelationRoleStub = RelationRoleStub.requires
@@ -545,7 +548,7 @@ class TestPostgreSQLClientPersistenceValidatorRole:
 
         # WHEN / THEN
         with pytest.raises(PersistenceNotApplicable):
-            validator.checkpoint(PersistenceState(id=1, ref=1))
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
     def test_cleanup_raises_not_applicable_for_non_requires_role(self) -> None:
         # GIVEN
@@ -577,7 +580,7 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
 
         # WHEN / THEN
         with pytest.raises(RuntimeError, match="uris"):
-            validator.checkpoint(PersistenceState(id=1, ref=1))
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
     def test_prepare_raises_when_first_uri_is_blank_after_split(self) -> None:
         # GIVEN a "uris" value that is non-blank (so validate_schema() passes) but whose first
@@ -620,11 +623,15 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
         # THEN
         assert isinstance(state, PersistenceState)
         assert state.ref == 1
+        assert state.token
         queries = " ".join(conn.cursor_stub.executed_queries)
         assert f"validator_canary_da7d88bc9ad4d4fd_{state.id:020d}" in queries
         assert "DROP TABLE IF EXISTS" in queries
         assert "CREATE TABLE" in queries
         assert "INSERT INTO" in queries
+        # The token is written as the row's marker, so checkpoint() can match on it later
+        insert_params = conn.cursor_stub.executed_params[-1]
+        assert insert_params[0] == state.token
 
     def test_generates_distinct_identifiers_across_calls(self) -> None:
         # GIVEN
@@ -637,6 +644,7 @@ class TestPostgreSQLClientPersistenceValidatorPrepare:
 
         # THEN
         assert first.id != second.id
+        assert first.token != second.token
 
 
 class TestPostgreSQLClientPersistenceValidatorCheckpoint:
@@ -650,7 +658,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            result, new_state = validator.checkpoint(PersistenceState(id=42, ref=2))
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
 
         # THEN
         assert result.status == "PASS"
@@ -658,6 +666,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert check.passed
         assert new_state.id == 42
         assert new_state.ref == 3
+        assert new_state.token == TEST_TOKEN
         # A new row is still written to continue the chain
         assert any("INSERT INTO" in q for q in cursor.executed_queries)
 
@@ -669,7 +678,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=3))
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=7, ref=3))
 
         # THEN
         assert result.status == "FAIL"
@@ -682,7 +691,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # ever compare against again, masking the original data loss behind permanent drift.
         # Neither should happen on FAIL: the returned state must match `expected` unchanged, and
         # no INSERT should have been issued.
-        assert new_state == PersistenceState(id=7, ref=3)
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=7, ref=3)
         assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
     def test_fails_when_table_is_not_found(self) -> None:
@@ -693,11 +702,11 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            result, new_state = validator.checkpoint(PersistenceState(id=7, ref=1))
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=7, ref=1))
 
         # THEN
         assert result.status == "FAIL"
-        assert new_state == PersistenceState(id=7, ref=1)
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=7, ref=1)
         assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
     def test_uses_canary_table_name_from_expected_identifier(self) -> None:
@@ -708,7 +717,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            validator.checkpoint(PersistenceState(id=99, ref=1))
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
         # THEN
         assert any("validator_canary_da7d88bc9ad4d4fd_00000000000000000099" in q for q in cursor.executed_queries)
@@ -727,7 +736,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            result, _ = validator.checkpoint(PersistenceState(id=99, ref=1))
+            result, _ = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
         # THEN the single match is used even though it isn't currently visible
         assert result.status == "PASS"
@@ -746,13 +755,13 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            validator.checkpoint(PersistenceState(id=99, ref=1))
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
         # THEN the visible schema ("public") is used to qualify the count query, not the first row
         count_query_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
         assert '"public".' in cursor.executed_queries[count_query_index]
 
-    def test_filters_row_count_by_identifier_derived_marker(self) -> None:
+    def test_filters_row_count_by_token(self) -> None:
         # GIVEN
         # Regression test for: checkpoint() previously counted every row in the table, so a table
         # recreated from scratch with an unrelated but equally-sized set of rows would still pass.
@@ -762,16 +771,47 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            validator.checkpoint(PersistenceState(id=99, ref=1))
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
-        # THEN the row count query and the follow-up insert are both scoped to the same marker,
-        # which is derived deterministically from the identifier so it is stable across calls
+        # THEN the row count query and the follow-up insert are both scoped to the same token,
+        # which is random per prepare() run so it cannot be reproduced by a recreated table
         select_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
         insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
         assert "WHERE marker = %s" in cursor.executed_queries[select_index]
-        assert cursor.executed_params[select_index] == ("marker-99", 1)
-        # INSERT params now include checkpoint_ref and written_at (the marker is first)
-        assert cursor.executed_params[insert_index][0] == "marker-99"
+        assert cursor.executed_params[select_index] == (TEST_TOKEN, 1)
+        # INSERT params now include checkpoint_ref and written_at (the token is first)
+        assert cursor.executed_params[insert_index][0] == TEST_TOKEN
+
+    def test_fails_when_table_was_dropped_and_recreated_with_same_ref(self) -> None:
+        # GIVEN a table dropped and recreated from scratch: the SERIAL sequence resets, so
+        # reinserting rows with the same checkpoint_ref reproduces `id == checkpoint_ref` and the
+        # same row count. Only the random per-run token distinguishes the original canary rows from
+        # the recreated ones, so the count query (scoped to the original token) matches nothing.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchall_rows=[("public",)], fetchone_rows=[(0,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the recreated table is detected as data loss, not a false PASS
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "row_count")
+        assert not check.passed
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+        assert not any("INSERT INTO" in q for q in cursor.executed_queries)
+
+    def test_raises_when_expected_token_is_empty(self) -> None:
+        # GIVEN a state serialised before the token existed (or otherwise restored/malformed)
+        # Regression test for: matching on an empty marker would count rows carrying no token at
+        # all, silently degrading the identity check instead of failing safely.
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
+            # WHEN / THEN
+            with pytest.raises(ValueError, match="token is empty"):
+                validator.checkpoint(PersistenceState(id=1, ref=1))
 
     def test_result_endpoint_and_interface_are_set(self) -> None:
         # GIVEN
@@ -781,7 +821,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=conn):
             # WHEN
-            result, _ = validator.checkpoint(PersistenceState(id=1, ref=1))
+            result, _ = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
         # THEN
         assert result.endpoint == "my-db"
@@ -800,7 +840,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
-                validator.checkpoint(PersistenceState(id=out_of_range_id, ref=1))
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=out_of_range_id, ref=1))
 
     def test_raises_when_expected_identifier_is_negative(self) -> None:
         # GIVEN
@@ -809,7 +849,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
-                validator.checkpoint(PersistenceState(id=-1, ref=1))
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=-1, ref=1))
 
     def test_raises_when_expected_ref_is_zero(self) -> None:
         # GIVEN
@@ -823,7 +863,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
-                validator.checkpoint(PersistenceState(id=1, ref=0))
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=0))
 
     def test_raises_when_expected_ref_is_negative(self) -> None:
         # GIVEN
@@ -832,7 +872,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
-                validator.checkpoint(PersistenceState(id=1, ref=-1))
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=-1))
 
 
 class TestPostgreSQLClientPersistenceValidatorCleanup:
