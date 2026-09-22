@@ -46,9 +46,8 @@ class PersistenceState(BaseModel):
     the data the validator tracks. Validators must match records on ``token`` rather than on a value
     derived from ``id``/``ref``: those are reproducible, so a backend that loses the data and
     recreates it from scratch (resetting a sequence, for example) would otherwise still satisfy the
-    check and report a false PASS. It is required and must be non-empty, so a state that could not
-    have come from ``prepare()`` (e.g. one restored from an older serialised form) is rejected
-    rather than silently matching records that carry no token at all.
+    check and report a false PASS. It is required and non-empty so a state that could not have come
+    from ``prepare()`` is rejected rather than silently matching untagged records.
     """
 
     id: int
@@ -62,8 +61,8 @@ class PersistenceNotApplicable(Exception):
     ``prepare()``/``checkpoint()``/``cleanup()`` have no ``SKIPPED`` result to return (unlike
     ``BaseValidator.validate()``), since ``prepare()``/``cleanup()`` don't produce a
     ``ValidationResult`` at all. Raise this instead - e.g. when ``self.role`` isn't the side of the
-    relation persistence applies to - and callers (the validator runner) treat it as "no applicable
-    validator", not as a failure.
+    relation persistence applies to - and callers treat it as "no applicable validator", not as a
+    failure.
     """
 
 
@@ -188,15 +187,15 @@ class BasePersistenceValidator(ABC):
     seeds known data and establishes a steady state, and each subsequent passing ``checkpoint()``
     call verifies all previously-written data survived and advances the steady state for the next
     round. A failing ``checkpoint()`` leaves the steady state unchanged instead of advancing past
-    the failure - see ``checkpoint()`` below.
-    This is only meaningful when the caller (the test harness) controls the sequence and carries
-    ``PersistenceState`` across calls; it is not a general-purpose health check.
+    the failure - see ``checkpoint()`` below. This is only meaningful when the caller (the test
+    harness) controls the sequence and carries ``PersistenceState`` across calls; it is not a
+    general-purpose health check.
 
     Concrete implementations choose how to map their internal storage (tables, keys, queues, ...)
-    to the interface. They are not required to key storage off ``relation_id`` - it is not a
-    stable identifier: it changes whenever a relation is removed and re-added, whereas the
-    identifier chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the
-    canary data it names.
+    to the interface. They are not required to key storage off ``relation_id`` - it is not a stable
+    identifier: it changes whenever a relation is removed and re-added, whereas the identifier
+    chosen by ``prepare()`` (``PersistenceState.id``) is stable for the lifetime of the canary data
+    it names.
     """
 
     charm: ops.CharmBase
