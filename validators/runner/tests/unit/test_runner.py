@@ -842,6 +842,59 @@ class TestValidatorRunnerPersistence:
         assert cleanup_results.results == []
         assert cleanup_results.cleaned_relation_ids == []
 
+    def test_prepare_all_reports_error_for_unestablished_metadata_relation(self) -> None:
+        # GIVEN a metadata relation with a registered persistence validator that has no live
+        # relation in the model (ops.RelationMapping always contains the metadata key, so the
+        # "not yet related" condition is an empty list, not a missing key)
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        charm = make_charm_from_relation(
+            RelationStub(name="db", id=0), interface_name="test-interface", role=RelationRoleStub.requires
+        )
+        charm.model.relations = {"db": []}
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN the unestablished relation surfaces as an ERROR (mirroring run()) instead of
+        # silently producing no state, which would make the following empty checkpoint look like
+        # a pass without any persistence validation having run
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "not found in model" in (results.results[0].error or "")
+        assert results.updated_refs == {}
+
+    def test_cleanup_all_reports_error_for_unestablished_metadata_relation(self) -> None:
+        # GIVEN a metadata relation with a registered persistence validator that has no live relation
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        charm = make_charm_from_relation(
+            RelationStub(name="db", id=0), interface_name="test-interface", role=RelationRoleStub.requires
+        )
+        charm.model.relations = {"db": []}
+
+        # WHEN
+        results = runner.cleanup_all(cast(ops.CharmBase, charm))
+
+        # THEN cleanup reports an ERROR rather than an empty (and therefore state-clearing) result
+        # list, and the relation is not reported as cleaned
+        assert len(results.results) == 1
+        assert results.results[0].status == "ERROR"
+        assert "not found in model" in (results.results[0].error or "")
+        assert results.cleaned_relation_ids == []
+
+    def test_missing_relation_error_ignored_for_interface_without_persistence_validator(self) -> None:
+        # GIVEN a metadata relation with no registered persistence validator that has no live relation
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        charm = make_charm_from_relation(
+            RelationStub(name="db", id=0), interface_name="other-interface", role=RelationRoleStub.requires
+        )
+        charm.model.relations = {"db": []}
+
+        # WHEN
+        results = runner.prepare_all(cast(ops.CharmBase, charm))
+
+        # THEN no ERROR is reported: persistence validation does not apply to this interface
+        assert results.results == []
+
     def test_prepare_all_reports_error_for_interface_with_load_error(self) -> None:
         # GIVEN a relation on an interface whose persistence validator failed to load
         runner = ValidatorRunner.__new__(ValidatorRunner)

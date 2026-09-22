@@ -265,6 +265,41 @@ class ValidatorRunner:
                 targets.append((integration, interface_name, role))
         return targets
 
+    def _persistence_missing_relation_results(self, charm: CharmBase) -> list[ValidationResult]:
+        """ERROR results for persistence interfaces whose metadata relation has no live relation.
+
+        ``_iter_persistence_targets`` iterates the relations present in the model, so a metadata
+        relation that is not (yet) established yields no target and is silently skipped. Reporting
+        an ERROR instead means a ``prepare`` on a partially initialized model cannot look like a
+        success whose following checkpoint trivially passes with nothing validated.
+
+        Only interfaces with a registered persistence validator (or a load error) are considered;
+        for any other interface there is no persistence validation to skip.
+        """
+        results: list[ValidationResult] = []
+        for relation_name, metadata in charm.meta.relations.items():
+            if (role := str_to_validation_role(metadata.role.name)) == "peer":
+                continue
+            interface_name = metadata.interface_name or relation_name
+            if interface_name not in self.persistence_validators and interface_name not in self.persistence_load_errors:
+                continue
+            if charm.model.relations.get(relation_name):
+                continue
+            error = f"Relation '{relation_name}' defined in metadata but not found in model."
+            logger.error(error)
+            results.append(
+                ValidationResult(
+                    status="ERROR",
+                    endpoint=relation_name,
+                    interface=interface_name,
+                    role=role,
+                    level=_PERSISTENCE_RESULT_LEVEL,
+                    relation_id=-1,
+                    error=error,
+                )
+            )
+        return results
+
     def _persistence_load_error_results(self, charm: CharmBase) -> list[ValidationResult]:
         """ERROR results for every live relation on an interface whose persistence validator failed to load.
 
@@ -322,7 +357,8 @@ class ValidatorRunner:
         the relation's Juju ``relation_id`` (as a string, matching the ``--refs`` wire format).
         """
         logger.info("Preparing persistence validators")
-        results: list[ValidationResult] = self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
+        results += self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             for validator_cls in self.persistence_validators[interface_name]:
@@ -365,7 +401,8 @@ class ValidatorRunner:
     def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
         """Verify all previously-seeded canary data is still present for every ref in *refs*."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
-        results: list[ValidationResult] = self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
+        results += self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for relation_id_str, expected in refs.items():
             try:
@@ -484,7 +521,8 @@ class ValidatorRunner:
     def cleanup_all(self, charm: CharmBase) -> ValidatorRunnerResults:
         """Drop all canary data for every relation with a registered persistence validator."""
         logger.info("Cleaning up persistence validators")
-        results: list[ValidationResult] = self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
+        results += self._persistence_load_error_results(charm)
         cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             # Only report the relation as cleaned once a cleanup() invocation actually ran. A
