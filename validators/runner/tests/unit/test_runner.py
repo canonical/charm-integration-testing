@@ -958,10 +958,9 @@ class TestValidatorRunnerPersistence:
 
     def test_checkpoint_all_does_not_duplicate_error_for_ref_on_interface_with_load_error(self) -> None:
         # GIVEN a ref pointing at a live relation whose interface's persistence validator failed
-        # to load this run
-        # Regression test for: _persistence_load_error_results() already adds one ERROR per live
-        # relation on a load-failed interface; the ref-checkpointing loop below used to add a
-        # second, more generic ERROR for the same relation_id, reporting one load failure twice.
+        # to load this run.
+        # Regression test for: the ref-checkpointing loop added a second, more generic ERROR for a
+        # relation_id _persistence_load_error_results() had already reported - one failure, twice.
         runner = ValidatorRunner.__new__(ValidatorRunner)
         runner.validators = {}
         runner.persistence_validators = {}

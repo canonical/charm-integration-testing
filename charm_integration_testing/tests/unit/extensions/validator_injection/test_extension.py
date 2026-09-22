@@ -252,11 +252,9 @@ class TestValidatorInjectorExtension:
         def test_reinstalls_when_venv_predates_persistence_support(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
-            # Regression test for: a venv installed before persistence support existed has
-            # venv_runner present but understands only --level, not --persistence. The readiness
-            # check must also require the persistence_marker file (only written by a fresh
-            # _inject_validators() run) so this venv is reinstalled instead of being invoked with
-            # an argument it doesn't support.
+            # Regression test for: a venv installed before persistence support exists has
+            # venv_runner present but understands only --level. The readiness check must also
+            # require the persistence_marker file, or this venv is invoked with an unsupported arg.
             juju.units_by_app["myapp"] = ["myapp/0"]
             juju.exec_responses.extend(_inject_and_pass_responses(_persistence_runner_json()))
 
@@ -446,11 +444,9 @@ class TestValidatorInjectorExtension:
         def test_reports_error_and_does_not_mutate_state_for_a_malformed_relation_id(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
-            # Regression test for: converting updated_refs' string keys to int happened outside
-            # the per-unit try/except that catches _run_persistence_on_unit failures, so a
-            # malformed or forward-version remote payload (e.g. a non-numeric relation_id key)
-            # raised ValueError straight out of post_persistence(), aborting the loop before later
-            # units were attempted and before persistence_state could be left untouched.
+            # Regression test for: converting updated_refs' string keys to int ran outside the
+            # per-unit try/except, so a malformed remote payload (non-numeric relation_id) raised
+            # ValueError straight out of post_persistence() and aborted the loop early.
             juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
             existing_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
             persistence_state = {existing_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
