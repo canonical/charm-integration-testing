@@ -68,15 +68,11 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # "prepare()" design point below.
         identifier = uuid.uuid4().int & ((1 << 63) - 1)
         # ... create a canary table/object named e.g. f"{self._canary_table_prefix()}{identifier:020d}"
-        # - the identifier must be zero-padded to a fixed width (20 digits here, since the 63-bit
-        # mask above never produces more than 19) so cleanup()'s discovery regex, which matches an
-        # exact "prefix + fixed-width digits" shape (see "Common patterns" below), can find it
-        # again. An unpadded/variable-width identifier would never match that regex, leaving the
-        # canary resource undiscoverable and orphaned. Then write one tagged row/record ...
+        # - zero-pad to a fixed width so cleanup()'s discovery regex (an exact "prefix + fixed-width
+        # digits" shape) can find it again. Then write one tagged row/record ...
         # Mint a second, independent random value and write it alongside the canary data. This
-        # token - not the identifier-derived resource name - is what checkpoint() matches on:
-        # the name is reproducible, so a resource dropped and recreated from scratch would
-        # otherwise satisfy the check and report a false PASS.
+        # token - not the reproducible resource name - is what checkpoint() matches on, so a
+        # resource dropped and recreated from scratch can't satisfy the check.
         token = uuid.uuid4().hex
         # commit (or use an autocommit connection) before returning - a transactional backend
         # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
@@ -85,28 +81,20 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
         self._require_requires_role()
-        # expected.id and expected.ref both come from --refs, a (possibly restored/malformed)
-        # PersistenceState rather than values prepare() just minted - validate expected.id is in
-        # the range prepare() could have produced (e.g. 0..(1 << 63) - 1) before interpolating it
-        # into any resource name or query, and validate expected.ref against the range your
-        # prepare() declares (e.g. PostgreSQL starts at ref=1, but a KV validator might start at
-        # ref=0; see the validator-specific initial state below). An out-of-range id could
-        # otherwise silently target the wrong resource; an invalid ref could let an empty or
-        # partially recreated canary satisfy `actual == expected.ref` and report a false PASS.
-        # Also reject an empty expected.token: prepare() always mints one, so an empty value can
-        # only come from a restored/malformed state, and matching on it would count records
-        # carrying no token at all. Raise before any read/write if any of these is invalid.
+        # expected.id/ref/token come from --refs, a (possibly restored/malformed) PersistenceState
+        # rather than values prepare() just minted: validate expected.id is in the range prepare()
+        # could have produced, expected.ref against the range your prepare() declares, and reject an
+        # empty expected.token. Raise before any read/write if invalid - an out-of-range id could
+        # target the wrong resource, and a bogus ref or empty token could let an empty/partially
+        # recreated canary report a false PASS.
         # ... read back and assert the tagged row/record count matches expected.ref (filter on the
         # random token written by prepare(), not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
         # Gate the extra write and the returned state on the *overall* result, not just the one
-        # assertion above - if this method later adds more checks, a single "count matches"
-        # assertion could still be true while the combined result is FAIL. The harness only
-        # carries a returned state forward on PASS (see the design point below), so
-        # writing/advancing when result.status != "PASS" would grow the backend's actual state
-        # past what the harness will ever compare against again, masking the mismatch instead of
-        # letting a later checkpoint re-detect it. Commit the write (or use autocommit) for the
-        # same reason as prepare() above.
+        # assertion above: the harness only carries a returned state forward on PASS, so
+        # writing/advancing on FAIL/ERROR would grow the backend's actual state past what the
+        # harness will ever compare against again, masking the mismatch. Commit the write (or use
+        # autocommit) for the same reason as prepare() above.
         if result.status == "PASS":
             # ... write one more tagged row/record, carrying the same token forward ...
             new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)
@@ -629,12 +617,10 @@ def _quote_identifier(name: str) -> str:
 
 def _canary_scope_token(self) -> str:
     # A single fixed-width token derived from the model UUID, relation_id *and* unit name:
-    # relation_id is assigned per-model, so two different models could otherwise expose the same
-    # numeric relation_id against a shared database/schema and collide; the unit name is needed
-    # because the runner injects and runs persistence validators on every unit of the
-    # application, and two units of the same application share both model UUID and relation_id
-    # while owning separate canary tables. Folding these into the hash (rather than appending
-    # them as raw values) keeps the token's length independent of how large relation_id gets.
+    # relation_id is assigned per-model, so two models could otherwise collide on a shared
+    # database/schema; the unit name is needed because the runner runs persistence validators on
+    # every unit, and two units of one application share model UUID and relation_id while owning
+    # separate canary tables. Hashing (rather than appending) keeps the token length fixed.
     unit_name = self.charm.model.unit.name
     digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
     return hashlib.sha256(digest_input).hexdigest()[:16]
@@ -656,12 +642,11 @@ def _canary_table_regex(self) -> "re.Pattern[str]":
 def cleanup(self) -> None:
     self._require_requires_role()
     # cleanup() runs for every relation with a registered persistence validator, including one
-    # that never got as far as receiving credentials (e.g. the relation is still being set up).
-    # Treat a databag with no usable credentials yet as a no-op instead of raising by opening a
-    # connection anyway. Check the *same* fields _open_connection() requires (via the same
-    # validate_schema() helper) rather than a narrower heuristic like "uris" alone: a relation
-    # that already has "uris" but is still missing "database"/"username"/"password" would
-    # otherwise fall through this guard and raise instead of no-op'ing.
+    # that never received credentials (e.g. the relation is still being set up). Treat a databag
+    # with no usable credentials as a no-op rather than raising by opening a connection anyway.
+    # Check the *same* fields _open_connection() requires (via validate_schema()) rather than a
+    # narrower heuristic like "uris" alone, or a relation with "uris" but no database/username/
+    # password would fall through and raise instead of no-op'ing.
     creds = self._resolve_credentials()
     if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
         return
