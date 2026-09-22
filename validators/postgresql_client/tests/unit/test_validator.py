@@ -599,10 +599,9 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
     def test_prepare_raises_when_uri_database_does_not_match_databag_database(self) -> None:
         # GIVEN a "uris" value pointing at "mydb" but a "database" field claiming a different
         # database.
-        # Regression test for: unlike _validate_simple()/_validate_deep(), _open_connection() (used
-        # by prepare()/checkpoint()/cleanup()) previously skipped this consistency check entirely,
-        # so a relation advertising uris=".../other_db" alongside a stale "database" field would
-        # silently write and verify canary data against the wrong database.
+        # Regression test for: _open_connection() (used by prepare()/checkpoint()/cleanup())
+        # previously skipped the consistency check _validate_simple()/_validate_deep() perform, so
+        # canary data would be written and verified against the wrong database.
         databag = {**VALID_DATABAG, "database": "otherdb"}
         validator = _make_persistence_validator(databag)
 
@@ -687,11 +686,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert not check.passed
         assert "3" in check.message and "1" in check.message
         # Regression test for: checkpoint() previously wrote a new marker row and advanced `ref`
-        # even on FAIL, but ValidatorRunner only carries the returned state forward on PASS -
-        # writing here anyway would grow the actual row count past what a later checkpoint could
-        # ever compare against again, masking the original data loss behind permanent drift.
-        # Neither should happen on FAIL: the returned state must match `expected` unchanged, and
-        # no INSERT should have been issued.
+        # even on FAIL, but ValidatorRunner only carries the returned state forward on PASS, so the
+        # actual row count would drift past what a later checkpoint could compare against. On FAIL
+        # the returned state must match `expected` unchanged and no INSERT should be issued.
         assert new_state == PersistenceState(token=TEST_TOKEN, id=7, ref=3)
         assert not any("INSERT INTO" in q for q in cursor.executed_queries)
 
@@ -727,10 +724,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # GIVEN a single table anywhere in the database matches this canary's exact (random,
         # effectively-unique) name.
         # Regression test for: resolving the schema via pg_table_is_visible() alone depends on the
-        # *current* connection's search_path, which can disagree with the search_path prepare()
-        # used, causing a false FAIL (or, in a contrived multi-match case, the wrong table). Since
-        # the table name is derived from a random per-run identifier, an exact-name match anywhere
-        # in the database - visible or not - unambiguously identifies our canary.
+        # *current* connection's search_path, which can disagree with the one prepare() used,
+        # causing a false FAIL. An exact-name match anywhere in the database - visible or not -
+        # unambiguously identifies our canary.
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchall_rows=[("some_schema", False)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
