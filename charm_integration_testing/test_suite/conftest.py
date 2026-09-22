@@ -562,21 +562,14 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     # not pin a revision or channel, charm_from_store falls back to the overrides defaults, so a
     # "latest release" run still resolves a concrete revision and base.
     try:
-        if target_revision is not None:
-            target = charmhub_client.charm_from_store(
-                charm_name=target_charm,
-                ubuntu_arch=target_arch,
-                charm_revision=target_revision,
-                ubuntu_version=target_series,
-            )
-        else:
-            target = charmhub_client.charm_from_store(
-                charm_name=target_charm,
-                ubuntu_arch=target_arch,
-                charm_track=channel_track,
-                charm_risk=channel_risk,
-                ubuntu_version=target_series,
-            )
+        target = charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            ubuntu_arch=target_arch,
+            charm_track=channel_track,
+            charm_risk=channel_risk,
+            charm_revision=target_revision,
+            ubuntu_version=target_series,
+        )
     except BaseMismatchError:
         # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
         # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
