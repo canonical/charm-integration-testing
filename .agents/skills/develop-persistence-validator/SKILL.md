@@ -68,11 +68,10 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # "prepare()" design point below.
         identifier = uuid.uuid4().int & ((1 << 63) - 1)
         # ... create a canary table/object named e.g. f"{self._canary_table_prefix()}{identifier:020d}"
-        # - zero-pad to a fixed width so cleanup()'s discovery regex (an exact "prefix + fixed-width
-        # digits" shape) can find it again. Then write one tagged row/record ...
-        # Mint a second, independent random value and write it alongside the canary data. This
-        # token - not the reproducible resource name - is what checkpoint() matches on, so a
-        # resource dropped and recreated from scratch can't satisfy the check.
+        # - zero-pad to a fixed width so cleanup()'s discovery regex can find it again. Then write
+        # one tagged row/record ...
+        # Mint a second, independent random value and write it alongside the canary data: this
+        # token, not the resource name, is what checkpoint() matches on.
         token = uuid.uuid4().hex
         # commit (or use an autocommit connection) before returning - a transactional backend
         # left uncommitted here can roll back the write, so the next checkpoint() sees no data.
@@ -81,12 +80,9 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         """Verify canary data survived, then extend it. Called after each disruption."""
         self._require_requires_role()
-        # expected.id/ref/token come from --refs, a (possibly restored/malformed) PersistenceState
-        # rather than values prepare() just minted: validate expected.id is in the range prepare()
-        # could have produced, expected.ref against the range your prepare() declares, and reject an
-        # empty expected.token. Raise before any read/write if invalid - an out-of-range id could
-        # target the wrong resource, and a bogus ref or empty token could let an empty/partially
-        # recreated canary report a false PASS.
+        # expected comes from --refs, not from prepare(): validate id/ref are in range and token is
+        # non-empty, raising before any read/write - a bogus value could target the wrong resource
+        # or let a partially recreated canary report a false PASS.
         # ... read back and assert the tagged row/record count matches expected.ref (filter on the
         # random token written by prepare(), not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
@@ -641,12 +637,9 @@ def _canary_table_regex(self) -> "re.Pattern[str]":
 
 def cleanup(self) -> None:
     self._require_requires_role()
-    # cleanup() runs for every relation with a registered persistence validator, including one
-    # that never received credentials (e.g. the relation is still being set up). Treat a databag
-    # with no usable credentials as a no-op rather than raising by opening a connection anyway.
-    # Check the *same* fields _open_connection() requires (via validate_schema()) rather than a
-    # narrower heuristic like "uris" alone, or a relation with "uris" but no database/username/
-    # password would fall through and raise instead of no-op'ing.
+    # cleanup() runs even for a relation that never received credentials (still being set up):
+    # treat a databag with no usable credentials as a no-op. Check the *same* fields
+    # _open_connection() requires (via validate_schema()), not a narrower heuristic like "uris".
     creds = self._resolve_credentials()
     if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
         return
@@ -660,12 +653,10 @@ def cleanup(self) -> None:
     # canary tables in place.
     try:
         with conn.cursor() as cur:
-            # CREATE TABLE elsewhere is unqualified, so it resolves through search_path - which can
-            # land in a schema other than current_schema(), and that path can change between
-            # invocations. Search every schema in information_schema.tables rather than filtering
-            # to current_schema(), or a table created in another schema could be left behind. Also
-            # restrict to base tables: a view/foreign table sharing the prefix would make DROP
-            # TABLE fail and abort cleanup, leaving any remaining canary tables undropped.
+            # CREATE TABLE elsewhere is unqualified, so it resolves through search_path, which can
+            # land in a schema other than current_schema() and change between invocations. Search
+            # every schema in information_schema.tables, and restrict to base tables so a
+            # view/foreign table sharing the prefix can't make DROP TABLE abort cleanup.
             cur.execute(
                 "SELECT table_schema, table_name FROM information_schema.tables "  # nosec B608
                 "WHERE table_type = 'BASE TABLE' "
@@ -673,13 +664,9 @@ def cleanup(self) -> None:
                 (f"{escaped_prefix}%",),
             )
             tables = cur.fetchall()
-        # The LIKE query above only narrows candidates by *prefix* - it can't cheaply assert an
-        # exact suffix shape. Re-check every candidate against the fixed-width regex before
-        # dropping it, so a same-prefixed but unrelated table (e.g. a hand-created "..._backup")
-        # is skipped instead of destroyed. The regex alone would still accept a shape-only
-        # look-alike like "..._99999999999999999999" (20 nines) - larger than any identifier
-        # prepare() can produce (masked to 63 bits) - so also check the captured identifier
-        # against _MAX_CANARY_IDENTIFIER.
+        # The LIKE query only narrows by *prefix*; re-check each candidate against the fixed-width
+        # regex and _MAX_CANARY_IDENTIFIER before dropping, so a same-prefixed but unrelated table
+        # (e.g. a hand-created "..._backup") is skipped instead of destroyed.
         name_regex = self._canary_table_regex()
         for schema, table_name in tables:
             match = name_regex.fullmatch(table_name)
