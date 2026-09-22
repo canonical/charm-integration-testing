@@ -363,7 +363,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         # Masked to 63 bits (rather than the full 128-bit uuid4().int) so the canary table name -
         # which also carries a fixed-width scope token - stays within PostgreSQL's 63-byte
         # identifier limit, while still leaving far more entropy than a test run could collide on.
-        identifier = uuid.uuid4().int & ((1 << 63) - 1)
+        identifier = uuid.uuid4().int & _MAX_CANARY_IDENTIFIER
         table = self._canary_table_name(identifier)
         # Random, unguessable per-run token written to every canary row and matched on by
         # checkpoint(). It must not be derivable from `identifier`/`ref`: those are reproducible,
