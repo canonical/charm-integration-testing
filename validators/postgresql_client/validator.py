@@ -20,14 +20,14 @@ from validators.base import (
 )
 
 # Table name prefix for persistence-validator canary tables. Kept as a module constant so
-# PostgreSQLClientPersistenceValidator.cleanup() (which has no per-call state to work from) can
-# discover every canary table it may have created by pattern rather than by identifier.
+# cleanup() (which has no per-call state to work from) can discover every canary table it may
+# have created by pattern rather than by identifier.
 _CANARY_TABLE_PREFIX = "validator_canary_"
 
 # prepare() masks its identifier to 63 bits, so a genuine canary identifier never exceeds this
 # value. cleanup()'s discovery regex only checks a candidate table name's *shape* (prefix + 20
-# digits); this bound lets it also reject an out-of-range look-alike that has the right shape but
-# couldn't have been produced by prepare().
+# digits); this bound lets it also reject an out-of-range look-alike with the right shape that
+# prepare() couldn't have produced.
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 
 
@@ -425,8 +425,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # Only write the next canary row when this checkpoint passed: ValidatorRunner only
                 # carries the advanced PersistenceState forward on a PASS result, so writing here
                 # unconditionally would grow `actual` past what the harness will ever compare
-                # against again - masking the original mismatch behind a permanent drift instead of
-                # letting a later checkpoint re-detect the same data loss consistently.
+                # against again, masking the mismatch behind permanent drift.
                 if passed and qualified_table is not None:
                     next_ref = expected.ref + 1
                     cur.execute(
@@ -457,42 +456,28 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def cleanup(self) -> None:
         """Drop every canary table this validator instance (or a prior instance of it) created.
 
-        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so instead
-        of dropping one table by identifier, every table matching this validator instance's canary
-        name pattern is discovered via ``information_schema`` and dropped. This also mops up a
-        canary table left behind by an interrupted run (e.g. a crash between ``prepare()`` and the
-        next ``cleanup()``).
+        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so every
+        table matching this instance's canary name pattern is discovered via ``information_schema``
+        and dropped, rather than dropping one table by identifier. This also mops up a table left
+        behind by an interrupted run (e.g. a crash between ``prepare()`` and the next ``cleanup()``).
 
-        Discovery is scoped to a model+relation+unit namespace (see ``_canary_table_prefix``)
-        rather than the bare ``_CANARY_TABLE_PREFIX``: two concurrent ``postgresql_client``
-        relations sharing the same database/schema - even across different models, whose relation
-        IDs are assigned independently and so can collide numerically - can no longer drop each
-        other's canary tables. The unit is part of that namespace because the harness runs
-        persistence validators on every unit of the application, and those units share a model UUID
-        and relation ID while owning separate canary tables: without it, cleanup on one unit would
-        drop another unit's still-active table and make that unit's next ``checkpoint()`` report a
-        data loss that never happened. The namespace is stable for the lifetime of a given relation
-        on a given unit, so this still finds a table left behind by an interrupted run of *this*
-        instance; it does not sweep up a stray table from a relation that was removed and re-added
-        under a new ID, which is an accepted trade-off since a fresh ``prepare()`` for the new ID
-        starts its own table anyway.
+        Discovery is scoped to a model+relation+unit namespace (see ``_canary_table_prefix``) so
+        concurrent relations sharing a database/schema can't drop each other's tables. It does not
+        sweep up a stray table from a relation removed and re-added under a new ID - an accepted
+        trade-off, since a fresh ``prepare()`` for the new ID starts its own table anyway.
 
-        The initial ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE``
-        can't cheaply assert an exact suffix shape), so every candidate is re-checked against
-        ``_canary_table_regex()`` - which requires the full ``prefix + fixed-width digits`` shape -
-        and against ``_MAX_CANARY_IDENTIFIER`` before being dropped. The regex alone would still
-        accept a shape-only look-alike such as ``..._99999999999999999999`` (20 nines), which is
-        larger than any identifier ``prepare()`` can produce; the extra bound check rejects that
-        too. This rejects a same-prefixed but unrelated table (e.g. a hand-created
-        ``validator_canary_<token>_backup``) that a bare prefix match would otherwise destroy.
+        The ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE`` can't
+        cheaply assert an exact suffix shape), so every candidate is re-checked against
+        ``_canary_table_regex()`` and ``_MAX_CANARY_IDENTIFIER`` before being dropped. This rejects
+        a same-prefixed but unrelated table (e.g. a hand-created ``..._backup``) that a bare prefix
+        match would otherwise destroy.
         """
         self._require_requires_role()
         # Check the same required fields _open_connection() validates, and no-op only when they're
         # genuinely absent; a malformed/unreachable connection still raises and surfaces as a real
-        # ERROR. (Checking only "uris"/"secret-user" was a heuristic that didn't match what
-        # _open_connection() actually requires, so a relation exposing "uris" before the rest of
-        # those fields resolve would raise instead of no-op'ing, turning an in-progress relation
-        # into a failed teardown.)
+        # ERROR. A narrower heuristic (e.g. "uris" alone) would let a relation that has "uris" but
+        # is still missing the rest raise instead of no-op'ing, turning an in-progress relation into
+        # a failed teardown.
         creds = self._resolve_credentials()
         if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
             return
@@ -506,9 +491,9 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
                 # CREATE TABLE in prepare()/checkpoint() is unqualified, so it resolves through
                 # search_path into the first writable schema (which may not be current_schema()).
-                # Search all schemas to avoid leaving canary tables behind in other schemas. Also
-                # restrict to base tables: a view or foreign table sharing the prefix would make
-                # PostgreSQL reject DROP TABLE and abort cleanup, leaving the rest undropped.
+                # Search all schemas to avoid leaving canary tables behind elsewhere. Restrict to
+                # base tables: a view or foreign table sharing the prefix would make PostgreSQL
+                # reject DROP TABLE and abort cleanup, leaving the rest undropped.
                 cur.execute(
                     "SELECT table_schema, table_name FROM information_schema.tables "
                     "WHERE table_type = 'BASE TABLE' "
@@ -537,7 +522,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         # Unlike the functional validator's validate()/deep(), these methods have no ValidationCheck
         # to report a schema failure through, so a missing/blank "uris" is raised rather than passed
         # to psycopg2 as an empty dsn: libpq treats dsn="" as "use local/default connection
-        # parameters", which would silently create/check a canary against an unintended database.
+        # parameters", silently creating/checking a canary against an unintended database.
         schema_check = self.validate_schema(["uris", "database", "username", "password"], creds)
         if not schema_check.passed:
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
@@ -550,8 +535,8 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'uris' is blank")
         # Mirrors the database/URI consistency check _validate_simple()/_validate_deep() perform
         # before connecting: without it, a relation advertising uris=".../other_db" alongside a
-        # stale/mismatched "database" field would silently write and verify canary data against
-        # the wrong database, allowing persistence validation to pass for the wrong target.
+        # stale "database" field would silently write and verify canary data against the wrong
+        # database.
         db_check = self._check_database_consistency(uri, data["database"])
         if not db_check.passed:
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {db_check.message}")
@@ -562,21 +547,15 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
     def _canary_table_prefix(self) -> str:
         """Prefix scoped to this model, relation and unit, so cleanup discovery can't cross boundaries.
 
-        ``self.relation_id`` is stable for the lifetime of a given relation (it only changes if the
-        relation is removed and re-added), but relation IDs are assigned independently per model
-        and can collide numerically across two different models relating to the same backend, and
-        can themselves be arbitrarily long. The unit name is also part of the scope: the runner
-        injects and runs persistence validators on *every* unit of the application, so two units of
-        the same application share both ``model.uuid`` and ``relation_id`` while owning separate
-        canary tables (see ``cleanup()``). Rather than embedding the raw ``relation_id`` (variable
-        length) and a short model hash (narrow collision resistance) in the table name directly,
-        all three are folded into a single fixed-width, collision-resistant ``scope_token``: the
-        first 16 hex characters (64 bits) of a SHA-256 hash of
-        ``f"{model_uuid}:{relation_id}:{unit_name}"``. A fixed-width token, combined with the
-        fixed-width identifier written by ``_canary_table_name()``, lets ``cleanup()`` validate the
-        *exact* shape of a table name (via ``_canary_table_regex()``) instead of relying on a
-        prefix match alone, and keeps the total name within PostgreSQL's 63-byte identifier limit
-        regardless of how large ``relation_id`` gets.
+        ``self.relation_id`` is stable for the lifetime of a given relation, but relation IDs are
+        assigned independently per model and can collide numerically across two different models
+        relating to the same backend. The unit name is also part of the scope: the runner runs
+        persistence validators on *every* unit of the application, so two units share both
+        ``model.uuid`` and ``relation_id`` while owning separate canary tables (see ``cleanup()``).
+        All three are folded into a single fixed-width ``scope_token`` - the first 16 hex characters
+        (64 bits) of a SHA-256 hash of ``f"{model_uuid}:{relation_id}:{unit_name}"`` - so the name
+        stays within PostgreSQL's 63-byte identifier limit regardless of how large ``relation_id``
+        gets, and ``cleanup()`` can validate its exact shape via ``_canary_table_regex()``.
         """
         scope_token = self._canary_scope_token()
         return f"{_CANARY_TABLE_PREFIX}{scope_token}_"
@@ -590,21 +569,20 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         """Exact-shape match for this relation's canary tables: prefix + fixed-width digits.
 
         Used by ``cleanup()`` to reject a table that merely shares the discovery prefix (e.g. a
-        hand-created ``validator_canary_<token>_backup``) but doesn't match the fixed-width
-        zero-padded identifier suffix ``_canary_table_name()`` always produces. Matching this
-        shape alone isn't sufficient though - see ``cleanup()``, which additionally checks the
-        captured ``identifier`` group against ``_MAX_CANARY_IDENTIFIER``.
+        hand-created ``..._backup``) but doesn't match the fixed-width zero-padded identifier
+        suffix ``_canary_table_name()`` always produces. Matching this shape alone isn't sufficient
+        - see ``cleanup()``, which also checks the captured ``identifier`` against
+        ``_MAX_CANARY_IDENTIFIER``.
         """
         return re.compile(re.escape(self._canary_table_prefix()) + r"(?P<identifier>[0-9]{20})")
 
     def _canary_table_name(self, identifier: int) -> str:
         # Zero-padded to a fixed 20 digits (identifier is masked to 63 bits in prepare(), so it
-        # never exceeds 19 digits) so every canary table name has the same length and shape,
-        # which _canary_table_regex() relies on to reject look-alike, unrelated tables. checkpoint()
-        # passes back an identifier from a (possibly restored/malformed) PersistenceState rather
-        # than a freshly masked one, so validate the range here too - an out-of-range value would
-        # otherwise produce a name PostgreSQL could truncate or reject, causing checkpoint() to
-        # silently read/write the wrong table instead of failing safely.
+        # never exceeds 19 digits) so every canary table name has the same shape, which
+        # _canary_table_regex() relies on to reject look-alike tables. checkpoint() passes back an
+        # identifier from a (possibly restored/malformed) PersistenceState, so validate the range
+        # here too - an out-of-range value could otherwise produce a name PostgreSQL truncates or
+        # rejects, silently targeting the wrong table instead of failing safely.
         if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
             raise ValueError(
                 f"canary identifier {identifier} is out of range " f"(expected 0..{_MAX_CANARY_IDENTIFIER})"
@@ -615,20 +593,15 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         """Resolve the schema this validator's canary table currently lives in.
 
         ``CREATE TABLE`` in ``prepare()`` is unqualified, so PostgreSQL resolves it through
-        ``search_path`` at creation time. Rather than re-deriving that same resolution later via
-        ``pg_table_is_visible()`` - which depends on the *current* connection's ``search_path`` and
-        so can disagree with prepare()'s if the path changed in between (e.g. a different role
-        default, or a session-level override) - look the table up by its exact name across every
-        schema in the database, independent of visibility. ``table_name`` is derived from a random,
-        effectively-unique per-run identifier (see ``_canary_table_name``), so in the overwhelming
-        common case exactly one table anywhere matches; that unambiguously identifies our canary
-        regardless of search_path drift between calls.
-
-        Only if more than one schema happens to contain a same-named table (e.g. a leftover canary
-        from an earlier, interrupted run coincidentally reusing this run's random name - vanishingly
-        unlikely, but not impossible) is there genuine ambiguity: in that case, fall back to
-        ``pg_table_is_visible()`` to pick whichever match the *current* connection's unqualified
-        name resolution would actually address, preserving the original tie-breaking behavior.
+        ``search_path`` at creation time. Rather than re-deriving that via ``pg_table_is_visible()``
+        - which depends on the *current* connection's ``search_path`` and can disagree with
+        prepare()'s if the path changed in between - look the table up by its exact name across
+        every schema, independent of visibility. ``table_name`` is derived from a random,
+        effectively-unique per-run identifier (see ``_canary_table_name``), so in the common case
+        exactly one table matches, unambiguously identifying our canary regardless of search_path
+        drift. Only if more than one schema contains a same-named table (vanishingly unlikely) is
+        there genuine ambiguity: fall back to ``pg_table_is_visible()`` to pick whichever match the
+        *current* connection's unqualified name resolution would address.
         """
         cur.execute(
             "SELECT n.nspname, pg_catalog.pg_table_is_visible(c.oid) FROM pg_catalog.pg_class c "
