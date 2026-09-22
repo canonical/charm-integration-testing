@@ -387,6 +387,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Platform for the neighbor model in CMR tests: 'kubernetes' or 'machine'. Defaults to --target-platform value.",
     )
     parser.addoption(
+        "--target-arch",
+        type=str,
+        default="amd64",
+        help="Architecture for the target model, e.g. 'amd64' or 'arm64' (default: 'amd64').",
+    )
+    parser.addoption(
+        "--neighbor-arch",
+        type=str,
+        default=None,
+        help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
         "--charm-overrides",
         type=str,
         default="./static/charm-overrides/",
@@ -539,6 +551,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     target_channel: str | None = request.getfixturevalue("target_channel")
     target_revision: int | None = request.getfixturevalue("target_revision")
     target_series: str | None = request.getfixturevalue("target_series")
+    target_arch: str = request.getfixturevalue("target_arch")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
@@ -552,14 +565,14 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
         if target_revision is not None:
             target = charmhub_client.charm_from_store(
                 charm_name=target_charm,
-                ubuntu_arch="amd64",
+                ubuntu_arch=target_arch,
                 charm_revision=target_revision,
                 ubuntu_version=target_series,
             )
         else:
             target = charmhub_client.charm_from_store(
                 charm_name=target_charm,
-                ubuntu_arch="amd64",
+                ubuntu_arch=target_arch,
                 charm_track=channel_track,
                 charm_risk=channel_risk,
                 ubuntu_version=target_series,
@@ -607,7 +620,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     try:
         charmhub_client.charm_from_store(
             charm_name=target_charm,
-            ubuntu_arch="amd64",
+            ubuntu_arch=target_arch,
             charm_revision=previous_revision,
             ubuntu_version=target_base,
         )
@@ -635,6 +648,15 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-platform")
     if not value:
         pytest.fail("--target-platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def target_arch(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--target-arch")
+    if not value:
+        pytest.fail("--target-arch is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
 
@@ -694,6 +716,16 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     value = request.config.getoption("--neighbor-platform")
     if not value:
         return target_platform
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_arch(request: pytest.FixtureRequest, target_arch: str) -> str:
+    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch."""
+    value = request.config.getoption("--neighbor-arch")
+    if not value:
+        return target_arch
     assert isinstance(value, str)
     return value
 
