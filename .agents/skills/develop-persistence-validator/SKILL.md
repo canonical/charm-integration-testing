@@ -125,22 +125,22 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         e.g. for iteration - see "Manually verify" below - bypasses the harness and can call this
         method at any time.) A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
         instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
-        `prepare()` again for the new one. Note that this is a real, accepted limitation, not just
-        a delay: the discovery namespace (see `_canary_table_prefix`/"Common patterns" below) is
-        derived from the *current* relation_id, so `cleanup()` for the new relation cannot find
-        canary data left behind under the old relation_id - that old resource remains orphaned
-        rather than being swept up by a later cleanup call, unless prior relation_ids were
-        recorded somewhere durable. Neither this relation's own databag (removed along with the
-        relation) nor `ops.StoredState` can provide that durability: `run_validators` constructs
-        a fresh in-memory Ops `Framework` (`SQLiteStorage(":memory:")`) on every CLI invocation
-        (see `validators/runner/runner.py`), so anything written to `StoredState` during one
-        `prepare()`/`checkpoint()`/`cleanup()` call is gone before the next one runs - cleanup
-        cannot enumerate prior relation_ids from either store. If your backend needs the stronger
-        guarantee, record prior relation_ids somewhere that outlives both the relation and the
-        validator process itself - e.g. the charm's own peer relation databag (if one exists),
-        which Juju persists independently of any given relation - so cleanup can enumerate and
-        drop them too. Must still be safe to call when no canary resource remains (no-op, not an
-        error) - e.g. if `prepare()` was never reached for a given relation.
+        `prepare()` again for the new one.
+
+        This is a real, accepted limitation, not just a delay: the discovery namespace (see
+        `_canary_table_prefix`/"Common patterns" below) is derived from the *current* relation_id,
+        so `cleanup()` for the new relation cannot find canary data left behind under the old
+        relation_id - that old resource remains orphaned rather than being swept up by a later
+        cleanup call, unless prior relation_ids were recorded somewhere durable. Neither this
+        relation's own databag (removed along with the relation) nor `ops.StoredState` can provide
+        that durability: `run_validators` constructs a fresh in-memory Ops `Framework`
+        (`SQLiteStorage(":memory:")`) on every CLI invocation (see `validators/runner/runner.py`),
+        so anything written to `StoredState` during one call is gone before the next one runs. If
+        your backend needs the stronger guarantee, record prior relation_ids somewhere that
+        outlives both the relation and the validator process itself - e.g. the charm's own peer
+        relation databag (if one exists), which Juju persists independently of any given relation.
+        Must still be safe to call when no canary resource remains (no-op, not an error) - e.g. if
+        `prepare()` was never reached for a given relation.
         """
         self._require_requires_role()
         # ... discover and drop every canary table/object this validator created ...
