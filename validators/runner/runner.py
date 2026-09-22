@@ -113,9 +113,8 @@ class ValidatorRunnerResults(BaseModel):
     # registered persistence validator at cleanup time), whether or not the cleanup call itself
     # succeeded. Callers use this to distinguish "cleanup ran for this relation" (safe to drop
     # tracked state, once absent from any FAIL/ERROR result) from "this relation_id was never
-    # touched" (e.g. the relation was already removed, or its interface's persistence validator
-    # failed to load) - the latter must keep its tracked state so orphaned canary data isn't
-    # forgotten. Empty for prepare/checkpoint and for functional-only runs.
+    # touched" (e.g. the relation was already removed), which must keep its tracked state so
+    # orphaned canary data isn't forgotten. Empty for prepare/checkpoint and functional-only runs.
     cleaned_relation_ids: list[int] = Field(default_factory=list)
 
 
@@ -160,10 +159,8 @@ class ValidatorRunner:
                     )
                 # Unlike functional validators, persistence state (PersistenceState per relation_id
                 # in --refs/updated_refs) has no room to distinguish which validator a state entry
-                # belongs to. Two persistence validators registered for the same interface would
-                # silently overwrite each other's state, so warn loudly rather than misbehaving
-                # quietly - this is a real constraint of the current wire format, not (yet) enforced
-                # at load time.
+                # belongs to, so two persistence validators on the same interface would silently
+                # overwrite each other's state. Warn loudly rather than misbehaving quietly.
                 if ep.name in validators:
                     logger.warning(
                         f"Multiple persistence validators registered for interface '{ep.name}'; only one "
@@ -273,8 +270,8 @@ class ValidatorRunner:
 
         Without this, a relation on such an interface is indistinguishable from one with no
         persistence validator registered at all: both are silently absent from
-        ``_iter_persistence_targets``. That ambiguity is particularly unsafe for cleanup, whose
-        caller treats an empty result list as "nothing to clean up" and deletes tracked state.
+        ``_iter_persistence_targets``. That ambiguity is unsafe for cleanup, whose caller treats an
+        empty result list as "nothing to clean up" and deletes tracked state.
         """
         if not self.persistence_load_errors:
             return []
@@ -304,9 +301,9 @@ class ValidatorRunner:
         """Locate a live, non-peer relation by its Juju relation_id, along with its interface and role.
 
         Peer relations are skipped, matching ``_iter_persistence_targets``/
-        ``_persistence_load_error_results``: persistence validators are only ever registered
-        against non-peer interfaces, so a stale or malformed ``--refs`` entry that happens to
-        collide with a peer relation's ``relation_id`` must not resolve to it.
+        ``_persistence_load_error_results``: persistence validators are only registered against
+        non-peer interfaces, so a stale or malformed ``--refs`` entry that happens to collide with
+        a peer relation's ``relation_id`` must not resolve to it.
         """
         for relation_name, metadata in charm.meta.relations.items():
             role = str_to_validation_role(metadata.role.name)
@@ -338,9 +335,9 @@ class ValidatorRunner:
                     continue
                 elif not isinstance(state, PersistenceState):
                     # The abstract contract requires prepare() to return a PersistenceState; a
-                    # validator that instead returns None (or any other value) leaves this
-                    # relation with no tracked state, which would silently skip every later
-                    # checkpoint for it rather than surfacing the broken implementation.
+                    # validator returning anything else leaves this relation with no tracked state,
+                    # which would silently skip every later checkpoint for it rather than
+                    # surfacing the broken implementation.
                     logger.error(
                         f"Persistence validator '{validator_cls.__name__}' for endpoint "
                         f"'{integration.name}' returned {state!r} from prepare() instead of a "
@@ -376,7 +373,7 @@ class ValidatorRunner:
             except ValueError:
                 # A malformed key means the tracked state for this entry can never be
                 # checkpointed; report it as an ERROR rather than silently discarding it, which
-                # would otherwise let a real durability check pass without ever running.
+                # would let a real durability check pass without ever running.
                 logger.error(f"Invalid relation_id '{relation_id_str}' in --refs; cannot checkpoint.")
                 results.append(
                     ValidationResult(
@@ -414,10 +411,10 @@ class ValidatorRunner:
                     # one - don't add a second, more generic ERROR for the same relation_id.
                     continue
                 # A ref was supplied for a relation whose interface has no loaded persistence
-                # validator. This can't happen from a ref this same run's prepare_all produced
-                # (it only tracks interfaces it found validators for), so it means the ref is
-                # stale (e.g. the charm's interface changed) - either way, silently doing nothing
-                # would let a real durability check pass without ever running.
+                # validator. This can't come from this run's prepare_all (which only tracks
+                # interfaces it found validators for), so the ref is stale (e.g. the charm's
+                # interface changed) - silently doing nothing would let a real durability check
+                # pass without ever running.
                 logger.error(
                     f"No persistence validator registered for interface '{interface_name}'; cannot checkpoint."
                 )
@@ -448,10 +445,10 @@ class ValidatorRunner:
                     and isinstance(outcome[1], PersistenceState)
                 ):
                     # The abstract contract requires checkpoint() to return a
-                    # (ValidationResult, PersistenceState) pair; a validator that instead returns
-                    # None (or any other value) would otherwise be silently treated the same as a
-                    # legitimate PersistenceNotApplicable skip, hiding a broken implementation and
-                    # never checkpointing this relation again.
+                    # (ValidationResult, PersistenceState) pair; a validator returning anything
+                    # else would otherwise be silently treated the same as a legitimate
+                    # PersistenceNotApplicable skip, hiding a broken implementation and never
+                    # checkpointing this relation again.
                     logger.error(
                         f"Persistence validator '{validator_cls.__name__}' for endpoint "
                         f"'{integration.name}' returned {outcome!r} from checkpoint() instead of a "
@@ -476,11 +473,10 @@ class ValidatorRunner:
                     result, new_state = outcome
                     results.append(result)
                     # Only carry the new state forward on PASS: checkpoint() can return an advanced
-                    # state (e.g. an incremented row count) alongside a FAIL/ERROR result when the
-                    # underlying check didn't hold. Recording that advanced state anyway would
-                    # overwrite the last-known-good baseline before the caller raises on this
-                    # failure, so a later retry/continued run would checkpoint against
-                    # post-failure state and could spuriously pass.
+                    # state alongside a FAIL/ERROR result when the underlying check didn't hold.
+                    # Recording that anyway would overwrite the last-known-good baseline before the
+                    # caller raises, so a later retry could checkpoint against post-failure state
+                    # and spuriously pass.
                     if result.status == "PASS":
                         updated_refs[relation_id_str] = new_state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
@@ -493,11 +489,10 @@ class ValidatorRunner:
         cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             # Only report the relation as cleaned once a cleanup() invocation actually ran. A
-            # PersistenceNotApplicable skip means the validator is not applicable to this relation
-            # side, so no canary data was dropped; reporting it as cleaned would make
-            # post_persistence() forget tracked state for a relation whose cleanup never ran.
-            # Ordinary errors still count as "ran", so the existing FAIL/ERROR filtering in
-            # post_persistence() preserves the tracked state for them.
+            # PersistenceNotApplicable skip means no canary data was dropped, so reporting it as
+            # cleaned would make post_persistence() forget tracked state for a relation whose
+            # cleanup never ran. Ordinary errors still count as "ran", so the existing FAIL/ERROR
+            # filtering in post_persistence() preserves the tracked state for them.
             cleanup_ran = False
             for validator_cls in self.persistence_validators[interface_name]:
                 _, error_result, skipped = self._call_persistence_method(
@@ -525,10 +520,9 @@ class ValidatorRunner:
 
         Returns ``(value, None, False)`` on success, ``(None, error_result, False)`` if the
         validator raised, or ``(None, None, True)`` if it raised ``PersistenceNotApplicable`` (a
-        silent skip, not an error). The third element distinguishes that silent-skip case from a
-        validator returning ``None``/an invalid value on success (see ``prepare_all``/
-        ``checkpoint_all``, which must treat the latter as an ERROR rather than silently discard
-        it - a validator's returned state is otherwise indistinguishable from a legitimate skip).
+        silent skip, not an error). The third element distinguishes that skip from a validator
+        returning ``None``/an invalid value on success, which prepare_all/checkpoint_all must treat
+        as an ERROR rather than silently discard.
         """
         try:
             validator = validator_cls(charm, integration)
@@ -583,9 +577,8 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
 
     if args.refs is not None and args.persistence != "checkpoint":
         # --refs is only meaningful for checkpoint (prepare_all/cleanup_all take no state
-        # argument - see their docstrings). Without this check, a typo such as
-        # "--persistence prepare --refs ..." would parse and validate the JSON but then silently
-        # ignore it, running a different lifecycle op than the supplied --refs implied.
+        # argument). Without this check, a typo such as "--persistence prepare --refs ..." would
+        # parse and validate the JSON but then silently ignore it.
         parser.error("--refs is only valid when --persistence checkpoint is used")
 
     # Preserve the pre-persistence CLI contract: invoking run_validators with no flags at all

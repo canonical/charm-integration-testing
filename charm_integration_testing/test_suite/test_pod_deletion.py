@@ -51,14 +51,12 @@ def test_pod_deletion(
     )
 
     # Wait for return to idle. Also wait on the neighbor model (pod deletion/recreation can
-    # trigger relation hooks there), so the neighbor-side checkpoint below doesn't race a hook
-    # that hasn't settled yet.
+    # trigger relation hooks there).
     models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
     juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations. For a CMR where the target application is the
-    # provider, the applicable persistence validator and tracked canary state live on the
-    # neighbor's requirer units instead, so checkpoint the neighbor model too when present.
+    # Validate all applications and relations. For a CMR the persistence validator lives on the
+    # neighbor's requirer units, so checkpoint there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
         juju_client.validate_model(
             model=model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state

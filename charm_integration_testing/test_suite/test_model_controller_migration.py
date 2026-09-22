@@ -30,11 +30,10 @@ def test_model_controller_migration(
     if juju_client.version(target_model_ref).major >= 4:
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
 
-    # Validate all applications and relations before migration. Only target_model_ref's
-    # controller is migrated below; neighbor_model_ref (if present) stays on its own controller
-    # throughout, but is included here and after each migration step for a CMR where the target
-    # application is the provider - the applicable persistence validator and tracked canary state
-    # live on the neighbor's requirer units instead.
+    # Validate all applications and relations before migration. Only target_model_ref's controller
+    # is migrated below; the neighbor model stays on its own controller throughout, but is included
+    # here and after each migration step for a CMR (the persistence validator lives on the
+    # neighbor's requirer units).
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
         juju_client.validate_model(
             model=model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
@@ -48,8 +47,7 @@ def test_model_controller_migration(
     juju_client.wait_for_model_to_exist(model=temp_model_ref, timeout=timedelta(minutes=15))
 
     # Wait until model is idle in new controller. Also wait on the neighbor model (migrating the
-    # target can trigger relation hooks there), so the checkpoint below doesn't race a
-    # neighbor-side hook that hasn't settled yet.
+    # target can trigger relation hooks there).
     models_to_settle = [temp_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
     juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
@@ -80,8 +78,7 @@ def test_model_controller_migration(
     juju_client.wait_for_model_to_exist(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Wait until model is idle in old controller. Also wait on the neighbor model (migrating the
-    # target back can trigger relation hooks there), so the checkpoint below doesn't race a
-    # neighbor-side hook that hasn't settled yet.
+    # target back can trigger relation hooks there).
     models_to_settle_back = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
     juju_client.multi_model_idle_for_period(models_to_settle_back, timeout=timedelta(minutes=15))
 

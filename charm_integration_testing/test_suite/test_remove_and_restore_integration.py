@@ -32,21 +32,11 @@ def test_remove_and_restore_integration(
     if not integration_endpoints_removable:
         pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
 
-    # Removing and re-adding the relation gets it a brand new relation_id - in every model that
-    # takes part in it. For a same-model integration that's just integration_model_ref; for a CMR,
-    # both the offering model and the consuming model assign their own new relation_id, so any
-    # tracked persistence state for this integration's units in *either* model is about to go
-    # stale. Drop it now so the "prepare" call after re-adding seeds fresh canary data under the
-    # new relation_id(s), rather than the checkpoints below failing with "relation id not found"
-    # for stale entries.
-    #
-    # integration_endpoint_1/_2 can be a SAAS alias rather than the real application deployed in
-    # a given model (see integration_spec.py): for a CMR, whichever side consumes the offer is
-    # represented there by a local alias, not the remote application's real name, so resolving
-    # affected units from those endpoints can silently miss the offering side. Use the real
-    # target/neighbor application names instead - each is always deployed in its own model
-    # (target_application in target_model_ref; neighbor_application in neighbor_model_ref, or in
-    # target_model_ref itself for a same-model integration).
+    # Re-adding the relation assigns a brand new relation_id in every model taking part in it
+    # (both sides, for a CMR), so tracked persistence state for this integration's units is about
+    # to go stale. Resolve affected units from the real target/neighbor application names rather
+    # than integration_endpoint_1/_2, which can be a SAAS alias for a CMR and so would miss the
+    # offering side.
     neighbor_home = neighbor_model_ref if neighbor_model_ref is not None else target_model_ref
     model_applications: dict[JujuModelHandle, set[str]] = {}
     model_applications.setdefault(target_model_ref, set()).add(target_application)
@@ -54,11 +44,9 @@ def test_remove_and_restore_integration(
 
     candidate_models = {m for m in (target_model_ref, neighbor_model_ref) if m is not None}
     invalidated_models: set[JujuModelHandle] = set()
-    # Compute which tracked entries will go stale, but don't remove them from persistence_state
-    # yet: if remove_integration()/wait_for_removal_of_integration()/integrate() below fails, the
-    # old relation may still be present (or have no replacement), and teardown still needs these
-    # entries to retry cleanup() for them. Only actually invalidate them once the remove/re-add
-    # sequence has succeeded, immediately before the final prepare/checkpoint loop.
+    # Compute which tracked entries will go stale, but don't drop them yet: if the remove/re-add
+    # below fails, the old relation may still be present and teardown still needs these entries to
+    # retry cleanup() for them.
     keys_to_invalidate: set[PersistenceKey] = set()
     for model_ref in candidate_models:
         affected_units: set[str] = set()
@@ -95,17 +83,12 @@ def test_remove_and_restore_integration(
         endpoint_2=integration_endpoint_2,
     )
 
-    # The remove/re-add sequence above succeeded, so the relation_id(s) computed into
-    # keys_to_invalidate are now genuinely stale - only now is it safe to drop them (see the
-    # comment where keys_to_invalidate was built).
+    # The remove/re-add succeeded, so keys_to_invalidate are now genuinely stale.
     for key in keys_to_invalidate:
         del persistence_state[key]
 
-    # For CMR integrations, the provider side databag is populated by a unit agent that lives in
-    # a different model to the one that owns the integration. Waiting for idle only on
-    # `integration_model_ref` can race with that other model's agent still being "executing" when
-    # validate_model runs, so wait for every model involved (target and, if present, neighbor)
-    # to settle before validating.
+    # For CMR integrations the provider-side databag is populated by an agent in a different
+    # model, so wait for every involved model to settle before validating.
     model_refs = {integration_model_ref, target_model_ref}
     if neighbor_model_ref is not None:
         model_refs.add(neighbor_model_ref)
@@ -113,11 +96,9 @@ def test_remove_and_restore_integration(
 
     juju_client.multi_model_idle_for_period(sorted_model_refs, timeout=timedelta(minutes=15))
 
-    # Validate all applications and relations in every involved model. Every model in
-    # invalidated_models had its tracked state invalidated above (a CMR assigns a new relation_id
-    # in *both* the offering and consuming model, not just integration_model_ref), so all of them
-    # need a fresh "prepare" rather than "checkpoint" - otherwise the non-owning model's checkpoint
-    # would run against an empty refs map and silently skip verifying its persistence validators.
+    # Every model in invalidated_models had its tracked state dropped above, so it needs a fresh
+    # "prepare" rather than a "checkpoint" (which would run against an empty refs map and silently
+    # skip verifying its persistence validators).
     for model_ref in sorted_model_refs:
         persistence: Literal["prepare", "checkpoint"] = "prepare" if model_ref in invalidated_models else "checkpoint"
         juju_client.validate_model(
