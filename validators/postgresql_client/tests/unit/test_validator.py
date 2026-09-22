@@ -387,12 +387,9 @@ class TestPostgreSQLClientValidatorDeep:
         assert latency_check.passed
 
     def test_deep_latency_excludes_credential_resolution_time(self) -> None:
-        # Regression test for: cross-model/secrets-based credential resolution
-        # (Juju secret-get) can be slow independent of the database itself, and
-        # must not be counted against the deep-validation latency budget.
-        # GIVEN credential resolution alone consumes more than the 10s timeout
-        # (simulated via a fake clock so the test runs instantly), but the
-        # database round trip itself is instantaneous.
+        # GIVEN slow credential resolution (Juju secret-get, simulated via a fake clock) but an
+        # instantaneous database round trip.
+        # Regression test for: credential resolution time must not count against the latency budget.
         validator = _make_validator(VALID_DATABAG)
         cursor = CursorStub(fetchone_rows=[(42,), ("validator-probe",)])
         conn = ConnStub(cursor_stub=cursor)
@@ -562,11 +559,9 @@ class TestPostgreSQLClientPersistenceValidatorRole:
 
 class TestPostgreSQLClientPersistenceValidatorConnection:
     def test_prepare_raises_when_uris_is_blank(self) -> None:
-        # GIVEN a databag with a present but blank "uris" field
-        # Regression test for: a blank uri was previously passed straight to psycopg2 as
-        # dsn="", which libpq treats as "use local/default connection parameters" instead of
-        # failing - silently connecting to an unintended database rather than erroring on
-        # missing relation credentials.
+        # GIVEN a databag with a present but blank "uris" field.
+        # Regression test for: a blank uri reached psycopg2 as dsn="", which libpq treats as
+        # "use local/default connection parameters" - silently connecting elsewhere instead of failing.
         databag = {**VALID_DATABAG, "uris": ""}
         validator = _make_persistence_validator(databag)
 
@@ -584,11 +579,9 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
     def test_prepare_raises_when_first_uri_is_blank_after_split(self) -> None:
-        # GIVEN a "uris" value that is non-blank (so validate_schema() passes) but whose first
-        # comma-separated entry is blank once split/stripped - e.g. a leading comma or a
-        # whitespace-only first entry.
-        # Regression test for: this previously reached _connect() as dsn="", which libpq treats
-        # as "use local/default connection parameters" instead of failing loudly.
+        # GIVEN a non-blank "uris" whose first comma-separated entry is blank once stripped.
+        # Regression test for: this reached _connect() as dsn="", which libpq treats as "use
+        # local/default connection parameters" instead of failing loudly.
         databag = {**VALID_DATABAG, "uris": " ,postgresql://10.1.2.3:5432/mydb"}
         validator = _make_persistence_validator(databag)
 
@@ -597,11 +590,9 @@ class TestPostgreSQLClientPersistenceValidatorConnection:
             validator.prepare()
 
     def test_prepare_raises_when_uri_database_does_not_match_databag_database(self) -> None:
-        # GIVEN a "uris" value pointing at "mydb" but a "database" field claiming a different
-        # database.
-        # Regression test for: _open_connection() (used by prepare()/checkpoint()/cleanup())
-        # previously skipped the consistency check _validate_simple()/_validate_deep() perform, so
-        # canary data would be written and verified against the wrong database.
+        # GIVEN a "uris" pointing at "mydb" but a "database" field claiming a different database.
+        # Regression test for: _open_connection() skipped the consistency check the simple/deep
+        # validators perform, so canary data was written against the wrong database.
         databag = {**VALID_DATABAG, "database": "otherdb"}
         validator = _make_persistence_validator(databag)
 
@@ -721,11 +712,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert any("validator_canary_da7d88bc9ad4d4fd_00000000000000000099" in q for q in cursor.executed_queries)
 
     def test_resolves_schema_by_exact_name_across_all_schemas_regardless_of_visibility(self) -> None:
-        # GIVEN a single table anywhere in the database matches this canary's exact (random,
-        # effectively-unique) name.
-        # Regression test for: resolving the schema via pg_table_is_visible() alone depends on the
-        # *current* connection's search_path, which can disagree with the one prepare() used,
-        # causing a false FAIL.
+        # GIVEN a single table anywhere in the database matches this canary's exact name.
+        # Regression test for: resolving the schema via pg_table_is_visible() depends on the
+        # *current* connection's search_path, which can disagree with prepare()'s - causing a false FAIL.
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchall_rows=[("some_schema", False)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
@@ -740,11 +729,10 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert "pg_catalog.pg_namespace" in schema_query
 
     def test_tie_breaks_multiple_same_named_tables_by_search_path_visibility(self) -> None:
-        # GIVEN the (vanishingly unlikely, but not impossible) case where more than one schema
-        # contains a same-named table - e.g. a leftover canary from an earlier, interrupted run
-        # coincidentally reusing this run's random name. Genuine ambiguity like this must be
-        # resolved the same way PostgreSQL itself would resolve an unqualified reference: whichever
-        # match is visible under the *current* search_path.
+        # GIVEN two schemas containing a same-named table (e.g. a leftover canary from an
+        # interrupted run reusing this run's random name).
+        # Regression test for: ambiguity must resolve as PostgreSQL would - whichever match is
+        # visible under the *current* search_path.
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchall_rows=[("stale_schema", False), ("public", True)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
@@ -822,11 +810,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         assert result.level == "deep"
 
     def test_raises_when_expected_identifier_is_out_of_range(self) -> None:
-        # GIVEN
-        # Regression test for: checkpoint() previously formatted expected.id into the table name
-        # without validating it, so a restored/malformed PersistenceState with an out-of-range id
-        # (larger than any identifier prepare() can produce, masked to 63 bits) could silently
-        # produce an overlong/invalid table name instead of failing safely.
+        # GIVEN a restored/malformed PersistenceState with an out-of-range id.
+        # Regression test for: checkpoint() formatted expected.id into the table name without
+        # validating it, silently producing an invalid table name instead of failing safely.
         validator = _make_persistence_validator(VALID_DATABAG)
         out_of_range_id = 1 << 63  # one past _MAX_CANARY_IDENTIFIER
 
@@ -845,12 +831,9 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
                 validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=-1, ref=1))
 
     def test_raises_when_expected_ref_is_zero(self) -> None:
-        # GIVEN
-        # Regression test for: checkpoint() previously compared `actual == expected.ref` without
-        # validating expected.ref first, so a restored/malformed PersistenceState with ref=0 could
-        # let an empty or partially recreated table (actual == 0) coincidentally satisfy the
-        # comparison and report a false PASS. prepare() always returns ref=1, so ref < 1 can never
-        # have come from a real prior run.
+        # GIVEN a restored/malformed PersistenceState with ref=0 (prepare() always returns ref=1).
+        # Regression test for: an empty or partially recreated table (actual == 0) satisfied
+        # `actual == expected.ref` and reported a false PASS.
         validator = _make_persistence_validator(VALID_DATABAG)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
@@ -912,11 +895,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         assert "WHERE" in select_query  # Should still have some filtering (by table_type and LIKE pattern)
 
     def test_scopes_discovery_to_this_relations_id(self) -> None:
-        # Regression test for: discovery previously matched the bare `validator_canary_` prefix
-        # shared by every relation, so cleanup for one `postgresql_client` relation could drop
-        # canary tables belonging to a different, concurrent relation on the same database/schema.
-        # The LIKE pattern must be scoped to a token derived from this validator's own
-        # model+relation_id.
+        # Regression test for: matching the bare `validator_canary_` prefix shared by every
+        # relation let cleanup drop a concurrent relation's canary tables. The pattern must be
+        # scoped to a token derived from this validator's own model+relation_id.
         validator = _make_persistence_validator(VALID_DATABAG, relation_id=7)
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
@@ -931,11 +912,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         assert cursor.executed_params[0] == ("validator\\_canary\\_9c1f7f01a01956b9\\_%",)
 
     def test_scopes_discovery_to_this_models_uuid(self) -> None:
-        # Regression test for: relation IDs are assigned independently per model, so two
-        # different models can expose the same relation_id for a postgresql_client relation to
-        # the same shared database/schema. Discovery must also be scoped to a model-specific
-        # token so cleanup in one model can't drop another model's canary tables sharing the
-        # same relation_id.
+        # Regression test for: relation_ids are per-model, so two models sharing a database can
+        # expose the same relation_id. Discovery must be scoped to a model-specific token so
+        # cleanup in one model can't drop another model's canary tables.
         validator = _make_persistence_validator(
             VALID_DATABAG, relation_id=7, model_uuid="22222222-2222-2222-2222-222222222222"
         )
@@ -953,11 +932,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         assert like_pattern != "validator\\_canary\\_9c1f7f01a01956b9\\_%"
 
     def test_scopes_discovery_to_this_unit(self) -> None:
-        # Regression test for: the harness runs persistence validators on every unit of the
-        # application, so two units of the same application share both model.uuid and relation_id
-        # while owning separate canary tables. Discovery scoped to model+relation only would let
-        # cleanup on one unit drop another unit's still-active table, making that unit's next
-        # checkpoint report a data loss that never happened. The token must include the unit name.
+        # Regression test for: the runner runs persistence validators on every unit, so two units
+        # of one application share model.uuid and relation_id while owning separate canary tables.
+        # Model+relation scoping alone let cleanup on one unit drop another's live table.
         validator = _make_persistence_validator(VALID_DATABAG, relation_id=7, unit_name="app/0")
         other_unit = _make_persistence_validator(VALID_DATABAG, relation_id=7, unit_name="app/1")
         cursor = CursorStub(fetchall_rows=[])
@@ -994,11 +971,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         assert not any(look_alike in q for q in drop_queries)
 
     def test_rejects_discovered_tables_with_an_out_of_range_identifier(self) -> None:
-        # Regression test for: the discovery regex only checked the *shape* of the identifier
-        # suffix (20 digits), but prepare() masks identifiers to 63 bits (max
-        # 9223372036854775807, 19 digits) - a 20-digit suffix can represent a value far larger
-        # than that. Without an explicit bound check, cleanup would still drop a shape-only
-        # look-alike such as "..._99999999999999999999" that prepare() could never have produced.
+        # Regression test for: a 20-digit suffix can encode a value far larger than the 63-bit
+        # maximum prepare() can produce, so shape alone isn't enough - cleanup must bound-check the
+        # captured identifier or it would drop a look-alike prepare() could never have created.
         validator = _make_persistence_validator(VALID_DATABAG)
         good_table = "validator_canary_da7d88bc9ad4d4fd_00000000000000000001"
         out_of_range_table = "validator_canary_da7d88bc9ad4d4fd_99999999999999999999"
@@ -1059,11 +1034,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         mock_connect.assert_not_called()
 
     def test_noop_when_uris_present_but_other_required_fields_are_missing(self) -> None:
-        # GIVEN a relation that has advertised "uris" but not yet the rest of the fields
-        # _open_connection() requires (database/username/password) - e.g. still mid-setup.
-        # Regression test for: the no-op guard previously only checked "uris"/"secret-user" for
-        # presence, so this partial databag would fail that check, fall through to
-        # _open_connection(), and raise instead of no-op'ing.
+        # GIVEN a relation with "uris" but not yet database/username/password (still mid-setup).
+        # Regression test for: the no-op guard only checked "uris"/"secret-user", so this partial
+        # databag fell through to _open_connection() and raised instead of no-op'ing.
         validator = _make_persistence_validator({"uris": "postgresql://x/y"})
 
         with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:

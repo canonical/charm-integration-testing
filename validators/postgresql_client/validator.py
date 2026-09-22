@@ -183,10 +183,8 @@ class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator):
             return self._make_result(level="deep", checks=checks)
 
         # --- 5. Connect ---
-        # Latency is timed from here, not from the top of the function, so that
-        # Juju secret/relation-data resolution (steps 1-4) - which can be slow for
-        # cross-model relations independent of the database itself - is not counted
-        # against the database round-trip budget below.
+        # Latency is timed from here, not from the top, so slow Juju secret/relation-data
+        # resolution (steps 1-4) isn't counted against the database round-trip budget below.
         start_time = time.monotonic()
         try:
             conn = self._connect(uri)
@@ -473,11 +471,9 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         match would otherwise destroy.
         """
         self._require_requires_role()
-        # Check the same required fields _open_connection() validates, and no-op only when they're
-        # genuinely absent; a malformed/unreachable connection still raises and surfaces as a real
-        # ERROR. A narrower heuristic (e.g. "uris" alone) would let a relation that has "uris" but
-        # is still missing the rest raise instead of no-op'ing, turning an in-progress relation into
-        # a failed teardown.
+        # Check the same required fields _open_connection() validates, so an in-progress relation
+        # no-ops instead of raising. A narrower heuristic (e.g. "uris" alone) would let a relation
+        # missing the rest raise, turning it into a failed teardown.
         creds = self._resolve_credentials()
         if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
             return
@@ -489,11 +485,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
                 # this could match unrelated tables (e.g. `validatorXcanaryY123_456`).
                 prefix = self._canary_table_prefix()
                 escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
-                # CREATE TABLE in prepare()/checkpoint() is unqualified, so it resolves through
-                # search_path into the first writable schema (which may not be current_schema()).
-                # Search all schemas to avoid leaving canary tables behind elsewhere. Restrict to
-                # base tables: a view or foreign table sharing the prefix would make PostgreSQL
-                # reject DROP TABLE and abort cleanup, leaving the rest undropped.
+                # CREATE TABLE is unqualified, so it resolves through search_path into the first
+                # writable schema (maybe not current_schema()). Search all schemas to avoid leaving
+                # canary tables behind; restrict to base tables so a same-prefixed view/foreign
+                # table can't make DROP TABLE fail and abort the rest of cleanup.
                 cur.execute(
                     "SELECT table_schema, table_name FROM information_schema.tables "
                     "WHERE table_type = 'BASE TABLE' "
@@ -577,12 +572,10 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         return re.compile(re.escape(self._canary_table_prefix()) + r"(?P<identifier>[0-9]{20})")
 
     def _canary_table_name(self, identifier: int) -> str:
-        # Zero-padded to a fixed 20 digits (identifier is masked to 63 bits in prepare(), so it
-        # never exceeds 19 digits) so every canary table name has the same shape, which
-        # _canary_table_regex() relies on to reject look-alike tables. checkpoint() passes back an
-        # identifier from a (possibly restored/malformed) PersistenceState, so validate the range
-        # here too - an out-of-range value could otherwise produce a name PostgreSQL truncates or
-        # rejects, silently targeting the wrong table instead of failing safely.
+        # Zero-padded to a fixed 20 digits (prepare() masks identifiers to 63 bits, so never more
+        # than 19) so every canary name has the same shape, which _canary_table_regex() relies on.
+        # checkpoint() passes back an identifier from a possibly restored/malformed state, so
+        # range-check it here too rather than letting PostgreSQL truncate or reject the name.
         if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
             raise ValueError(
                 f"canary identifier {identifier} is out of range " f"(expected 0..{_MAX_CANARY_IDENTIFIER})"
