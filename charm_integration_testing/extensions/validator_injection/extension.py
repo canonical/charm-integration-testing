@@ -26,10 +26,6 @@ install_env = " ".join(
 )
 remote_validators_path = "/var/lib/juju/validators"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
-# Marker file written after a successful _inject_validators() install, used to distinguish a venv
-# (re)installed by this codebase - and so guaranteed to support `run_validators --persistence` -
-# from one left over from an older harness version that only understood `--level`.
-persistence_marker = f"{remote_validators_path}/.supports_persistence"
 uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
@@ -189,12 +185,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
 
         # Inject validators
-        if (
-            self.juju.exec_unit(
-                model, unit, f"test -f {venv_runner} && test -f {persistence_marker}", operator=is_k8s
-            ).return_code
-            != 0
-        ):
+        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 # An unconfigured validators_path means no validators are being tested at all, so
                 # this must be a silent skip rather than a hard failure. Return None (not the
@@ -249,10 +240,6 @@ class ValidatorInjectorExtension(JujuExtension):
             (
                 f"{install_env} {uv_bin} pip install --python {remote_validators_path}/venv {remote_validators_path}/packages/*",
                 "install validator packages",
-            ),
-            (
-                f"touch {persistence_marker}",
-                "mark venv as supporting persistence ops",
             ),
         ]:
             self.logger.debug(f"[{unit}] {desc} with command: {cmd}")
