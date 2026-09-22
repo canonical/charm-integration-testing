@@ -114,7 +114,7 @@ class ValidatorRunnerResults(BaseModel):
     # succeeded. Callers use this to distinguish "cleanup ran for this relation" (safe to drop
     # tracked state, once absent from any FAIL/ERROR result) from "this relation_id was never
     # touched" (e.g. the relation was already removed), which must keep its tracked state so
-    # orphaned canary data isn't forgotten. Empty for prepare/checkpoint and functional-only runs.
+    # orphaned canary data isn't forgotten.
     cleaned_relation_ids: list[int] = Field(default_factory=list)
 
 
@@ -445,10 +445,9 @@ class ValidatorRunner:
                     and isinstance(outcome[1], PersistenceState)
                 ):
                     # The abstract contract requires checkpoint() to return a
-                    # (ValidationResult, PersistenceState) pair; a validator returning anything
-                    # else would otherwise be silently treated the same as a legitimate
-                    # PersistenceNotApplicable skip, hiding a broken implementation and never
-                    # checkpointing this relation again.
+                    # (ValidationResult, PersistenceState) pair; anything else would otherwise be
+                    # silently treated the same as a legitimate PersistenceNotApplicable skip,
+                    # hiding a broken implementation and never checkpointing this relation again.
                     logger.error(
                         f"Persistence validator '{validator_cls.__name__}' for endpoint "
                         f"'{integration.name}' returned {outcome!r} from checkpoint() instead of a "
@@ -491,8 +490,8 @@ class ValidatorRunner:
             # Only report the relation as cleaned once a cleanup() invocation actually ran. A
             # PersistenceNotApplicable skip means no canary data was dropped, so reporting it as
             # cleaned would make post_persistence() forget tracked state for a relation whose
-            # cleanup never ran. Ordinary errors still count as "ran", so the existing FAIL/ERROR
-            # filtering in post_persistence() preserves the tracked state for them.
+            # cleanup never ran. Ordinary errors still count as "ran", so post_persistence()'s
+            # FAIL/ERROR filtering preserves the tracked state for them.
             cleanup_ran = False
             for validator_cls in self.persistence_validators[interface_name]:
                 _, error_result, skipped = self._call_persistence_method(
