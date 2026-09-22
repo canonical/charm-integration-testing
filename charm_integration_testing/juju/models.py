@@ -148,9 +148,8 @@ def rekey_persistence_state_controller(
     migration. Mutates *persistence_state* in place.
 
     Generic over the tracked state's value type (rather than importing ``validators.base``'s
-    ``PersistenceState`` directly) since this function only rewrites keys and never inspects or
-    constructs a value - keeping this data-model module free of a dependency on the higher-level
-    validator package.
+    ``PersistenceState``) since this function only rewrites keys and never inspects a value,
+    keeping this data-model module free of a dependency on the validator package.
     """
     if old_controller == new_controller:
         # Rewriting a key to itself would pop the entry after assigning it back, dropping it.

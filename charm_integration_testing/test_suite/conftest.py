@@ -263,9 +263,9 @@ def register_preexisting_resources(
 def persistence_state() -> dict[PersistenceKey, PersistenceState]:
     """Tracking dict for canary data seeded by data persistence validators.
 
-    Session-scoped and shared across every ``validate_model(persistence=...)`` call in a test
-    run: ``test_deploy`` populates it via "prepare", each disruptive test verifies and advances it
-    via "checkpoint", and ``test_teardown`` clears it via "cleanup". Keyed by
+    Session-scoped and shared across every ``validate_model(persistence=...)`` call in a test run:
+    ``test_deploy`` populates it via "prepare", each disruptive test verifies and advances it via
+    "checkpoint", and ``test_teardown`` clears it via "cleanup". Keyed by
     ``PersistenceKey(controller, model, unit, relation_id)`` so state for concurrently-tracked
     models/controllers (e.g. during migration tests) never collides.
     """
@@ -338,18 +338,13 @@ def seed_persistence_state_for_resumed_run(
     run resumes directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy``
     never runs this session), ``persistence_state`` would otherwise stay empty: disruptive tests'
     "checkpoint" calls would then pass no refs at all, which the runner treats as trivially
-    successful, silently skipping persistence validation entirely for the whole run.
+    successful, silently skipping persistence validation for the whole run.
 
     To avoid that silent gap, re-run "prepare" against the already-deployed target application as
-    soon as the session starts, seeding fresh canary data/state exactly as ``test_deploy`` would
-    have. This only handles the ``State.DEPLOYED`` resume point, where the target (and, for CMR
-    tests, neighbor) application is guaranteed to already exist. ``State.NEIGHBOR_ONLY`` doesn't
-    need seeding here either, but for a different reason: every test that can run from that state
-    (``test_idempotent_redeploy``, ``test_deploy_target_old_revision``) calls ``prepare()`` itself
-    as part of its own transition, so no gap exists there and no warning is warranted. Resuming
-    into any other post-deploy state (e.g. ``DEPLOYED_WITH_OLD_REVISION``) is not handled here
-    since the application topology at those states isn't guaranteed - persistence validation is
-    skipped for those runs, with a loud warning rather than a silent one.
+    soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
+    can run from it calls ``prepare()`` itself. Resuming into any other post-deploy state is not
+    handled here (the application topology at those states isn't guaranteed), so persistence
+    validation is skipped for those runs with a loud warning rather than a silent one.
     """
     current_state = State(request.config.getoption("--current-state"))
     if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
@@ -377,9 +372,8 @@ def seed_persistence_state_for_resumed_run(
     if is_cmr_test and neighbor_model_ref is not None:
         models.append(neighbor_model_ref)
     # prepare() writes through relation credentials, which can race hooks still settling when
-    # resuming with --current-state=deployed. test_deploy (and the other resume points that call
-    # prepare()) always wait for the model(s) to go idle first - match that here so this path
-    # doesn't produce false failures or incomplete seed state.
+    # resuming with --current-state=deployed. test_deploy always waits for the model(s) to go idle
+    # first - match that here.
     client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
     for model_ref in models:
         client.validate_model(model=model_ref, level=None, persistence="prepare", persistence_state=persistence_state)

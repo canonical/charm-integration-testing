@@ -25,25 +25,17 @@ def test_teardown(
     neighbor_model_ref: JujuModelHandle | None,
     persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
-    # Drop all canary data before the applications that host it are torn down: cleanup runs the
-    # persistence validators' cleanup() on the units themselves, so it has to happen while those
-    # units (and their persistence_state tracking entries) still exist. test_deploy prepares every
-    # model in all_bundles (including the neighbor model for CMR runs), so cleanup must cover every
-    # one of those models too, or a persistence-bearing unit living in the neighbor/integration
-    # model would be left with un-dropped canary tables and stale tracking entries.
+    # Drop all canary data before the applications hosting it are torn down: cleanup() runs on the
+    # units themselves, so it must happen while those units still exist. test_deploy prepares every
+    # model in all_bundles (including the neighbor model for CMR runs), so cleanup must cover all of
+    # them too.
     cleanup_model_refs = {target_model_ref}
     if neighbor_model_ref is not None:
         cleanup_model_refs.add(neighbor_model_ref)
-    # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR
-    # result. ValidatorInjectorExtension.post_persistence() itself converts a per-unit remote
-    # cleanup failure (e.g. a non-zero `run_validators` exit, or a malformed result payload) into
-    # an ERROR result rather than raising, so those surface via JujuValidationError too - but
-    # application/model-discovery failures (e.g. `application_units()`/`is_k8s_model()` raising
-    # because the application or model itself is gone) happen outside that per-unit try/except and
-    # still surface as a bare exception. Catching only JujuValidationError would abort the loop on
-    # the first such failure and skip cleanup for every model after it. Attempt every model, merge
-    # JujuValidationError failures together, and remember the first other exception; only raise
-    # once every model has been attempted.
+    # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR result,
+    # but application/model-discovery failures (e.g. the application is already gone) surface as a
+    # bare exception. Attempt every model, merge JujuValidationError failures, and remember the
+    # first other exception so one model's failure doesn't skip cleanup for the rest.
     combined_failed_validations: dict[str, list[ValidationResult]] = {}
     first_other_error: Exception | None = None
     for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
@@ -58,9 +50,8 @@ def test_teardown(
             if first_other_error is None:
                 first_other_error = exc
     if combined_failed_validations:
-        # Chain first_other_error (if any model also raised a non-validation exception) as the
-        # cause, rather than silently discarding it - otherwise a remote/transport cleanup
-        # failure on one model would be invisible whenever another model also failed validation.
+        # Chain first_other_error as the cause rather than discarding it, so a transport failure on
+        # one model isn't invisible when another model also failed validation.
         raise JujuValidationError(combined_failed_validations) from first_other_error
     if first_other_error is not None:
         raise first_other_error
@@ -98,8 +89,8 @@ def test_teardown(
     if is_cmr_integration:
         assert consumed_offer_alias is not None
         juju_client.remove_saas(consumed_offer_alias, model=integration_model_ref)
-        # Removal is asynchronous on the controller; a later re-consumption of the same
-        # alias (e.g. a redeploy) can otherwise race with the still-in-progress teardown.
+        # Removal is asynchronous on the controller; a later re-consumption of the same alias
+        # (e.g. a redeploy) can otherwise race with the still-in-progress teardown.
         # See https://github.com/canonical/charm-integration-testing/issues/1045.
         juju_client.wait_for_removal_of_saas(
             consumed_offer_alias, model=integration_model_ref, timeout=timedelta(minutes=10)

@@ -26,20 +26,14 @@ install_env = " ".join(
 )
 remote_validators_path = "/var/lib/juju/validators"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
-# Marker file written after a successful _inject_validators() install, used to distinguish a
-# venv that was (re)installed by this codebase - and so is guaranteed to support the
-# `run_validators --persistence` flag - from one left over from an older test run/harness
-# version that only understood `--level`. Checking `venv_runner`'s mere presence is not enough:
-# a venv installed before persistence support existed would pass that check yet fail with an
-# argument error the first time `--persistence` is invoked against it.
+# Marker file written after a successful _inject_validators() install, used to distinguish a venv
+# (re)installed by this codebase - and so guaranteed to support `run_validators --persistence` -
+# from one left over from an older harness version that only understood `--level`.
 persistence_marker = f"{remote_validators_path}/.supports_persistence"
 uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
-# The three ops run_validators' --persistence flag accepts (see validators/runner/runner.py's
-# _PERSISTENCE_OPS). post_persistence's `persistence` parameter is a plain `str` (its caller's
-# Literal["prepare", "checkpoint", "cleanup"] annotation isn't enforced at runtime), so this is
-# validated explicitly before being interpolated into a remote shell command.
+# The ops run_validators' --persistence flag accepts (see validators/runner/runner.py).
 _PERSISTENCE_OPS = frozenset({"prepare", "checkpoint", "cleanup"})
 
 
@@ -76,10 +70,8 @@ class ValidatorInjectorExtension(JujuExtension):
         persistence_state: dict[PersistenceKey, PersistenceState],
     ) -> dict[str, list[ValidationResult]]:
         if persistence not in _PERSISTENCE_OPS:
-            # Validate once, up front, rather than inside the per-unit loop below: this is a
-            # caller/programming error (not a remote/transport failure), so it must still raise
-            # immediately, before any command runs on any unit - not be swallowed into a per-unit
-            # ERROR result by the broad except in that loop.
+            # A caller/programming error, not a remote failure: raise immediately rather than
+            # letting the per-unit loop below swallow it into an ERROR result.
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
@@ -94,13 +86,10 @@ class ValidatorInjectorExtension(JujuExtension):
             try:
                 outcome = self._run_persistence_on_unit(model, unit, persistence, unit_refs, model_is_k8s)
             except Exception as exc:
-                # A transport/remote-command failure (e.g. a non-zero `run_validators` exit, or a
-                # malformed result payload) previously propagated straight out of this method,
-                # aborting the loop and leaving every later unit in this application - not just
-                # this one - with no persistence op attempted at all. Report it as an ERROR result
-                # for this unit instead (mirroring how ValidatorRunner turns a validator-level
-                # exception into an ERROR result) so validate_model()'s normal FAIL/ERROR
-                # aggregation surfaces it, while every other unit still gets its own attempt.
+                # Report a transport/remote-command failure as an ERROR result for this unit
+                # (mirroring how ValidatorRunner turns a validator-level exception into an ERROR
+                # result) so validate_model()'s normal FAIL/ERROR aggregation surfaces it, while
+                # every other unit still gets its own attempt.
                 results[unit] = [
                     ValidationResult(
                         status="ERROR",
@@ -123,12 +112,9 @@ class ValidatorInjectorExtension(JujuExtension):
 
             if persistence == "cleanup":
                 # Canary tables have been dropped; drop tracked state only for relation_ids that
-                # cleanup_all actually visited (i.e. had a live relation with a registered
-                # persistence validator at cleanup time) and that didn't produce a FAIL/ERROR
-                # result. A relation_id with a tracking entry that cleanup never visited (e.g. the
-                # relation is gone, or its interface's persistence validator failed to load) means
-                # cleanup never ran against the backend for it - keep that entry so orphaned
-                # canary data isn't silently forgotten.
+                # cleanup_all actually visited and that didn't produce a FAIL/ERROR result. An
+                # entry cleanup never visited (e.g. the relation is gone) means cleanup never ran
+                # against the backend for it - keep it so orphaned canary data isn't forgotten.
                 failed_relation_ids = {
                     result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
                 }
@@ -145,9 +131,8 @@ class ValidatorInjectorExtension(JujuExtension):
             else:
                 try:
                     # Build every key/state pair before mutating persistence_state: a malformed
-                    # or forward-version remote payload (updated_refs is parsed from JSON, so
-                    # Pydantic accepts any string key - e.g. "not-an-int") must not partially
-                    # apply this unit's updates before failing partway through the dict.
+                    # remote payload (updated_refs is parsed from JSON, so Pydantic accepts any
+                    # string key) must not partially apply this unit's updates before failing.
                     new_entries = {
                         PersistenceKey(
                             controller=model.controller,
@@ -212,11 +197,9 @@ class ValidatorInjectorExtension(JujuExtension):
         ):
             if not self.validators_path:
                 # Matches _run_validators_on_unit's convention: an unconfigured validators_path
-                # means no validators (functional or persistence) are being tested at all, and
-                # persistence is requested unconditionally by test_deploy/disruptive tests/
-                # test_teardown regardless of whether any validators are configured, so this must
-                # be a silent skip rather than a hard failure or every run without VALIDATORS_PATH
-                # set would fail. Return None (rather than the empty-but-ran ([], {})) so
+                # means no validators are being tested at all, and persistence is requested
+                # unconditionally by the test suite, so this must be a silent skip rather than a
+                # hard failure. Return None (rather than the empty-but-ran ([], {})) so
                 # post_persistence() can tell a genuine skip apart from cleanup finding nothing to
                 # report, and doesn't mistake the skip for a successful cleanup.
                 self.logger.warning(f"Validators path not provided, skipping persistence op '{persistence}' on {unit}")

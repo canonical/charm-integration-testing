@@ -392,12 +392,9 @@ class JujuClient:
         if persistence is not None:
             if persistence not in ("prepare", "checkpoint", "cleanup"):
                 # `Literal[...]` is a static-typing hint only, not enforced at runtime. Without this
-                # check, an invalid value reaches `post_persistence()` unvalidated; with no units,
-                # no applications, or only the default no-op `JujuExtension` hook, it would be
-                # silently treated as a successful no-op instead of raising - and even with a real
-                # extension, it's only rejected deep inside functional validation, and only when a
-                # unit happens to be visited. Validate at this boundary so every caller gets an
-                # immediate, consistent error.
+                # check an invalid value reaches post_persistence() unvalidated, where it would be
+                # silently treated as a successful no-op (no units, no applications, or the default
+                # no-op JujuExtension hook) instead of raising.
                 raise ValueError(f"Invalid persistence operation: {persistence!r}")
             if persistence_state is None:
                 raise ValueError("persistence_state is required when persistence is given")

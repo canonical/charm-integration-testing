@@ -38,8 +38,7 @@ def test_upgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    # Also wait on the neighbor model (refreshing the target can trigger relation/databag work
-    # there), so the neighbor-side checkpoint below doesn't race a hook that hasn't settled yet.
+    # Also wait on the neighbor model (refreshing the target can trigger relation/databag work there).
     models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
     juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
@@ -53,8 +52,7 @@ def test_upgrade_charm(
     juju_client.validate_model(
         model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
     )
-    # For a CMR where the upgraded target application is the provider, the applicable persistence
-    # validator and tracked canary state live on the neighbor's requirer units instead.
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so checkpoint there too.
     if neighbor_model_ref is not None:
         juju_client.validate_model(
             model=neighbor_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
