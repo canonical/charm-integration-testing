@@ -196,12 +196,10 @@ class ValidatorInjectorExtension(JujuExtension):
             != 0
         ):
             if not self.validators_path:
-                # Matches _run_validators_on_unit's convention: an unconfigured validators_path
-                # means no validators are being tested at all, and persistence is requested
-                # unconditionally by the test suite, so this must be a silent skip rather than a
-                # hard failure. Return None (rather than the empty-but-ran ([], {})) so
-                # post_persistence() can tell a genuine skip apart from cleanup finding nothing to
-                # report.
+                # An unconfigured validators_path means no validators are being tested at all, so
+                # this must be a silent skip rather than a hard failure. Return None (not the
+                # empty-but-ran ([], {})) so post_persistence() can tell a skip apart from cleanup
+                # finding nothing to report.
                 self.logger.warning(f"Validators path not provided, skipping persistence op '{persistence}' on {unit}")
                 return None
             self._inject_validators(model, unit, is_k8s=is_k8s)

@@ -109,12 +109,11 @@ class ValidatorRunnerResults(BaseModel):
     # --persistence prepare/checkpoint. Empty for functional-only runs and for cleanup (which has
     # no state to carry forward - see BasePersistenceValidator.cleanup).
     updated_refs: dict[str, PersistenceState] = Field(default_factory=dict)
-    # relation_ids that --persistence cleanup actually visited (i.e. had a live relation with a
+    # relation_ids that --persistence cleanup actually visited (had a live relation with a
     # registered persistence validator at cleanup time), whether or not the cleanup call itself
-    # succeeded. Callers use this to distinguish "cleanup ran for this relation" (safe to drop
-    # tracked state, once absent from any FAIL/ERROR result) from "this relation_id was never
-    # touched" (e.g. the relation was already removed), which must keep its tracked state so
-    # orphaned canary data isn't forgotten.
+    # succeeded. Callers use this to tell "cleanup ran" (safe to drop tracked state, once absent
+    # from any FAIL/ERROR result) from "never touched" (keep tracked state so orphaned canary data
+    # isn't forgotten).
     cleaned_relation_ids: list[int] = Field(default_factory=list)
 
 
@@ -122,10 +121,9 @@ class ValidatorRunner:
     validators: dict[str, list[type[BaseValidator]]]
     persistence_validators: dict[str, list[type[BasePersistenceValidator]]]
     # Interface names whose endpoint_persistence_validators entry point failed to load, mapped to
-    # the error message. Consulted by prepare_all/checkpoint_all/cleanup_all so a currently
-    # connected relation on one of these interfaces surfaces as an ERROR result instead of
-    # silently looking like "no persistence validator applicable" - which cleanup_all in
-    # particular must not treat as a successful (and therefore state-clearing) cleanup.
+    # the error. Consulted by prepare_all/checkpoint_all/cleanup_all so a live relation on such an
+    # interface surfaces as ERROR rather than looking like "no validator applicable" - which
+    # cleanup_all must not treat as a successful (state-clearing) cleanup.
     persistence_load_errors: dict[str, str]
 
     def __init__(self) -> None:
@@ -447,11 +445,9 @@ class ValidatorRunner:
                     # added an ERROR for every live relation on this interface, including this
                     # one - don't add a second, more generic ERROR for the same relation_id.
                     continue
-                # A ref was supplied for a relation whose interface has no loaded persistence
-                # validator. This can't come from this run's prepare_all (which only tracks
-                # interfaces it found validators for), so the ref is stale (e.g. the charm's
-                # interface changed) - silently doing nothing would let a real durability check
-                # pass without ever running.
+                # A ref for a relation whose interface has no loaded persistence validator can't
+                # come from this run's prepare_all, so it's stale (e.g. the charm's interface
+                # changed). Silently ignoring it would let a durability check pass without running.
                 logger.error(
                     f"No persistence validator registered for interface '{interface_name}'; cannot checkpoint."
                 )
@@ -508,11 +504,9 @@ class ValidatorRunner:
                 else:
                     result, new_state = outcome
                     results.append(result)
-                    # Only carry the new state forward on PASS: checkpoint() can return an advanced
-                    # state alongside a FAIL/ERROR result when the underlying check didn't hold.
-                    # Recording that anyway would overwrite the last-known-good baseline before the
-                    # caller raises, so a later retry could checkpoint against post-failure state
-                    # and spuriously pass.
+                    # Only carry state forward on PASS: checkpoint() can return an advanced state
+                    # alongside FAIL/ERROR. Recording it would overwrite the last-known-good
+                    # baseline, so a later retry could checkpoint against post-failure state.
                     if result.status == "PASS":
                         updated_refs[relation_id_str] = new_state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
@@ -525,11 +519,9 @@ class ValidatorRunner:
         results += self._persistence_load_error_results(charm)
         cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
-            # Only report the relation as cleaned once a cleanup() invocation actually ran. A
-            # PersistenceNotApplicable skip means no canary data was dropped, so reporting it as
-            # cleaned would make post_persistence() forget tracked state for a relation whose
-            # cleanup never ran. Ordinary errors still count as "ran", so post_persistence()'s
-            # FAIL/ERROR filtering preserves the tracked state for them.
+            # Only report cleaned once cleanup() actually ran: a PersistenceNotApplicable skip
+            # drops no canary data, so reporting it would make post_persistence() forget tracked
+            # state for a relation whose cleanup never ran. Errors still count as "ran".
             cleanup_ran = False
             for validator_cls in self.persistence_validators[interface_name]:
                 _, error_result, skipped = self._call_persistence_method(
