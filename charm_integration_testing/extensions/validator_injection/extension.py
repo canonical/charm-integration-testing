@@ -201,7 +201,7 @@ class ValidatorInjectorExtension(JujuExtension):
                 # unconditionally by the test suite, so this must be a silent skip rather than a
                 # hard failure. Return None (rather than the empty-but-ran ([], {})) so
                 # post_persistence() can tell a genuine skip apart from cleanup finding nothing to
-                # report, and doesn't mistake the skip for a successful cleanup.
+                # report.
                 self.logger.warning(f"Validators path not provided, skipping persistence op '{persistence}' on {unit}")
                 return None
             self._inject_validators(model, unit, is_k8s=is_k8s)
