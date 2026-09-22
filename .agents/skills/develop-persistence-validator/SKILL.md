@@ -378,7 +378,13 @@ rather than registering multiple entry points for the same interface.
    package, a new runtime/dev dependency, an `extras` change, or only a new
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
-   tests below.
+   tests below. In the development sandbox this matters especially for a
+   long-lived `scripts/sandbox.sh run --interactive` session: `poetry
+   install` runs once at `sandbox.sh up` time, so the VM's venv reflects the
+   `pyproject.toml` as of `up` and goes stale for any change made mid-session
+   - re-run `poetry install` inside the VM after editing a `pyproject.toml`,
+   or the runner won't discover the new/changed entry point until the next
+   `up`.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
