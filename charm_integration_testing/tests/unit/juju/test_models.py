@@ -186,14 +186,14 @@ class TestJujuConsumedOfferInfo:
                 label="valid_url",
                 url="other-controller:admin/other-model.postgresql-k8s",
                 expected_owner="admin",
-                expected_model=JujuModelHandle(controller="other-controller", model="other-model"),
+                expected_model=JujuModelHandle(controller="other-controller", model="other-model", owner="admin"),
                 expected_offer_name="postgresql-k8s",
             ),
             Params(
                 label="valid_url_non_admin_owner",
                 url="my-controller:alice/my-model.mysql-offer",
                 expected_owner="alice",
-                expected_model=JujuModelHandle(controller="my-controller", model="my-model"),
+                expected_model=JujuModelHandle(controller="my-controller", model="my-model", owner="alice"),
                 expected_offer_name="mysql-offer",
             ),
             Params(label="missing_colon", url="admin/other-model.postgresql-k8s", should_be_none=True),
@@ -227,6 +227,10 @@ class TestJujuConsumedOfferInfo:
                 assert params.expected_owner is not None
                 assert params.expected_model is not None
                 assert params.expected_offer_name is not None
-                assert result == ParsedOfferUrl(
-                    owner=params.expected_owner, model=params.expected_model, offer_name=params.expected_offer_name
+                assert result == ParsedOfferUrl(model=params.expected_model, offer_name=params.expected_offer_name)
+                # AND the parsed model handle carries the owner, so it can be addressed directly
+                assert result.model.owner == params.expected_owner
+                assert (
+                    result.model.uri
+                    == f"{params.expected_model.controller}:{params.expected_owner}/{params.expected_model.model}"
                 )
