@@ -336,3 +336,134 @@ class TestBasePersistenceValidator:
         assert validator.role == "requires"
         assert validator.databag == databag
         assert validator.relation_exists() is True
+
+    def test_resolve_secret_reads_secret_when_uri_is_present(self) -> None:
+        # GIVEN a persistence validator on a relation whose databag references a secret
+        app = ApplicationStub()
+        relation = RelationStub(
+            name="my-db",
+            id=1,
+            app=app,
+            data={app: {"secret-uri": "secret:db-creds", "username": "plain-user"}},
+        )
+        secrets = {"secret:db-creds": {"username": "secret-user", "password": "pw"}}
+        charm = make_charm_from_relation_and_secrets(relation, secrets)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        resolved = validator.resolve_secret("secret-uri", "username", "password")
+
+        # THEN the persistence copy resolves the secret identically to BaseValidator
+        assert resolved == {"username": "secret-user", "password": "pw"}
+        assert charm.model.requested_ids == ["secret:db-creds"]
+
+    def test_resolve_secret_falls_back_to_plaintext_fields_without_uri(self) -> None:
+        # GIVEN a persistence validator on a relation with plaintext credentials only
+        app = ApplicationStub()
+        relation = RelationStub(
+            name="my-db",
+            id=1,
+            app=app,
+            data={app: {"username": "plain-user", "password": "plain-pw", "extra": "x"}},
+        )
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        resolved = validator.resolve_secret("secret-uri", "username", "password", "missing")
+
+        # THEN
+        assert resolved == {"username": "plain-user", "password": "plain-pw"}
+        assert charm.model.requested_ids == []
+
+    def test_validate_schema_reports_missing_required_fields(self) -> None:
+        # GIVEN a persistence validator on a relation missing a required field
+        app = ApplicationStub()
+        relation = RelationStub(
+            name="my-db",
+            id=1,
+            app=app,
+            data={app: {"host": "10.0.0.10", "port": ""}},
+        )
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        check = validator.validate_schema(["host", "port", "user"])
+
+        # THEN
+        assert check.passed is False
+        assert check.message == "Missing: port, user"
+
+    def test_validate_schema_merges_resolved_credentials(self) -> None:
+        # GIVEN a persistence validator on a relation with only a host in its databag
+        app = ApplicationStub()
+        relation = RelationStub(name="my-db", id=1, app=app, data={app: {"host": "10.0.0.10"}})
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        check = validator.validate_schema(
+            ["host", "username", "password"],
+            creds={"username": "secret-user", "password": "secret-pw"},
+        )
+
+        # THEN
+        assert check == ValidationCheck(name="schema", passed=True, message="OK")
+
+    def test_make_result_defaults_to_pass_when_all_checks_pass(self) -> None:
+        # GIVEN a persistence validator on a relation
+        relation = RelationStub(name="db", id=2)
+        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="my-interface")
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        result = validator._make_result(level="deep", checks=[ValidationCheck(name="row_count", passed=True)])
+
+        # THEN the result is populated from the relation, not from caller-supplied defaults
+        assert result.status == "PASS"
+        assert result.endpoint == "db"
+        assert result.interface == "my-interface"
+        assert result.role == "requires"
+        assert result.relation_id == 2
+        assert result.level == "deep"
+
+    def test_make_result_defaults_to_fail_when_a_check_fails(self) -> None:
+        # GIVEN a persistence validator on a relation
+        relation = RelationStub(name="db", id=2)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        result = validator._make_result(level="deep", checks=[ValidationCheck(name="row_count", passed=False)])
+
+        # THEN
+        assert result.status == "FAIL"
+
+    def test_error_result_carries_error_and_no_checks(self) -> None:
+        # GIVEN a persistence validator on a relation
+        relation = RelationStub(name="db", id=2)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        result = validator._error_result("deep", "connection refused")
+
+        # THEN
+        assert result.status == "ERROR"
+        assert result.error == "connection refused"
+        assert result.checks == []
+
+    def test_fail_result_carries_checks(self) -> None:
+        # GIVEN a persistence validator on a relation
+        relation = RelationStub(name="db", id=2)
+        charm = make_charm_from_relation(relation)
+        validator = ConcretePersistenceValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+        checks = [ValidationCheck(name="row_count", passed=False, message="expected 3, got 0")]
+
+        # WHEN
+        result = validator._fail_result("deep", checks)
+
+        # THEN
+        assert result.status == "FAIL"
+        assert result.checks == checks
