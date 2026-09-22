@@ -88,28 +88,25 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
         # expected.id and expected.ref both come from --refs, a (possibly restored/malformed)
         # PersistenceState rather than values prepare() just minted - validate expected.id is in
         # the range prepare() could have produced (e.g. 0..(1 << 63) - 1) before interpolating it
-        # into any resource name or query. Also validate expected.ref against the range your
+        # into any resource name or query, and validate expected.ref against the range your
         # prepare() declares (e.g. PostgreSQL starts at ref=1, but a KV validator might start at
         # ref=0; see the validator-specific initial state below). An out-of-range id could
-        # otherwise produce a truncated/different identifier and silently target the wrong
-        # resource; an invalid ref (outside your declared range) could let an empty or partially
-        # recreated canary satisfy `actual == expected.ref` and report a false PASS. Also reject
-        # an empty expected.token: prepare() always mints one, so an empty value can only come
-        # from a state serialised before the token existed, or otherwise restored/malformed -
-        # matching on it would count records carrying no token at all. Raise before any
-        # read/write if any of these is invalid.
+        # otherwise silently target the wrong resource; an invalid ref could let an empty or
+        # partially recreated canary satisfy `actual == expected.ref` and report a false PASS.
+        # Also reject an empty expected.token: prepare() always mints one, so an empty value can
+        # only come from a restored/malformed state, and matching on it would count records
+        # carrying no token at all. Raise before any read/write if any of these is invalid.
         # ... read back and assert the tagged row/record count matches expected.ref (filter on the
         # random token written by prepare(), not a bare row count - see "Common patterns" below) ...
         result = self._make_result(level="deep", checks=[...])
         # Gate the extra write and the returned state on the *overall* result, not just the one
-        # assertion above - if this method later adds more checks (e.g. a schema/connection
-        # check), a single "count matches" assertion could still be true while the combined
-        # result is FAIL, and writing/advancing here would ignore that. The harness only carries
-        # a returned state forward on PASS (see the design point below), so writing/advancing
-        # when result.status != "PASS" would grow the backend's actual state past what the
-        # harness will ever compare against again, masking the mismatch instead of letting a
-        # later checkpoint re-detect it. Commit the write (or use autocommit) for the same reason
-        # as prepare() above.
+        # assertion above - if this method later adds more checks, a single "count matches"
+        # assertion could still be true while the combined result is FAIL. The harness only
+        # carries a returned state forward on PASS (see the design point below), so
+        # writing/advancing when result.status != "PASS" would grow the backend's actual state
+        # past what the harness will ever compare against again, masking the mismatch instead of
+        # letting a later checkpoint re-detect it. Commit the write (or use autocommit) for the
+        # same reason as prepare() above.
         if result.status == "PASS":
             # ... write one more tagged row/record, carrying the same token forward ...
             new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token)
