@@ -282,12 +282,21 @@ def _lower_as_features(expr: AnyExpr, ctx: LoweringContext) -> _FeatureSet:
     return result
 
 
-def _charm_set_for_endpoints(charm_id: int, endpoint_refs: _EndpointNames, domain: Domain) -> z3.ExprRef:
+def _charm_set_for_endpoints(
+    charm_id: int, endpoint_refs: _EndpointNames, domain: Domain, *, include_external_cmr_peers: bool = False
+) -> z3.ExprRef:
     """Build a Z3 Set(Int) of peer charm IDs integrated on the given endpoints.
 
     Endpoints tagged cross_model_only (via cross_model()) only contribute peers reached over a
-    genuine cross-model integration (Domain.is_cross_model); this is a pre-existing limitation
-    for external CMR peers, which have no DomainCharm/id to add to the set.
+    genuine cross-model integration (Domain.is_cross_model). External CMR peers (remote model not
+    part of this domain) have no DomainCharm/id, so they're represented by a stable synthetic id
+    instead (Domain.external_cmr_peer_ids) -- this still lets charms() equality distinguish two
+    unrelated external peers, even though it can't name them.
+
+    External peers are opt-in via ``include_external_cmr_peers`` and only ``charms()`` asks for
+    them. Other callers (notably ``_reachable_set``, whose result feeds ``units()``/``tracks()``/
+    ``risks()``/``channels()``/``revisions()``) can only reduce over ids that name a real
+    ``DomainCharm``, so a synthetic id would silently contribute nothing there.
     """
     endpoint_names = {ref.name for ref in endpoint_refs}
     cross_model_only_names = {ref.name for ref in endpoint_refs if ref.cross_model_only}
@@ -304,6 +313,28 @@ def _charm_set_for_endpoints(charm_id: int, endpoint_refs: _EndpointNames, domai
         if matched_endpoint in cross_model_only_names and not domain.is_cross_model(integration):
             continue
         result = z3.If(integration.exists, z3.SetAdd(result, z3.IntVal(peer_id)), result)
+
+    if not include_external_cmr_peers:
+        return result
+
+    # External CMRs are always cross-model and always exist (they're user-declared facts, not
+    # solver decisions), but only contribute to this charm's set when this charm is the one
+    # actually resolved for the local application -- mirrored from the cmr_terms handling in
+    # constraints.add_charm_constraints.
+    app_to_charm = domain.app_to_charm_map()
+    peer_ids = domain.external_cmr_peer_ids()
+    local_model = domain.charms[charm_id].model
+    for model_ref, local_ep, remote_ep in domain.external_cmr_integrations():
+        # Scope to the model owning this charm: another model can hold an identically named
+        # application, whose CMR must not contribute here (see the same guard in
+        # constraints.add_charm_constraints).
+        if model_ref != local_model or local_ep.endpoint not in endpoint_names:
+            continue
+        mapping_var = app_to_charm.get((local_ep.application, charm_id))
+        if mapping_var is None:
+            continue
+        peer_id = peer_ids[(remote_ep.model.key, remote_ep.application)]
+        result = z3.If(mapping_var, z3.SetAdd(result, z3.IntVal(peer_id)), result)
 
     return result
 
@@ -829,7 +860,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
 
         case CharmsExpr(arg=arg):
             endpoints = _lower_as_endpoints(arg, ctx)
-            return _charm_set_for_endpoints(ctx.charm_id, endpoints, ctx.domain)
+            return _charm_set_for_endpoints(ctx.charm_id, endpoints, ctx.domain, include_external_cmr_peers=True)
 
         case ReachableExpr(arg=EndpointExpr(name=name)):
             return _reachable_set(ctx.charm_id, name, ctx.domain_charm.spec, ctx.domain)
