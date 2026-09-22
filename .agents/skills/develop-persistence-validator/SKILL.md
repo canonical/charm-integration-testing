@@ -574,6 +574,38 @@ rather than registering multiple entry points for the same interface.
    required for consistency with the prior `prepare()` and `checkpoint()`
    commands) and confirm the canary resource is gone.
 
+9. Capture verification evidence with
+   `development-sandbox/bin/verify-persistence-validator.sh`. This is the
+   persistence counterpart of `verify-validator.sh`: it runs the quality and
+   wiring gates, then drives the full `prepare -> disrupt -> checkpoint ->
+   cleanup` lifecycle against a live model and writes a `summary.txt` +
+   `report.json` evidence bundle. Run it after step 8 has injected the
+   validators venv onto the units (a plain `juju deploy` does not create it):
+   ```
+   $PROJECT_ROOT/development-sandbox/bin/verify-persistence-validator.sh \
+     --model <interface>-test \
+     --app <requirer> \
+     --provider <provider> \
+     --validator <name> \
+     --output-dir $PROJECT_ROOT/development-sandbox/reports/<name>-$(date +%Y%m%d-%H%M%S)
+   ```
+   `--app` is the application whose units run the persistence validator (the
+   side the validator's role gating applies to); `--provider` is the
+   application disrupted between prepare and checkpoint. By default the
+   provider is scaled to zero and back to its original unit count, then the
+   model is waited on before checkpointing. For a backend that cannot be
+   disrupted by scaling (e.g. a Kubernetes-only backend such as MinIO, whose
+   databag retains credentials at zero units), pass `--down-cmd`/`--restore-cmd`
+   instead (e.g. `kubectl scale deployment ... --replicas=0` / `--replicas=1`).
+   The script drives the lifecycle through
+   `development-sandbox/bin/dev-persistence.py`, which uses
+   `ValidatorInjectorExtension` and so handles the `--operator` flag for
+   Kubernetes charms automatically. The script exits non-zero unless every
+   gate passes, and `checkpoint_pass` requires a `PASS` result for the
+   interface - an empty result set (nothing applicable) is not treated as a
+   pass. Include the `summary.txt` and `report.json` paths in your completion
+   summary, and destroy the model afterwards.
+
 ## Common patterns
 
 ### Discovering canary resources by name pattern
@@ -743,5 +775,9 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
   yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
   includes nested markdown documentation, run markdownlint-cli2 explicitly on
   those files).
+- `development-sandbox/bin/verify-persistence-validator.sh` produces a
+  `summary.txt` + `report.json` evidence bundle (in
+  `development-sandbox/reports/` when run as documented in step 9) with
+  `checkpoint_pass=true` for the interface.
 - No hardcoded charm names, model names, or relation ids inside the
   validator code.
