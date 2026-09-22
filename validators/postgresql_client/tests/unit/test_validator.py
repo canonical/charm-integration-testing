@@ -725,8 +725,7 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # effectively-unique) name.
         # Regression test for: resolving the schema via pg_table_is_visible() alone depends on the
         # *current* connection's search_path, which can disagree with the one prepare() used,
-        # causing a false FAIL. An exact-name match anywhere in the database - visible or not -
-        # unambiguously identifies our canary.
+        # causing a false FAIL.
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchall_rows=[("some_schema", False)], fetchone_rows=[(1,)])
         conn = ConnStub(cursor_stub=cursor)
@@ -850,8 +849,8 @@ class TestPostgreSQLClientPersistenceValidatorCheckpoint:
         # Regression test for: checkpoint() previously compared `actual == expected.ref` without
         # validating expected.ref first, so a restored/malformed PersistenceState with ref=0 could
         # let an empty or partially recreated table (actual == 0) coincidentally satisfy the
-        # comparison and report a false PASS instead of failing safely. prepare() always returns
-        # ref=1, so ref < 1 can never have come from a real prior run.
+        # comparison and report a false PASS. prepare() always returns ref=1, so ref < 1 can never
+        # have come from a real prior run.
         validator = _make_persistence_validator(VALID_DATABAG)
 
         with patch("validators.postgresql_client.validator.psycopg2.connect", return_value=ConnStub()):
