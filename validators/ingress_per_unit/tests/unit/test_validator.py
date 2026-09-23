@@ -95,6 +95,10 @@ class TestHostFormatCheck:
     def test_port_is_rejected(self) -> None:
         assert not _host_format_check("app.svc:8080").passed
 
+    def test_delimiters_are_rejected(self) -> None:
+        assert not _host_format_check("/tmp").passed
+        assert not _host_format_check("user@app.svc").passed
+
 
 class TestPortRangeCheck:
     def test_valid_port(self) -> None:

@@ -144,11 +144,11 @@ def _host_format_check(host: str) -> ValidationCheck:
             passed=False,
             message=f"host {host!r} contains whitespace.",
         )
-    if ":" in host:
+    if any(character in host for character in ":/@"):
         return ValidationCheck(
             name="host_format",
             passed=False,
-            message=f"host {host!r} must be a hostname or IPv4 address without a port.",
+            message=f"host {host!r} must be a bare hostname or IPv4 address.",
         )
     return ValidationCheck(name="host_format", passed=True, message=f"host {host!r} is well-formed.")
 
