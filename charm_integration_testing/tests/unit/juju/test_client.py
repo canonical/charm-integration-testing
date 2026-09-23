@@ -1217,3 +1217,44 @@ class TestDeployBundles:
             f"deploy:{tmp_path / 'phase2-bundle-0.yaml'}",
             "post_deploy",
         ]
+
+
+# ---------------------------------------------------------------------------
+# TestJujuClientAddModelCloud
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AddModelCloudBackendStub(NullJujuBackend):
+    """Backend stub that records add_model cloud and add_k8s_cloud calls."""
+
+    add_model_calls: list[tuple[str, str, dict[str, str], str | None]] = field(default_factory=list)
+    add_k8s_cloud_calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        self.add_model_calls.append((controller, model, model_config, cloud))
+
+    def add_k8s_cloud(self, cloud: str, controller: str) -> None:
+        self.add_k8s_cloud_calls.append((cloud, controller))
+
+
+class TestJujuClientAddModelCloud:
+    """Verify add_model passes cloud through to backend and add_k8s_cloud delegates."""
+
+    def test_add_model_passes_cloud_through(self) -> None:
+        backend = AddModelCloudBackendStub()
+        _client(backend).add_model(controller="ctrl-a", model="model-a", model_config={"foo": "bar"}, cloud="k8s-cloud")
+
+        assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar"}, "k8s-cloud")]
+
+    def test_add_model_defaults_cloud_to_none(self) -> None:
+        backend = AddModelCloudBackendStub()
+        _client(backend).add_model(controller="ctrl-a", model="model-a", model_config={})
+
+        assert backend.add_model_calls == [("ctrl-a", "model-a", {}, None)]
+
+    def test_add_k8s_cloud_delegates_to_backend(self) -> None:
+        backend = AddModelCloudBackendStub()
+        _client(backend).add_k8s_cloud(cloud="k8s-cloud", controller="ctrl-a")
+
+        assert backend.add_k8s_cloud_calls == [("k8s-cloud", "ctrl-a")]

@@ -458,13 +458,20 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_bootstrap_controller(controller)
 
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
-        self.logger.info(f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'.")
-        self.backend.add_model(controller=controller, model=model, model_config=model_config)
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        cloud_suffix = f" on cloud '{cloud}'" if cloud else ""
+        self.logger.info(
+            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'{cloud_suffix}."
+        )
+        self.backend.add_model(controller=controller, model=model, model_config=model_config, cloud=cloud)
 
         # Call extensions
         for extension in self.extensions:
             extension.post_add_model(controller, model)
+
+    def add_k8s_cloud(self, cloud: str, controller: str) -> None:
+        self.logger.info(f"Registering Kubernetes cloud '{cloud}' on controller '{controller}'.")
+        self.backend.add_k8s_cloud(cloud=cloud, controller=controller)
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")

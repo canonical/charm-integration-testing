@@ -217,6 +217,12 @@ neighbor model lands on*. Combining them (``--same-controller --neighbor-cloud <
 places the neighbor model on a different cloud of the same controller, which requires a
 multi-cloud controller.
 
+When a same-controller run names a Kubernetes ``--neighbor-cloud``, the suite registers
+that cloud on the target controller before creating the neighbor model. The kubeconfig
+for the cloud must be exported via ``KUBECONFIG_<cloud>`` (hyphens replaced with
+underscores, e.g. ``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller``
+so no client-only registration is needed.
+
 In same-controller mode the neighbor model name is still generated separately, so the
 two models remain distinct. ``--neighbor-controller`` must not be passed alongside
 ``--same-controller``.

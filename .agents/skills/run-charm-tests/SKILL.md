@@ -392,7 +392,8 @@ Tests:      [Deploy] ─────[Relate] ──[Verify]
 - One controller, two models
 - Tests cross-model relations without a second bootstrap
 - Combine with `--neighbor-cloud` to place the neighbor model on a different cloud of
-  the same controller (multi-cloud controller)
+  the same controller (multi-cloud controller); a Kubernetes neighbor cloud is
+  registered on the target controller automatically from `KUBECONFIG_<cloud>`
 
 #### **Parallel (Future)**
 ```

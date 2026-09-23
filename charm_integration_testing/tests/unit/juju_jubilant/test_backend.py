@@ -2451,6 +2451,8 @@ class TestJubilantBackend:
             bootstrap_calls: int = 0
             add_model_calls: int = 0
             switch_calls: int = 0
+            add_model_clouds: list[str | None] = field(default_factory=list)
+            cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = field(default_factory=list)
 
             def bootstrap(
                 self,
@@ -2465,13 +2467,15 @@ class TestJubilantBackend:
                     self.bootstrap_failures_remaining -= 1
                     raise RuntimeError("transient bootstrap failure")
 
-            def add_model(self, model: str, controller: str, config: dict[str, str]) -> None:
+            def add_model(self, model: str, controller: str, config: dict[str, str], cloud: str | None = None) -> None:
                 self.add_model_calls += 1
+                self.add_model_clouds.append(cloud)
                 if self.add_model_failures_remaining > 0:
                     self.add_model_failures_remaining -= 1
                     raise RuntimeError("transient add-model failure")
 
-            def cli(self, *args: str, include_model: bool = True) -> str:
+            def cli(self, *args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                self.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
                 if args and args[0] == "switch":
                     self.switch_calls += 1
                 return ""
@@ -2522,6 +2526,70 @@ class TestJubilantBackend:
 
             assert stub.add_model_calls == 3
             assert stub.switch_calls == 0
+
+        def test_add_k8s_cloud_success(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+
+            assert stub.cli_calls == [
+                (
+                    ("add-k8s", "my-k8s", "--controller", "test-controller"),
+                    {"include_model": False, "stdin": "kubeconfig-content"},
+                )
+            ]
+
+        def test_add_k8s_cloud_missing_kubeconfig(self) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with pytest.raises(ValueError, match="No kubeconfig configured for cloud"):
+                backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+
+            assert stub.cli_calls == []
+
+        def test_add_k8s_cloud_retries_then_succeeds(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            def flaky_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
+                if len(stub.cli_calls) < 3:
+                    raise RuntimeError("transient add-k8s failure")
+                return ""
+
+            stub.cli = flaky_cli
+            with patch("tenacity.nap.sleep", return_value=None):
+                backend._add_k8s_cloud(cloud="my-k8s", controller="test-controller", kubeconfig="kubeconfig-content")
+
+            assert len(stub.cli_calls) == 3
+
+        def test_add_k8s_cloud_retries_then_raises(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            def flaky_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
+                raise RuntimeError("transient add-k8s failure")
+
+            stub.cli = flaky_cli
+            with patch("tenacity.nap.sleep", return_value=None):
+                with pytest.raises(RuntimeError, match="transient add-k8s failure"):
+                    backend._add_k8s_cloud(
+                        cloud="my-k8s", controller="test-controller", kubeconfig="kubeconfig-content"
+                    )
+
+            assert len(stub.cli_calls) == 3
 
 
 class TestParseBundleFile:

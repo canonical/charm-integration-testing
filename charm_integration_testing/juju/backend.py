@@ -387,7 +387,12 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_k8s_cloud(self, cloud: str, controller: str) -> None:
+        """Register a Kubernetes cloud on an existing controller."""
         raise NotImplementedError
 
     @abstractmethod
