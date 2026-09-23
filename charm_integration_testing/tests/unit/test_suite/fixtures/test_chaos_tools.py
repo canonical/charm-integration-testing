@@ -116,6 +116,28 @@ class TestSelectChaosTool:
         # THEN readiness and priority determine the selection
         assert tool == params.expected
 
+    @pytest.mark.parametrize("status", [401, 403, 500])
+    def test_second_crd_error_propagates_when_first_is_absent(self, status: int) -> None:
+        # GIVEN absent Litmus and StressChaos CRDs, and an error reading IOChaos
+        error = ApiException(status=status)
+        reads: list[str] = []
+
+        class CrdErrorStub(KubernetesStub):
+            def crd_exists(self, name: str) -> bool:
+                reads.append(name)
+                if name == "iochaos.chaos-mesh.org":
+                    raise error
+                return False
+
+        backend = CrdErrorStub()
+
+        # WHEN selecting a tool, THEN the API error is not reported as absence
+        with pytest.raises(ApiException) as exc_info:
+            select_chaos_tool(backend, TARGET.model)
+
+        assert exc_info.value is error
+        assert reads == ["chaosengines.litmuschaos.io", *CHAOS_MESH_CRDS]
+
     def test_availability_is_not_cached(self) -> None:
         # GIVEN an initially empty cluster
         backend = KubernetesStub()

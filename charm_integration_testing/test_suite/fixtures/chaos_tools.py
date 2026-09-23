@@ -36,7 +36,9 @@ def select_chaos_tool(backend: KubernetesBackend, namespace: str) -> ChaosTool |
     """Check current availability, preferring Litmus over Chaos Mesh."""
     if litmus_is_available(backend, namespace):
         return ChaosTool.LITMUS
-    if all(backend.crd_exists(name) for name in CHAOS_MESH_CRDS):
+    # Check both CRDs so an absent one does not hide an API error for the other.
+    mesh_crds_present = [backend.crd_exists(name) for name in CHAOS_MESH_CRDS]
+    if all(mesh_crds_present):
         return ChaosTool.CHAOS_MESH
     return None
 
