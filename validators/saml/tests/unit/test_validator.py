@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import base64
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import entry_points
 from typing import cast
@@ -35,6 +36,9 @@ def _make_certificate() -> str:
 
 
 VALID_CERT = _make_certificate()
+VALID_CERT_DER = base64.b64encode(
+    x509.load_pem_x509_certificate(VALID_CERT.encode()).public_bytes(serialization.Encoding.DER)
+).decode()
 VALID_DATA = {
     "entity_id": "https://idp.example.com",
     "single_sign_on_service_redirect_url": "https://idp.example.com/sso",
@@ -91,6 +95,11 @@ def test_invalid_certificate_fails() -> None:
     assert result.status == "FAIL"
 
 
+def test_base64_der_certificate_passes() -> None:
+    result = _make_validator({**VALID_DATA, "x509certs": VALID_CERT_DER}).validate()
+    assert result.status == "PASS"
+
+
 def test_deep_metadata_passes() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
@@ -121,6 +130,28 @@ def test_deep_metadata_requires_entity_descriptor() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b"<NotMetadata/>"
+    with patch("validators.saml.validator.urlopen", return_value=response):
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
+            level="deep"
+        )
+    assert result.status == "FAIL"
+
+
+def test_deep_metadata_requires_saml_namespace() -> None:
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = b"<EntityDescriptor/>"
+    with patch("validators.saml.validator.urlopen", return_value=response):
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
+            level="deep"
+        )
+    assert result.status == "FAIL"
+
+
+def test_deep_metadata_rejects_forbidden_xml() -> None:
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = b'<!DOCTYPE foo [<!ENTITY xxe "forbidden">]><EntityDescriptor>&xxe;</EntityDescriptor>'
     with patch("validators.saml.validator.urlopen", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"

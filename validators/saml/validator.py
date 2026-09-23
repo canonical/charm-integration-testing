@@ -1,13 +1,16 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import base64
+import binascii
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from defusedxml import ElementTree
+from defusedxml import ElementTree  # type: ignore[import-untyped]
+from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped]
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -18,13 +21,8 @@ _REQUIRED_FIELDS = (
     "x509certs",
 )
 _HTTP_TIMEOUT = 10
-_SUPPORTED_BINDINGS = {
-    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact",
-    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
-    "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
-    "urn:oasis:names:tc:SAML:2.0:bindings:PAOS",
-    "urn:oasis:names:tc:SAML:2.0:bindings:SOAP",
-}
+_REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+_SAML_METADATA_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:metadata"
 
 
 class SamlValidator(BaseValidator):
@@ -73,7 +71,7 @@ def _url_check(name: str, value: str) -> ValidationCheck:
 
 
 def _binding_check(value: str) -> ValidationCheck:
-    passed = value in _SUPPORTED_BINDINGS
+    passed = value == _REDIRECT_BINDING
     return ValidationCheck(
         name="binding",
         passed=passed,
@@ -84,18 +82,23 @@ def _binding_check(value: str) -> ValidationCheck:
 def _certificate_check(value: str) -> ValidationCheck:
     certificates = [certificate.strip() for certificate in value.split(",") if certificate.strip()]
     try:
-        passed = bool(certificates) and all(
-            x509.load_pem_x509_certificate(certificate.encode(), default_backend()) for certificate in certificates
-        )
-    except ValueError:
+        passed = bool(certificates) and all(_load_certificate(certificate) for certificate in certificates)
+    except (ValueError, binascii.Error):
         passed = False
     return ValidationCheck(
         name="certificate",
         passed=passed,
         message="X.509 certificate material is valid."
         if passed
-        else "x509certs does not contain valid PEM certificates.",
+        else "x509certs does not contain valid certificate material.",
     )
+
+
+def _load_certificate(value: str) -> x509.Certificate:
+    if value.startswith("-----BEGIN CERTIFICATE-----"):
+        return x509.load_pem_x509_certificate(value.encode(), default_backend())
+    der = base64.b64decode("".join(value.split()), validate=True)
+    return x509.load_der_x509_certificate(der, default_backend())
 
 
 def _metadata_check(url: str) -> ValidationCheck:
@@ -107,10 +110,10 @@ def _metadata_check(url: str) -> ValidationCheck:
         with urlopen(request, timeout=_HTTP_TIMEOUT) as response:  # nosec B310 - scheme is checked above
             body = response.read()
         root = ElementTree.fromstring(body)
-        if root.tag.rsplit("}", 1)[-1] != "EntityDescriptor":
+        if root.tag != f"{{{_SAML_METADATA_NAMESPACE}}}EntityDescriptor":
             return ValidationCheck(
                 name="metadata", passed=False, message="SAML metadata response has no EntityDescriptor."
             )
         return ValidationCheck(name="metadata", passed=True, message="SAML metadata is reachable and valid XML.")
-    except (ElementTree.ParseError, HTTPError, URLError, OSError) as exc:
+    except (DefusedXmlException, ElementTree.ParseError, HTTPError, URLError, OSError) as exc:
         return ValidationCheck(name="metadata", passed=False, message=f"SAML metadata check failed: {exc}.")
