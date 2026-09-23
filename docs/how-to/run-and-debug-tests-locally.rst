@@ -100,15 +100,19 @@ cloud, replacing hyphens in the cloud name with underscores. For example:
 
    export KUBECONFIG_local_k8s=/path/to/kubeconfig
 
-The test suite reports tool availability at session start. Litmus requires
-its three CRDs and a ready ``litmus`` Deployment in ``litmus-system``.
+The test suite reports every available tool once per session, the first
+time a test requests a chaos tool via ``require_chaos_tool`` or
+``chaos_tool_for_model``; sessions with no chaos tests skip the check.
+Litmus requires its three CRDs and a ready ``litmus`` Deployment in
+``litmus-system``.
 The shared operator namespace is independent of the test model namespace.
 CIT uses this installation without deploying charms or configuring CMR.
 
-Tests using ``require_chaos_tool`` prefer Litmus when both tools are
-available and skip when neither is available. Availability is checked again
-when a test requests a tool. Kubernetes API errors are reported as failures.
-Tests using ``require_chaos_mesh`` continue to require Chaos Mesh.
+Tests using ``require_chaos_tool`` see every available tool and prefer
+Litmus when both are available; they skip when neither is available.
+Availability is rechecked for each request rather than reused from the
+session report. Kubernetes API errors are reported as failures. Tests
+using ``require_chaos_mesh`` continue to require Chaos Mesh specifically.
 
 Detection does not run Litmus experiments or prepare experiment definitions
 and permissions. Shared resources remain managed by the infrastructure

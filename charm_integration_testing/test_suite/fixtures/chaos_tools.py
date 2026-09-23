@@ -21,15 +21,29 @@ class ChaosTool(str, Enum):
     CHAOS_MESH = "chaos-mesh"
 
 
-def select_chaos_tool(backend: KubernetesBackend) -> ChaosTool | None:
-    """Check current availability, preferring Litmus over Chaos Mesh."""
+def available_chaos_tools(backend: KubernetesBackend) -> frozenset[ChaosTool]:
+    """Check current availability of every chaos tool, without choosing between them."""
+    tools: set[ChaosTool] = set()
     if litmus_is_available(backend):
-        return ChaosTool.LITMUS
+        tools.add(ChaosTool.LITMUS)
     # Check both CRDs so an absent one does not hide an API error for the other.
     mesh_crds_present = [backend.crd_exists(name) for name in CHAOS_MESH_CRDS]
     if all(mesh_crds_present):
+        tools.add(ChaosTool.CHAOS_MESH)
+    return frozenset(tools)
+
+
+def preferred_chaos_tool(tools: frozenset[ChaosTool]) -> ChaosTool | None:
+    """Pick Litmus over Chaos Mesh when both support the caller's need."""
+    if ChaosTool.LITMUS in tools:
+        return ChaosTool.LITMUS
+    if ChaosTool.CHAOS_MESH in tools:
         return ChaosTool.CHAOS_MESH
     return None
+
+
+def _format_tools(tools: frozenset[ChaosTool]) -> str:
+    return ", ".join(sorted(tool.value for tool in tools)) or "none"
 
 
 def detect_initial_tools(
@@ -47,13 +61,13 @@ def detect_initial_tools(
             continue
         backend = backend_factory(path)
         try:
-            tool = select_chaos_tool(backend)
-            logger.info("Initial chaos tool for %s/%s: %s.", cloud, namespace, tool.value if tool else "none")
+            tools = available_chaos_tools(backend)
+            logger.info("Initial chaos tools for %s/%s: %s.", cloud, namespace, _format_tools(tools))
         finally:
             backend.api_client.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def detect_chaos_tools(
     request: pytest.FixtureRequest,
     juju_backend: JujuBackend,
@@ -76,8 +90,8 @@ def detect_chaos_tools(
                 logger.info("Chaos detection not performed for model %s: non-Kubernetes model.", model.uri)
                 continue
             # The backend owns this client and may reuse it after the snapshot.
-            tool = select_chaos_tool(kubernetes.backend)
-            logger.info("Initial chaos tool for %s: %s.", model.uri, tool.value if tool else "none")
+            tools = available_chaos_tools(kubernetes.backend)
+            logger.info("Initial chaos tools for %s: %s.", model.uri, _format_tools(tools))
         return
     scopes = [(target_cloud, target_model_ref.model)]
     if neighbor_cloud is not None and neighbor_model_ref is not None:
@@ -90,14 +104,16 @@ def require_tool_for_model(backend: JujuBackend, model: JujuModelHandle) -> Chao
     kubernetes = backend.get_kubernetes_client_for_model(model)
     if kubernetes is None:
         pytest.skip("Litmus and Chaos Mesh require a Kubernetes model.")
-    tool = select_chaos_tool(kubernetes.backend)
+    tool = preferred_chaos_tool(available_chaos_tools(kubernetes.backend))
     if tool is None:
         pytest.skip(f"Neither Litmus nor Chaos Mesh is available for {model.uri}.")
     return tool
 
 
 @pytest.fixture
-def chaos_tool_for_model(juju_backend: JujuBackend) -> Callable[[JujuModelHandle], ChaosTool]:
+def chaos_tool_for_model(
+    juju_backend: JujuBackend, detect_chaos_tools: None
+) -> Callable[[JujuModelHandle], ChaosTool]:
     """Resolve the available chaos tool for a test model."""
 
     def resolve(model: JujuModelHandle) -> ChaosTool:

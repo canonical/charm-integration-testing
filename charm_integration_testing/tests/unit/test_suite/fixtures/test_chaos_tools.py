@@ -16,9 +16,9 @@ from test_suite.fixtures import chaos_tools
 from test_suite.fixtures.chaos_tools import (
     CHAOS_MESH_CRDS,
     ChaosTool,
+    available_chaos_tools,
     detect_initial_tools,
     require_tool_for_model,
-    select_chaos_tool,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
@@ -89,58 +89,70 @@ def make_request(**options: str) -> pytest.FixtureRequest:
     return cast(pytest.FixtureRequest, RequestStub(ConfigStub(values)))
 
 
-class TestSelectChaosTool:
+class TestAvailableChaosTools:
     @dataclass(frozen=True)
     class Params:
         label: str
         litmus_crd: bool
         operator_ready: bool
         mesh_crds: tuple[str, ...]
-        expected: ChaosTool | None
+        expected: frozenset[ChaosTool]
 
     test_cases = [
         Params(
-            label="prefer-litmus",
+            label="both-available",
             litmus_crd=True,
             operator_ready=True,
             mesh_crds=CHAOS_MESH_CRDS,
-            expected=ChaosTool.LITMUS,
+            expected=frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH}),
         ),
         Params(
             label="litmus-only",
             litmus_crd=True,
             operator_ready=True,
             mesh_crds=(),
-            expected=ChaosTool.LITMUS,
+            expected=frozenset({ChaosTool.LITMUS}),
         ),
         Params(
-            label="unready-litmus-falls-back",
+            label="unready-litmus-leaves-mesh",
             litmus_crd=True,
             operator_ready=False,
             mesh_crds=CHAOS_MESH_CRDS,
-            expected=ChaosTool.CHAOS_MESH,
+            expected=frozenset({ChaosTool.CHAOS_MESH}),
         ),
         Params(
             label="mesh-only",
             litmus_crd=False,
             operator_ready=False,
             mesh_crds=CHAOS_MESH_CRDS,
-            expected=ChaosTool.CHAOS_MESH,
+            expected=frozenset({ChaosTool.CHAOS_MESH}),
         ),
-        Params(label="neither", litmus_crd=False, operator_ready=False, mesh_crds=(), expected=None),
-        Params(label="crd-without-operator", litmus_crd=True, operator_ready=False, mesh_crds=(), expected=None),
-        Params(label="operator-without-crd", litmus_crd=False, operator_ready=True, mesh_crds=(), expected=None),
+        Params(label="neither", litmus_crd=False, operator_ready=False, mesh_crds=(), expected=frozenset()),
+        Params(
+            label="crd-without-operator",
+            litmus_crd=True,
+            operator_ready=False,
+            mesh_crds=(),
+            expected=frozenset(),
+        ),
+        Params(
+            label="operator-without-crd",
+            litmus_crd=False,
+            operator_ready=True,
+            mesh_crds=(),
+            expected=frozenset(),
+        ),
         Params(
             label="incomplete-mesh",
             litmus_crd=False,
             operator_ready=False,
             mesh_crds=CHAOS_MESH_CRDS[:1],
-            expected=None,
+            expected=frozenset(),
         ),
     ]
 
     @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
-    def test_selection(self, params: Params) -> None:
+    def test_detection(self, params: Params) -> None:
         # GIVEN the available CRDs and shared operator
         backend = KubernetesStub()
         backend.crds.update(params.mesh_crds)
@@ -149,11 +161,11 @@ class TestSelectChaosTool:
         if params.operator_ready:
             backend.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
 
-        # WHEN selecting a tool
-        tool = select_chaos_tool(backend)
+        # WHEN checking availability
+        tools = available_chaos_tools(backend)
 
-        # THEN readiness and priority determine the selection
-        assert tool == params.expected
+        # THEN readiness determines which tools are reported
+        assert tools == params.expected
 
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_second_crd_error_propagates_when_first_is_absent(self, status: int) -> None:
@@ -170,9 +182,9 @@ class TestSelectChaosTool:
 
         backend = CrdErrorStub()
 
-        # WHEN selecting a tool, THEN the API error is not reported as absence
+        # WHEN checking availability, THEN the API error is not reported as absence
         with pytest.raises(ApiException) as exc_info:
-            select_chaos_tool(backend)
+            available_chaos_tools(backend)
 
         assert exc_info.value is error
         assert reads == [*LITMUS_CRDS, *CHAOS_MESH_CRDS]
@@ -180,16 +192,16 @@ class TestSelectChaosTool:
     def test_availability_is_not_cached(self) -> None:
         # GIVEN an initially empty cluster
         backend = KubernetesStub()
-        assert select_chaos_tool(backend) is None
+        assert available_chaos_tools(backend) == frozenset()
 
-        # WHEN resources appear and disappear, THEN selection observes each change
+        # WHEN resources appear and disappear, THEN detection observes each change
         backend.crds.update(CHAOS_MESH_CRDS)
-        assert select_chaos_tool(backend) == ChaosTool.CHAOS_MESH
+        assert available_chaos_tools(backend) == frozenset({ChaosTool.CHAOS_MESH})
         backend.crds.update(LITMUS_CRDS)
         backend.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        assert select_chaos_tool(backend) == ChaosTool.LITMUS
+        assert available_chaos_tools(backend) == frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH})
         backend.ready_deployments.clear()
-        assert select_chaos_tool(backend) == ChaosTool.CHAOS_MESH
+        assert available_chaos_tools(backend) == frozenset({ChaosTool.CHAOS_MESH})
 
 
 class TestInitialDetection:
@@ -422,7 +434,7 @@ class TestRequireTool:
         backend = JujuBackendStub()
         backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
         backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend)
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
 
         # WHEN both models request a chaos tool
         target_tool = resolve(TARGET)
@@ -438,7 +450,7 @@ class TestRequireTool:
         backend = JujuBackendStub()
         backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
         backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend)
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
         assert resolve(TARGET) == ChaosTool.LITMUS
 
         # WHEN the shared operator stops
