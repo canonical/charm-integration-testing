@@ -96,7 +96,7 @@ def run_for_integration(
                     role=role,
                     level=level,
                     relation_id=integration.id,
-                    error=f"Validator '{validator_cls.__name__}' failed to run: {exc}",
+                    error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
                 )
             )
     return results
