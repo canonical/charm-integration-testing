@@ -5,9 +5,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, JujuValidationError, PersistenceKey
+from extensions import ValidatorInjectorExtension
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, JujuValidationError
 
-from validators.base import PersistenceState, ValidationResult
+from validators.base import ValidationResult
 
 from .scheduler.states import State
 
@@ -23,15 +24,13 @@ def test_teardown(
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
     neighbor_model_ref: JujuModelHandle | None,
-    persistence_state: dict[PersistenceKey, PersistenceState],
+    persistence_extension: ValidatorInjectorExtension,
 ) -> None:
     # Drop all canary data before the applications hosting it are torn down: cleanup() runs on the
-    # units themselves, so it must happen while those units still exist. test_deploy prepares every
-    # model in all_bundles (including the neighbor model for CMR runs), so cleanup must cover all of
-    # them too.
-    cleanup_model_refs = {target_model_ref}
-    if neighbor_model_ref is not None:
-        cleanup_model_refs.add(neighbor_model_ref)
+    # units themselves, so it must happen while those units still exist. Clean up every model the
+    # extension still holds state for (test_deploy prepares every model in all_bundles, including
+    # the neighbor model for CMR runs).
+    cleanup_model_refs = persistence_extension.models_with_persistence_state
     # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR result,
     # but application/model-discovery failures (e.g. the application is already gone) surface as a
     # bare exception. Attempt every model, merge JujuValidationError failures, and remember the
@@ -40,9 +39,7 @@ def test_teardown(
     first_other_error: Exception | None = None
     for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
         try:
-            juju_client.validate_model(
-                model=model_ref, level=None, persistence="cleanup", persistence_state=persistence_state
-            )
+            juju_client.validate_model(model=model_ref, level=None, persistence="cleanup")
         except JujuValidationError as exc:
             for unit, results in exc.failed_validations.items():
                 combined_failed_validations.setdefault(unit, []).extend(results)

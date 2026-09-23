@@ -5,9 +5,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, PersistenceKey
-
-from validators.base import PersistenceState
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -18,7 +16,6 @@ def test_scale_in_and_scale_out_charm(
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     # Get units
     num_units = juju_client.num_units(target_application, model=target_model_ref)
@@ -40,6 +37,4 @@ def test_scale_in_and_scale_out_charm(
     # Validate all applications and relations. For a CMR the persistence validator lives on the
     # neighbor's requirer units, so checkpoint there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(
-            model=model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=model_ref, level="simple", persistence="checkpoint")

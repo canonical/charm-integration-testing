@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient, JujuModelHandle, PersistenceKey
-
-from validators.base import PersistenceState
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -49,7 +47,6 @@ def test_deploy_target_old_revision(
     target_charm: str,
     tmp_path: Path,
     target_bundle: Path,
-    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -83,6 +80,4 @@ def test_deploy_target_old_revision(
     # Validate all applications and relations, and seed canary data for later persistence checks.
     # For a CMR the persistence validator lives on the neighbor's requirer units, so prepare there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(
-            model=model_ref, level="simple", persistence="prepare", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=model_ref, level="simple", persistence="prepare")

@@ -4,9 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, PersistenceKey
-
-from validators.base import PersistenceState
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -16,7 +14,6 @@ def test_controller_restart(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
-    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     # Reboot our controllers with a rolling reboot
     juju_client.reboot_model_controller(model=target_model_ref)
@@ -29,6 +26,4 @@ def test_controller_restart(
     # Validate all applications and relations, and verify canary data survived the reboot. For a
     # CMR the persistence validator lives on the neighbor's requirer units, so checkpoint there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(
-            model=model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=model_ref, level="deep", persistence="checkpoint")

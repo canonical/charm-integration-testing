@@ -8,7 +8,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-from juju import JujuBackend, JujuExtension, JujuModelHandle, PersistenceKey
+from juju import JujuBackend, JujuExtension, JujuModelHandle, PersistenceKey, rekey_persistence_state_controller
 
 from validators.base.validator import PersistenceState, ValidationResult
 from validators.runner import ValidatorRunnerResults
@@ -50,6 +50,11 @@ class ValidatorInjectorExtension(JujuExtension):
         self.uv_file = uv_file
         self.juju = juju
         self.logger = logger.getChild("ValidatorInjectorExtension")
+        # Canary state seeded by "prepare" and advanced by "checkpoint", keyed by
+        # PersistenceKey(controller, model, unit, relation_id). Owned here rather than threaded
+        # through validate_model by callers, so a single session-scoped instance is the one source
+        # of truth across every client built during a run.
+        self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         results: dict[str, list[ValidationResult]] = {}
@@ -63,7 +68,6 @@ class ValidatorInjectorExtension(JujuExtension):
         model: JujuModelHandle,
         application: str,
         persistence: str,
-        persistence_state: dict[PersistenceKey, PersistenceState],
     ) -> dict[str, list[ValidationResult]]:
         if persistence not in _PERSISTENCE_OPS:
             # A caller/programming error, not a remote failure: raise immediately rather than
@@ -76,7 +80,7 @@ class ValidatorInjectorExtension(JujuExtension):
             # needs (and only ever reports back) refs for the unit it's running on.
             unit_refs = {
                 key.relation_id: state
-                for key, state in persistence_state.items()
+                for key, state in self.persistence_state.items()
                 if key.controller == model.controller and key.model == model.model and key.unit == unit
             }
             try:
@@ -117,13 +121,13 @@ class ValidatorInjectorExtension(JujuExtension):
                 cleaned_relation_ids = set(cleaned_relation_ids_list) - failed_relation_ids
                 for key in [
                     key
-                    for key in persistence_state
+                    for key in self.persistence_state
                     if key.controller == model.controller
                     and key.model == model.model
                     and key.unit == unit
                     and key.relation_id in cleaned_relation_ids
                 ]:
-                    del persistence_state[key]
+                    del self.persistence_state[key]
             else:
                 try:
                     # Build every key/state pair before mutating persistence_state: a malformed
@@ -151,8 +155,35 @@ class ValidatorInjectorExtension(JujuExtension):
                         )
                     ]
                     continue
-                persistence_state.update(new_entries)
+                self.persistence_state.update(new_entries)
         return results
+
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        # A migrated model's units and relation_ids are unchanged, but its controller is not, so
+        # every tracked key for it is now stale. Re-key in place so callers never have to.
+        rekey_persistence_state_controller(self.persistence_state, model, source, target)
+
+    @property
+    def models_with_persistence_state(self) -> set[JujuModelHandle]:
+        """The models this extension currently holds canary state for."""
+        return {JujuModelHandle(controller=key.controller, model=key.model) for key in self.persistence_state}
+
+    def invalidate_persistence_state_for_models(
+        self, models: set[JujuModelHandle], units_by_model: dict[JujuModelHandle, set[str]]
+    ) -> None:
+        """Drop tracked state for the given units in the given models.
+
+        Used when a relation is removed and re-added: the new relation gets a fresh relation_id in
+        every participating model, so any state keyed on the old one is stale and must be dropped
+        before the next "prepare" seeds fresh canary data.
+        """
+        for key in [
+            key
+            for key in self.persistence_state
+            if JujuModelHandle(controller=key.controller, model=key.model) in models
+            and key.unit in units_by_model.get(JujuModelHandle(controller=key.controller, model=key.model), set())
+        ]:
+            del self.persistence_state[key]
 
     def _run_validators_on_unit(
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True

@@ -34,7 +34,6 @@ from juju import (
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
-    PersistenceKey,
 )
 from juju.resource_registry import (
     JujuControllerHandle,
@@ -78,7 +77,6 @@ from bundle_builder_x import (
     leaf_release_errors,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
-from validators.base import PersistenceState
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
@@ -260,16 +258,21 @@ def register_preexisting_resources(
 
 
 @pytest.fixture(scope="session")
-def persistence_state() -> dict[PersistenceKey, PersistenceState]:
-    """Tracking dict for canary data seeded by data persistence validators.
+def persistence_extension(
+    validators_path: Path | None,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    uv_file: Path | None,
+) -> ValidatorInjectorExtension:
+    """Session-scoped validator injector, and the owner of the canary persistence state.
 
-    Session-scoped and shared across every ``validate_model(persistence=...)`` call in a test run:
-    ``test_deploy`` populates it via "prepare", each disruptive test verifies and advances it via
-    "checkpoint", and ``test_teardown`` clears it via "cleanup". Keyed by
-    ``PersistenceKey(controller, model, unit, relation_id)`` so state for concurrently-tracked
-    models/controllers (e.g. during migration tests) never collides.
+    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    so the state it holds is the single source of truth: ``test_deploy`` seeds it via "prepare",
+    each disruptive test verifies and advances it via "checkpoint", and ``test_teardown`` clears it
+    via "cleanup". It also re-keys itself on model migration, so tests never touch the state
+    directly.
     """
-    return {}
+    return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
 
 
 def _build_juju_client(
@@ -277,9 +280,8 @@ def _build_juju_client(
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -295,7 +297,7 @@ def _build_juju_client(
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
@@ -307,38 +309,35 @@ def juju_client(
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
 ) -> JujuClient:
     return _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, uv_file, validators_path, session_resource_registry
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
     )
 
 
 @pytest.fixture(scope="session", autouse=True)
 def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
-    persistence_state: dict[PersistenceKey, PersistenceState],
+    persistence_extension: ValidatorInjectorExtension,
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
     register_preexisting_resources: None,
 ) -> None:
-    """Seed ``persistence_state`` when ``--current-state`` resumes past ``test_deploy``.
+    """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
 
-    ``persistence_state`` is normally populated by ``test_deploy`` calling ``prepare()``. When a
-    run resumes directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy``
-    never runs this session), ``persistence_state`` would otherwise stay empty: disruptive tests'
-    "checkpoint" calls would then pass no refs at all, which the runner treats as trivially
-    successful, silently skipping persistence validation for the whole run.
+    The state is normally populated by ``test_deploy`` calling ``prepare()``. When a run resumes
+    directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy`` never runs this
+    session), it would otherwise stay empty: disruptive tests' "checkpoint" calls would then pass
+    no refs at all, which the runner treats as trivially successful, silently skipping persistence
+    validation for the whole run.
 
     To avoid that silent gap, re-run "prepare" against the already-deployed target application as
     soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
@@ -358,7 +357,7 @@ def seed_persistence_state_for_resumed_run(
 
     if current_state != State.DEPLOYED:
         warnings.warn(
-            f"Resuming at --current-state={current_state.value} does not seed persistence_state; "
+            f"Resuming at --current-state={current_state.value} does not seed persistence state; "
             "data persistence validation will be skipped for this run since test_deploy did not "
             "run and no seeding is implemented for this resume point.",
             UserWarning,
@@ -366,7 +365,7 @@ def seed_persistence_state_for_resumed_run(
         return
 
     client = _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, uv_file, validators_path, session_resource_registry
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
     )
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:
@@ -376,7 +375,7 @@ def seed_persistence_state_for_resumed_run(
     # first - match that here.
     client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
     for model_ref in models:
-        client.validate_model(model=model_ref, level=None, persistence="prepare", persistence_state=persistence_state)
+        client.validate_model(model=model_ref, level=None, persistence="prepare")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

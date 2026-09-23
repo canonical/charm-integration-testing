@@ -243,7 +243,7 @@ class TestValidatorInjectorExtension:
 
             # WHEN / THEN
             with pytest.raises(ValueError, match="Unsupported persistence op"):
-                extension.post_persistence(TEST_MODEL, "myapp", "prepare; rm -rf /", {})
+                extension.post_persistence(TEST_MODEL, "myapp", "prepare; rm -rf /")
 
             # THEN no command was ever run on the unit
             assert not juju.exec_calls
@@ -255,7 +255,7 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_inject_and_pass_responses(_persistence_runner_json()))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "prepare", {})
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare")
 
             # THEN the venv was installed - i.e. more than just the readiness check and the run
             # command were executed - and the op still succeeded afterwards
@@ -272,7 +272,7 @@ class TestValidatorInjectorExtension:
                 juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "prepare", {})
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare")
 
             # THEN each unit's run command has --persistence prepare and no --refs
             run_cmds = [call[2] for call in juju.exec_calls if "--persistence" in call[2]]
@@ -291,13 +291,14 @@ class TestValidatorInjectorExtension:
             state: dict[PersistenceKey, PersistenceState] = {}
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "prepare", state)
+            extension.persistence_state = state
+            extension.post_persistence(TEST_MODEL, "myapp", "prepare")
 
             # THEN the state dict was updated with a key scoped to controller/model/unit
             key = PersistenceKey(
                 controller=TEST_MODEL.controller, model=TEST_MODEL.model, unit="myapp/0", relation_id=4
             )
-            assert state == {key: new_state}
+            assert extension.persistence_state == {key: new_state}
 
         def test_checkpoint_passes_refs_scoped_to_the_unit(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -314,7 +315,8 @@ class TestValidatorInjectorExtension:
                 juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", persistence_state)
+            extension.persistence_state = persistence_state
+            extension.post_persistence(TEST_MODEL, "myapp", "checkpoint")
 
             # THEN each unit's run command only includes its own refs
             run_cmds = {call[1]: call[2] for call in juju.exec_calls if "--persistence" in call[2]}
@@ -333,10 +335,11 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            extension.persistence_state = persistence_state
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
 
             # THEN the state entry is dropped, and no --refs flag was sent
-            assert persistence_state == {}
+            assert extension.persistence_state == {}
             run_cmd = juju.exec_calls[-1][2]
             assert "--persistence cleanup" in run_cmd
             assert "--refs" not in run_cmd
@@ -355,10 +358,11 @@ class TestValidatorInjectorExtension:
             )
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            extension.persistence_state = persistence_state
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
 
             # THEN the tracking entry is kept, since the canary data may not actually be gone
-            assert persistence_state == {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+            assert extension.persistence_state == {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
 
         def test_cleanup_keeps_state_for_a_relation_cleanup_never_visited(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -376,11 +380,12 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            extension.persistence_state = persistence_state
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
 
             # THEN only the visited relation's state is dropped; the unvisited one is kept so its
             # (possibly still-present) canary data isn't silently forgotten
-            assert persistence_state == {unvisited_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
+            assert extension.persistence_state == {unvisited_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
 
         def test_cleanup_does_not_drop_state_belonging_to_other_units(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -396,10 +401,11 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
 
             # WHEN
-            extension.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            extension.persistence_state = persistence_state
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
 
             # THEN only this unit's entry is removed
-            assert persistence_state == {other_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
+            assert extension.persistence_state == {other_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
 
         def test_returns_results_keyed_by_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN one unit whose checkpoint run returns a FAIL result
@@ -409,7 +415,7 @@ class TestValidatorInjectorExtension:
             )
 
             # WHEN
-            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", {})
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint")
 
             # THEN the failing result is returned under its unit
             assert results["myapp/0"][0].endpoint == "canary"
@@ -427,7 +433,7 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))  # myapp/1: succeeds
 
             # WHEN
-            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", {})
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint")
 
             # THEN myapp/0 reports an ERROR result instead of raising, and myapp/1 was still
             # attempted (its own run command shows up in exec_calls) and reports its own result.
@@ -454,7 +460,8 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))  # myapp/1
 
             # WHEN
-            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint", persistence_state)
+            extension.persistence_state = persistence_state
+            results = extension.post_persistence(TEST_MODEL, "myapp", "checkpoint")
 
             # THEN myapp/0 reports an ERROR result instead of raising, its existing tracked state
             # is untouched, and myapp/1 still gets its own attempt.
@@ -477,13 +484,98 @@ class TestValidatorInjectorExtension:
             juju.exec_responses.append(_fail())
 
             # WHEN cleanup is requested but cannot run
-            results = extension_no_path.post_persistence(TEST_MODEL, "myapp", "cleanup", persistence_state)
+            extension_no_path.persistence_state = persistence_state
+            results = extension_no_path.post_persistence(TEST_MODEL, "myapp", "cleanup")
 
             # THEN no results are reported, and the tracked state is preserved rather than deleted -
             # deleting it here would mean a cleanup that never ran (and so never dropped the real
             # canary data) is treated as having succeeded.
             assert results == {"myapp/0": []}
-            assert persistence_state == {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+            assert extension_no_path.persistence_state == {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+
+    class TestPostMigrateModel:
+        def test_rekeys_tracked_state_to_the_target_controller(self, extension: ValidatorInjectorExtension) -> None:
+            # GIVEN state tracked under the source controller
+            key = PersistenceKey("source-ctrl", "mymodel", "myapp/0", 4)
+            extension.persistence_state = {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+
+            # WHEN the model is migrated
+            extension.post_migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+            # THEN the key now points at the target controller
+            assert extension.persistence_state == {
+                PersistenceKey("target-ctrl", "mymodel", "myapp/0", 4): PersistenceState(id=1, ref=2, token=TEST_TOKEN)
+            }
+
+        def test_leaves_other_models_untouched(self, extension: ValidatorInjectorExtension) -> None:
+            # GIVEN state for the migrated model and for an unrelated one
+            migrated = PersistenceKey("source-ctrl", "mymodel", "myapp/0", 4)
+            other = PersistenceKey("source-ctrl", "othermodel", "myapp/0", 4)
+            extension.persistence_state = {
+                migrated: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                other: PersistenceState(id=3, ref=4, token=TEST_TOKEN),
+            }
+
+            # WHEN the model is migrated
+            extension.post_migrate_model("mymodel", "source-ctrl", "target-ctrl")
+
+            # THEN only the migrated model's key moved
+            assert extension.persistence_state == {
+                PersistenceKey("target-ctrl", "mymodel", "myapp/0", 4): PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                other: PersistenceState(id=3, ref=4, token=TEST_TOKEN),
+            }
+
+    class TestModelsWithPersistenceState:
+        def test_returns_empty_set_when_nothing_tracked(self, extension: ValidatorInjectorExtension) -> None:
+            assert extension.models_with_persistence_state == set()
+
+        def test_returns_one_handle_per_tracked_model(self, extension: ValidatorInjectorExtension) -> None:
+            # GIVEN state across two models and two units of the same model
+            extension.persistence_state = {
+                PersistenceKey("ctrl", "mymodel", "myapp/0", 4): PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                PersistenceKey("ctrl", "mymodel", "myapp/1", 4): PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                PersistenceKey("ctrl", "othermodel", "myapp/0", 4): PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+            }
+
+            # THEN each model appears once
+            assert extension.models_with_persistence_state == {
+                JujuModelHandle(controller="ctrl", model="mymodel"),
+                JujuModelHandle(controller="ctrl", model="othermodel"),
+            }
+
+    class TestInvalidatePersistenceStateForModels:
+        def test_drops_only_the_given_units_in_the_given_models(self, extension: ValidatorInjectorExtension) -> None:
+            # GIVEN state for two units in the target model and one in another model
+            target = JujuModelHandle(controller="ctrl", model="mymodel")
+            dropped = PersistenceKey("ctrl", "mymodel", "myapp/0", 4)
+            kept_unit = PersistenceKey("ctrl", "mymodel", "myapp/1", 4)
+            kept_model = PersistenceKey("ctrl", "othermodel", "myapp/0", 4)
+            extension.persistence_state = {
+                dropped: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                kept_unit: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                kept_model: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+            }
+
+            # WHEN invalidating myapp/0 in the target model
+            extension.invalidate_persistence_state_for_models({target}, {target: {"myapp/0"}})
+
+            # THEN only that unit's entry is gone
+            assert extension.persistence_state == {
+                kept_unit: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                kept_model: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+            }
+
+        def test_drops_nothing_when_no_units_given(self, extension: ValidatorInjectorExtension) -> None:
+            # GIVEN tracked state
+            target = JujuModelHandle(controller="ctrl", model="mymodel")
+            key = PersistenceKey("ctrl", "mymodel", "myapp/0", 4)
+            extension.persistence_state = {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+
+            # WHEN invalidating a model with no units listed
+            extension.invalidate_persistence_state_for_models({target}, {})
+
+            # THEN the state is untouched
+            assert extension.persistence_state == {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
 
     class TestRunValidatorsOnUnit:
         class TestVenvAlreadyInstalled:

@@ -6,7 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Literal
 
-from validators.base import PersistenceState, ValidationResult
+from validators.base import ValidationResult
 
 from .backend import JujuBackend
 from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
@@ -17,7 +17,6 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
-    PersistenceKey,
 )
 from .version import JujuVersion
 
@@ -367,7 +366,6 @@ class JujuClient:
         model: JujuModelHandle,
         level: str | None = "simple",
         persistence: Literal["prepare", "checkpoint", "cleanup"] | None = None,
-        persistence_state: dict[PersistenceKey, PersistenceState] | None = None,
     ) -> None:
         """Validate all applications in the model, and/or run a persistence lifecycle op.
 
@@ -379,25 +377,19 @@ class JujuClient:
             level: Validation level ("simple" or "deep"), or None to skip functional validation
                 entirely (e.g. when only running a persistence op).
             persistence: Persistence lifecycle operation to run ("prepare", "checkpoint", or
-                "cleanup"), or None to skip persistence handling entirely.
-            persistence_state: Tracking dict for canary state, keyed by
-                ``PersistenceKey(controller, model, unit, relation_id)``. Required whenever
-                *persistence* is given; extensions mutate it in place (adding/updating entries
-                for "prepare"/"checkpoint", removing them for "cleanup").
+                "cleanup"), or None to skip persistence handling entirely. Extensions own any
+                state this needs (see ``ValidatorInjectorExtension``).
 
         Raises:
-            ValueError: If *persistence* is an unsupported value, or given without *persistence_state*.
+            ValueError: If *persistence* is an unsupported value.
             JujuValidationError: If any validation or persistence checks fail.
         """
-        if persistence is not None:
-            if persistence not in ("prepare", "checkpoint", "cleanup"):
-                # `Literal[...]` is a static-typing hint only, not enforced at runtime. Without this
-                # check an invalid value reaches post_persistence() unvalidated, where it would be
-                # silently treated as a successful no-op (no units, no applications, or the default
-                # no-op JujuExtension hook) instead of raising.
-                raise ValueError(f"Invalid persistence operation: {persistence!r}")
-            if persistence_state is None:
-                raise ValueError("persistence_state is required when persistence is given")
+        if persistence is not None and persistence not in ("prepare", "checkpoint", "cleanup"):
+            # `Literal[...]` is a static-typing hint only, not enforced at runtime. Without this
+            # check an invalid value reaches post_persistence() unvalidated, where it would be
+            # silently treated as a successful no-op (no units, no applications, or the default
+            # no-op JujuExtension hook) instead of raising.
+            raise ValueError(f"Invalid persistence operation: {persistence!r}")
 
         # Collect applications for validators
         applications = self.backend.list_applications(model)
@@ -421,11 +413,9 @@ class JujuClient:
                     for unit, unit_results in extension.post_validate(model, application, level).items():
                         results.setdefault(unit, []).extend(unit_results)
 
-            if persistence is not None and persistence_state is not None:
+            if persistence is not None:
                 for extension in self.extensions:
-                    for unit, unit_results in extension.post_persistence(
-                        model, application, persistence, persistence_state
-                    ).items():
+                    for unit, unit_results in extension.post_persistence(model, application, persistence).items():
                         results.setdefault(unit, []).extend(unit_results)
 
             if not results:

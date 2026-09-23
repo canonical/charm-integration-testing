@@ -4,10 +4,8 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, JujuVersion, PersistenceKey, rekey_persistence_state_controller
+from juju import JujuClient, JujuModelHandle, JujuVersion
 from utils.juju_releases import UpgradeMode, classify_upgrade_mode
-
-from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -19,7 +17,6 @@ def test_upgrade_controller(
     target_upgrade_version: JujuVersion | None,
     model: str,
     neighbor_model_ref: JujuModelHandle | None,
-    persistence_state: dict[PersistenceKey, PersistenceState],
     request: pytest.FixtureRequest,
 ) -> None:
     """
@@ -69,24 +66,13 @@ def test_upgrade_controller(
     models_to_settle = [workload_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
     juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
-    if active_controller != target_controller:
-        # Migration path: the model's controller changed, so remap tracked persistence keys
-        # before checkpointing against them.
-        rekey_persistence_state_controller(
-            persistence_state, model=model, old_controller=target_controller, new_controller=active_controller
-        )
-    juju_client.validate_model(
-        model=workload_model_ref,
-        level="deep",
-        persistence="checkpoint",
-        persistence_state=persistence_state,
-    )
+    # On the migration path the model's controller changed; the extension re-keyed its tracked
+    # state on post_migrate_model, so the checkpoint below finds it under the new controller.
+    juju_client.validate_model(model=workload_model_ref, level="deep", persistence="checkpoint")
     # For a CMR the persistence validator lives on the neighbor's requirer units. The neighbor's
     # own controller is unaffected by this upgrade, so no rekey is needed.
     if neighbor_model_ref is not None:
-        juju_client.validate_model(
-            model=neighbor_model_ref, level="deep", persistence="checkpoint", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=neighbor_model_ref, level="deep", persistence="checkpoint")
 
 
 def _upgrade_in_place(
