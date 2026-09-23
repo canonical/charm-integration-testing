@@ -4,7 +4,6 @@
 import logging
 from datetime import timedelta
 from pathlib import Path
-from typing import Literal
 
 from validators.base import ValidationResult
 
@@ -128,6 +127,10 @@ class JujuClient:
         endpoint_2: JujuIntegrationApplication,
         model: JujuModelHandle,
     ) -> None:
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
+
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
@@ -365,9 +368,8 @@ class JujuClient:
         self,
         model: JujuModelHandle,
         level: str | None = "simple",
-        persistence: Literal["prepare", "checkpoint", "cleanup"] | None = None,
     ) -> None:
-        """Validate all applications in the model, and/or run a persistence lifecycle op.
+        """Validate all applications in the model, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
@@ -376,26 +378,13 @@ class JujuClient:
             model: Juju model reference
             level: Validation level ("simple" or "deep"), or None to skip functional validation
                 entirely (e.g. when only running a persistence op).
-            persistence: Persistence lifecycle operation to run ("prepare", "checkpoint", or
-                "cleanup"), or None to skip persistence handling entirely. Extensions own any
-                state this needs (see ``ValidatorInjectorExtension``).
 
         Raises:
-            ValueError: If *persistence* is an unsupported value.
             JujuValidationError: If any validation or persistence checks fail.
         """
-        if persistence is not None and persistence not in ("prepare", "checkpoint", "cleanup"):
-            # `Literal[...]` is a static-typing hint only, not enforced at runtime. Without this
-            # check an invalid value reaches post_persistence() unvalidated, where it would be
-            # silently treated as a successful no-op (no units, no applications, or the default
-            # no-op JujuExtension hook) instead of raising.
-            raise ValueError(f"Invalid persistence operation: {persistence!r}")
-
         # Collect applications for validators
         applications = self.backend.list_applications(model)
-        self.logger.info(
-            f"Running validators on {len(applications)} applications (level={level}, persistence={persistence})"
-        )
+        self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
@@ -413,10 +402,9 @@ class JujuClient:
                     for unit, unit_results in extension.post_validate(model, application, level).items():
                         results.setdefault(unit, []).extend(unit_results)
 
-            if persistence is not None:
-                for extension in self.extensions:
-                    for unit, unit_results in extension.post_persistence(model, application, persistence).items():
-                        results.setdefault(unit, []).extend(unit_results)
+            for extension in self.extensions:
+                for unit, unit_results in extension.post_persistence(model, application).items():
+                    results.setdefault(unit, []).extend(unit_results)
 
             if not results:
                 self.logger.info(f"No validation results for application '{application}'.")

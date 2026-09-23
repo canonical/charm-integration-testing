@@ -35,6 +35,6 @@ def test_scale_in_and_scale_out_charm(
     juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations. For a CMR the persistence validator lives on the
-    # neighbor's requirer units, so checkpoint there too.
+    # neighbor's requirer units, so validate there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(model=model_ref, level="simple", persistence="checkpoint")
+        juju_client.validate_model(model=model_ref, level="simple")

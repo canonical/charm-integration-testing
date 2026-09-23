@@ -4,7 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
@@ -124,19 +124,33 @@ class PersistenceExtensionStub(JujuExtension):
         self.state_updates = state_updates or {}
         self.keys_to_drop = keys_to_drop or []
         self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
-        self.calls: list[tuple[str, str, dict[PersistenceKey, PersistenceState]]] = []
+        self.calls: list[tuple[str, dict[PersistenceKey, PersistenceState]]] = []
 
     def post_persistence(
         self,
         model: JujuModelHandle,
         application: str,
-        persistence: str,
     ) -> dict[str, list[ValidationResult]]:
-        self.calls.append((application, persistence, dict(self.persistence_state)))
+        self.calls.append((application, dict(self.persistence_state)))
         self.persistence_state.update(self.state_updates)
         for key in self.keys_to_drop:
             self.persistence_state.pop(key, None)
         return self.results.get(application, {})
+
+
+class PreRemoveIntegrationExtensionStub(JujuExtension):
+    """Extension that records pre_remove_integration calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication]] = []
+
+    def pre_remove_integration(
+        self,
+        model: JujuModelHandle,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+    ) -> None:
+        self.calls.append((model, endpoint_1, endpoint_2))
 
 
 @dataclass
@@ -483,18 +497,6 @@ class TestJujuClientValidateModel:
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
         assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
 
-    def test_raises_value_error_for_unsupported_persistence_operation(self, logger: LoggerStub) -> None:
-        # Regression test for: `persistence`'s `Literal[...]` type hint isn't enforced at runtime,
-        # so an invalid value previously reached post_persistence() unvalidated and was silently
-        # treated as a no-op with no applications/units (or a default JujuExtension hook), rather
-        # than raising immediately at this boundary.
-        backend = BackendStub(app_list={})
-        client = self._client(logger, backend)
-
-        # WHEN / THEN
-        with pytest.raises(ValueError, match="Invalid persistence operation"):
-            client.validate_model(self._model(), persistence=cast(Any, "not-a-real-operation"))
-
     def test_skips_functional_validation_when_level_is_none(self, logger: LoggerStub) -> None:
         # GIVEN a backend that would FAIL functional validation
         backend = BackendStub(
@@ -513,10 +515,10 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend, [extension])
 
         # WHEN
-        client.validate_model(self._model(), level=None, persistence="prepare")
+        client.validate_model(self._model(), level=None)
 
-        # THEN the extension was invoked with the application and op
-        assert extension.calls == [("myapp", "prepare", {})]
+        # THEN the extension was invoked with the application
+        assert extension.calls == [("myapp", {})]
 
     def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN a persistence extension that reports a FAIL
@@ -526,7 +528,7 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model(self._model(), level=None, persistence="checkpoint")
+            client.validate_model(self._model(), level=None)
         assert "myapp/0" in exc_info.value.failed_validations
 
     def test_persistence_extension_owns_its_state(self, logger: LoggerStub) -> None:
@@ -538,7 +540,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend, [extension])
 
         # WHEN
-        client.validate_model(self._model(), level=None, persistence="prepare")
+        client.validate_model(self._model(), level=None)
 
         # THEN the extension's own state was updated
         assert extension.persistence_state == {key: new_state}
@@ -554,8 +556,8 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN both were run, and the persistence failure is raised
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model(self._model(), level="simple", persistence="checkpoint")
-        assert extension.calls == [("myapp", "checkpoint", {})]
+            client.validate_model(self._model(), level="simple")
+        assert extension.calls == [("myapp", {})]
         assert "canary" in {r.endpoint for r in exc_info.value.failed_validations["myapp/0"]}
 
     def test_delegates_to_backend_with_revision_only(self, logger: LoggerStub) -> None:
@@ -1089,6 +1091,14 @@ class TestIntegrationMethods:
         backend = IntegrationTrackingBackendStub()
         _client(backend).remove_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
 
+        assert backend.remove_calls == [(_MODEL, _EP1, _EP2)]
+
+    def test_remove_integration_fires_pre_remove_integration_hook_before_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        extension = PreRemoveIntegrationExtensionStub()
+        _client(backend, [extension]).remove_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
+
+        assert extension.calls == [(_MODEL, _EP1, _EP2)]
         assert backend.remove_calls == [(_MODEL, _EP1, _EP2)]
 
     def test_wait_for_removal_of_integration_delegates_to_backend(self) -> None:

@@ -40,4 +40,4 @@ def test_idempotent_redeploy(
     )
 
     for _, model_ref in all_bundles:
-        juju_client.validate_model(model=model_ref, level="simple", persistence="prepare")
+        juju_client.validate_model(model=model_ref, level="simple")

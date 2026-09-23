@@ -5,10 +5,7 @@
 from datetime import timedelta
 
 import pytest
-from extensions import ValidatorInjectorExtension
-from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle, JujuValidationError
-
-from validators.base import ValidationResult
+from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -24,34 +21,11 @@ def test_teardown(
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
     neighbor_model_ref: JujuModelHandle | None,
-    persistence_extension: ValidatorInjectorExtension,
 ) -> None:
-    # Drop all canary data before the applications hosting it are torn down: cleanup() runs on the
-    # units themselves, so it must happen while those units still exist. Clean up every model the
-    # extension still holds state for (test_deploy prepares every model in all_bundles, including
-    # the neighbor model for CMR runs).
-    cleanup_model_refs = persistence_extension.models_with_persistence_state
-    # Best-effort across models: validate_model() raises JujuValidationError on a FAIL/ERROR result,
-    # but application/model-discovery failures (e.g. the application is already gone) surface as a
-    # bare exception. Attempt every model, merge JujuValidationError failures, and remember the
-    # first other exception so one model's failure doesn't skip cleanup for the rest.
-    combined_failed_validations: dict[str, list[ValidationResult]] = {}
-    first_other_error: Exception | None = None
-    for model_ref in sorted(cleanup_model_refs, key=lambda m: m.uri):
-        try:
-            juju_client.validate_model(model=model_ref, level=None, persistence="cleanup")
-        except JujuValidationError as exc:
-            for unit, results in exc.failed_validations.items():
-                combined_failed_validations.setdefault(unit, []).extend(results)
-        except Exception as exc:  # broad on purpose - see comment above
-            if first_other_error is None:
-                first_other_error = exc
-    if combined_failed_validations:
-        # Chain first_other_error as the cause rather than discarding it, so a transport failure on
-        # one model isn't invisible when another model also failed validation.
-        raise JujuValidationError(combined_failed_validations) from first_other_error
-    if first_other_error is not None:
-        raise first_other_error
+    # Canary data is dropped by the extension's pre-removal hooks: pre_remove_integration cleans
+    # up the consuming side before the CMR relation is removed below, and pre_remove cleans up the
+    # target model before its application is destroyed. Both run while the relations still exist,
+    # which cleanup() needs to visit them.
 
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is

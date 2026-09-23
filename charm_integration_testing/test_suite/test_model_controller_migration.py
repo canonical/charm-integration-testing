@@ -32,7 +32,7 @@ def test_model_controller_migration(
     # here and after each migration step for a CMR (the persistence validator lives on the
     # neighbor's requirer units).
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(model=model_ref, level="deep", persistence="checkpoint")
+        juju_client.validate_model(model=model_ref, level="deep")
 
     juju_client.migrate_model(
         model_name=model, source_controller=target_controller, target_controller=temp_juju_controller
@@ -53,12 +53,12 @@ def test_model_controller_migration(
         juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
 
     # The model kept its units and relation ids, but its controller name changed. The extension
-    # re-keyed its tracked state on post_migrate_model, so the checkpoint below finds the state
+    # re-keyed its tracked state on post_migrate_model, so the checkpoint finds the state
     # seeded before migration.
 
     # Validate all applications and relations AFTER migration
     for model_ref in (m for m in (temp_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(model=model_ref, level="deep", persistence="checkpoint")
+        juju_client.validate_model(model=model_ref, level="deep")
 
     # Migrate the model back to the original controller
     juju_client.migrate_model(
@@ -81,4 +81,4 @@ def test_model_controller_migration(
 
     # Validate all applications and relations AFTER second migration
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(model=model_ref, level="deep", persistence="checkpoint")
+        juju_client.validate_model(model=model_ref, level="deep")

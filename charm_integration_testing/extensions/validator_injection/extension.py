@@ -8,7 +8,15 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-from juju import JujuBackend, JujuExtension, JujuModelHandle, PersistenceKey, rekey_persistence_state_controller
+from juju import (
+    JujuBackend,
+    JujuExtension,
+    JujuIntegrationApplication,
+    JujuModelHandle,
+    JujuValidationError,
+    PersistenceKey,
+    rekey_persistence_state_controller,
+)
 
 from validators.base.validator import PersistenceState, ValidationResult
 from validators.runner import ValidatorRunnerResults
@@ -67,12 +75,17 @@ class ValidatorInjectorExtension(JujuExtension):
         self,
         model: JujuModelHandle,
         application: str,
-        persistence: str,
     ) -> dict[str, list[ValidationResult]]:
-        if persistence not in _PERSISTENCE_OPS:
-            # A caller/programming error, not a remote failure: raise immediately rather than
-            # letting the per-unit loop below swallow it into an ERROR result.
-            raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
+        # Auto-decide the op from tracked state: any state for this model means a previous
+        # "prepare" seeded canary data, so this run must verify it ("checkpoint"); otherwise
+        # seed it ("prepare"). Deciding per-model (not per-application) matters for same-model
+        # integrations, where the provider app in the same model has no tracked state for its
+        # own units (PersistenceNotApplicable skip) but the requirer does.
+        op = (
+            "checkpoint"
+            if any(key.controller == model.controller and key.model == model.model for key in self.persistence_state)
+            else "prepare"
+        )
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
@@ -84,7 +97,7 @@ class ValidatorInjectorExtension(JujuExtension):
                 if key.controller == model.controller and key.model == model.model and key.unit == unit
             }
             try:
-                outcome = self._run_persistence_on_unit(model, unit, persistence, unit_refs, model_is_k8s)
+                outcome = self._run_persistence_on_unit(model, unit, op, unit_refs, model_is_k8s)
             except Exception as exc:
                 # Report a transport/remote-command failure as an ERROR result for this unit
                 # (mirroring how ValidatorRunner turns a validator-level exception into an ERROR
@@ -98,7 +111,7 @@ class ValidatorInjectorExtension(JujuExtension):
                         role="requires",
                         level="deep",
                         relation_id=-1,
-                        error=f"Persistence op '{persistence}' failed on {unit}: {exc}",
+                        error=f"Persistence op '{op}' failed on {unit}: {exc}",
                     )
                 ]
                 continue
@@ -107,83 +120,100 @@ class ValidatorInjectorExtension(JujuExtension):
                 # distinct from "ran and found nothing to report", which returns ([], {}) below.
                 results[unit] = []
                 continue
-            unit_results, updated_refs, cleaned_relation_ids_list = outcome
+            unit_results, updated_refs, _ = outcome
             results[unit] = unit_results
 
-            if persistence == "cleanup":
-                # Canary tables have been dropped; drop tracked state only for relation_ids that
-                # cleanup_all actually visited and that didn't produce a FAIL/ERROR result. An
-                # entry cleanup never visited (e.g. the relation is gone) means cleanup never ran
-                # against the backend for it - keep it so orphaned canary data isn't forgotten.
-                failed_relation_ids = {
-                    result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
+            try:
+                # Build every key/state pair before mutating persistence_state: a malformed
+                # remote payload (updated_refs is parsed from JSON, so Pydantic accepts any
+                # string key) must not partially apply this unit's updates before failing.
+                new_entries = {
+                    PersistenceKey(
+                        controller=model.controller,
+                        model=model.model,
+                        unit=unit,
+                        relation_id=int(relation_id_str),
+                    ): state
+                    for relation_id_str, state in updated_refs.items()
                 }
-                cleaned_relation_ids = set(cleaned_relation_ids_list) - failed_relation_ids
-                for key in [
-                    key
-                    for key in self.persistence_state
-                    if key.controller == model.controller
-                    and key.model == model.model
-                    and key.unit == unit
-                    and key.relation_id in cleaned_relation_ids
-                ]:
-                    del self.persistence_state[key]
-            else:
-                try:
-                    # Build every key/state pair before mutating persistence_state: a malformed
-                    # remote payload (updated_refs is parsed from JSON, so Pydantic accepts any
-                    # string key) must not partially apply this unit's updates before failing.
-                    new_entries = {
-                        PersistenceKey(
-                            controller=model.controller,
-                            model=model.model,
-                            unit=unit,
-                            relation_id=int(relation_id_str),
-                        ): state
-                        for relation_id_str, state in updated_refs.items()
-                    }
-                except (TypeError, ValueError) as exc:
-                    results[unit] = [
-                        ValidationResult(
-                            status="ERROR",
-                            endpoint="",
-                            interface="",
-                            role="requires",
-                            level="deep",
-                            relation_id=-1,
-                            error=f"Persistence op '{persistence}' returned a malformed relation_id on {unit}: {exc}",
-                        )
-                    ]
-                    continue
-                self.persistence_state.update(new_entries)
+            except (TypeError, ValueError) as exc:
+                results[unit] = [
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint="",
+                        interface="",
+                        role="requires",
+                        level="deep",
+                        relation_id=-1,
+                        error=f"Persistence op '{op}' returned a malformed relation_id on {unit}: {exc}",
+                    )
+                ]
+                continue
+            self.persistence_state.update(new_entries)
         return results
+
+    def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
+        # Cleanup runs before the backend removes the application, while its relations still
+        # exist, so cleanup_all can visit them and drop canary data. No tracked state for this
+        # model (e.g. a CMR provider side, which raises PersistenceNotApplicable) is a no-op.
+        self._cleanup_model(model)
+
+    def pre_remove_integration(
+        self,
+        model: JujuModelHandle,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+    ) -> None:
+        # For a CMR teardown the integration is removed before the applications, so cleanup
+        # must run here (relations still exist) rather than in pre_remove. For a same-model
+        # integration this is a no-op: destroying the app removes the relation, and pre_remove
+        # handles cleanup on the model that owns the requirer's state.
+        self._cleanup_model(model)
+
+    def _cleanup_model(self, model: JujuModelHandle) -> None:
+        """Drop canary data for every unit with tracked state in the model, raising on failure.
+
+        Cleanup must run while the model's relations still exist, so it is invoked from the
+        pre-removal hooks rather than from validate_model. Unlike post_persistence's cleanup
+        branch, failures here raise (JujuValidationError) rather than returning ERROR results,
+        because the caller is about to destroy the model's relations: a silent failure would
+        strand canary data forever.
+        """
+        failed_validations: dict[str, list[ValidationResult]] = {}
+        model_is_k8s = self.juju.is_k8s_model(model)
+        for unit in sorted(
+            {
+                key.unit
+                for key in self.persistence_state
+                if key.controller == model.controller and key.model == model.model
+            }
+        ):
+            outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s)
+            if outcome is None:
+                # No validators_path configured: nothing was cleaned, so keep the state so
+                # orphaned canary data isn't forgotten.
+                continue
+            unit_results, _, cleaned_relation_ids_list = outcome
+            failed_relation_ids = {result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")}
+            cleaned_relation_ids = set(cleaned_relation_ids_list) - failed_relation_ids
+            for key in [
+                key
+                for key in self.persistence_state
+                if key.controller == model.controller
+                and key.model == model.model
+                and key.unit == unit
+                and key.relation_id in cleaned_relation_ids
+            ]:
+                del self.persistence_state[key]
+            if failed_relation_ids:
+                failed_validations[unit] = [result for result in unit_results if result.status in ("FAIL", "ERROR")]
+        if failed_validations:
+            raise JujuValidationError(failed_validations)
 
     def post_migrate_model(self, model: str, source: str, target: str) -> None:
         # A migrated model's units and relation_ids are unchanged, but its controller is not, so
         # every tracked key for it is now stale. Re-key in place so callers never have to.
         rekey_persistence_state_controller(self.persistence_state, model, source, target)
-
-    @property
-    def models_with_persistence_state(self) -> set[JujuModelHandle]:
-        """The models this extension currently holds canary state for."""
-        return {JujuModelHandle(controller=key.controller, model=key.model) for key in self.persistence_state}
-
-    def invalidate_persistence_state_for_models(
-        self, models: set[JujuModelHandle], units_by_model: dict[JujuModelHandle, set[str]]
-    ) -> None:
-        """Drop tracked state for the given units in the given models.
-
-        Used when a relation is removed and re-added: the new relation gets a fresh relation_id in
-        every participating model, so any state keyed on the old one is stale and must be dropped
-        before the next "prepare" seeds fresh canary data.
-        """
-        for key in [
-            key
-            for key in self.persistence_state
-            if JujuModelHandle(controller=key.controller, model=key.model) in models
-            and key.unit in units_by_model.get(JujuModelHandle(controller=key.controller, model=key.model), set())
-        ]:
-            del self.persistence_state[key]
 
     def _run_validators_on_unit(
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True

@@ -46,7 +46,7 @@ def test_upgrade_charm(
             f"Expected '{target_application}' to be on upgraded revision "
             f"{target_revision}, got {upgraded_revision}."
         )
-    juju_client.validate_model(model=target_model_ref, level="simple", persistence="checkpoint")
-    # For a CMR the persistence validator lives on the neighbor's requirer units, so checkpoint there too.
+    juju_client.validate_model(model=target_model_ref, level="simple")
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
     if neighbor_model_ref is not None:
-        juju_client.validate_model(model=neighbor_model_ref, level="simple", persistence="checkpoint")
+        juju_client.validate_model(model=neighbor_model_ref, level="simple")
