@@ -92,6 +92,9 @@ class TestHostFormatCheck:
     def test_whitespace_is_rejected(self) -> None:
         assert not _host_format_check("app 0.svc").passed
 
+    def test_port_is_rejected(self) -> None:
+        assert not _host_format_check("app.svc:8080").passed
+
 
 class TestPortRangeCheck:
     def test_valid_port(self) -> None:
@@ -230,7 +233,7 @@ class TestIngressPerUnitValidatorDeep:
         validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
         with (
             patch("validators.ingress_per_unit.validator.socket.create_connection"),
-            patch("validators.ingress_per_unit.validator.urlopen", return_value=_mock_response()),
+            patch("validators.ingress_per_unit.validator._HTTP_OPENER.open", return_value=_mock_response()),
         ):
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
