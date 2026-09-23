@@ -1,0 +1,28 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-saml"
+version = "0.1.0"
+description = "Validator for the saml interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+requires-python = ">=3.10"
+dependencies = ["validators-base"]
+
+[project.optional-dependencies]
+dev = ["validators-test-utils"]
+
+[project.entry-points."endpoint_validators"]
+saml = "validators.saml:SamlValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.saml"]
+
+[tool.setuptools.package-dir]
+"validators.saml" = "."

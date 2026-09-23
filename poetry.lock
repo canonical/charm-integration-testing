@@ -3238,6 +3238,7 @@ validators-postgresql-client = "*"
 validators-prometheus-remote-write = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
+validators-saml = "*"
 validators-temporal-host-info = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
 validators-trino-catalog = "*"
@@ -3267,6 +3268,27 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/s3"
+
+[[package]]
+name = "validators-saml"
+version = "0.1.0"
+description = "Validator for the saml interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/saml"
 
 [[package]]
 name = "validators-temporal-host-info"
@@ -3555,4 +3577,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "882124e7d2d34fb044b9160159f49bc8b40bd6418abc0840424d9ac599ee0492"
+content-hash = "0922f58ae483aa3197d4a97ba5da71a0945cd0151ddef5b8b92714a1f9b8474c"
