@@ -67,12 +67,12 @@ def run_for_integration(
     """
     results: list[ValidationResult] = []
     for validator_cls in validators.get(interface_name, []):
-        validator = validator_cls(charm, integration)
-        logger.debug(
-            f"Running validator '{validator_cls.__name__}' for endpoint '{integration.name}' "
-            f"(interface='{interface_name}', role='{role}', level='{level}')"
-        )
         try:
+            validator = validator_cls(charm, integration)
+            logger.debug(
+                f"Running validator '{validator_cls.__name__}' for endpoint '{integration.name}' "
+                f"(interface='{interface_name}', role='{role}', level='{level}')"
+            )
             result = validator.validate(level=level)
             while result.status == "SKIPPED":
                 fallback = LEVEL_FALLBACK[result.level]
@@ -96,7 +96,7 @@ def run_for_integration(
                     role=role,
                     level=level,
                     relation_id=integration.id,
-                    error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
+                    error=f"Validator '{validator_cls.__name__}' failed to run: {exc}",
                 )
             )
     return results

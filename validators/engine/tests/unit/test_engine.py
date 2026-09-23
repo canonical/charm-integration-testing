@@ -42,6 +42,16 @@ class ExplodingValidator(BaseValidator):
         raise RuntimeError("something went wrong")
 
 
+class UnconstructableValidator(BaseValidator):
+    """Validator whose constructor fails, e.g. because the relation is malformed."""
+
+    def __init__(self, charm: ops.CharmBase, relation: ops.Relation) -> None:
+        raise RuntimeError("cannot construct validator")
+
+    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
+        raise AssertionError("validate() must not be reached when construction fails")
+
+
 class SkippingValidator(BaseValidator):
     """Validator that only supports 'simple'; returns SKIPPED for anything else."""
 
@@ -136,6 +146,18 @@ class TestRunForCharm:
 
         assert results[0].status == "ERROR"
         assert "something went wrong" in (results[0].error or "")
+
+    def test_captures_validator_constructor_exception_as_error(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm), level="simple", validators={"test-interface": [UnconstructableValidator]}
+        )
+
+        assert results[0].status == "ERROR"
+        assert "cannot construct validator" in (results[0].error or "")
+        assert results[0].relation_id == 0
 
     def test_reports_error_when_relation_missing_from_model(self) -> None:
         relation = RelationStub(name="db", id=0)
