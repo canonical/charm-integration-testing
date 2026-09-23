@@ -123,6 +123,7 @@ class PersistenceExtensionStub(JujuExtension):
         self.results = results
         self.state_updates = state_updates or {}
         self.keys_to_drop = keys_to_drop or []
+        self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
         self.calls: list[tuple[str, str, dict[PersistenceKey, PersistenceState]]] = []
 
     def post_persistence(
@@ -130,12 +131,11 @@ class PersistenceExtensionStub(JujuExtension):
         model: JujuModelHandle,
         application: str,
         persistence: str,
-        persistence_state: dict[PersistenceKey, PersistenceState],
     ) -> dict[str, list[ValidationResult]]:
-        self.calls.append((application, persistence, dict(persistence_state)))
-        persistence_state.update(self.state_updates)
+        self.calls.append((application, persistence, dict(self.persistence_state)))
+        self.persistence_state.update(self.state_updates)
         for key in self.keys_to_drop:
-            persistence_state.pop(key, None)
+            self.persistence_state.pop(key, None)
         return self.results.get(application, {})
 
 
@@ -483,15 +483,6 @@ class TestJujuClientValidateModel:
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
         assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
 
-    def test_raises_value_error_when_persistence_given_without_state(self, logger: LoggerStub) -> None:
-        # GIVEN no persistence_state
-        backend = BackendStub(app_list={})
-        client = self._client(logger, backend)
-
-        # WHEN / THEN
-        with pytest.raises(ValueError, match="persistence_state"):
-            client.validate_model(self._model(), persistence="prepare")
-
     def test_raises_value_error_for_unsupported_persistence_operation(self, logger: LoggerStub) -> None:
         # Regression test for: `persistence`'s `Literal[...]` type hint isn't enforced at runtime,
         # so an invalid value previously reached post_persistence() unvalidated and was silently
@@ -502,11 +493,7 @@ class TestJujuClientValidateModel:
 
         # WHEN / THEN
         with pytest.raises(ValueError, match="Invalid persistence operation"):
-            client.validate_model(
-                self._model(),
-                persistence=cast(Any, "not-a-real-operation"),
-                persistence_state={},
-            )
+            client.validate_model(self._model(), persistence=cast(Any, "not-a-real-operation"))
 
     def test_skips_functional_validation_when_level_is_none(self, logger: LoggerStub) -> None:
         # GIVEN a backend that would FAIL functional validation
@@ -524,10 +511,9 @@ class TestJujuClientValidateModel:
         backend = BackendStub(app_list={"myapp": _app_info()})
         extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}})
         client = self._client(logger, backend, [extension])
-        state: dict[PersistenceKey, PersistenceState] = {}
 
         # WHEN
-        client.validate_model(self._model(), level=None, persistence="prepare", persistence_state=state)
+        client.validate_model(self._model(), level=None, persistence="prepare")
 
         # THEN the extension was invoked with the application and op
         assert extension.calls == [("myapp", "prepare", {})]
@@ -537,27 +523,25 @@ class TestJujuClientValidateModel:
         backend = BackendStub(app_list={"myapp": _app_info()})
         extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail()]}})
         client = self._client(logger, backend, [extension])
-        state: dict[PersistenceKey, PersistenceState] = {}
 
         # WHEN / THEN
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model(self._model(), level=None, persistence="checkpoint", persistence_state=state)
+            client.validate_model(self._model(), level=None, persistence="checkpoint")
         assert "myapp/0" in exc_info.value.failed_validations
 
-    def test_persistence_extension_mutates_state_in_place(self, logger: LoggerStub) -> None:
+    def test_persistence_extension_owns_its_state(self, logger: LoggerStub) -> None:
         # GIVEN an extension that adds a new state entry on prepare
         backend = BackendStub(app_list={"myapp": _app_info()})
         key = PersistenceKey(controller="ctrl", model="mymodel", unit="myapp/0", relation_id=4)
         new_state = PersistenceState(id=123, ref=1, token=TEST_TOKEN)
         extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}}, state_updates={key: new_state})
         client = self._client(logger, backend, [extension])
-        state: dict[PersistenceKey, PersistenceState] = {}
 
         # WHEN
-        client.validate_model(self._model(), level=None, persistence="prepare", persistence_state=state)
+        client.validate_model(self._model(), level=None, persistence="prepare")
 
-        # THEN the caller's dict was updated in place
-        assert state == {key: new_state}
+        # THEN the extension's own state was updated
+        assert extension.persistence_state == {key: new_state}
 
     def test_both_functional_and_persistence_run_when_both_requested(self, logger: LoggerStub) -> None:
         # GIVEN backend validation passes but the persistence extension reports a FAIL
@@ -567,11 +551,10 @@ class TestJujuClientValidateModel:
         )
         extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail("canary")]}})
         client = self._client(logger, backend, [extension])
-        state: dict[PersistenceKey, PersistenceState] = {}
 
         # WHEN / THEN both were run, and the persistence failure is raised
         with pytest.raises(JujuValidationError) as exc_info:
-            client.validate_model(self._model(), level="simple", persistence="checkpoint", persistence_state=state)
+            client.validate_model(self._model(), level="simple", persistence="checkpoint")
         assert extension.calls == [("myapp", "checkpoint", {})]
         assert "canary" in {r.endpoint for r in exc_info.value.failed_validations["myapp/0"]}
 

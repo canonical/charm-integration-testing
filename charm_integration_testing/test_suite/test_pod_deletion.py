@@ -3,10 +3,8 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, PersistenceKey
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient, PodStatus
-
-from validators.base import PersistenceState
 
 from .scheduler.states import State
 
@@ -19,7 +17,6 @@ def test_pod_deletion(
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     if kubernetes_client is None:
         pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
@@ -58,6 +55,4 @@ def test_pod_deletion(
     # Validate all applications and relations. For a CMR the persistence validator lives on the
     # neighbor's requirer units, so checkpoint there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(
-            model=model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=model_ref, level="simple", persistence="checkpoint")

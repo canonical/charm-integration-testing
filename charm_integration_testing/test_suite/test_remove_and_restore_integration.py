@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from juju import JujuBackend, JujuClient, JujuIntegrationApplication, JujuModelHandle, PersistenceKey
-
-from validators.base import PersistenceState
+from extensions import ValidatorInjectorExtension
+from juju import JujuBackend, JujuClient, JujuIntegrationApplication, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -27,7 +26,7 @@ def test_remove_and_restore_integration(
     target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str,
-    persistence_state: dict[PersistenceKey, PersistenceState],
+    persistence_extension: ValidatorInjectorExtension,
 ) -> None:
     if not integration_endpoints_removable:
         pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
@@ -47,7 +46,7 @@ def test_remove_and_restore_integration(
     # Compute which tracked entries will go stale, but don't drop them yet: if the remove/re-add
     # below fails, the old relation may still be present and teardown still needs these entries to
     # retry cleanup() for them.
-    keys_to_invalidate: set[PersistenceKey] = set()
+    units_by_model: dict[JujuModelHandle, set[str]] = {}
     for model_ref in candidate_models:
         affected_units: set[str] = set()
         for application in model_applications.get(model_ref, set()):
@@ -55,11 +54,7 @@ def test_remove_and_restore_integration(
         if not affected_units:
             continue
         invalidated_models.add(model_ref)
-        keys_to_invalidate.update(
-            key
-            for key in persistence_state
-            if key.controller == model_ref.controller and key.model == model_ref.model and key.unit in affected_units
-        )
+        units_by_model[model_ref] = affected_units
 
     # Break relation
     juju_client.remove_integration(
@@ -83,9 +78,9 @@ def test_remove_and_restore_integration(
         endpoint_2=integration_endpoint_2,
     )
 
-    # The remove/re-add succeeded, so keys_to_invalidate are now genuinely stale.
-    for key in keys_to_invalidate:
-        del persistence_state[key]
+    # The remove/re-add succeeded, so the tracked entries for the affected units are now
+    # genuinely stale.
+    persistence_extension.invalidate_persistence_state_for_models(invalidated_models, units_by_model)
 
     # For CMR integrations the provider-side databag is populated by an agent in a different
     # model, so wait for every involved model to settle before validating.
@@ -101,6 +96,4 @@ def test_remove_and_restore_integration(
     # skip verifying its persistence validators).
     for model_ref in sorted_model_refs:
         persistence: Literal["prepare", "checkpoint"] = "prepare" if model_ref in invalidated_models else "checkpoint"
-        juju_client.validate_model(
-            model=model_ref, level="simple", persistence=persistence, persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=model_ref, level="simple", persistence=persistence)

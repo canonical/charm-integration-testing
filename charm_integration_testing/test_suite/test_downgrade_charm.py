@@ -4,9 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle, PersistenceKey
-
-from validators.base import PersistenceState
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -21,7 +19,6 @@ def test_downgrade_charm(
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
-    persistence_state: dict[PersistenceKey, PersistenceState],
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -55,11 +52,7 @@ def test_downgrade_charm(
             f"Expected '{target_application}' to be on downgraded revision "
             f"{target_downgrade_revision}, got {downgraded_revision}."
         )
-    juju_client.validate_model(
-        model=target_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
-    )
+    juju_client.validate_model(model=target_model_ref, level="simple", persistence="checkpoint")
     # For a CMR the persistence validator lives on the neighbor's requirer units, so checkpoint there too.
     if neighbor_model_ref is not None:
-        juju_client.validate_model(
-            model=neighbor_model_ref, level="simple", persistence="checkpoint", persistence_state=persistence_state
-        )
+        juju_client.validate_model(model=neighbor_model_ref, level="simple", persistence="checkpoint")
