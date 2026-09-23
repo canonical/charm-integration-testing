@@ -23,6 +23,7 @@ _HTTP_TIMEOUT = 10
 
 # Path at which the catalogue provider serves its aggregated catalogue.
 _CONFIG_PATH = "/config.json"
+_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class CatalogueValidator(BaseValidator):
@@ -200,7 +201,7 @@ def _fetch_catalogue(url: str) -> tuple[ValidationCheck, dict[str, Any] | None]:
     """
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310  # nosec B310
+        with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
             status_code = resp.status
             body = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
@@ -292,7 +293,12 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
     for item in apps:
         if not isinstance(item, dict) or item.get("name") != name:
             continue
-        fields_match = all(item.get(field) == value for field, value in expected.items() if field != "api_endpoints" and field in item)
+        fields_match = all(item.get(field) == expected[field] for field in _REQUIRED_FIELDS)
+        fields_match = fields_match and all(
+            item.get(field) == value
+            for field, value in expected.items()
+            if field not in _REQUIRED_FIELDS and field != "api_endpoints" and field in item
+        )
         if "api_endpoints" in expected and "api_endpoints" in item:
             try:
                 fields_match = fields_match and item.get("api_endpoints") == json.loads(expected["api_endpoints"])

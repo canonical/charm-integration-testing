@@ -139,6 +139,10 @@ class TestValidateItemServed:
     def test_none_payload(self) -> None:
         assert not _validate_item_served(None, VALID_DATABAG).passed
 
+    def test_required_field_missing(self) -> None:
+        payload = {"apps": [{"name": VALID_DATABAG["name"], "icon": VALID_DATABAG["icon"]}]}
+        assert not _validate_item_served(payload, VALID_DATABAG).passed
+
 
 # ---------------------------------------------------------------------------
 # L1 – simple validation
@@ -222,14 +226,14 @@ class TestCatalogueValidatorSimple:
 class TestCatalogueValidatorDeep:
     def test_pass_when_item_served(self) -> None:
         validator = _make_validator(VALID_DATABAG)
-        with patch("urllib.request.urlopen", return_value=_mock_response(VALID_PAYLOAD)):
+        with patch("validators.catalogue.validator._HTTP_OPENER.open", return_value=_mock_response(VALID_PAYLOAD)):
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
 
     def test_fail_when_item_not_served(self) -> None:
         payload = {"apps": [{"name": "Prometheus"}]}
         validator = _make_validator(VALID_DATABAG)
-        with patch("urllib.request.urlopen", return_value=_mock_response(payload)):
+        with patch("validators.catalogue.validator._HTTP_OPENER.open", return_value=_mock_response(payload)):
             result = validator.validate(level="deep")
         assert result.status == "FAIL"
         item_check = next(c for c in result.checks if c.name == "item_served")
@@ -237,7 +241,9 @@ class TestCatalogueValidatorDeep:
 
     def test_fail_when_provider_unreachable(self) -> None:
         validator = _make_validator(VALID_DATABAG)
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+        with patch(
+            "validators.catalogue.validator._HTTP_OPENER.open", side_effect=urllib.error.URLError("connection refused")
+        ):
             result = validator.validate(level="deep")
         assert result.status == "FAIL"
         reach_check = next(c for c in result.checks if c.name == "http_reachability")
@@ -262,7 +268,7 @@ class TestCatalogueValidatorDeep:
         mock_resp.read.return_value = b"<html>not json</html>"
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("validators.catalogue.validator._HTTP_OPENER.open", return_value=mock_resp):
             result = validator.validate(level="deep")
         assert result.status == "FAIL"
         reach_check = next(c for c in result.checks if c.name == "http_reachability")
@@ -294,7 +300,7 @@ class TestCatalogueValidatorDeep:
             captured["req"] = req
             return _mock_response(VALID_PAYLOAD)
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch("validators.catalogue.validator._HTTP_OPENER.open", side_effect=fake_urlopen):
             validator.validate(level="deep")
 
         assert captured["req"].full_url == "http://app.test-model.svc.cluster.local/config.json"
