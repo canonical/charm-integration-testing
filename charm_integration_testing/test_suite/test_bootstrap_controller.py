@@ -47,3 +47,11 @@ def test_bootstrap_controller(
         bootstrap_configuration=target_controller_bootstrap_config,
         metadata_source=target_controller_bootstrap_metadata_source,
     )
+
+    # Register the neighbor cloud on the target controller when the neighbor model
+    # lives there (same-controller mode) but on a different cloud (SQT-884:
+    # different platforms, same controller). The neighbor model is then created
+    # on that cloud in test_create_model.
+    if is_cmr_test and neighbor_controller == target_controller and neighbor_cloud != target_cloud:
+        assert neighbor_cloud is not None
+        juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)

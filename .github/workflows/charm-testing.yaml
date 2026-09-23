@@ -388,10 +388,12 @@ jobs:
           run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
+          CMR_ARGS=()
           if [[ "${same_controller}" == "true" ]]; then
-            CMR_ARGS=(--same-controller)
-          else
-            CMR_ARGS=(--neighbor-cloud "${neighbor_cloud}")
+            CMR_ARGS+=(--same-controller)
+          fi
+          if [[ -n "${neighbor_cloud}" ]]; then
+            CMR_ARGS+=(--neighbor-cloud "${neighbor_cloud}")
           fi
           ./scripts/run-tests.sh \
             --target-cloud "${target_cloud}" \
