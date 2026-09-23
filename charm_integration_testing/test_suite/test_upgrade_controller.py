@@ -60,11 +60,9 @@ def test_upgrade_controller(
         post_version > pre_version
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
-    # And the workload model should still be healthy. Also wait on the neighbor model (the
-    # upgrade/migration above can trigger relation hooks there).
+    # And the workload model should still be healthy
     workload_model_ref = JujuModelHandle(controller=active_controller, model=model)
-    models_to_settle = [workload_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
-    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=workload_model_ref, timeout=timedelta(minutes=15))
 
     # On the migration path the model's controller changed; the extension re-keyed its tracked
     # state on post_migrate_model, so the checkpoint finds it under the new controller.

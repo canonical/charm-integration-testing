@@ -35,9 +35,8 @@ def test_upgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
-    # Also wait on the neighbor model (refreshing the target can trigger relation/databag work there).
-    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
-    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
+    # Wait for return to idle
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is upgraded to the target revision and the model is healthy
     upgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)

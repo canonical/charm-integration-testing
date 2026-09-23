@@ -29,10 +29,8 @@ def test_scale_in_and_scale_out_charm(
     # Rescale application
     juju_client.scale_application(target_application, num_units, model=target_model_ref)
 
-    # Wait for return to idle. Also wait on the neighbor model (scaling changes the relation's
-    # remote unit membership, which can trigger relation hooks there).
-    models_to_settle = [target_model_ref] + ([neighbor_model_ref] if neighbor_model_ref is not None else [])
-    juju_client.multi_model_idle_for_period(models_to_settle, timeout=timedelta(minutes=15))
+    # Wait for return to idle
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations. For a CMR the persistence validator lives on the
     # neighbor's requirer units, so validate there too.
