@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import smtplib
+import ssl
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -76,17 +77,33 @@ def _smtp_handshake_check(databag: dict[str, str]) -> ValidationCheck:
     host = databag["host"]
     port = int(databag["port"])
     security = databag["transport_security"]
+    skip_ssl_verify = databag.get("skip_ssl_verify", "").lower() in {"1", "true", "yes", "on"}
+    ssl_context = _ssl_context(skip_ssl_verify)
     client: smtplib.SMTP | smtplib.SMTP_SSL
     try:
         if security == "tls":
-            client = smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT)
+            client = smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT, context=ssl_context)
         else:
             client = smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT)
         with client:
-            client.ehlo()
+            _require_smtp_response(client.ehlo(), 250, "EHLO")
             if security == "starttls":
-                client.starttls()
-                client.ehlo()
+                _require_smtp_response(client.starttls(context=ssl_context), 220, "STARTTLS")
+                _require_smtp_response(client.ehlo(), 250, "EHLO after STARTTLS")
         return ValidationCheck(name="smtp_handshake", passed=True, message="SMTP handshake succeeded.")
     except (OSError, smtplib.SMTPException) as exc:
         return ValidationCheck(name="smtp_handshake", passed=False, message=f"SMTP handshake failed: {exc}.")
+
+
+def _ssl_context(skip_ssl_verify: bool) -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    if skip_ssl_verify:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _require_smtp_response(response: tuple[int, bytes], expected: int, command: str) -> None:
+    code, message = response
+    if code != expected:
+        raise smtplib.SMTPException(f"{command} returned {code}: {message!r}")

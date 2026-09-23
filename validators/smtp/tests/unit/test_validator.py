@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ssl
 from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -77,10 +78,36 @@ def test_plain_auth_requires_credentials() -> None:
 def test_deep_passes_smtp_handshake() -> None:
     client = MagicMock()
     client.__enter__.return_value = client
+    client.ehlo.side_effect = [(250, b"OK"), (250, b"OK")]
+    client.starttls.return_value = (220, b"Ready")
     with patch("validators.smtp.validator.smtplib.SMTP", return_value=client):
         result = _make_validator(VALID_DATABAG).validate(level="deep")
     assert result.status == "PASS"
     assert client.ehlo.call_count == 2
+
+
+def test_deep_honors_skip_ssl_verify() -> None:
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.ehlo.return_value = (250, b"OK")
+    with patch("validators.smtp.validator.smtplib.SMTP_SSL", return_value=client) as smtp_ssl:
+        result = _make_validator({**VALID_DATABAG, "transport_security": "tls", "skip_ssl_verify": "true"}).validate(
+            level="deep"
+        )
+    assert result.status == "PASS"
+    context = smtp_ssl.call_args.kwargs["context"]
+    assert context.verify_mode == ssl.CERT_NONE
+    assert not context.check_hostname
+
+
+def test_deep_fails_rejected_ehlo() -> None:
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.ehlo.return_value = (550, b"Rejected")
+    with patch("validators.smtp.validator.smtplib.SMTP", return_value=client):
+        result = _make_validator(VALID_DATABAG).validate(level="deep")
+    assert result.status == "FAIL"
+    assert "EHLO returned 550" in next(check for check in result.checks if check.name == "smtp_handshake").message
 
 
 def test_deep_fails_unreachable_smtp() -> None:
