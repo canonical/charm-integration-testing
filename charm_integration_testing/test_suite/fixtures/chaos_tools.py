@@ -53,8 +53,11 @@ def detect_initial_tools(
     *,
     backend_factory: Callable[[Path], KubernetesBackend] = KubernetesBackend.k8s_client,
 ) -> None:
-    """Report a session-start snapshot without requiring a test controller to exist."""
-    for cloud, namespace in dict.fromkeys(scopes):
+    """Report tool availability once per cloud without requiring a test controller."""
+    scopes_by_cloud: dict[str, str] = {}
+    for cloud, namespace in scopes:
+        scopes_by_cloud.setdefault(cloud, namespace)
+    for cloud, namespace in scopes_by_cloud.items():
         path = kubeconfigs.get(cloud)
         if path is None:
             logger.info("Chaos detection not performed for cloud %s: no kubeconfig supplied.", cloud)
@@ -99,31 +102,31 @@ def detect_chaos_tools(
     detect_initial_tools(scopes, cloud_kubeconfigs, logger)
 
 
-def require_tool_for_model(backend: JujuBackend, model: JujuModelHandle) -> ChaosTool:
+def require_tools_for_model(backend: JujuBackend, model: JujuModelHandle) -> frozenset[ChaosTool]:
     """Skip tool-dependent tests only for unsupported substrates or unavailable tools."""
     kubernetes = backend.get_kubernetes_client_for_model(model)
     if kubernetes is None:
         pytest.skip("Litmus and Chaos Mesh require a Kubernetes model.")
-    tool = preferred_chaos_tool(available_chaos_tools(kubernetes.backend))
-    if tool is None:
+    tools = available_chaos_tools(kubernetes.backend)
+    if not tools:
         pytest.skip(f"Neither Litmus nor Chaos Mesh is available for {model.uri}.")
-    return tool
+    return tools
 
 
 @pytest.fixture
 def chaos_tool_for_model(
     juju_backend: JujuBackend, detect_chaos_tools: None
-) -> Callable[[JujuModelHandle], ChaosTool]:
-    """Resolve the available chaos tool for a test model."""
+) -> Callable[[JujuModelHandle], frozenset[ChaosTool]]:
+    """Resolve the available chaos tools for a test model."""
 
-    def resolve(model: JujuModelHandle) -> ChaosTool:
-        return require_tool_for_model(juju_backend, model)
+    def resolve(model: JujuModelHandle) -> frozenset[ChaosTool]:
+        return require_tools_for_model(juju_backend, model)
 
     return resolve
 
 
 @pytest.fixture
 def require_chaos_tool(
-    chaos_tool_for_model: Callable[[JujuModelHandle], ChaosTool], target_model_ref: JujuModelHandle
-) -> ChaosTool:
+    chaos_tool_for_model: Callable[[JujuModelHandle], frozenset[ChaosTool]], target_model_ref: JujuModelHandle
+) -> frozenset[ChaosTool]:
     return chaos_tool_for_model(target_model_ref)

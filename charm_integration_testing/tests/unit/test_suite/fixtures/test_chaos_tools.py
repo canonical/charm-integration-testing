@@ -18,11 +18,14 @@ from test_suite.fixtures.chaos_tools import (
     ChaosTool,
     available_chaos_tools,
     detect_initial_tools,
-    require_tool_for_model,
+    preferred_chaos_tool,
+    require_tools_for_model,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
 from ...extensions.shared import NullJujuBackend
+
+pytest_plugins = ["pytester"]
 
 TARGET = JujuModelHandle(controller="target-controller", model="target-model")
 NEIGHBOR = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
@@ -205,8 +208,8 @@ class TestAvailableChaosTools:
 
 
 class TestInitialDetection:
-    def test_checks_each_scope_once_and_closes_clients(self, caplog: pytest.LogCaptureFixture) -> None:
-        # GIVEN duplicate scopes and separate kubeconfigs
+    def test_checks_each_cloud_once_and_closes_clients(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN two model namespaces on one cloud and another cloud
         backends: list[KubernetesStub] = []
         paths: list[Path] = []
 
@@ -219,7 +222,7 @@ class TestInitialDetection:
         # WHEN taking the session snapshot
         with caplog.at_level(logging.INFO):
             detect_initial_tools(
-                [("target", "one"), ("target", "one"), ("neighbor", "two")],
+                [("target", "one"), ("target", "two"), ("neighbor", "three")],
                 {"target": Path("target-config"), "neighbor": Path("neighbor-config")},
                 logging.getLogger(__name__),
                 backend_factory=factory,
@@ -229,7 +232,8 @@ class TestInitialDetection:
         assert paths == [Path("target-config"), Path("neighbor-config")]
         assert all(backend.api_client.closed for backend in backends)
         assert "target/one: none" in caplog.text
-        assert "neighbor/two: none" in caplog.text
+        assert "target/two:" not in caplog.text
+        assert "neighbor/three: none" in caplog.text
 
     def test_missing_kubeconfig_is_not_reported_as_machine_cloud(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN no kubeconfig or known substrate
@@ -390,7 +394,7 @@ class TestInitialDetectionFixture:
         assert not backend.kubernetes.api_client.closed
 
 
-class TestRequireTool:
+class TestRequireTools:
     def test_machine_model_skips_dependent_test(self) -> None:
         # GIVEN an authoritative machine-cloud result
         backend = JujuBackendStub()
@@ -398,7 +402,7 @@ class TestRequireTool:
 
         # WHEN a test requires a tool, THEN only that request is skipped
         with pytest.raises(pytest.skip.Exception, match="Kubernetes model"):
-            require_tool_for_model(backend, TARGET)
+            require_tools_for_model(backend, TARGET)
 
     def test_absent_tools_skip_dependent_test(self) -> None:
         # GIVEN neither tool in a Kubernetes model
@@ -406,7 +410,7 @@ class TestRequireTool:
 
         # WHEN a test requires a tool, THEN absence produces a skip
         with pytest.raises(pytest.skip.Exception, match="Neither Litmus nor Chaos Mesh"):
-            require_tool_for_model(backend, TARGET)
+            require_tools_for_model(backend, TARGET)
 
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_api_errors_are_not_skipped(self, status: int) -> None:
@@ -417,7 +421,7 @@ class TestRequireTool:
 
         # WHEN requiring a tool, THEN errors do not cause a skip or fallback
         with pytest.raises(ApiException) as exc_info:
-            require_tool_for_model(backend, TARGET)
+            require_tools_for_model(backend, TARGET)
         assert exc_info.value is backend.kubernetes.error
 
     def test_missing_model_configuration_is_not_skipped(self) -> None:
@@ -427,7 +431,7 @@ class TestRequireTool:
 
         # WHEN requiring a tool, THEN configuration failure propagates
         with pytest.raises(KeyError):
-            require_tool_for_model(backend, TARGET)
+            require_tools_for_model(backend, TARGET)
 
     def test_shared_operator_serves_both_models(self) -> None:
         # GIVEN two models sharing a cluster with Litmus and Chaos Mesh
@@ -437,11 +441,11 @@ class TestRequireTool:
         resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
 
         # WHEN both models request a chaos tool
-        target_tool = resolve(TARGET)
-        neighbor_tool = resolve(NEIGHBOR)
+        target_tools = resolve(TARGET)
+        neighbor_tools = resolve(NEIGHBOR)
 
         # THEN both use the shared operator without querying charm configuration
-        assert target_tool == neighbor_tool == ChaosTool.LITMUS
+        assert target_tools == neighbor_tools == frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH})
         assert backend.kubernetes.reads == [("litmus-system", "litmus")] * 2
         assert backend.resolutions == [TARGET.uri, NEIGHBOR.uri]
 
@@ -451,25 +455,202 @@ class TestRequireTool:
         backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
         backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
         resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
-        assert resolve(TARGET) == ChaosTool.LITMUS
+        assert resolve(TARGET) == frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH})
 
         # WHEN the shared operator stops
         backend.kubernetes.ready_deployments.clear()
 
-        # THEN the next request falls back to Chaos Mesh
-        assert resolve(TARGET) == ChaosTool.CHAOS_MESH
+        # THEN the next request no longer reports Litmus
+        assert resolve(TARGET) == frozenset({ChaosTool.CHAOS_MESH})
 
     def test_target_fixture_uses_target_model(self) -> None:
         # GIVEN a tool resolver that records the requested model
         models: list[JujuModelHandle] = []
 
-        def resolve(model: JujuModelHandle) -> ChaosTool:
+        def resolve(model: JujuModelHandle) -> frozenset[ChaosTool]:
             models.append(model)
-            return ChaosTool.LITMUS
+            return frozenset({ChaosTool.LITMUS})
 
         # WHEN the target test requires a chaos tool
         tool = unwrap(chaos_tools.require_chaos_tool)(resolve, TARGET)
 
         # THEN the target model's tool is returned
-        assert tool == ChaosTool.LITMUS
+        assert tool == frozenset({ChaosTool.LITMUS})
         assert models == [TARGET]
+
+
+def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.Pytester) -> None:
+    # GIVEN both chaos plugins and a backend that records every Kubernetes query
+    calls_path = pytester.path / "api_calls.log"
+    pytester.makeconftest(
+        """
+        import logging
+        from pathlib import Path
+
+        import pytest
+        from juju import JujuModelHandle
+        from kubernetes_client import KubernetesBackend, KubernetesClient
+
+        pytest_plugins = ["test_suite.fixtures.chaos_tools", "test_suite.fixtures.chaos_mesh"]
+        TARGET = JujuModelHandle(controller="target-controller", model="target-model")
+        CALLS = Path(__file__).with_name("api_calls.log")
+
+
+        def record(operation):
+            with CALLS.open("a") as stream:
+                stream.write(operation + "\\n")
+
+
+        def pytest_addoption(parser):
+            parser.addoption("--current-state", default="deployed")
+            parser.addoption("--target-cloud", default="target")
+            parser.addoption("--target-platform", default="kubernetes")
+            parser.addoption("--neighbor-cloud", default=None)
+            parser.addoption("--neighbor-platform", default=None)
+
+
+        class ApiClientStub:
+            def close(self):
+                record("close")
+
+
+        class BackendStub(KubernetesBackend):
+            def __init__(self):
+                self.api_client = ApiClientStub()
+
+            def crd_exists(self, name):
+                record(name)
+                return False
+
+            def deployment_is_ready(self, namespace, name):
+                record(namespace + "/" + name)
+                return False
+
+
+        class JujuBackendStub:
+            def get_kubernetes_client_for_model(self, model):
+                record("model lookup")
+                return KubernetesClient(BackendStub())
+
+
+        @pytest.fixture(scope="session", autouse=True)
+        def client_boundary():
+            def create_client(kubeconfig):
+                record("client creation")
+                return BackendStub()
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(KubernetesBackend, "k8s_client", staticmethod(create_client))
+                yield
+
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("chaos-tools-wiring-test")
+
+
+        @pytest.fixture(scope="session")
+        def juju_backend():
+            return JujuBackendStub()
+
+
+        @pytest.fixture(scope="session")
+        def cloud_kubeconfigs():
+            return {"target": Path("/test/target.yaml")}
+
+
+        @pytest.fixture(scope="session")
+        def target_cloud():
+            return "target"
+
+
+        @pytest.fixture(scope="session")
+        def target_platform():
+            return "kubernetes"
+
+
+        @pytest.fixture(scope="session")
+        def target_model_ref():
+            return TARGET
+
+
+        @pytest.fixture(scope="session")
+        def neighbor_cloud():
+            return None
+
+
+        @pytest.fixture(scope="session")
+        def neighbor_model_ref():
+            return None
+
+
+        @pytest.fixture(scope="session")
+        def register_preexisting_resources():
+            return None
+        """
+    )
+    pytester.makepyfile(
+        """
+        import pytest
+
+
+        def test_native_without_chaos_tools():
+            pass
+
+
+        def test_chaos_only(require_chaos_tool):
+            pytest.fail("Missing tools must skip before running the test")
+
+
+        def test_mesh_only(require_chaos_mesh):
+            pytest.fail("Missing Chaos Mesh must skip before running the test")
+        """
+    )
+
+    # WHEN only the unrelated test runs
+    unrelated_only = pytester.runpytest("-k", "test_native_without_chaos_tools", "--log-cli-level=INFO")
+
+    # THEN neither plugin queries Kubernetes
+    unrelated_only.assert_outcomes(passed=1)
+    assert not calls_path.exists()
+    assert "Initial chaos tools" not in unrelated_only.stdout.str()
+    assert "Chaos Mesh on cloud" not in unrelated_only.stdout.str()
+
+    # WHEN two tool-dependent tests run in the same session
+    with_chaos_tests = pytester.runpytest("-k", "test_chaos_only or test_mesh_only", "--log-cli-level=INFO")
+
+    # THEN both skip, with one report per detector and fresh prerequisite checks
+    with_chaos_tests.assert_outcomes(skipped=2)
+    calls = calls_path.read_text().splitlines()
+    assert calls.count("chaosengines.litmuschaos.io") == 2
+    assert calls.count("stresschaos.chaos-mesh.org") == 4
+    assert calls.count("client creation") == 2
+    assert calls.count("close") == 2
+    assert with_chaos_tests.stdout.str().count("Initial chaos tools for target-controller:target-model: none.") == 1
+    assert with_chaos_tests.stdout.str().count("Chaos Mesh on cloud target: not installed") == 1
+
+
+class TestPreferredChaosTool:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        tools: frozenset[ChaosTool]
+        expected: ChaosTool | None
+
+    test_cases = [
+        Params("both", frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH}), ChaosTool.LITMUS),
+        Params("litmus-only", frozenset({ChaosTool.LITMUS}), ChaosTool.LITMUS),
+        Params("mesh-only", frozenset({ChaosTool.CHAOS_MESH}), ChaosTool.CHAOS_MESH),
+        Params("neither", frozenset(), None),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
+    def test_prefers_litmus_when_available(self, params: Params) -> None:
+        # GIVEN tools that support the same experiment
+        tools = params.tools
+
+        # WHEN choosing one tool for that experiment
+        tool = preferred_chaos_tool(tools)
+
+        # THEN Litmus is preferred when available
+        assert tool == params.expected

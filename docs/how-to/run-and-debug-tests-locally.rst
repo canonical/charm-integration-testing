@@ -100,19 +100,25 @@ cloud, replacing hyphens in the cloud name with underscores. For example:
 
    export KUBECONFIG_local_k8s=/path/to/kubeconfig
 
-The test suite reports every available tool once per session, the first
-time a test requests a chaos tool via ``require_chaos_tool`` or
-``chaos_tool_for_model``; sessions with no chaos tests skip the check.
+The combined tool report runs once per session, when a test first requests
+``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
+the report checks each configured Kubernetes cloud once. Neither chaos
+detector runs automatically for unrelated tests.
 Litmus requires its three CRDs and a ready ``litmus`` Deployment in
 ``litmus-system``.
 The shared operator namespace is independent of the test model namespace.
 CIT uses this installation without deploying charms or configuring CMR.
 
-Tests using ``require_chaos_tool`` see every available tool and prefer
-Litmus when both are available; they skip when neither is available.
-Availability is rechecked for each request rather than reused from the
-session report. Kubernetes API errors are reported as failures. Tests
-using ``require_chaos_mesh`` continue to require Chaos Mesh specifically.
+``require_chaos_tool`` returns a ``frozenset`` of tools available for the
+target model. ``chaos_tool_for_model`` provides a function that accepts a
+model and returns its available tools. Both skip the requesting test when
+no tools are available. Availability is rechecked for each request rather
+than reused from the session report.
+
+Tests select a tool that supports their experiment. When either tool can
+perform the experiment, ``preferred_chaos_tool()`` favors Litmus. Kubernetes
+API errors are reported as failures. Tests using ``require_chaos_mesh``
+continue to check for and require Chaos Mesh specifically.
 
 Detection does not run Litmus experiments or prepare experiment definitions
 and permissions. Shared resources remain managed by the infrastructure

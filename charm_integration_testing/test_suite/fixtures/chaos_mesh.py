@@ -26,7 +26,7 @@ def _chaos_mesh_installed(kubeconfig: Path) -> bool:
         backend.api_client.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def detect_chaos_mesh(
     request: pytest.FixtureRequest,
     cloud_kubeconfigs: dict[str, Path],
@@ -68,6 +68,7 @@ def require_chaos_mesh(
     target_platform: str,
     target_cloud: str,
     cloud_kubeconfigs: dict[str, Path],
+    detect_chaos_mesh: None,
 ) -> None:
     """Skip a Chaos Mesh-only test when the target cloud lacks it."""
     if target_platform != "kubernetes":

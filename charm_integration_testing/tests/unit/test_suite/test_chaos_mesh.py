@@ -100,10 +100,10 @@ def run_detection(
 
 def run_gate(kubeconfigs: dict[str, Path], platform: str = "kubernetes") -> None:
     gate = cast(
-        Callable[[str, str, dict[str, Path]], None],
+        Callable[[str, str, dict[str, Path], None], None],
         inspect.unwrap(chaos_mesh.require_chaos_mesh),
     )
-    gate(platform, "target", kubeconfigs)
+    gate(platform, "target", kubeconfigs, None)
 
 
 def test_detection_checks_only_stresschaos_and_closes_client(backend_factory: BackendFactoryStub) -> None:
