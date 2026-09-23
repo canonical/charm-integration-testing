@@ -731,8 +731,18 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
 
 
 @pytest.fixture
-def neighbor_arch(request: pytest.FixtureRequest, target_arch: str) -> str:
-    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch."""
+def neighbor_arch(
+    request: pytest.FixtureRequest,
+    target_arch: str,
+    neighbor_model_ref: JujuModelHandle | None,
+) -> str:
+    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch.
+
+    In non-CMR tests there is no neighbor model: the neighbor application is deployed
+    into the target model, so it necessarily uses ``target_arch``.
+    """
+    if neighbor_model_ref is None:
+        return target_arch
     value = request.config.getoption("--neighbor-arch")
     if not value:
         return target_arch
