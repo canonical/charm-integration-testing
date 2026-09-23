@@ -171,6 +171,17 @@ class TestRunForCharm:
         assert results[0].status == "ERROR"
         assert results[0].relation_id is None
 
+    def test_skips_missing_relation_with_no_validator_installed(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        charm.model.relations = {}
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm), level="simple", validators={"other-interface": [PassingValidator]}
+        )
+
+        assert results == []
+
     def test_skips_optional_relation_missing_from_model(self) -> None:
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
