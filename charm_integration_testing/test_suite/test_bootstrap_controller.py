@@ -20,6 +20,7 @@ def test_bootstrap_controller(
     target_controller_bootstrap_metadata_source: Path | None,
     neighbor_cloud: str | None,
     neighbor_controller: str | None,
+    neighbor_platform: str,
     neighbor_controller_bootstrap_constraints: dict[str, str] | None,
     neighbor_controller_bootstrap_config: dict[str, str] | None,
     neighbor_controller_bootstrap_metadata_source: Path | None,
@@ -51,7 +52,13 @@ def test_bootstrap_controller(
     # Register the neighbor cloud on the target controller when the neighbor model
     # lives there (same-controller mode) but on a different cloud (SQT-884:
     # different platforms, same controller). The neighbor model is then created
-    # on that cloud in test_create_model.
-    if is_cmr_test and neighbor_controller == target_controller and neighbor_cloud != target_cloud:
+    # on that cloud in test_create_model. Only Kubernetes clouds can be registered
+    # this way; other combinations are rejected during option validation.
+    if (
+        is_cmr_test
+        and neighbor_controller == target_controller
+        and neighbor_cloud != target_cloud
+        and neighbor_platform == "kubernetes"
+    ):
         assert neighbor_cloud is not None
         juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)

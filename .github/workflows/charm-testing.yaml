@@ -32,8 +32,9 @@ on:
         type: string
         default: ''
       same_controller:
-        description: Run a same-controller cross-model relation test (neighbor model
-          on the target controller). Orthogonal to neighbor_environment.
+        description: When neighbor_environment is set, place the neighbor model on
+          the target controller instead of bootstrapping a new one for it. Requires
+          neighbor_environment; ignored (and rejected) otherwise.
         required: false
         type: boolean
         default: false
@@ -124,6 +125,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Validate CMR inputs
+        if: ${{ inputs.same_controller && inputs.neighbor_environment == '' }}
+        shell: bash
+        run: |
+          echo "::error::same_controller=true requires neighbor_environment to be set. CMR" \
+            "always needs a neighbor environment (same-controller mode places its model on" \
+            "the target controller instead of bootstrapping a new one for it)."
+          exit 1
       - name: Pick runner
         id: pick
         uses: ./.github/actions/pick-runner
@@ -357,7 +366,7 @@ jobs:
           detail: Tests started.
       - name: Run charm CMR tests
         id: run_tests_cmr
-        if: ${{ inputs.neighbor_environment != '' || inputs.same_controller }}
+        if: ${{ inputs.neighbor_environment != '' }}
         continue-on-error: true
         shell: bash
         env:
@@ -437,7 +446,7 @@ jobs:
             --junit-xml=junit.xml
       - name: Run charm tests
         id: run_tests
-        if: ${{ inputs.neighbor_environment == '' && !inputs.same_controller }}
+        if: ${{ inputs.neighbor_environment == '' }}
         continue-on-error: true
         shell: bash
         env:
@@ -525,7 +534,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ (inputs.neighbor_environment != '' || inputs.same_controller) && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Post results to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -533,13 +542,13 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ (inputs.neighbor_environment != '' || inputs.same_controller) && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
         shell: bash
         env:
-          junit_xml: ${{ (inputs.neighbor_environment != '' || inputs.same_controller) && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
         run: |
           mkdir -p "logs"
           [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"

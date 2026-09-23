@@ -30,17 +30,13 @@ def _request(**options: Any) -> pytest.FixtureRequest:
     return cast(pytest.FixtureRequest, RequestStub(options))
 
 
-def test_same_controller_alone_enables_cmr() -> None:
+def test_same_controller_alone_is_not_cmr() -> None:
     # GIVEN a run configured with --same-controller and no --neighbor-cloud
     request = _request(**{"--same-controller": True})
 
-    # WHEN resolving the CMR fixtures
-    same_controller = _fixture("same_controller")(request)
-    is_cmr_test = _fixture("is_cmr_test")(request)
-
-    # THEN the run is treated as a CMR test on a single controller
-    assert same_controller is True
-    assert is_cmr_test is True
+    # WHEN resolving the CMR fixture
+    # THEN it is not treated as CMR (rejected separately by pytest_configure)
+    assert _fixture("is_cmr_test")(request) is False
 
 
 def test_neighbor_cloud_alone_enables_cmr() -> None:
@@ -56,6 +52,19 @@ def test_neighbor_cloud_alone_enables_cmr() -> None:
     assert is_cmr_test is True
 
 
+def test_same_controller_with_neighbor_cloud_enables_cmr() -> None:
+    # GIVEN a run configured with both --same-controller and --neighbor-cloud
+    request = _request(**{"--same-controller": True, "--neighbor-cloud": "lxd"})
+
+    # WHEN resolving the CMR fixtures
+    same_controller = _fixture("same_controller")(request)
+    is_cmr_test = _fixture("is_cmr_test")(request)
+
+    # THEN the run is treated as a same-controller CMR test
+    assert same_controller is True
+    assert is_cmr_test is True
+
+
 def test_no_cmr_options_is_not_cmr() -> None:
     # GIVEN a run with neither CMR option
     request = _request()
@@ -67,7 +76,7 @@ def test_no_cmr_options_is_not_cmr() -> None:
 
 def test_same_controller_reuses_target_controller() -> None:
     # GIVEN a same-controller run
-    request = _request(**{"--same-controller": True})
+    request = _request(**{"--same-controller": True, "--neighbor-cloud": "lxd"})
 
     # WHEN resolving the neighbor controller
     neighbor_controller = _fixture("neighbor_controller")(
@@ -82,35 +91,14 @@ def test_same_controller_reuses_target_controller() -> None:
     assert neighbor_controller == "charmqa-12345678"
 
 
-def test_same_controller_falls_back_to_target_cloud() -> None:
-    # GIVEN a same-controller run without an explicit neighbor cloud
-    request = _request(**{"--same-controller": True})
-
-    # WHEN resolving the neighbor cloud
-    neighbor_cloud = _fixture("neighbor_cloud")(
-        request,
-        is_cmr_test=True,
-        same_controller=True,
-        target_cloud="target-cloud",
-    )
-
-    # THEN the neighbor model is placed on the target cloud
-    assert neighbor_cloud == "target-cloud"
-
-
-def test_same_controller_honours_explicit_neighbor_cloud() -> None:
-    # GIVEN a same-controller run that also names a neighbor cloud (multi-cloud controller)
+def test_same_controller_uses_explicit_neighbor_cloud() -> None:
+    # GIVEN a same-controller run naming an explicit neighbor cloud (multi-cloud controller)
     request = _request(**{"--same-controller": True, "--neighbor-cloud": "k8s-cloud"})
 
     # WHEN resolving the neighbor cloud
-    neighbor_cloud = _fixture("neighbor_cloud")(
-        request,
-        is_cmr_test=True,
-        same_controller=True,
-        target_cloud="target-cloud",
-    )
+    neighbor_cloud = _fixture("neighbor_cloud")(request, is_cmr_test=True)
 
-    # THEN the explicit cloud wins
+    # THEN the explicit cloud is used
     assert neighbor_cloud == "k8s-cloud"
 
 
@@ -132,9 +120,19 @@ def test_cross_controller_generates_neighbor_controller() -> None:
     assert neighbor_controller.startswith("charmqa-")
 
 
+def test_configure_rejects_same_controller_without_neighbor_cloud() -> None:
+    # GIVEN --same-controller without --neighbor-cloud
+    config = ConfigStub({"--same-controller": True})
+
+    # WHEN validating the options
+    # THEN the combination is rejected: CMR always needs a neighbor cloud
+    with pytest.raises(pytest.exit.Exception, match="--same-controller requires --neighbor-cloud"):
+        controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
 def test_configure_rejects_neighbor_controller_with_same_controller() -> None:
     # GIVEN --same-controller combined with an explicit --neighbor-controller
-    config = ConfigStub({"--same-controller": True, "--neighbor-controller": "other"})
+    config = ConfigStub({"--same-controller": True, "--neighbor-cloud": "lxd", "--neighbor-controller": "other"})
 
     # WHEN validating the options
     # THEN the combination is rejected
@@ -148,7 +146,7 @@ def test_configure_rejects_neighbor_model_without_cmr() -> None:
 
     # WHEN validating the options
     # THEN the option is rejected
-    with pytest.raises(pytest.exit.Exception, match="--neighbor-cloud or --same-controller is required"):
+    with pytest.raises(pytest.exit.Exception, match="--neighbor-cloud is required"):
         controller_spec.pytest_configure(cast(pytest.Config, config))
 
 
@@ -157,6 +155,7 @@ def test_configure_rejects_identical_same_controller_model() -> None:
     config = ConfigStub(
         {
             "--same-controller": True,
+            "--neighbor-cloud": "lxd",
             "--target-model": "shared",
             "--neighbor-model": "shared",
         }
@@ -173,8 +172,82 @@ def test_configure_accepts_same_controller_with_distinct_model() -> None:
     config = ConfigStub(
         {
             "--same-controller": True,
+            "--neighbor-cloud": "lxd",
+            "--target-cloud": "lxd",
             "--target-model": "target",
             "--neighbor-model": "neighbor",
+        }
+    )
+
+    # WHEN validating the options
+    # THEN validation passes
+    controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
+def test_configure_accepts_same_controller_with_existing_controller_state() -> None:
+    # GIVEN --same-controller with a state that implies an existing controller, where
+    # --neighbor-controller is rejected (the neighbor shares the target controller)
+    config = ConfigStub(
+        {
+            "--same-controller": True,
+            "--neighbor-cloud": "lxd",
+            "--target-cloud": "lxd",
+            "--current-state": "no_model",
+            "--target-controller": "target",
+            "--target-model": "target",
+            "--neighbor-model": "neighbor",
+        }
+    )
+
+    # WHEN validating the options
+    # THEN validation passes without requiring --neighbor-controller
+    controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
+def test_configure_requires_neighbor_controller_for_cross_controller_existing_state() -> None:
+    # GIVEN a cross-controller CMR run with a state that implies an existing controller
+    # and no --neighbor-controller
+    config = ConfigStub(
+        {
+            "--neighbor-cloud": "lxd",
+            "--current-state": "no_model",
+            "--target-controller": "target",
+            "--target-model": "target",
+            "--neighbor-model": "neighbor",
+        }
+    )
+
+    # WHEN validating the options
+    # THEN --neighbor-controller is still required
+    with pytest.raises(pytest.exit.Exception, match="--neighbor-controller is required"):
+        controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
+def test_configure_rejects_same_controller_non_k8s_neighbor_cloud() -> None:
+    # GIVEN --same-controller with a different neighbor cloud on a non-Kubernetes platform
+    config = ConfigStub(
+        {
+            "--same-controller": True,
+            "--neighbor-cloud": "openstack-cloud",
+            "--target-cloud": "lxd",
+            "--neighbor-platform": "machine",
+        }
+    )
+
+    # WHEN validating the options
+    # THEN the unsupported combination is rejected
+    with pytest.raises(pytest.exit.Exception, match="only supported for Kubernetes neighbor platforms"):
+        controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
+def test_configure_accepts_same_controller_k8s_neighbor_cloud() -> None:
+    # GIVEN --same-controller with a different Kubernetes neighbor cloud
+    config = ConfigStub(
+        {
+            "--same-controller": True,
+            "--neighbor-cloud": "k8s-cloud",
+            "--target-cloud": "lxd",
+            "--neighbor-platform": "kubernetes",
         }
     )
 
