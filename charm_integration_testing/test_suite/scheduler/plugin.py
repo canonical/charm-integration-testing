@@ -135,6 +135,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "state_disabled: Exclude a conditionally unavailable state transition from scheduler planning.",
+    )
+    config.addinivalue_line(
+        "markers",
         (
             "injected: Added automatically by the scheduler to bridging transition tests "
             "that were not explicitly requested by the user (e.g. via -k).  "
@@ -583,6 +587,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     all_transitions: dict[StateTransition, list[pytest.Item]] = defaultdict(list)
 
     for item in _all_collected:
+        if item.get_closest_marker("state_disabled") is not None:
+            continue
         try:
             marker = read_state_marker(item)
         except ValueError as exc:
@@ -606,6 +612,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     _skipped_transitions = set()
     _skipped_transition_item_ids = {}
 
+    items[:] = [item for item in items if item.get_closest_marker("state_disabled") is None]
+
     # ------------------------------------------------------------------
     # 2. Partition the USER-SELECTED items (post -k filter) into marked
     #    and unmarked.  These are the destinations the scheduler must reach.
@@ -614,6 +622,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     unmarked: list[pytest.Item] = []
 
     for item in items:
+        if item.get_closest_marker("state_disabled") is not None:
+            continue
         try:
             marker = read_state_marker(item)
         except ValueError as exc:

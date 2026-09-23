@@ -25,6 +25,90 @@ from pytest import Pytester
 pytest_plugins = ["pytester"]
 
 
+def test_disabled_transition_is_excluded_and_planner_uses_alternate_path(pytester: Pytester) -> None:
+    pytester.makeconftest(
+        textwrap.dedent(
+            """
+            import pytest
+
+            pytest_plugins = ["test_suite.scheduler.plugin"]
+
+            @pytest.hookimpl(trylast=True)
+            def pytest_itemcollected(item):
+                if item.name == "test_scale_from_ha":
+                    item.add_marker("state_disabled")
+            """
+        )
+    )
+    pytester.makepyfile(
+        textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED)
+            def test_scale_from_ha():
+                pass
+
+            @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.NEIGHBOR_ONLY)
+            def test_teardown():
+                pass
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_redeploy():
+                pass
+
+            @pytest.mark.state(requires=State.DEPLOYED)
+            def test_destination():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("-v", "--current-state", "deployed_ha", "-k", "test_destination")
+
+    result.assert_outcomes(passed=3)
+    assert any("[injected] test_teardown PASSED" in line for line in result.outlines)
+    assert any("[injected] test_redeploy PASSED" in line for line in result.outlines)
+    assert any("test_destination PASSED" in line for line in result.outlines)
+    result.stdout.no_fnmatch_line("*test_scale_from_ha*PASSED*")
+
+
+def test_enabled_scale_from_ha_is_the_direct_path_to_deployed(pytester: Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED)
+            def test_scale_from_ha():
+                pass
+
+            @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.NEIGHBOR_ONLY)
+            def test_teardown():
+                pass
+
+            @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED)
+            def test_redeploy():
+                pass
+
+            @pytest.mark.state(requires=State.DEPLOYED)
+            def test_destination():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("-v", "--current-state", "deployed_ha", "-k", "test_destination")
+
+    result.assert_outcomes(passed=2)
+    assert any("[injected] test_scale_from_ha PASSED" in line for line in result.outlines)
+    assert any("test_destination PASSED" in line for line in result.outlines)
+    result.stdout.no_fnmatch_line("*test_teardown*PASSED*")
+
+
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
 

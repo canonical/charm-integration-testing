@@ -11,6 +11,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+import yaml
 from extensions import (
     ConfigureLivepatchServerExtension,
     IstioMeshExtension,
@@ -60,6 +61,8 @@ from bundle_builder_x import (
     BaseMismatchError,
     BundleBuilder,
     BundleDiagnostic,
+    Charm,
+    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -84,6 +87,24 @@ pytest_plugins = [
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
 ]
+
+
+def _target_scale_down_enabled(config: pytest.Config) -> bool:
+    charm = config.getoption("--target-charm")
+    raw_channel = config.getoption("--target-channel")
+    ubuntu_version = config.getoption("--target-series")
+    overrides_path = config.getoption("--charm-overrides")
+    if not all(isinstance(value, str) and value for value in (charm, raw_channel, ubuntu_version, overrides_path)):
+        return True
+
+    channel = CharmChannel.model_validate(raw_channel)
+    return OverridesClient(overrides=Path(overrides_path)).get_charm_scale_down(charm, channel, ubuntu_version)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_itemcollected(item: pytest.Item) -> None:
+    if getattr(item, "originalname", item.name) == "test_scale_from_ha" and not _target_scale_down_enabled(item.config):
+        item.add_marker("state_disabled")
 
 
 @pytest.fixture
@@ -624,6 +645,47 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
+
+
+@pytest.fixture
+def ha_units(target_deployed_charm: Charm | None, overrides_client: OverridesClient) -> int:
+    """HA unit target for the deployed target charm version."""
+    if target_deployed_charm is None:
+        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
+    return overrides_client.get_charm_ha_units(
+        target_deployed_charm.name,
+        target_deployed_charm.channel,
+        target_deployed_charm.ubuntu_version,
+    )
+
+
+def _bundle_application_units(bundle_path: Path, application: str, platform: str) -> int:
+    with bundle_path.open(encoding="utf-8") as file:
+        try:
+            bundle = next(yaml.safe_load_all(file))
+        except StopIteration:
+            raise ValueError(f"Bundle is empty: {bundle_path}") from None
+
+    if not isinstance(bundle, dict):
+        raise ValueError(f"Invalid bundle document in {bundle_path}.")
+    applications = bundle.get("applications")
+    if not isinstance(applications, dict) or application not in applications:
+        raise ValueError(f"Application '{application}' not found in bundle: {bundle_path}")
+    application_data = applications[application]
+    if not isinstance(application_data, dict):
+        raise ValueError(f"Invalid application definition for '{application}' in {bundle_path}.")
+
+    units_key = "scale" if platform == "kubernetes" else "num_units"
+    units = application_data.get(units_key)
+    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+        raise ValueError(f"Application '{application}' in {bundle_path} must define a positive integer '{units_key}'.")
+    return units
+
+
+@pytest.fixture
+def original_units(target_bundle: Path, target_application: str, target_platform: str) -> int:
+    """Unit count originally declared for the target application."""
+    return _bundle_application_units(target_bundle, target_application, target_platform)
 
 
 @pytest.fixture
