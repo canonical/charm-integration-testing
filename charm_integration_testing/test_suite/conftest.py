@@ -267,10 +267,11 @@ def persistence_extension(
     """Session-scoped validator injector, and the owner of the canary persistence state.
 
     One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
-    so the state it holds is the single source of truth: ``test_deploy`` seeds it via "prepare",
-    each disruptive test verifies and advances it via "checkpoint", and ``test_teardown`` clears it
-    via "cleanup". It also re-keys itself on model migration, so tests never touch the state
-    directly.
+    so the state it holds is the single source of truth. The persistence op is auto-decided from
+    that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
+    (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
+    applications or integrations are torn down. It also re-keys itself on model migration, so
+    tests never touch the state directly.
     """
     return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
 
@@ -375,7 +376,7 @@ def seed_persistence_state_for_resumed_run(
     # first - match that here.
     client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
     for model_ref in models:
-        client.validate_model(model=model_ref, level=None, persistence="prepare")
+        client.validate_model(model=model_ref, level=None)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

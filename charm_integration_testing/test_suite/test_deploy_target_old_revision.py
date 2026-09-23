@@ -77,7 +77,7 @@ def test_deploy_target_old_revision(
             f"got {deployed_revision}."
         )
 
-    # Validate all applications and relations, and seed canary data for later persistence checks.
-    # For a CMR the persistence validator lives on the neighbor's requirer units, so prepare there too.
+    # Validate all applications and relations, seeding canary data for later persistence checks.
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
     for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
-        juju_client.validate_model(model=model_ref, level="simple", persistence="prepare")
+        juju_client.validate_model(model=model_ref, level="simple")

@@ -32,4 +32,4 @@ def test_deploy(
     )
 
     for _, model_ref in all_bundles:
-        juju_client.validate_model(model=model_ref, level="deep", persistence="prepare")
+        juju_client.validate_model(model=model_ref, level="deep")
