@@ -1,17 +1,40 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from datetime import datetime, timedelta, timezone
 from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import ops
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from validators.saml.validator import SamlValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
 
-VALID_CERT = "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"
+
+def _make_certificate() -> str:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "idp.example.com")])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    return certificate.public_bytes(serialization.Encoding.PEM).decode()
+
+
+VALID_CERT = _make_certificate()
 VALID_DATA = {
     "entity_id": "https://idp.example.com",
     "single_sign_on_service_redirect_url": "https://idp.example.com/sso",
@@ -51,10 +74,27 @@ def test_provider_role_skips() -> None:
     assert _make_validator(VALID_DATA, role=RelationRoleStub.provides).validate().status == "SKIPPED"
 
 
+def test_unsupported_binding_fails() -> None:
+    result = _make_validator({**VALID_DATA, "single_sign_on_service_redirect_binding": "invalid"}).validate()
+    assert result.status == "FAIL"
+
+
+def test_malformed_url_fails() -> None:
+    result = _make_validator({**VALID_DATA, "entity_id": "https://idp.example.com:bad"}).validate()
+    assert result.status == "FAIL"
+
+
+def test_invalid_certificate_fails() -> None:
+    result = _make_validator(
+        {**VALID_DATA, "x509certs": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"}
+    ).validate()
+    assert result.status == "FAIL"
+
+
 def test_deep_metadata_passes() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
-    response.read.return_value = b"<EntityDescriptor/>"
+    response.read.return_value = b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"/>'
     with patch("validators.saml.validator.urlopen", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
@@ -64,6 +104,24 @@ def test_deep_metadata_passes() -> None:
 
 def test_deep_metadata_fails() -> None:
     with patch("validators.saml.validator.urlopen", side_effect=OSError("unreachable")):
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
+            level="deep"
+        )
+    assert result.status == "FAIL"
+
+
+def test_deep_metadata_rejects_malformed_url() -> None:
+    with patch("validators.saml.validator.urlopen") as open_url:
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com:bad"}).validate(level="deep")
+    assert result.status == "FAIL"
+    open_url.assert_not_called()
+
+
+def test_deep_metadata_requires_entity_descriptor() -> None:
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = b"<NotMetadata/>"
+    with patch("validators.saml.validator.urlopen", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )

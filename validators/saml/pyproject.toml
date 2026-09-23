@@ -9,7 +9,7 @@ authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 requires-python = ">=3.10"
-dependencies = ["validators-base"]
+dependencies = ["cryptography", "defusedxml", "validators-base"]
 
 [project.optional-dependencies]
 dev = ["validators-test-utils"]
