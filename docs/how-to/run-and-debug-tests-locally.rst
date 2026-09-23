@@ -87,11 +87,15 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 Chaos tools
 ~~~~~~~~~~~
 
-Install Litmus or Chaos Mesh on the Kubernetes cluster before running tests
-that require a chaos tool. On PS6 staging and PS7, the infrastructure
+Install Chaos Mesh on the Kubernetes cluster for CPU and memory pressure or
+Disk I/O latency experiments. On PS6 staging and PS7, the infrastructure
 repositories manage the shared ``litmus-core`` Helm release. See the
 ``docs/how-to/install_litmus_core.rst`` guide in sqa-ops for installation
 steps and chart versions.
+
+Litmus is currently detected and reported only; its execution client is not
+implemented or included in experiment selection. Detection does not prepare
+experiment definitions or permissions.
 
 Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
 cloud, replacing hyphens in the cloud name with underscores. For example:
@@ -107,23 +111,47 @@ detector runs automatically for unrelated tests.
 Litmus requires its three CRDs and a ready ``litmus`` Deployment in
 ``litmus-system``.
 The shared operator namespace is independent of the test model namespace.
-CIT uses this installation without deploying charms or configuring CMR.
+CIT detects this installation without deploying charms or configuring CMR.
 
-``require_chaos_tool`` returns a ``frozenset`` of tools available for the
-target model. ``chaos_tool_for_model`` provides a function that accepts a
-model and returns its available tools. Both skip the requesting test when
-no tools are available. Availability is rechecked for each request rather
-than reused from the session report.
+``require_chaos_tool`` returns a ``MetaChaosClient`` for the target model.
+``chaos_tool_for_model`` returns a callable that accepts a model and creates
+a separate client for that model. Tests request experiments directly; the
+client selects the first configured implementation that supports each
+operation. Installation checks run for each client request rather than
+reusing the session report.
 
-Tests select a tool that supports their experiment. When either tool can
-perform the experiment, ``preferred_chaos_tool()`` prefers Litmus. Kubernetes
-API errors are reported as failures. Tests using ``require_chaos_mesh``
-continue to check for and require Chaos Mesh specifically.
+For example, a test can request I/O latency without selecting a tool:
 
-Detection does not run Litmus experiments or prepare experiment definitions
-and permissions. Shared resources remain managed by the infrastructure
-repositories. Use approved disposable workloads for experiments; the shared
-operator and privileged helpers do not provide isolation between tenants.
+.. code:: python
+
+   from datetime import timedelta
+
+   def test_io_latency(require_chaos_tool, target_model_ref):
+       require_chaos_tool.io_latency(
+           model=target_model_ref,
+           unit="postgresql/0",
+           volume_path="/data",
+           delay=timedelta(milliseconds=50),
+           percent=80,
+           duration=timedelta(seconds=30),
+       )
+
+Chaos Mesh handles CPU and memory pressure and Disk I/O latency. Native disk
+fill uses ``fallocate`` through Juju on machine and Kubernetes models.
+Kubernetes network isolation blocks ingress through a ``NetworkPolicy``.
+Disk fill and network isolation do not require Litmus or Chaos Mesh.
+The native CPU and memory commands are not used as fallback for external
+pressure experiments.
+
+Only unsupported operations permit fallback. If no implementation supports
+the requested experiment, that test is skipped. API and execution errors
+are reported as failures. Pending experiments are cleaned up at test teardown,
+including after a failure or skip. Cleanup errors are reported as failures.
+Tests using ``require_chaos_mesh`` retain their existing ``StressChaos`` check.
+
+Shared resources remain managed by the infrastructure repositories. Use
+approved disposable workloads for experiments; the shared operator and
+privileged helpers do not provide isolation between tenants.
 
 Install the repository dependencies
 -----------------------------------

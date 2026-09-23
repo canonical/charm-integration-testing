@@ -3,26 +3,29 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from inspect import unwrap
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 import pytest
+from chaos_client import ChaosCleanupError, MetaChaosClient
+from chaos_client.chaos_mesh_detection import CHAOS_MESH_CRDS
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
 from juju import JujuModelHandle
+from juju.backend import JujuExecOutput
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.fixtures import chaos_tools
 from test_suite.fixtures.chaos_tools import (
-    CHAOS_MESH_CRDS,
     ChaosTool,
     available_chaos_tools,
+    chaos_client_for_model,
     detect_initial_tools,
-    preferred_chaos_tool,
-    require_tools_for_model,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
+from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api
 from ...extensions.shared import NullJujuBackend
 
 pytest_plugins = ["pytester"]
@@ -46,6 +49,8 @@ class KubernetesStub(KubernetesBackend):
         self.ready_deployments: set[tuple[str, str]] = set()
         self.reads: list[tuple[str, str]] = []
         self.error: ApiException | None = None
+        self.custom_objects_api = FakeCustomObjectsApi()
+        self.networking_v1_api = FakeNetworkingV1Api()
 
     def crd_exists(self, name: str) -> bool:
         if self.error is not None:
@@ -65,10 +70,27 @@ class JujuBackendStub(NullJujuBackend):
             NEIGHBOR.uri: KubernetesClient(self.kubernetes),
         }
         self.resolutions: list[str] = []
+        self.exec_calls: list[tuple[JujuModelHandle, str, str]] = []
+        self.exec_error: RuntimeError | None = None
+        self.exec_return_code = 0
 
     def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
         self.resolutions.append(model.uri)
         return self.clients[model.uri]
+
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+        self.exec_calls.append((model, unit, task))
+        if self.exec_error is not None:
+            raise self.exec_error
+        return JujuExecOutput(return_code=self.exec_return_code, stdout="", stderr="")
+
+
+class FinalizerRequest:
+    def __init__(self) -> None:
+        self.finalizers: list[Callable[[], None]] = []
+
+    def addfinalizer(self, finalizer: Callable[[], None]) -> None:
+        self.finalizers.append(finalizer)
 
 
 @dataclass
@@ -394,94 +416,217 @@ class TestInitialDetectionFixture:
         assert not backend.kubernetes.api_client.closed
 
 
-class TestRequireTools:
-    def test_machine_model_skips_dependent_test(self) -> None:
-        # GIVEN an authoritative machine-cloud result
+class TestExperimentClients:
+    def test_failed_network_creation_does_not_delete_existing_policy(self) -> None:
+        # GIVEN a policy creation conflict
+        error = ApiException(status=409)
+
+        class ConflictingApi(FakeNetworkingV1Api):
+            def create_namespaced_network_policy(self, namespace: str, body: object) -> None:
+                raise error
+
         backend = JujuBackendStub()
-        backend.clients[TARGET.uri] = None
+        api = ConflictingApi()
+        backend.kubernetes.networking_v1_api = api
+        client = chaos_client_for_model(backend, TARGET)
 
-        # WHEN a test requires a tool, THEN only that request is skipped
-        with pytest.raises(pytest.skip.Exception, match="Kubernetes model"):
-            require_tools_for_model(backend, TARGET)
+        # WHEN creation fails and teardown runs
+        with pytest.raises(ApiException) as exc_info:
+            client.isolate_network(TARGET.model, "postgresql/0")
+        client.cleanup_all()
 
-    def test_absent_tools_skip_dependent_test(self) -> None:
-        # GIVEN neither tool in a Kubernetes model
+        # THEN the original error propagates and no existing policy is deleted
+        assert exc_info.value is error
+        assert api.delete_calls == []
+
+    def test_litmus_presence_does_not_hide_mesh_latency(self) -> None:
+        # GIVEN a cluster with both installations
         backend = JujuBackendStub()
+        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        client = chaos_client_for_model(backend, TARGET)
 
-        # WHEN a test requires a tool, THEN absence produces a skip
-        with pytest.raises(pytest.skip.Exception, match="Neither Litmus nor Chaos Mesh"):
-            require_tools_for_model(backend, TARGET)
+        # WHEN requesting I/O latency and cleaning up
+        client.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
+        client.cleanup_all()
+
+        # THEN Chaos Mesh creates and removes the experiment
+        api = backend.kubernetes.custom_objects_api
+        assert len(api.create_calls) == 1
+        assert api.create_calls[0]["plural"] == "iochaos"
+        assert api.create_calls[0]["namespace"] == TARGET.model
+        assert len(api.delete_calls) == 1
+        assert backend.exec_calls == []
+
+    def test_network_isolation_without_installed_tools(self) -> None:
+        # GIVEN a Kubernetes model without chaos operators
+        backend = JujuBackendStub()
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN isolating ingress and cleaning up
+        client.isolate_network(TARGET.model, "postgresql/0")
+        client.cleanup_all()
+
+        # THEN the native Kubernetes API owns creation and removal
+        api = backend.kubernetes.networking_v1_api
+        assert len(api.create_calls) == 1
+        assert api.create_calls[0][0] == TARGET.model
+        assert api.delete_calls == [("chaos-isolate-postgresql", TARGET.model)]
+        assert backend.exec_calls == []
+
+    def test_each_request_rechecks_mesh_availability(self) -> None:
+        # GIVEN a previous client request while Mesh was installed
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
+        previous = chaos_client_for_model(backend, TARGET)
+
+        # WHEN Mesh is removed before the next request
+        backend.kubernetes.crds.clear()
+        current = chaos_client_for_model(backend, TARGET)
+
+        # THEN the new client skips latency instead of using the old installation report
+        assert current is not previous
+        with pytest.raises(pytest.skip.Exception, match="io_latency"):
+            current.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
+        assert backend.kubernetes.custom_objects_api.create_calls == []
+
+    @pytest.mark.parametrize("machine", [False, True], ids=["kubernetes", "machine"])
+    def test_disk_fill_does_not_require_installed_tools(self, machine: bool) -> None:
+        # GIVEN a model without Litmus or Chaos Mesh
+        backend = JujuBackendStub()
+        if machine:
+            backend.clients[TARGET.uri] = None
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN filling disk and cleaning up
+        client.fill_disk(TARGET, "postgresql/0", "/tmp/fill", 128)
+        client.cleanup_all()
+
+        # THEN native commands run without starting or killing stress-ng
+        assert backend.exec_calls == [
+            (TARGET, "postgresql/0", "fallocate -l 128M -- /tmp/fill"),
+            (TARGET, "postgresql/0", "rm -f -- /tmp/fill"),
+        ]
+
+    @pytest.mark.parametrize("litmus_present", [False, True], ids=["no-tools", "litmus-only"])
+    def test_unsupported_experiment_skips_at_execution(self, litmus_present: bool) -> None:
+        # GIVEN no executable I/O latency client
+        backend = JujuBackendStub()
+        if litmus_present:
+            backend.kubernetes.crds.update(LITMUS_CRDS)
+            backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN requesting latency, THEN only that unsupported experiment causes a skip
+        with pytest.raises(pytest.skip.Exception, match="io_latency"):
+            client.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
+        assert backend.exec_calls == []
+
+    def test_external_pressure_does_not_fall_back_to_native_stress(self) -> None:
+        # GIVEN a Kubernetes model without Chaos Mesh
+        backend = JujuBackendStub()
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN requesting pressure, THEN workload-local stress-ng is not used
+        with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
+            client.stress_cpu(TARGET, "postgresql/0", 2, timedelta(seconds=30))
+        with pytest.raises(pytest.skip.Exception, match="stress_memory"):
+            client.stress_memory(TARGET, "postgresql/0", 2, 128, timedelta(seconds=30))
+        assert backend.exec_calls == []
 
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_api_errors_are_not_skipped(self, status: int) -> None:
-        # GIVEN available Mesh CRDs but an API failure
+        # GIVEN an API failure
         backend = JujuBackendStub()
-        backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
         backend.kubernetes.error = ApiException(status=status)
 
-        # WHEN requiring a tool, THEN errors do not cause a skip or fallback
+        # WHEN building experiment clients, THEN the original error propagates
         with pytest.raises(ApiException) as exc_info:
-            require_tools_for_model(backend, TARGET)
+            chaos_client_for_model(backend, TARGET)
         assert exc_info.value is backend.kubernetes.error
+
+    def test_execution_errors_are_not_skipped(self) -> None:
+        # GIVEN a native command failure
+        backend = JujuBackendStub()
+        backend.exec_error = RuntimeError("command failed")
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN executing disk fill, THEN the original error propagates
+        with pytest.raises(RuntimeError) as exc_info:
+            client.fill_disk(TARGET, "postgresql/0", "/tmp/fill", 128)
+        assert exc_info.value is backend.exec_error
+        backend.exec_error = None
+        client.cleanup_all()
+        assert backend.exec_calls[-1][2] == "rm -f -- /tmp/fill"
 
     def test_missing_model_configuration_is_not_skipped(self) -> None:
         # GIVEN a model with no registered Kubernetes client
         backend = JujuBackendStub()
         del backend.clients[TARGET.uri]
 
-        # WHEN requiring a tool, THEN configuration failure propagates
+        # WHEN building clients, THEN configuration failure propagates
         with pytest.raises(KeyError):
-            require_tools_for_model(backend, TARGET)
+            chaos_client_for_model(backend, TARGET)
 
-    def test_shared_operator_serves_both_models(self) -> None:
-        # GIVEN two models sharing a cluster with Litmus and Chaos Mesh
+    def test_nonzero_native_exit_and_cleanup_failure_are_reported(self) -> None:
+        # GIVEN a native command returning a nonzero exit code
         backend = JujuBackendStub()
-        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
-        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
+        backend.exec_return_code = 1
+        client = chaos_client_for_model(backend, TARGET)
 
-        # WHEN both models request a chaos tool
-        target_tools = resolve(TARGET)
-        neighbor_tools = resolve(NEIGHBOR)
+        # WHEN executing and cleaning up, THEN neither failure is hidden
+        with pytest.raises(RuntimeError, match="exit code 1"):
+            client.fill_disk(TARGET, "postgresql/0", "/tmp/fill", 128)
+        with pytest.raises(ChaosCleanupError):
+            client.cleanup_all()
 
-        # THEN both use the shared operator without querying charm configuration
-        assert target_tools == neighbor_tools == frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH})
-        assert backend.kubernetes.reads == [("litmus-system", "litmus")] * 2
-        assert backend.resolutions == [TARGET.uri, NEIGHBOR.uri]
+        # WHEN the command succeeds again, THEN cleanup can be retried
+        backend.exec_return_code = 0
+        client.cleanup_all()
+        assert backend.exec_calls[-1][2] == "rm -f -- /tmp/fill"
 
-    def test_selection_is_rechecked_for_each_request(self) -> None:
-        # GIVEN a shared operator and an available Chaos Mesh installation
+    def test_resolver_registers_separate_cleanup_for_each_model(self) -> None:
+        # GIVEN a fixture request and two models on one cluster
         backend = JujuBackendStub()
-        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
-        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None)
-        assert resolve(TARGET) == frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH})
+        request = FinalizerRequest()
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(cast(pytest.FixtureRequest, request), backend, None)
 
-        # WHEN the shared operator stops
-        backend.kubernetes.ready_deployments.clear()
+        # WHEN requesting clients and executing an experiment in each model
+        target = resolve(TARGET)
+        neighbor = resolve(NEIGHBOR)
+        target.fill_disk(TARGET, "postgresql/0", "/tmp/target", 128)
+        neighbor.fill_disk(NEIGHBOR, "postgresql/0", "/tmp/neighbor", 128)
+        for finalizer in reversed(request.finalizers):
+            finalizer()
 
-        # THEN the next request no longer reports Litmus
-        assert resolve(TARGET) == frozenset({ChaosTool.CHAOS_MESH})
+        # THEN clients and cleanup remain separate without closing the shared backend
+        assert target is not neighbor
+        assert len(request.finalizers) == 2
+        assert backend.exec_calls[-2:] == [
+            (NEIGHBOR, "postgresql/0", "rm -f -- /tmp/neighbor"),
+            (TARGET, "postgresql/0", "rm -f -- /tmp/target"),
+        ]
+        assert not backend.kubernetes.api_client.closed
 
     def test_target_fixture_uses_target_model(self) -> None:
-        # GIVEN a tool resolver that records the requested model
+        # GIVEN a resolver that records the requested model
         models: list[JujuModelHandle] = []
+        client = MetaChaosClient([])
 
-        def resolve(model: JujuModelHandle) -> frozenset[ChaosTool]:
+        def resolve(model: JujuModelHandle) -> MetaChaosClient:
             models.append(model)
-            return frozenset({ChaosTool.LITMUS})
+            return client
 
-        # WHEN the target test requires a chaos tool
-        tool = unwrap(chaos_tools.require_chaos_tool)(resolve, TARGET)
+        # WHEN requesting the target fixture
+        result = unwrap(chaos_tools.require_chaos_tool)(resolve, TARGET)
 
-        # THEN the target model's tool is returned
-        assert tool == frozenset({ChaosTool.LITMUS})
+        # THEN the target model's client is returned
+        assert result is client
         assert models == [TARGET]
 
 
-def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.Pytester) -> None:
-    # GIVEN both chaos plugins and a backend that records every Kubernetes query
-    calls_path = pytester.path / "api_calls.log"
+@pytest.fixture
+def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
     pytester.makeconftest(
         """
         import logging
@@ -528,6 +673,12 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.
 
 
         class JujuBackendStub:
+            def exec_unit(self, model, unit, task, operator=False):
+                from juju.backend import JujuExecOutput
+
+                record(task)
+                return JujuExecOutput(return_code=0, stdout="", stderr="")
+
             def get_kubernetes_client_for_model(self, model):
                 record("model lookup")
                 return KubernetesClient(BackendStub())
@@ -589,6 +740,13 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.
             return None
         """
     )
+    return pytester
+
+
+def test_detection_runs_only_when_a_chaos_fixture_is_requested(chaos_pytester: pytest.Pytester) -> None:
+    # GIVEN both chaos plugins and a backend that records every Kubernetes query
+    pytester = chaos_pytester
+    calls_path = pytester.path / "api_calls.log"
     pytester.makepyfile(
         """
         import pytest
@@ -598,8 +756,13 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.
             pass
 
 
-        def test_chaos_only(require_chaos_tool):
-            pytest.fail("Missing tools must skip before running the test")
+        def test_chaos_only(require_chaos_tool, target_model_ref):
+            from datetime import timedelta
+
+            require_chaos_tool.io_latency(
+                target_model_ref, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30)
+            )
+            pytest.fail("Unsupported experiments must skip")
 
 
         def test_mesh_only(require_chaos_mesh):
@@ -622,7 +785,7 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.
     # THEN both skip, with one report per detector and fresh prerequisite checks
     with_chaos_tests.assert_outcomes(skipped=2)
     calls = calls_path.read_text().splitlines()
-    assert calls.count("chaosengines.litmuschaos.io") == 2
+    assert calls.count("chaosengines.litmuschaos.io") == 1
     assert calls.count("stresschaos.chaos-mesh.org") == 4
     assert calls.count("client creation") == 2
     assert calls.count("close") == 2
@@ -630,27 +793,40 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(pytester: pytest.
     assert with_chaos_tests.stdout.str().count("Chaos Mesh on cloud target: not installed") == 1
 
 
-class TestPreferredChaosTool:
-    @dataclass(frozen=True)
-    class Params:
-        label: str
-        tools: frozenset[ChaosTool]
-        expected: ChaosTool | None
+def test_experiments_are_cleaned_up_after_failure_skip_and_success(chaos_pytester: pytest.Pytester) -> None:
+    # GIVEN experiments that precede different test outcomes
+    pytester = chaos_pytester
+    calls_path = pytester.path / "api_calls.log"
+    pytester.makepyfile(
+        """
+        import pytest
 
-    test_cases = [
-        Params("both", frozenset({ChaosTool.LITMUS, ChaosTool.CHAOS_MESH}), ChaosTool.LITMUS),
-        Params("litmus-only", frozenset({ChaosTool.LITMUS}), ChaosTool.LITMUS),
-        Params("mesh-only", frozenset({ChaosTool.CHAOS_MESH}), ChaosTool.CHAOS_MESH),
-        Params("neither", frozenset(), None),
-    ]
 
-    @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
-    def test_prefers_litmus_when_available(self, params: Params) -> None:
-        # GIVEN tools that support the same experiment
-        tools = params.tools
+        def test_disk_then_failure(require_chaos_tool, target_model_ref):
+            require_chaos_tool.fill_disk(target_model_ref, "postgresql/0", "/tmp/failed-test", 128)
+            pytest.fail("Deliberate failure after disk fill")
 
-        # WHEN choosing one tool for that experiment
-        tool = preferred_chaos_tool(tools)
 
-        # THEN Litmus is preferred when available
-        assert tool == params.expected
+        def test_disk_then_skip(require_chaos_tool, target_model_ref):
+            from datetime import timedelta
+
+            require_chaos_tool.fill_disk(target_model_ref, "postgresql/0", "/tmp/skipped-test", 128)
+            require_chaos_tool.io_latency(
+                target_model_ref, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30)
+            )
+
+
+        def test_disk_success(require_chaos_tool, target_model_ref):
+            require_chaos_tool.fill_disk(target_model_ref, "postgresql/0", "/tmp/passed-test", 128)
+        """
+    )
+
+    # WHEN experiments precede a test failure, skip, or success
+    lifecycle = pytester.runpytest("-k", "test_disk_", "--log-cli-level=INFO")
+
+    # THEN teardown removes each experiment's file in all three cases
+    lifecycle.assert_outcomes(passed=1, failed=1, skipped=1)
+    calls = calls_path.read_text().splitlines()
+    for path in ("/tmp/failed-test", "/tmp/skipped-test", "/tmp/passed-test"):
+        assert calls.count(f"fallocate -l 128M -- {path}") == 1
+        assert calls.count(f"rm -f -- {path}") == 1

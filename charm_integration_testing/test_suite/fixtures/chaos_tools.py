@@ -4,16 +4,17 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NoReturn
 
 import pytest
+from chaos_client import ChaosClient, ChaosMeshChaosClient, MetaChaosClient
+from chaos_client.adapters import DiskFillClient, NetworkIsolationClient
+from chaos_client.chaos_mesh_detection import chaos_mesh_is_available
 from chaos_client.litmus_detection import litmus_is_available
 from juju import JujuBackend, JujuModelHandle
 from kubernetes_client import KubernetesBackend
 
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
-
-CHAOS_MESH_CRDS = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org")
 
 
 class ChaosTool(str, Enum):
@@ -26,20 +27,9 @@ def available_chaos_tools(backend: KubernetesBackend) -> frozenset[ChaosTool]:
     tools: set[ChaosTool] = set()
     if litmus_is_available(backend):
         tools.add(ChaosTool.LITMUS)
-    # Check both CRDs so an absent one does not hide an API error for the other.
-    mesh_crds_present = [backend.crd_exists(name) for name in CHAOS_MESH_CRDS]
-    if all(mesh_crds_present):
+    if chaos_mesh_is_available(backend):
         tools.add(ChaosTool.CHAOS_MESH)
     return frozenset(tools)
-
-
-def preferred_chaos_tool(tools: frozenset[ChaosTool]) -> ChaosTool | None:
-    """Pick Litmus over Chaos Mesh when both support the caller's need."""
-    if ChaosTool.LITMUS in tools:
-        return ChaosTool.LITMUS
-    if ChaosTool.CHAOS_MESH in tools:
-        return ChaosTool.CHAOS_MESH
-    return None
 
 
 def _format_tools(tools: frozenset[ChaosTool]) -> str:
@@ -102,31 +92,38 @@ def detect_chaos_tools(
     detect_initial_tools(scopes, cloud_kubeconfigs, logger)
 
 
-def require_tools_for_model(backend: JujuBackend, model: JujuModelHandle) -> frozenset[ChaosTool]:
-    """Skip tool-dependent tests only for unsupported substrates or unavailable tools."""
+def chaos_client_for_model(backend: JujuBackend, model: JujuModelHandle) -> MetaChaosClient:
+    """Build experiment clients for the model's substrate."""
+    tools: list[ChaosClient] = []
     kubernetes = backend.get_kubernetes_client_for_model(model)
-    if kubernetes is None:
-        pytest.skip("Litmus and Chaos Mesh require a Kubernetes model.")
-    tools = available_chaos_tools(kubernetes.backend)
-    if not tools:
-        pytest.skip(f"Neither Litmus nor Chaos Mesh is available for {model.uri}.")
-    return tools
+    if kubernetes is not None:
+        if chaos_mesh_is_available(kubernetes.backend):
+            tools.append(ChaosMeshChaosClient(kubernetes.backend))
+        tools.append(NetworkIsolationClient(kubernetes.backend))
+    tools.append(DiskFillClient(backend))
+
+    def skip_unsupported(operation: str) -> NoReturn:
+        pytest.skip(f"No available chaos client supports '{operation}' for {model.uri}.")
+
+    return MetaChaosClient(tools, on_unsupported=skip_unsupported)
 
 
 @pytest.fixture
 def chaos_tool_for_model(
-    juju_backend: JujuBackend, detect_chaos_tools: None
-) -> Callable[[JujuModelHandle], frozenset[ChaosTool]]:
-    """Resolve the available chaos tools for a test model."""
+    request: pytest.FixtureRequest, juju_backend: JujuBackend, detect_chaos_tools: None
+) -> Callable[[JujuModelHandle], MetaChaosClient]:
+    """Provide experiment clients with cleanup at test teardown."""
 
-    def resolve(model: JujuModelHandle) -> frozenset[ChaosTool]:
-        return require_tools_for_model(juju_backend, model)
+    def resolve(model: JujuModelHandle) -> MetaChaosClient:
+        client = chaos_client_for_model(juju_backend, model)
+        request.addfinalizer(client.cleanup_all)
+        return client
 
     return resolve
 
 
 @pytest.fixture
 def require_chaos_tool(
-    chaos_tool_for_model: Callable[[JujuModelHandle], frozenset[ChaosTool]], target_model_ref: JujuModelHandle
-) -> frozenset[ChaosTool]:
+    chaos_tool_for_model: Callable[[JujuModelHandle], MetaChaosClient], target_model_ref: JujuModelHandle
+) -> MetaChaosClient:
     return chaos_tool_for_model(target_model_ref)
