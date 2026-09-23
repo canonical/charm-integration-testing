@@ -116,8 +116,8 @@ def run_for_charm(
     A relation declared in metadata but absent from the model is reported as an ERROR
     by default, preserving the CLI runner's historical behavior. Callers that only
     want to validate installed validators can set *skip_missing_unvalidated* to skip
-    missing relations with no installed validator. Relations explicitly marked
-    optional are always skipped.
+    missing relations with no installed validator, as well as relations explicitly
+    marked optional.
     """
     if validators is None:
         validators = load_validators()
@@ -129,15 +129,16 @@ def run_for_charm(
         interface_name = metadata.interface_name or relation
 
         if relation not in charm.model.relations:
-            if metadata.optional:
-                logger.debug(f"Optional relation '{relation}' not found in model; skipping.")
-                continue
-            if skip_missing_unvalidated and interface_name not in validators:
-                logger.debug(
-                    f"Relation '{relation}' not found in model and no validator is installed "
-                    f"for interface '{interface_name}'; skipping."
-                )
-                continue
+            if skip_missing_unvalidated:
+                if metadata.optional:
+                    logger.debug(f"Optional relation '{relation}' not found in model; skipping.")
+                    continue
+                if interface_name not in validators:
+                    logger.debug(
+                        f"Relation '{relation}' not found in model and no validator is installed "
+                        f"for interface '{interface_name}'; skipping."
+                    )
+                    continue
             logger.error(f"Relation '{relation}' defined in metadata but not found in model.")
             results.append(
                 ValidationResult(

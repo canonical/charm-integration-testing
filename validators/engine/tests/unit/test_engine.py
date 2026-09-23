@@ -197,7 +197,7 @@ class TestRunForCharm:
         assert results[0].status == "ERROR"
         assert results[0].relation_id is None
 
-    def test_skips_optional_relation_missing_from_model(self) -> None:
+    def test_reports_optional_relation_missing_from_model_by_default(self) -> None:
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
         charm.meta.relations[relation.name].optional = True
@@ -205,6 +205,21 @@ class TestRunForCharm:
 
         results = run_for_charm(
             cast(ops.CharmBase, charm), level="simple", validators={"test-interface": [PassingValidator]}
+        )
+
+        assert results[0].status == "ERROR"
+
+    def test_skips_optional_relation_missing_from_model_when_requested(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        charm.meta.relations[relation.name].optional = True
+        charm.model.relations = {}
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
         )
 
         assert results == []
