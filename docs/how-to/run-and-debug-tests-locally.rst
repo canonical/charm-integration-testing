@@ -183,3 +183,40 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Cross-model relations
+---------------------
+
+By default the target and neighbor applications are deployed into a single model. To
+exercise a cross-model relation (CMR) instead, the neighbor application is deployed into
+a second model. There are two ways to place that second model:
+
+- **Same controller** — pass ``--same-controller``. The neighbor model is created on the
+  target controller, so only one controller is bootstrapped. This is the cheapest CMR
+  variant and is what the same-platform/same-controller test matrix cell uses.
+
+  .. code:: bash
+
+     ./scripts/run-tests.sh \
+       --target-cloud "${CLOUD_NAME}" \
+       --target-charm "mysql" \
+       --target-endpoint "database" \
+       --neighbor-charm "mysql-router" \
+       --neighbor-endpoint "backend-database" \
+       --same-controller \
+       --current-state "no_bundle" \
+       --charm-overrides "./static/charm-overrides/" \
+       --log-dir "./test-logs"
+
+- **Cross controller** — pass ``--neighbor-cloud``. A second controller is bootstrapped
+  on that cloud and the neighbor model is created there.
+
+The two options are orthogonal: ``--same-controller`` controls *whether a second
+controller is bootstrapped*, while ``--neighbor-cloud`` controls *which cloud the
+neighbor model lands on*. Combining them (``--same-controller --neighbor-cloud <cloud>``)
+places the neighbor model on a different cloud of the same controller, which requires a
+multi-cloud controller.
+
+In same-controller mode the neighbor model name is still generated separately, so the
+two models remain distinct. ``--neighbor-controller`` must not be passed alongside
+``--same-controller``.
