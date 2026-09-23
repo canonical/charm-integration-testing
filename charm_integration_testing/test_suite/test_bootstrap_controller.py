@@ -24,8 +24,9 @@ def test_bootstrap_controller(
     neighbor_controller_bootstrap_config: dict[str, str] | None,
     neighbor_controller_bootstrap_metadata_source: Path | None,
 ) -> None:
-    # Bootstrap neighbor controller if needed
-    if is_cmr_test:
+    # Bootstrap neighbor controller if needed. In same-controller mode the neighbor model
+    # shares the target controller, so there is nothing extra to bootstrap.
+    if is_cmr_test and neighbor_controller != target_controller:
         assert neighbor_cloud is not None
         assert neighbor_controller is not None
         assert neighbor_controller_bootstrap_constraints is not None
