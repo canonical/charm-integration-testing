@@ -4,7 +4,7 @@
 import socket
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 import yaml  # pyyaml; the provider publishes its unit->URL mapping as a YAML-encoded string
 
@@ -28,6 +28,14 @@ _HTTP_TIMEOUT = 10
 
 _MIN_PORT = 1
 _MAX_PORT = 65535
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+_HTTP_OPENER = build_opener(ProxyHandler({}), _NoRedirectHandler())
 
 
 class IngressPerUnitValidator(BaseValidator):
@@ -79,7 +87,7 @@ class IngressPerUnitValidator(BaseValidator):
         if not urls_check.passed:
             return self._fail_result(level, checks)
 
-        unit_name = local.get("name") or self.charm.unit.name
+        unit_name = self.charm.unit.name
         url_check, url = _unit_url_check(urls, unit_name)
         checks.append(url_check)
         if not url_check.passed:
@@ -135,6 +143,12 @@ def _host_format_check(host: str) -> ValidationCheck:
             name="host_format",
             passed=False,
             message=f"host {host!r} contains whitespace.",
+        )
+    if ":" in host:
+        return ValidationCheck(
+            name="host_format",
+            passed=False,
+            message=f"host {host!r} must be a hostname or IPv4 address without a port.",
         )
     return ValidationCheck(name="host_format", passed=True, message=f"host {host!r} is well-formed.")
 
@@ -252,10 +266,17 @@ def _unit_url_check(urls: dict[str, str], unit_name: str) -> tuple[ValidationChe
             ),
             "",
         )
-    return (
-        ValidationCheck(name="unit_url", passed=True, message=f"Ingress URL for '{unit_name}': {url!r}."),
-        url,
-    )
+    parsed = urlparse(url)
+    if parsed.username is not None or parsed.password is not None:
+        return (
+            ValidationCheck(
+                name="unit_url",
+                passed=False,
+                message=f"Ingress URL for '{unit_name}' must not contain userinfo.",
+            ),
+            "",
+        )
+    return (ValidationCheck(name="unit_url", passed=True, message=f"Ingress URL for '{unit_name}' is advertised."), url)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +307,8 @@ def _url_format_check(url: str) -> ValidationCheck:
             passed=False,
             message=f"URL {url!r} has no valid hostname.",
         )
+    if parsed.username is not None or parsed.password is not None:
+        return ValidationCheck(name="url_format", passed=False, message="Ingress URL must not contain userinfo.")
 
     try:
         _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
@@ -324,8 +347,8 @@ def _connectivity_check(host: str, port: int, url: str) -> ValidationCheck:
 def _http_probe_check(url: str) -> ValidationCheck:
     """Issue an HTTP GET to the ingress URL and verify a valid HTTP response."""
     try:
-        req = Request(url)  # nosec B310 - url is http/https only
-        with urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
+        req = Request(url)
+        with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
             status = resp.status
         return ValidationCheck(name="http_probe", passed=True, message=f"HTTP GET {url} -> {status}.")
     except HTTPError as exc:
