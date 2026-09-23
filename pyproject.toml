@@ -46,6 +46,7 @@ validators-alertmanager-dispatch = { path = "./validators/alertmanager_dispatch"
 validators-certificate-transfer = { path = "./validators/certificate_transfer", develop = true, extras = ["dev"] }
 validators-trino-client = { path = "./validators/trino_client", develop = true, extras = ["dev"] }
 validators-trino-catalog = { path = "./validators/trino_catalog", develop = true, extras = ["dev"] }
+validators-smtp = { path = "./validators/smtp", develop = true, extras = ["dev"] }
 validators-cross-model-mesh = { path = "./validators/cross_model_mesh", develop = true, extras = ["dev"] }
 
 [build-system]

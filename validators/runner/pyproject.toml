@@ -46,6 +46,7 @@ dependencies = [
     "validators-trino-client",
     "validators-trino-catalog",
     "validators-cross-model-mesh",
+    "validators-smtp",
 ]
 
 [build-system]
