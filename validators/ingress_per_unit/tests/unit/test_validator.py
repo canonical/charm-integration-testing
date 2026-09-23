@@ -251,7 +251,7 @@ class TestIngressPerUnitValidatorDeep:
         assert any(c.name == "unit_url" and not c.passed for c in result.checks)
 
     def test_fail_when_url_malformed(self) -> None:
-        validator = _make_validator(VALID_UNIT_DATA, _provider_databag({_UNIT_NAME: {"url": "ftp://bad"}}))
+        validator = _make_validator(VALID_UNIT_DATA, _provider_databag({_UNIT_NAME: {"url": "http://[::1"}}))
         result = validator.validate(level="deep")
         assert result.status == "FAIL"
         assert any(c.name == "url_format" and not c.passed for c in result.checks)
