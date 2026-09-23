@@ -60,6 +60,7 @@ from bundle_builder_x import (
     BaseMismatchError,
     BundleBuilder,
     BundleDiagnostic,
+    Charm,
     CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
@@ -540,12 +541,13 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
 
 
 @pytest.fixture
-def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
-    """Revision to downgrade to for the charm under test.
+def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
+    """Canonical charm metadata for the target revision the cycle refreshes back to.
 
-    When ``--target-downgrade-revision`` is an explicit integer, that value is
-    returned directly. When the value is ``"default"``, Test Observer is queried
-    for a historical revision with a passing deploy for the target charm.
+    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
+    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
+    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
+    when the target cannot be resolved on the requested series.
     """
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
@@ -558,11 +560,8 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     channel_track = channel.track or None if channel else None
     channel_risk = channel.risk or None if channel else None
 
-    # Resolve the target charm to learn the revision and base it is deployed on. When the caller does
-    # not pin a revision or channel, charm_from_store falls back to the overrides defaults, so a
-    # "latest release" run still resolves a concrete revision and base.
     try:
-        target = charmhub_client.charm_from_store(
+        return charmhub_client.charm_from_store(
             charm_name=target_charm,
             ubuntu_arch=target_arch,
             charm_track=channel_track,
@@ -578,6 +577,22 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
         )
 
+
+@pytest.fixture
+def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
+    """Revision to downgrade to for the charm under test.
+
+    When ``--target-downgrade-revision`` is an explicit integer, that value is
+    returned directly. When the value is ``"default"``, Test Observer is queried
+    for a historical revision with a passing deploy for the target charm.
+    """
+    target_charm: str = request.getfixturevalue("target_charm")
+    target_channel: str | None = request.getfixturevalue("target_channel")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target: Charm = request.getfixturevalue("target_resolved_charm")
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
     target_base = target.ubuntu_version
 
     value = request.config.getoption("--target-downgrade-revision")

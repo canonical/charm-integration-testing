@@ -6,6 +6,8 @@ from datetime import timedelta
 import pytest
 from juju import JujuClient, JujuModelHandle
 
+from bundle_builder_x import Charm
+
 from .scheduler.states import State
 
 
@@ -15,11 +17,12 @@ def test_upgrade_charm(
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
     target_application: str,
-    target_revision: int | None,
-    target_channel: str | None,
+    target_resolved_charm: Charm,
 ) -> None:
-    if target_revision is None:
-        pytest.fail("--target-revision must be provided as an integer for this test.")
+    # The resolved charm carries the concrete revision and channel even in a "latest release" run,
+    # where --target-revision/--target-channel are left at their defaults.
+    target_revision = target_resolved_charm.revision
+    target_channel = str(target_resolved_charm.channel)
 
     # Upgrading the charm to the target revision specified by the fixture
     juju_client.logger.info(
