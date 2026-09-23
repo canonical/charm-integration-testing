@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from kubernetes.client import ApiException, V1DeleteOptions, V1NetworkPolicy  # type: ignore[import-untyped]
 
 
 class FakeCustomObjectsApi:
@@ -32,11 +32,25 @@ class FakeNetworkingV1Api:
         self.create_calls: list[tuple[str, object]] = []
         self.delete_calls: list[tuple[str, str]] = []
         self.raise_on_delete: Exception | None = None
+        self.raise_on_read: Exception | None = None
+        self.policies: dict[tuple[str, str], V1NetworkPolicy] = {}
+        self.delete_options: list[V1DeleteOptions | None] = []
 
-    def create_namespaced_network_policy(self, namespace: str, body: object) -> None:
+    def create_namespaced_network_policy(self, namespace: str, body: V1NetworkPolicy) -> None:
         self.create_calls.append((namespace, body))
+        body.metadata.uid = "test-policy-uid"
+        self.policies[(namespace, body.metadata.name)] = body
 
-    def delete_namespaced_network_policy(self, name: str, namespace: str) -> None:
+    def read_namespaced_network_policy(self, name: str, namespace: str) -> V1NetworkPolicy:
+        if self.raise_on_read is not None:
+            raise self.raise_on_read
+        if (namespace, name) not in self.policies:
+            raise ApiException(status=404)
+        return self.policies[(namespace, name)]
+
+    def delete_namespaced_network_policy(self, name: str, namespace: str, body: V1DeleteOptions | None = None) -> None:
         self.delete_calls.append((name, namespace))
+        self.delete_options.append(body)
         if self.raise_on_delete is not None:
             raise self.raise_on_delete
+        self.policies.pop((namespace, name), None)

@@ -46,6 +46,7 @@ class KubernetesStub(KubernetesBackend):
     def __init__(self) -> None:
         self.api_client = ClosingApiStub()
         self.crds: set[str] = set()
+        self.crd_reads: list[str] = []
         self.ready_deployments: set[tuple[str, str]] = set()
         self.reads: list[tuple[str, str]] = []
         self.error: ApiException | None = None
@@ -53,6 +54,7 @@ class KubernetesStub(KubernetesBackend):
         self.networking_v1_api = FakeNetworkingV1Api()
 
     def crd_exists(self, name: str) -> bool:
+        self.crd_reads.append(name)
         if self.error is not None:
             raise self.error
         return name in self.crds
@@ -344,6 +346,30 @@ class TestInitialDetectionFixture:
 
         # THEN the model is resolved only once
         assert backend.resolutions == [TARGET.uri]
+
+    def test_shared_cluster_is_checked_once(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN distinct models sharing the same Kubernetes client
+        backend = JujuBackendStub()
+        backend.clients[NEIGHBOR.uri] = backend.clients[TARGET.uri]
+
+        # WHEN taking the session snapshot
+        with caplog.at_level(logging.INFO):
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=State.DEPLOYED.value),
+                backend,
+                {},
+                "target",
+                TARGET,
+                "neighbor",
+                NEIGHBOR,
+                logging.getLogger(__name__),
+                None,
+            )
+
+        # THEN both models resolve but the cluster is scanned and reported once
+        assert backend.resolutions == [TARGET.uri, NEIGHBOR.uri]
+        assert backend.kubernetes.crd_reads == [*LITMUS_CRDS, *CHAOS_MESH_CRDS]
+        assert caplog.text.count("Initial chaos tools for") == 1
 
     def test_machine_model_is_logged_without_skipping_session(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN an existing machine model

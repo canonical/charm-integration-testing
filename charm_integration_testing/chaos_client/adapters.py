@@ -3,8 +3,11 @@
 
 import shlex
 from datetime import timedelta
+from uuid import uuid4
 
 from juju import JujuModelHandle
+from kubernetes import client  # type: ignore[import-untyped]
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
 from .client import NativeChaosClient
@@ -34,18 +37,37 @@ class DiskFillClient(NativeChaosClient):
 
 
 class NetworkIsolationClient(KubernetesChaosClient):
-    """Only remove policies successfully created by this client."""
+    """Track policy ownership even when creation returns an ambiguous error."""
 
     def __init__(self, backend: KubernetesBackend) -> None:
         super().__init__(backend)
-        self._isolated: set[tuple[str, str]] = set()
+        self._owner = uuid4().hex
+        self._isolated: dict[tuple[str, str], str] = {}
 
     def isolate_network(self, model: str, unit: str) -> None:
-        super().isolate_network(model, unit)
-        self._isolated.add((model, unit))
+        policy = self._network_policy(model, unit)
+        policy.metadata.annotations = {"charm-integration-testing/owner": self._owner}
+        self._isolated[(model, unit)] = policy.metadata.name
+        self._backend.networking_v1_api.create_namespaced_network_policy(namespace=model, body=policy)
 
     def remove_network_isolation(self, model: str, unit: str) -> None:
-        if (model, unit) not in self._isolated:
+        name = self._isolated.get((model, unit))
+        if name is None:
             return
-        super().remove_network_isolation(model, unit)
-        self._isolated.remove((model, unit))
+        api = self._backend.networking_v1_api
+        try:
+            policy = api.read_namespaced_network_policy(name=name, namespace=model)
+            annotations = policy.metadata.annotations or {}
+            if annotations.get("charm-integration-testing/owner") == self._owner:
+                if not policy.metadata.uid:
+                    raise RuntimeError(f"Cannot safely delete NetworkPolicy {model}/{name} without its UID.")
+                # Do not delete a replacement created between the read and delete.
+                api.delete_namespaced_network_policy(
+                    name=name,
+                    namespace=model,
+                    body=client.V1DeleteOptions(preconditions=client.V1Preconditions(uid=policy.metadata.uid)),
+                )
+        except ApiException as error:
+            if error.status != 404:
+                raise
+        del self._isolated[(model, unit)]

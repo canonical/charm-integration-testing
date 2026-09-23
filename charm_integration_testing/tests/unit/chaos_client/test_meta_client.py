@@ -122,7 +122,7 @@ def test_reports_unsupported_experiment(params: Params, empty: bool) -> None:
         params.invoke(client)
 
     # THEN unsupported calls leave no cleanup work
-    client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
+    client.cleanup(TEST_MODEL, UNIT, "")
     client.remove_network_isolation(TEST_MODEL.model, UNIT)
     assert all(operation == params.operation for operation, _ in tool.calls)
 
@@ -159,29 +159,27 @@ def test_execution_failure_propagates_and_retains_cleanup(error: BaseException) 
     assert fallback.calls == []
 
     # WHEN cleaning up, THEN the failed client's cleanup is still attempted
-    client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
-    assert failing.calls[-1] == ("cleanup", (TEST_MODEL, UNIT, "/tmp/fill"))
+    client.cleanup(TEST_MODEL, UNIT, "")
+    assert failing.calls[-1] == ("cleanup", (TEST_MODEL, UNIT, ""))
     assert fallback.calls == []
 
 
 def test_disk_cleanup_preserves_each_created_path() -> None:
-    # GIVEN two disk experiments handled by the second client
-    unused = ClientStub(set())
+    # GIVEN two disk experiments on the same unit
     native = ClientStub({"fill_disk", "cleanup"})
-    client = MetaChaosClient([unused, native])
+    client = MetaChaosClient([native])
     client.fill_disk(TEST_MODEL, UNIT, "/tmp/first", 128)
     client.fill_disk(TEST_MODEL, UNIT, "/tmp/second", 256)
 
-    # WHEN cleaning up twice
+    # WHEN cleaning an unknown path and then only the first file
     client.cleanup(TEST_MODEL, UNIT, "/unused")
-    client.cleanup(TEST_MODEL, UNIT, "/unused")
+    assert len(native.calls) == 2
+    client.cleanup(TEST_MODEL, UNIT, "/tmp/first")
 
-    # THEN the owner cleans each path once in reverse order
-    assert native.calls[2:] == [
-        ("cleanup", (TEST_MODEL, UNIT, "/tmp/second")),
-        ("cleanup", (TEST_MODEL, UNIT, "/tmp/first")),
-    ]
-    assert [operation for operation, _ in unused.calls] == ["fill_disk", "fill_disk"]
+    # THEN the second file remains pending until teardown
+    assert native.calls[2:] == [("cleanup", (TEST_MODEL, UNIT, "/tmp/first"))]
+    client.cleanup_all()
+    assert native.calls[3:] == [("cleanup", (TEST_MODEL, UNIT, "/tmp/second"))]
 
 
 def test_cleanup_attempts_all_owners_and_retains_failures_for_retry() -> None:
@@ -198,19 +196,19 @@ def test_cleanup_attempts_all_owners_and_retains_failures_for_retry() -> None:
 
     # WHEN cleaning up, THEN both failures are preserved
     with pytest.raises(ChaosCleanupError) as exc_info:
-        client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
+        client.cleanup_all()
     assert exc_info.value.errors == (disk_error, stress_error)
     assert exc_info.value.__cause__ is disk_error
 
     # WHEN one owner recovers, THEN only failed cleanup is retried
     disk.errors.clear()
     with pytest.raises(ChaosCleanupError) as exc_info:
-        client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
+        client.cleanup_all()
     assert exc_info.value.errors == (stress_error,)
     disk_calls = list(disk.calls)
     stress.errors.clear()
-    client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
-    client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
+    client.cleanup_all()
+    client.cleanup_all()
     assert disk.calls == disk_calls
     assert [operation for operation, _ in stress.calls].count("cleanup") == 3
 
@@ -225,7 +223,7 @@ def test_cleanup_dispatch_keeps_model_and_unit_scopes_separate() -> None:
     client.fill_disk(TEST_MODEL, "postgresql/1", "/tmp/third", 128)
 
     # WHEN cleaning one target
-    client.cleanup(TEST_MODEL, UNIT, "/unused")
+    client.cleanup(TEST_MODEL, UNIT, "/tmp/first")
 
     # THEN only that target's cleanup is dispatched
     assert native.calls[3:] == [("cleanup", (TEST_MODEL, UNIT, "/tmp/first"))]
@@ -259,7 +257,7 @@ def test_unsupported_cleanup_is_a_failure_not_a_fallback() -> None:
 
     # WHEN cleaning up, THEN missing cleanup is surfaced rather than delegated
     with pytest.raises(ChaosCleanupError) as exc_info:
-        client.cleanup(TEST_MODEL, UNIT, "/tmp/fill")
+        client.cleanup(TEST_MODEL, UNIT, "")
     assert len(exc_info.value.errors) == 1
     assert isinstance(exc_info.value.errors[0], NotImplementedError)
     assert fallback.calls == []
@@ -306,3 +304,23 @@ def test_cleanup_all_continues_after_network_removal_fails() -> None:
     client.cleanup_all()
     assert disk.calls == disk_calls
     assert network.calls[-1] == ("remove_network_isolation", (TEST_MODEL.model, UNIT))
+
+
+def test_path_cleanup_preserves_stress_and_other_latency_paths() -> None:
+    # GIVEN stress and two latency experiments on the same unit
+    tool = ClientStub({"stress_cpu", "io_latency", "cleanup"})
+    client = MetaChaosClient([tool])
+    client.stress_cpu(TEST_MODEL, UNIT, 1, DURATION)
+    for path in ("/data", "/other"):
+        client.io_latency(TEST_MODEL, UNIT, path, timedelta(seconds=1), 50, DURATION)
+
+    # WHEN cleaning one latency path
+    client.cleanup(TEST_MODEL, UNIT, "/data")
+
+    # THEN stress and the other path remain until teardown
+    assert tool.calls[3:] == [("cleanup", (TEST_MODEL, UNIT, "/data"))]
+    client.cleanup_all()
+    assert tool.calls[4:] == [
+        ("cleanup", (TEST_MODEL, UNIT, "/other")),
+        ("cleanup", (TEST_MODEL, UNIT, "")),
+    ]

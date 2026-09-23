@@ -155,13 +155,37 @@ class TestCleanup:
         )
         created = list(client._created)
 
-        # WHEN cleaning up
-        client.cleanup(TEST_MODEL, UNIT, path="/unused")
+        # WHEN cleaning each experiment scope
+        client.cleanup(TEST_MODEL, UNIT, path="/data")
+        assert len(client._created) == 1
+        client.cleanup(TEST_MODEL, UNIT, path="")
 
         # THEN every CR is deleted in reverse creation order and tracking is cleared
         deleted = [(c["plural"], c["namespace"], c["name"]) for c in backend.custom_objects_api.delete_calls]
         assert deleted == list(reversed(created))
         assert client._created == []
+
+    def test_cleanup_preserves_other_models_units_and_paths(self) -> None:
+        # GIVEN latency experiments differing in one scope field
+        backend = BackendStub()
+        client = ChaosMeshChaosClient(backend)
+        other = JujuModelHandle(controller="other-controller", model=TEST_MODEL.model)
+        targets = [
+            (TEST_MODEL, UNIT, "/data"),
+            (other, UNIT, "/data"),
+            (TEST_MODEL, "postgresql/1", "/data"),
+            (TEST_MODEL, UNIT, "/other"),
+        ]
+        for model, unit, path in targets:
+            client.io_latency(model, unit, path, timedelta(seconds=1), 50, timedelta(seconds=10))
+        created = list(client._created)
+
+        # WHEN cleaning the first scope
+        client.cleanup(TEST_MODEL, UNIT, "/data")
+
+        # THEN other resource scopes remain tracked
+        assert client._created == created[1:]
+        assert [call["name"] for call in backend.custom_objects_api.delete_calls] == [created[0][2]]
 
     def test_swallows_404_from_delete(self) -> None:
         # GIVEN a client with a created CR whose delete returns 404
@@ -170,7 +194,7 @@ class TestCleanup:
         client.stress_cpu(TEST_MODEL, UNIT, workers=1, duration=timedelta(seconds=10))
 
         # WHEN cleaning up
-        client.cleanup(TEST_MODEL, UNIT, path="/unused")
+        client.cleanup(TEST_MODEL, UNIT, path="")
 
         # THEN no exception is raised and tracking is cleared
         assert client._created == []
@@ -184,8 +208,13 @@ class TestCleanup:
         # WHEN cleaning up
         # THEN the API exception is re-raised and the CR that failed to delete stays tracked for a retry
         with pytest.raises(ApiException):
-            client.cleanup(TEST_MODEL, UNIT, path="/unused")
+            client.cleanup(TEST_MODEL, UNIT, path="")
         assert len(client._created) == 1
+
+        # WHEN deletion recovers, THEN the retained resource can be removed
+        backend.custom_objects_api.raise_on_delete = None
+        client.cleanup(TEST_MODEL, UNIT, path="")
+        assert client._created == []
 
 
 class TestUnsupportedMethods:

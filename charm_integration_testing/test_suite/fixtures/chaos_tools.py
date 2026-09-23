@@ -77,11 +77,15 @@ def detect_chaos_tools(
         models = [target_model_ref]
         if neighbor_model_ref is not None:
             models.append(neighbor_model_ref)
+        checked_clients: set[int] = set()
         for model in {model.uri: model for model in models}.values():
             kubernetes = juju_backend.get_kubernetes_client_for_model(model)
             if kubernetes is None:
                 logger.info("Chaos detection not performed for model %s: non-Kubernetes model.", model.uri)
                 continue
+            if id(kubernetes) in checked_clients:
+                continue
+            checked_clients.add(id(kubernetes))
             # The backend owns this client and may reuse it after the snapshot.
             tools = available_chaos_tools(kubernetes.backend)
             logger.info("Initial chaos tools for %s: %s.", model.uri, _format_tools(tools))

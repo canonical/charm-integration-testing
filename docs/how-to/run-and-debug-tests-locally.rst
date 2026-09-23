@@ -147,6 +147,9 @@ Only unsupported operations permit fallback. If no implementation supports
 the requested experiment, that test is skipped. API and execution errors
 are reported as failures. Pending experiments are cleaned up at test teardown,
 including after a failure or skip. Cleanup errors are reported as failures.
+Explicit ``cleanup(model, unit, path)`` calls remove disk fill or I/O latency
+resources for that path only. An empty path selects CPU and memory stress
+for the model and unit. ``cleanup_all()`` removes all pending experiments.
 Tests using ``require_chaos_mesh`` retain their existing ``StressChaos`` check.
 
 Shared resources remain managed by the infrastructure repositories. Use
