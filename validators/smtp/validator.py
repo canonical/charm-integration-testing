@@ -40,7 +40,17 @@ class SmtpValidator(BaseValidator):
             return self._fail_result(level, checks)
 
         if databag["auth_type"] == "plain":
-            credentials = self.resolve_secret("password_id", "user", "password")
+            try:
+                credentials = self.resolve_secret("password_id", "user", "password")
+            except Exception as exc:
+                checks.append(
+                    ValidationCheck(
+                        name="credentials",
+                        passed=False,
+                        message=f"Could not resolve SMTP credentials: {exc}.",
+                    )
+                )
+                return self._fail_result(level, checks)
             credential_check = self.validate_schema(["user", "password"], data=credentials)
             credential_check.name = "credentials"
             checks.append(credential_check)

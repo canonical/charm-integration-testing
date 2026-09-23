@@ -75,6 +75,15 @@ def test_plain_auth_requires_credentials() -> None:
     assert any(check.name == "credentials" for check in result.checks)
 
 
+def test_plain_auth_secret_failure_returns_failed_check() -> None:
+    validator = _make_validator({**VALID_DATABAG, "auth_type": "plain"})
+    with patch.object(validator, "resolve_secret", side_effect=RuntimeError("secret unavailable")):
+        result = validator.validate()
+    assert result.status == "FAIL"
+    credential_check = next(check for check in result.checks if check.name == "credentials")
+    assert "secret unavailable" in credential_check.message
+
+
 def test_deep_passes_smtp_handshake() -> None:
     client = MagicMock()
     client.__enter__.return_value = client
