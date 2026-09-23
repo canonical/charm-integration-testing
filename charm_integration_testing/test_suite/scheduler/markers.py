@@ -19,6 +19,24 @@ A single marker, ``@pytest.mark.state``, is used to annotate every test:
 
   The scheduler may automatically inject these tests into the execution plan
   to bridge gaps between states: in addition to running them as normal tests.
+
+Convention for recoverable skips
+---------------------------------
+When a transition test skips via a plain ``pytest.skip()`` (any phase), the
+skip doesn't advance the scheduler's tracked state - it stays at
+``requires``, unless the call phase already advanced it to ``provides``
+before a later teardown-phase skip (see ``pytest_runtest_makereport`` in
+``plugin.py``). This only holds if every skip check runs *before* any real
+state-mutating action (e.g. a Juju deploy/refresh/scale). Authors adding new
+state-marked tests must keep mutating logic strictly after any conditional
+``pytest.skip()`` (as existing transition tests do, e.g.
+``test_upgrade_controller``).
+
+This convention does not extend to ``xfail``: a test that resolves to
+"skipped" via ``@pytest.mark.xfail``/``pytest.xfail()`` is treated like a
+failure instead, since the test body ran until it hit the expected failure
+and may have mutated the environment partway through. State-marked tests in
+this suite should not use ``xfail``.
 """
 
 from __future__ import annotations
