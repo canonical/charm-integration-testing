@@ -177,10 +177,25 @@ class TestRunForCharm:
         charm.model.relations = {}
 
         results = run_for_charm(
-            cast(ops.CharmBase, charm), level="simple", validators={"other-interface": [PassingValidator]}
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"other-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
         )
 
         assert results == []
+
+    def test_reports_missing_relation_without_validator_by_default(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        charm.model.relations = {}
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm), level="simple", validators={"other-interface": [PassingValidator]}
+        )
+
+        assert results[0].status == "ERROR"
+        assert results[0].relation_id is None
 
     def test_skips_optional_relation_missing_from_model(self) -> None:
         relation = RelationStub(name="db", id=0)

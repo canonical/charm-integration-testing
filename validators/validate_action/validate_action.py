@@ -40,7 +40,7 @@ def run_validate_action(charm: CharmBase, event: ActionEvent) -> None:
         event.fail(f"Invalid level '{level}'. Must be one of {get_args(ValidationLevel)}.")
         return
 
-    action_results = ValidateActionResults(results=run_for_charm(charm, level=level))
+    action_results = ValidateActionResults(results=run_for_charm(charm, level=level, skip_missing_unvalidated=True))
 
     statuses = [result.status for result in action_results.results]
     event.set_results(

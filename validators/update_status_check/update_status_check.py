@@ -34,7 +34,7 @@ def run_simple_check(charm: CharmBase) -> UpdateStatusCheckResults:
     the caller can build a unit status (e.g. from a collect-status handler)
     without needing to re-run the validators.
     """
-    results = run_for_charm(charm, level="simple")
+    results = run_for_charm(charm, level="simple", skip_missing_unvalidated=True)
 
     for result in results:
         if result.status in ("FAIL", "ERROR"):
