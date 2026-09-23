@@ -116,7 +116,7 @@ no tools are available. Availability is rechecked for each request rather
 than reused from the session report.
 
 Tests select a tool that supports their experiment. When either tool can
-perform the experiment, ``preferred_chaos_tool()`` favors Litmus. Kubernetes
+perform the experiment, ``preferred_chaos_tool()`` prefers Litmus. Kubernetes
 API errors are reported as failures. Tests using ``require_chaos_mesh``
 continue to check for and require Chaos Mesh specifically.
 
