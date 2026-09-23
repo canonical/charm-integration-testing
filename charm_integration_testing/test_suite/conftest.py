@@ -583,8 +583,10 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
-    returned directly. When the value is ``"default"``, Test Observer is queried
-    for a historical revision with a passing deploy for the target charm.
+    used. When the value is ``"default"``, Test Observer is queried for a
+    historical revision with a passing deploy for the target charm. Either way
+    the selected revision is validated against the base the target is deployed
+    on, and the cycle is skipped when the two are incompatible.
     """
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
