@@ -7,6 +7,7 @@
 # lb-sink (requires): optional - src/reactive/keepalived.py never references lb-sink.
 # loadbalancer (provides): optional - only configured under @when("loadbalancer.available", "keepalived.started").
 # website (provides): optional - only configured under @when("website.available", "keepalived.started").
+# loadbalancer track: Charmed Kubernetes loadbalancer peers publish matching Kubernetes tracks.
 overrides:
   - provides:
       loadbalancer:
@@ -16,3 +17,6 @@ overrides:
     requires:
       lb-sink:
         optional: true
+    constraints:
+      - 'bool(endpoint[loadbalancer]) => tracks(charms(endpoint[loadbalancer])) ==
+        tracks({self})'

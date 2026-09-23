@@ -625,7 +625,7 @@ class TestClassifyIntegrations:
         assert len(cmr_ints) == 1
         assert cmr_ints[0].url == "lxd:admin/monitoring.prometheus-scrape-offer"
 
-    def test_default_offer_name(self) -> None:
+    def test_default_offer_name_is_left_unresolved(self) -> None:
         # GIVEN a CMR without an explicit offer_name
         model_spec = ModelSpec(
             applications={"my-app": AppSpec(charm="my-charm")},
@@ -644,10 +644,10 @@ class TestClassifyIntegrations:
         # WHEN classifying
         result = classify_integrations(model_spec, {"model-a": model_spec})
 
-        # THEN offer_name defaults to <remote_application>-offer
-        cmr_ints = [i for i in result if i.offer_name is not None]
-        assert len(cmr_ints) == 1
-        assert cmr_ints[0].offer_name == "prometheus-offer"
+        # THEN offer_name stays None (not defaulted) so domain.py can distinguish a
+        # user-declared offer_name from an absent one; extract.py applies the default later.
+        assert len(result) == 1
+        assert result[0].offer_name is None
 
 
 class TestApplicationsFromSpec:
@@ -792,7 +792,8 @@ class TestSpecFileEdgeCases:
             )
 
     def test_in_spec_cmr_explicit_url_does_not_require_controller(self) -> None:
-        # GIVEN an in-spec CMR where the remote model has no controller but url is provided
+        # GIVEN an in-spec CMR where the remote model has no controller but url and a matching
+        # offer_name are provided
         # THEN it is valid - the explicit url supersedes auto-generation
         spec = SpecFile(
             models=[
@@ -806,6 +807,7 @@ class TestSpecFileEdgeCases:
                             remote_model="m-b",
                             remote_application="rapp",
                             remote_endpoint="re",
+                            offer_name="rapp-offer",
                             url="my-ctrl:admin/m-b.rapp-offer",
                         ),
                     ],
@@ -820,8 +822,272 @@ class TestSpecFileEdgeCases:
         # THEN the explicit URL is preserved as-is (no controller needed for in-spec CMRs with explicit URL)
         assert spec.models_by_name["m-a"].integrations[0].url == "my-ctrl:admin/m-b.rapp-offer"
 
+    def test_in_spec_cmr_explicit_url_without_offer_name_rejected(self) -> None:
+        # GIVEN an in-spec CMR with an explicit url but no offer_name
+        # THEN it is rejected: an unpinned offer_name could diverge from the offer embedded in url.
+        with pytest.raises(ValueError, match="provides an explicit 'url' but no 'offer_name'"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e",
+                                remote_model="m-b",
+                                remote_application="rapp",
+                                remote_endpoint="re",
+                                url="my-ctrl:admin/m-b.rapp-offer",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(name="m-b", controller="lxd", applications={"rapp": AppSpec(charm="rc")}),
+                ]
+            )
+
+    def test_in_spec_cmr_offer_name_disagreeing_with_url_rejected(self) -> None:
+        # GIVEN an in-spec CMR whose offer_name doesn't match the offer embedded in its url
+        # THEN it is rejected: extraction preserves both values verbatim.
+        with pytest.raises(ValueError, match="does not match the offer name embedded in 'url'"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e",
+                                remote_model="m-b",
+                                remote_application="rapp",
+                                remote_endpoint="re",
+                                offer_name="offer-one",
+                                url="my-ctrl:admin/m-b.offer-two",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(name="m-b", controller="lxd", applications={"rapp": AppSpec(charm="rc")}),
+                ]
+            )
+
+    def test_external_cmrs_to_same_application_with_distinct_offers_accepted(self) -> None:
+        # GIVEN two external CMRs to the same remote application, but each consuming a
+        # distinct offer (different, internally-consistent url/offer_name pairs)
+        # THEN it is accepted: one remote application can expose multiple distinct offers.
+        spec = SpecFile(
+            models=[
+                ModelSpec(
+                    name="m-a",
+                    controller="lxd",
+                    applications={"app": AppSpec(charm="c")},
+                    integrations=[
+                        IntegrationSpec(
+                            application="app",
+                            endpoint="e1",
+                            remote_model="ext",
+                            remote_application="rapp",
+                            remote_endpoint="re1",
+                            offer_name="offer-one",
+                            url="ctrl:admin/ext.offer-one",
+                        ),
+                        IntegrationSpec(
+                            application="app",
+                            endpoint="e2",
+                            remote_model="ext",
+                            remote_application="rapp",
+                            remote_endpoint="re2",
+                            offer_name="offer-two",
+                            url="ctrl:admin/ext.offer-two",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        assert len(spec.models_by_name["m-a"].integrations) == 2
+
+    def test_external_cmrs_sharing_a_url_with_disagreeing_offer_name_rejected(self) -> None:
+        # GIVEN two external CMRs with the same url but different offer_name values
+        # THEN it is rejected: SAAS entries are keyed by offer_name, so the same offer would
+        # be emitted twice under two different names.
+        with pytest.raises(ValueError, match="disagreeing offer_name"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="offer-one",
+                                url="ctrl:admin/ext.shared-offer",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re2",
+                                offer_name="offer-two",
+                                url="ctrl:admin/ext.shared-offer",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
+    def test_external_cmrs_sharing_an_offer_name_with_disagreeing_url_rejected(self) -> None:
+        # GIVEN two external CMRs that resolve to the same offer_name, but declare different urls
+        # THEN it is rejected: SAAS entries are keyed by offer_name alone, so the two urls
+        # would silently collide.
+        with pytest.raises(ValueError, match="disagreeing url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="shared-name",
+                                url="ctrl:admin/ext-a.shared-name",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext2",
+                                remote_application="rapp2",
+                                remote_endpoint="re2",
+                                offer_name="shared-name",
+                                url="ctrl:admin/ext-b.shared-name",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
+    def test_external_cmrs_to_same_application_with_offer_name_omitted_on_one_side_rejected(self) -> None:
+        # GIVEN two external CMRs sharing a url, where one has an explicit offer_name and the
+        # other omits it
+        # THEN it is rejected: the omitted one defaults per extract.py, which disagrees here.
+        with pytest.raises(ValueError, match="disagreeing offer_name"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="custom-offer",
+                                url="ctrl:admin/ext.custom-offer",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext",
+                                remote_application="rapp",
+                                remote_endpoint="re2",
+                                url="ctrl:admin/ext.custom-offer",
+                            ),
+                        ],
+                    ),
+                ]
+            )
+
+    def test_in_spec_and_external_cmr_sharing_offer_name_with_disagreeing_url_rejected(self) -> None:
+        # GIVEN an in-spec CMR and an external CMR resolving to the same offer_name but
+        # declaring different urls
+        # THEN it is rejected: the collision applies regardless of in-spec vs. external.
+        with pytest.raises(ValueError, match="disagreeing url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="m-b",
+                                remote_application="rapp",
+                                remote_endpoint="re1",
+                                offer_name="shared-name",
+                                url="lxd:admin/m-b.shared-name",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="ext",
+                                remote_application="rapp2",
+                                remote_endpoint="re2",
+                                offer_name="shared-name",
+                                url="ctrl:admin/ext.shared-name",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(name="m-b", controller="lxd", applications={"rapp": AppSpec(charm="rc")}),
+                ]
+            )
+
+    def test_two_in_spec_cmrs_sharing_offer_name_with_disagreeing_url_rejected(self) -> None:
+        # GIVEN two in-spec CMRs to different remote models that share an offer_name but
+        # declare different urls
+        # THEN it is rejected for the same reason as the external case.
+        with pytest.raises(ValueError, match="disagreeing url"):
+            SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m-a",
+                        controller="lxd",
+                        applications={"app": AppSpec(charm="c")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e1",
+                                remote_model="m-b",
+                                remote_application="rapp-b",
+                                remote_endpoint="re1",
+                                offer_name="shared-name",
+                                url="lxd:admin/m-b.shared-name",
+                            ),
+                            IntegrationSpec(
+                                application="app",
+                                endpoint="e2",
+                                remote_model="m-c",
+                                remote_application="rapp-c",
+                                remote_endpoint="re2",
+                                offer_name="shared-name",
+                                url="lxd:admin/m-c.shared-name",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(name="m-b", controller="lxd", applications={"rapp-b": AppSpec(charm="rc")}),
+                    ModelSpec(name="m-c", controller="lxd", applications={"rapp-c": AppSpec(charm="rc")}),
+                ]
+            )
+
     def test_in_spec_cmr_explicit_url_preserved(self) -> None:
-        # GIVEN an in-spec CMR with an explicit url provided alongside a resolvable remote model
+        # GIVEN an in-spec CMR with an explicit url and offer_name provided alongside a
+        # resolvable remote model
         model_a = ModelSpec(
             controller="lxd",
             applications={"app": AppSpec(charm="c")},
@@ -832,6 +1098,7 @@ class TestSpecFileEdgeCases:
                     remote_model="m-b",
                     remote_application="rapp",
                     remote_endpoint="re",
+                    offer_name="EXPLICIT_OFFER",
                     url="EXPLICIT_URL",
                 ),
             ],

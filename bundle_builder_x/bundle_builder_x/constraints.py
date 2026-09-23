@@ -19,6 +19,7 @@ from .assertion_tags import (
     CharmMappedToSingleApplicationTag,
     CharmPayload,
     CharmRankBoundedTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
@@ -71,14 +72,7 @@ def _charm_endpoints_from_integration(integration: DomainCharmIntegration) -> li
 
 
 def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
-    # Snapshot aggregated mappings once to avoid rebuilding dicts in loops.
-    # Flat (app_name, charm_id) -> BoolRef for cross-model lookups.
-    app_to_charm: dict[tuple[str, int], z3.BoolRef] = {
-        (app, cid): var
-        for mc in domain.models.values()
-        for app, domain_app in mc.applications.items()
-        for cid, var in domain_app.charm_ids.items()
-    }
+    app_to_charm = domain.app_to_charm_map()
 
     # Ensure each application maps to exactly one charm
     for model_ref, model_constraints in domain.models.items():
@@ -109,18 +103,11 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
         )
 
     # Ensure each user-specified integration (local or CMR) maps to exactly one charm integration.
-    # For external CMRs (remote model not in domain), skip: those are handled via cmr_counts.
+    # External CMRs are skipped: those are handled via cmr_counts.
     for model_ref, model_constraints in domain.models.items():
         for app_integration in model_constraints.application_integrations:
-            is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
-            if is_cmr:
-                remote_model = (
-                    app_integration.endpoint_1.model
-                    if app_integration.endpoint_1.model != ModelRef()
-                    else app_integration.endpoint_2.model
-                )
-                if remote_model not in domain.models:
-                    continue  # external CMR - satisfied via cmr_counts in add_charm_constraints
+            if domain.is_external_cmr(app_integration):
+                continue  # external CMR - satisfied via cmr_counts in add_charm_constraints
             charm_int_dict = app_integration.charm_integration_ids
             solver.assert_and_track(
                 z3.Sum([z3.If(m, 1, 0) for m in charm_int_dict.values()] + [z3.IntVal(0)]) == 1,
@@ -205,12 +192,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
 
 def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Snapshot aggregated mapping once to avoid rebuilding the dict in nested loops.
-    app_to_charm: dict[tuple[str, int], z3.BoolRef] = {
-        (app, cid): var
-        for mc in domain.models.values()
-        for app, domain_app in mc.applications.items()
-        for cid, var in domain_app.charm_ids.items()
-    }
+    app_to_charm = domain.app_to_charm_map()
 
     # Ensure both charms exist if integration exists (local and cross-model)
     for integration in domain.charm_integrations:
@@ -224,38 +206,31 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
-    # Build a lookup of cross-model integration counts per (application, endpoint).
+    # Build a lookup of cross-model integration counts per (model, application, endpoint).
     # Only covers external CMRs - in-domain CMRs have their endpoint count handled
     # through DomainCharmIntegration.exists (forced True by the user-CMR mapping constraint).
-    cmr_counts: dict[tuple[str, str], int] = {}
-    for mc in domain.models.values():
-        for app_int in mc.application_integrations:
-            # Identify external CMR: one endpoint has a model that is NOT in the domain
-            ep1_model = app_int.endpoint_1.model
-            ep2_model = app_int.endpoint_2.model
-            if ep1_model == ep2_model:
-                continue  # local integration
-            if (ep1_model if ep1_model != ModelRef() else ep2_model) in domain.models:
-                continue  # in-domain CMR - endpoint count flows through integration.exists
-            local_ep = app_int.endpoint_1 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_2
-            key = (local_ep.application, local_ep.endpoint)
-            cmr_counts[key] = cmr_counts.get(key, 0) + 1
+    cmr_counts: dict[tuple[ModelRef, str, str], int] = {}
+    for model_ref, local_ep, _remote_ep in domain.external_cmr_integrations():
+        key = (model_ref, local_ep.application, local_ep.endpoint)
+        cmr_counts[key] = cmr_counts.get(key, 0) + 1
 
     # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
             integrations_using_endpoint: list[z3.BoolRef] = []
+            cross_model_integrations_using_endpoint: list[z3.BoolRef] = []
             for integration in domain.charm_integrations:
                 if (integration.requires_charm_id == charm_id and integration.requires_endpoint == endpoint_name) or (
                     integration.provides_charm_id == charm_id and integration.provides_endpoint == endpoint_name
                 ):
                     integrations_using_endpoint.append(integration.exists)
+                    if domain.is_cross_model(integration):
+                        cross_model_integrations_using_endpoint.append(integration.exists)
 
-            # Add cross-model contributions: for each (app, endpoint) that has CMR
-            # integrations, add +N when the application-to-charm mapping is active.
+            # External CMRs contribute +N to both the plain and cross-model-only counts.
             cmr_terms: list[z3.ArithRef] = []
-            for (app, ep), ext_count in cmr_counts.items():
-                if ep != endpoint_name:
+            for (cmr_model_ref, app, ep), ext_count in cmr_counts.items():
+                if ep != endpoint_name or cmr_model_ref != charm.model:
                     continue
                 mapping_var = app_to_charm.get((app, charm_id))
                 if mapping_var is not None:
@@ -275,6 +250,20 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 endpoint.integrated == (endpoint.count >= 1),
                 EndpointIntegratedMatchesCountTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                ).encode(),
+            )
+
+            # Mirror the count constraint above, scoped to cross-model integrations only. Backs
+            # the cross_model() DSL filter (see dsl_lowering.py).
+            cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
+            cross_model_count_expr = z3.Sum(
+                [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
+            )
+            solver.assert_and_track(
+                endpoint.cross_model_count == cross_model_count_expr,
+                CrossModelEndpointCountMatchesIntegrationsTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                    num_terms=cross_model_num_terms,
                 ).encode(),
             )
 

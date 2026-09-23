@@ -109,6 +109,8 @@ is a parse-time error, not a silent Z3 failure.
      - ``x`` and every ``vi`` must be the same scalar type
    * - ``reachable()``
      - Argument must be ``endpoint[x]`` directly; returns ``CharmSet``
+   * - ``cross_model()``
+     - Argument must be ``RelationSet``; returns ``RelationSet``
    * - ``features()``
      - Argument must be ``RelationSet`` (``endpoint[x]`` or ``RelationSet`` expression); does not accept ``CharmSet``
    * - ``not``
@@ -212,6 +214,64 @@ Contrast with ``charms(endpoint[receive-ca-cert])`` = {ssc} (directly wired only
    * - ``reachable(endpoint[x])``
      - ``CharmSet``
      - Yes, physical + proxy-reachable
+
+Cross-model relation set
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+   cross_model(endpoint[<name>])  ->  RelationSet
+   cross_model(RelationSet)       ->  RelationSet
+
+Filters a ``RelationSet`` to only its cross-model-integrated view: relations whose peer
+charm lives in a different Juju model. Returns a ``RelationSet`` like ``endpoint[x]``
+itself, tagging the selected endpoints so that downstream reducers (``bool()``,
+``len()``, ``charms()``) read cross-model-scoped counts instead of plain ones.
+
+Unlike ``bool(endpoint[x])``, which is ``True`` for any active integration (local or
+cross-model), ``bool(cross_model(endpoint[x]))`` is ``True`` only when at least one of
+those integrations is a genuine cross-model relation (CMR).
+
+``bool()`` and ``len()`` both include external CMR contributions -- cross-model
+integrations whose remote application/model is not part of the current domain, tracked
+separately as ``cmr_counts`` in ``constraints.py`` -- since they only need a count, not a
+charm identity.
+
+``charms()`` also includes external CMR contributions, using a stable synthetic id
+derived from the remote ``(model, application)`` pair. Distinct external peers produce
+distinct set elements, so ``charms(cross_model(endpoint[x]))`` can be compared for
+equality across charms and two unrelated external peers compare unequal.
+
+.. note::
+
+   The synthetic id is opaque: external peers have no ``DomainCharm``, so a
+   ``charms(...)`` set containing them cannot be intersected with, or tested for
+   membership against, named charms, and the ids carry no meaning outside the
+   current domain. Two external peers that happen to share a remote model key and
+   application name are treated as the same peer.
+
+   Only ``charms()`` adds external peers. ``reachable()`` (and therefore the
+   channel/resource reductions over it) stays in-domain, since its result is
+   reduced against real ``DomainCharm`` attributes.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Reducer
+     - Includes external CMR contributions?
+   * - ``bool(cross_model(endpoint[x]))``
+     - Yes
+   * - ``len(cross_model(endpoint[x]))``
+     - Yes
+   * - ``charms(cross_model(endpoint[x]))``
+     - Yes -- via a synthetic id per remote (model, application)
+
+A common use is requiring an endpoint to only ever ride an existing cross-model relation,
+never pair purely locally::
+
+   constraints:
+     - len(endpoint[<name>]) == len(cross_model(endpoint[<name>]))
 
 Endpoint feature set
 ~~~~~~~~~~~~~~~~~~~~
