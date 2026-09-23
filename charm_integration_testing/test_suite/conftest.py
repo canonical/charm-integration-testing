@@ -15,7 +15,6 @@ from extensions import (
     ConfigureLivepatchServerExtension,
     IstioMeshExtension,
     LegoExtension,
-    LitmusExtension,
     MetacontrollerExtension,
     MysqlDatabaseReplicationExtension,
     MysqlK8sDatabaseReplicationExtension,
@@ -25,7 +24,6 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from extensions.litmus.extension import LitmusConfig
 from juju import (
     JujuApplicationInfo,
     JujuBackend,
@@ -268,7 +266,6 @@ def juju_client(
     uv_file: Path | None,
     validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
-    litmus_configs: dict[JujuModelHandle, LitmusConfig],
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -286,7 +283,6 @@ def juju_client(
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
-            LitmusExtension(juju_backend, litmus_configs),
         ],
     )
 

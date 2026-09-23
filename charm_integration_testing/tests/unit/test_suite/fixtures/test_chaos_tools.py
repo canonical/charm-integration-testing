@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from juju import JujuClient, JujuExtension, JujuModelHandle
+from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
+from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.fixtures import chaos_tools
@@ -16,20 +17,62 @@ from test_suite.fixtures.chaos_tools import (
     CHAOS_MESH_CRDS,
     ChaosTool,
     detect_initial_tools,
-    prepare_existing_model,
     require_tool_for_model,
     select_chaos_tool,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
-from ...extensions.test_litmus import CONFIG, NEIGHBOR, TARGET, KubernetesStub, LitmusBackendStub, make_client
+from ...extensions.shared import NullJujuBackend
+
+TARGET = JujuModelHandle(controller="target-controller", model="target-model")
+NEIGHBOR = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
+
+
+@dataclass
+class ClosingApiStub:
+    closed: bool = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class KubernetesStub(KubernetesBackend):
+    def __init__(self) -> None:
+        self.api_client = ClosingApiStub()
+        self.crds: set[str] = set()
+        self.ready_deployments: set[tuple[str, str]] = set()
+        self.reads: list[tuple[str, str]] = []
+        self.error: ApiException | None = None
+
+    def crd_exists(self, name: str) -> bool:
+        if self.error is not None:
+            raise self.error
+        return name in self.crds
+
+    def deployment_is_ready(self, namespace: str, name: str) -> bool:
+        self.reads.append((namespace, name))
+        return (namespace, name) in self.ready_deployments
+
+
+class JujuBackendStub(NullJujuBackend):
+    def __init__(self) -> None:
+        self.kubernetes = KubernetesStub()
+        self.clients: dict[str, KubernetesClient | None] = {
+            TARGET.uri: KubernetesClient(self.kubernetes),
+            NEIGHBOR.uri: KubernetesClient(self.kubernetes),
+        }
+        self.resolutions: list[str] = []
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        self.resolutions.append(model.uri)
+        return self.clients[model.uri]
 
 
 @dataclass
 class ConfigStub:
-    options: dict[str, str | float | None]
+    options: dict[str, str]
 
-    def getoption(self, name: str) -> str | float | None:
+    def getoption(self, name: str) -> str:
         return self.options[name]
 
 
@@ -38,12 +81,8 @@ class RequestStub:
     config: ConfigStub
 
 
-def make_request(**options: str | float | None) -> pytest.FixtureRequest:
-    values: dict[str, str | float | None] = {
-        "--litmus-offer": None,
-        "--neighbor-litmus-offer": None,
-        "--litmus-channel": "dev/edge",
-        "--litmus-timeout": 600,
+def make_request(**options: str) -> pytest.FixtureRequest:
+    values: dict[str, str] = {
         "--current-state": State.NO_BUNDLE.value,
     }
     values.update({f"--{key.replace('_', '-')}": value for key, value in options.items()})
@@ -102,16 +141,16 @@ class TestSelectChaosTool:
 
     @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
     def test_selection(self, params: Params) -> None:
-        # GIVEN the available resources in the target namespace
+        # GIVEN the available CRDs and shared operator
         backend = KubernetesStub()
         backend.crds.update(params.mesh_crds)
         if params.litmus_crd:
-            backend.crds.add("chaosengines.litmuschaos.io")
+            backend.crds.update(LITMUS_CRDS)
         if params.operator_ready:
-            backend.ready_namespaces.add(TARGET.model)
+            backend.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
 
         # WHEN selecting a tool
-        tool = select_chaos_tool(backend, TARGET.model)
+        tool = select_chaos_tool(backend)
 
         # THEN readiness and priority determine the selection
         assert tool == params.expected
@@ -133,24 +172,24 @@ class TestSelectChaosTool:
 
         # WHEN selecting a tool, THEN the API error is not reported as absence
         with pytest.raises(ApiException) as exc_info:
-            select_chaos_tool(backend, TARGET.model)
+            select_chaos_tool(backend)
 
         assert exc_info.value is error
-        assert reads == ["chaosengines.litmuschaos.io", *CHAOS_MESH_CRDS]
+        assert reads == [*LITMUS_CRDS, *CHAOS_MESH_CRDS]
 
     def test_availability_is_not_cached(self) -> None:
         # GIVEN an initially empty cluster
         backend = KubernetesStub()
-        assert select_chaos_tool(backend, TARGET.model) is None
+        assert select_chaos_tool(backend) is None
 
         # WHEN resources appear and disappear, THEN selection observes each change
         backend.crds.update(CHAOS_MESH_CRDS)
-        assert select_chaos_tool(backend, TARGET.model) == ChaosTool.CHAOS_MESH
-        backend.crds.add("chaosengines.litmuschaos.io")
-        backend.ready_namespaces.add(TARGET.model)
-        assert select_chaos_tool(backend, TARGET.model) == ChaosTool.LITMUS
-        backend.ready_namespaces.clear()
-        assert select_chaos_tool(backend, TARGET.model) == ChaosTool.CHAOS_MESH
+        assert select_chaos_tool(backend) == ChaosTool.CHAOS_MESH
+        backend.crds.update(LITMUS_CRDS)
+        backend.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        assert select_chaos_tool(backend) == ChaosTool.LITMUS
+        backend.ready_deployments.clear()
+        assert select_chaos_tool(backend) == ChaosTool.CHAOS_MESH
 
 
 class TestInitialDetection:
@@ -214,11 +253,11 @@ class TestInitialDetectionFixture:
     @pytest.mark.parametrize("state", list(State), ids=lambda state: state.value)
     def test_state_selects_model_or_configured_cloud(self, state: State, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN configured controller clouds without kubeconfigs and live model clients
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
         neighbor = KubernetesStub()
-        neighbor.crds.add("chaosengines.litmuschaos.io")
-        neighbor.ready_namespaces.add(NEIGHBOR.model)
+        neighbor.crds.update(LITMUS_CRDS)
+        neighbor.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
         backend.clients[NEIGHBOR.uri] = KubernetesClient(neighbor)
 
         # WHEN taking the initial snapshot for a fresh or resumed session
@@ -250,7 +289,7 @@ class TestInitialDetectionFixture:
 
     def test_duplicate_model_is_checked_once(self) -> None:
         # GIVEN the same model configured as target and neighbor
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
 
         # WHEN taking the snapshot
         unwrap(chaos_tools.detect_chaos_tools)(
@@ -270,7 +309,7 @@ class TestInitialDetectionFixture:
 
     def test_machine_model_is_logged_without_skipping_session(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN an existing machine model
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         backend.clients[TARGET.uri] = None
 
         # WHEN taking the snapshot
@@ -293,7 +332,7 @@ class TestInitialDetectionFixture:
 
     def test_model_resolution_error_does_not_fall_back(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN a model lookup or configuration failure
-        class FailingBackend(LitmusBackendStub):
+        class FailingBackend(JujuBackendStub):
             def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
                 raise error
 
@@ -319,7 +358,7 @@ class TestInitialDetectionFixture:
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_api_error_propagates_without_closing_shared_client(self, status: int) -> None:
         # GIVEN an API error from a backend-owned Kubernetes client
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         backend.kubernetes.error = ApiException(status=status)
 
         # WHEN taking the snapshot, THEN the error propagates and ownership is preserved
@@ -342,7 +381,7 @@ class TestInitialDetectionFixture:
 class TestRequireTool:
     def test_machine_model_skips_dependent_test(self) -> None:
         # GIVEN an authoritative machine-cloud result
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         backend.clients[TARGET.uri] = None
 
         # WHEN a test requires a tool, THEN only that request is skipped
@@ -351,7 +390,7 @@ class TestRequireTool:
 
     def test_absent_tools_skip_dependent_test(self) -> None:
         # GIVEN neither tool in a Kubernetes model
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
 
         # WHEN a test requires a tool, THEN absence produces a skip
         with pytest.raises(pytest.skip.Exception, match="Neither Litmus nor Chaos Mesh"):
@@ -360,7 +399,7 @@ class TestRequireTool:
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_api_errors_are_not_skipped(self, status: int) -> None:
         # GIVEN available Mesh CRDs but an API failure
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
         backend.kubernetes.error = ApiException(status=status)
 
@@ -371,103 +410,54 @@ class TestRequireTool:
 
     def test_missing_model_configuration_is_not_skipped(self) -> None:
         # GIVEN a model with no registered Kubernetes client
-        backend = LitmusBackendStub()
+        backend = JujuBackendStub()
         del backend.clients[TARGET.uri]
 
         # WHEN requiring a tool, THEN configuration failure propagates
         with pytest.raises(KeyError):
             require_tool_for_model(backend, TARGET)
 
-    def test_configured_litmus_does_not_fall_back(self) -> None:
-        # GIVEN Mesh availability but a missing configured Litmus relation
-        backend = LitmusBackendStub()
-        backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None, {TARGET: CONFIG})
+    def test_shared_operator_serves_both_models(self) -> None:
+        # GIVEN two models sharing a cluster with Litmus and Chaos Mesh
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend)
 
-        # WHEN requesting a tool, THEN configured setup failure remains visible
-        with pytest.raises(RuntimeError, match="not connected"):
-            resolve(TARGET)
+        # WHEN both models request a chaos tool
+        target_tool = resolve(TARGET)
+        neighbor_tool = resolve(NEIGHBOR)
 
-    def test_configured_litmus_is_rechecked(self) -> None:
-        # GIVEN a previously connected configured model
-        backend = LitmusBackendStub()
-        backend.install(TARGET)
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend, None, {TARGET: CONFIG})
+        # THEN both use the shared operator without querying charm configuration
+        assert target_tool == neighbor_tool == ChaosTool.LITMUS
+        assert backend.kubernetes.reads == [("litmus-system", "litmus")] * 2
+        assert backend.resolutions == [TARGET.uri, NEIGHBOR.uri]
+
+    def test_selection_is_rechecked_for_each_request(self) -> None:
+        # GIVEN a shared operator and an available Chaos Mesh installation
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(backend)
         assert resolve(TARGET) == ChaosTool.LITMUS
 
-        # WHEN its relation disappears, THEN the next request fails
-        backend.connected.remove(TARGET)
-        with pytest.raises(RuntimeError, match="not connected"):
-            resolve(TARGET)
+        # WHEN the shared operator stops
+        backend.kubernetes.ready_deployments.clear()
 
+        # THEN the next request falls back to Chaos Mesh
+        assert resolve(TARGET) == ChaosTool.CHAOS_MESH
 
-class TestLitmusOptions:
-    def test_neighbor_does_not_inherit_target_offer(self) -> None:
-        # GIVEN a target offer without a neighbor offer
-        request = make_request(litmus_offer=CONFIG.offer_url)
+    def test_target_fixture_uses_target_model(self) -> None:
+        # GIVEN a tool resolver that records the requested model
+        models: list[JujuModelHandle] = []
 
-        # WHEN resolving configuration, THEN only the target is configured
-        assert unwrap(chaos_tools.litmus_configs)(request, TARGET, NEIGHBOR) == {TARGET: CONFIG}
+        def resolve(model: JujuModelHandle) -> ChaosTool:
+            models.append(model)
+            return ChaosTool.LITMUS
 
-    def test_neighbor_offer_requires_neighbor_model(self) -> None:
-        # GIVEN a neighbor offer without a neighbor model
-        request = make_request(neighbor_litmus_offer=CONFIG.offer_url)
+        # WHEN the target test requires a chaos tool
+        tool = unwrap(chaos_tools.require_chaos_tool)(resolve, TARGET)
 
-        # WHEN resolving configuration, THEN this is a usage error
-        with pytest.raises(pytest.UsageError, match="requires a neighbor model"):
-            unwrap(chaos_tools.litmus_configs)(request, TARGET, None)
-
-    @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
-    def test_invalid_timeout_is_usage_error(self, timeout: float) -> None:
-        # GIVEN an invalid timeout with Litmus enabled
-        request = make_request(litmus_offer=CONFIG.offer_url, litmus_timeout=timeout)
-
-        # WHEN resolving configuration, THEN it fails before deployment
-        with pytest.raises(pytest.UsageError):
-            unwrap(chaos_tools.litmus_configs)(request, TARGET, None)
-
-
-class TestPrepareExistingModel:
-    def test_does_not_run_unrelated_hooks(self, tmp_path: Path) -> None:
-        # GIVEN a resumed model with unrelated workload hooks
-        class UnexpectedHook(JujuExtension):
-            def post_deploy(self, model: JujuModelHandle) -> None:
-                pytest.fail("Infrastructure preparation must not run unrelated hooks")
-
-        backend = LitmusBackendStub()
-        client = JujuClient(backend, logging.getLogger(__name__), extensions=[UnexpectedHook()])
-
-        # WHEN preparing the existing model
-        prepare_existing_model(client, TARGET, CONFIG, tmp_path)
-
-        # THEN infrastructure is connected and ready without recreating the model
-        assert TARGET in backend.connected
-        assert backend.created_models == []
-        assert len(backend.deployments) == 1
-        assert backend.kubernetes.reads == [(TARGET.model, "chaos-operator-ce")]
-
-    def test_connected_model_is_not_redeployed(self, tmp_path: Path) -> None:
-        # GIVEN an existing ready connection
-        backend = LitmusBackendStub()
-        backend.install(TARGET)
-
-        # WHEN preparing the model again
-        prepare_existing_model(make_client(backend, {TARGET: CONFIG}), TARGET, CONFIG, tmp_path)
-
-        # THEN readiness is checked but no deployment is issued
-        assert backend.deployments == []
-        assert backend.kubernetes.reads == [(TARGET.model, "chaos-operator-ce")]
-
-    @pytest.mark.parametrize("state", list(State), ids=lambda state: state.value)
-    def test_startup_state_controls_preparation(self, state: State, tmp_path_factory: pytest.TempPathFactory) -> None:
-        # GIVEN a fresh or resumed session
-        backend = LitmusBackendStub()
-        request = make_request(current_state=state.value)
-
-        # WHEN the startup fixture prepares configured models
-        unwrap(chaos_tools.prepare_litmus_models)(
-            request, backend, logging.getLogger(__name__), {TARGET: CONFIG}, tmp_path_factory, None, None
-        )
-
-        # THEN only existing models are prepared at startup
-        assert len(backend.deployments) == (0 if state in STATES_WITHOUT_EXISTING_MODEL else 1)
+        # THEN the target model's tool is returned
+        assert tool == ChaosTool.LITMUS
+        assert models == [TARGET]

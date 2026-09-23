@@ -84,6 +84,37 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
      --config "logging-config=DEBUG" \
      --config="update-status-hook-interval=2m"
 
+Chaos tools
+~~~~~~~~~~~
+
+Install Litmus or Chaos Mesh on the Kubernetes cluster before running tests
+that require a chaos tool. On PS6 staging and PS7, the infrastructure
+repositories manage the shared ``litmus-core`` Helm release. See the
+``docs/how-to/install_litmus_core.rst`` guide in sqa-ops for installation
+steps and chart versions.
+
+Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
+cloud, replacing hyphens in the cloud name with underscores. For example:
+
+.. code:: bash
+
+   export KUBECONFIG_local_k8s=/path/to/kubeconfig
+
+The test suite reports tool availability at session start. Litmus requires
+its three CRDs and a ready ``litmus`` Deployment in ``litmus-system``.
+The shared operator namespace is independent of the test model namespace.
+CIT uses this installation without deploying charms or configuring CMR.
+
+Tests using ``require_chaos_tool`` prefer Litmus when both tools are
+available and skip when neither is available. Availability is checked again
+when a test requests a tool. Kubernetes API errors are reported as failures.
+Tests using ``require_chaos_mesh`` continue to require Chaos Mesh.
+
+Detection does not run Litmus experiments or prepare experiment definitions
+and permissions. Shared resources remain managed by the infrastructure
+repositories. Use approved disposable workloads for experiments; the shared
+operator and privileged helpers do not provide isolation between tenants.
+
 Install the repository dependencies
 -----------------------------------
 

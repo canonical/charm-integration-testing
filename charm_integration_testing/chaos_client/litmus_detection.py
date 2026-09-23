@@ -3,14 +3,17 @@
 
 from kubernetes_client import KubernetesBackend
 
-CHAOSENGINE_CRD = "chaosengines.litmuschaos.io"
-CHAOS_OPERATOR_DEPLOYMENT = "chaos-operator-ce"
+LITMUS_CRDS = (
+    "chaosengines.litmuschaos.io",
+    "chaosexperiments.litmuschaos.io",
+    "chaosresults.litmuschaos.io",
+)
+OPERATOR_NAMESPACE = "litmus-system"
+OPERATOR_DEPLOYMENT = "litmus"
 
 
-def litmus_is_available(backend: KubernetesBackend, namespace: str) -> bool:
-    """Check the Litmus CRD and operator readiness in the execution namespace.
-
-    Results are not cached and API errors propagate. ChaosCenter connectivity
-    and experiment execution are not checked.
-    """
-    return backend.crd_exists(CHAOSENGINE_CRD) and backend.deployment_is_ready(namespace, CHAOS_OPERATOR_DEPLOYMENT)
+def litmus_is_available(backend: KubernetesBackend) -> bool:
+    """Check the shared Litmus CRDs and operator readiness without caching results."""
+    # Check every CRD so an absent one does not hide an API error for another.
+    present = [backend.crd_exists(name) for name in LITMUS_CRDS]
+    return all(present) and backend.deployment_is_ready(OPERATOR_NAMESPACE, OPERATOR_DEPLOYMENT)
