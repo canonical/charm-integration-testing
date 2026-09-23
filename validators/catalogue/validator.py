@@ -104,7 +104,7 @@ class CatalogueValidator(BaseValidator):
         if not fetch_check.passed:
             return self._build_result("deep", checks)
 
-        checks.append(_validate_item_served(payload, local["name"]))
+        checks.append(_validate_item_served(payload, local))
 
         return self._build_result("deep", checks)
 
@@ -148,8 +148,14 @@ def _validate_url_syntax(url: str) -> ValidationCheck:
     """Return a check confirming *url* is a well-formed http/https URL."""
     try:
         parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.netloc
+            or not parsed.hostname
+            or any(character.isspace() for character in url)
+        ):
             raise ValueError(f"Scheme '{parsed.scheme}' is not http/https or host is missing.")
+        parsed.port
     except ValueError as exc:
         return ValidationCheck(
             name="url_syntax",
@@ -164,7 +170,7 @@ def _validate_api_endpoints(raw: str) -> ValidationCheck:
 
     ``api_endpoints`` is optional; an empty value is accepted.
     """
-    if not raw:
+    if not raw or raw == "null":
         return ValidationCheck(name="api_endpoints", passed=True, message="api_endpoints is not set (optional).")
     try:
         parsed = json.loads(raw)
@@ -273,8 +279,8 @@ def _fetch_catalogue(url: str) -> tuple[ValidationCheck, dict[str, Any] | None]:
     )
 
 
-def _validate_item_served(payload: dict[str, Any] | None, name: str) -> ValidationCheck:
-    """Return a check confirming an item named *name* is present in the served catalogue."""
+def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, str]) -> ValidationCheck:
+    """Return a check confirming the expected item is present in the served catalogue."""
     apps = payload.get("apps") if isinstance(payload, dict) else None
     if not isinstance(apps, list):
         return ValidationCheck(
@@ -282,6 +288,22 @@ def _validate_item_served(payload: dict[str, Any] | None, name: str) -> Validati
             passed=False,
             message="Served catalogue has no 'apps' list.",
         )
+    name = expected["name"]
+    for item in apps:
+        if not isinstance(item, dict) or item.get("name") != name:
+            continue
+        fields_match = all(item.get(field) == value for field, value in expected.items() if field != "api_endpoints" and field in item)
+        if "api_endpoints" in expected and "api_endpoints" in item:
+            try:
+                fields_match = fields_match and item.get("api_endpoints") == json.loads(expected["api_endpoints"])
+            except json.JSONDecodeError:
+                fields_match = False
+        if fields_match:
+            return ValidationCheck(
+                name="item_served",
+                passed=True,
+                message=f"Item '{name}' is present in the served catalogue.",
+            )
     served = [item.get("name") for item in apps if isinstance(item, dict)]
     if name not in served:
         return ValidationCheck(
@@ -294,6 +316,6 @@ def _validate_item_served(payload: dict[str, Any] | None, name: str) -> Validati
         )
     return ValidationCheck(
         name="item_served",
-        passed=True,
-        message=f"Item '{name}' is present in the served catalogue.",
+        passed=False,
+        message=f"Item '{name}' is present but does not match the published catalogue fields.",
     )

@@ -61,7 +61,7 @@ VALID_PAYLOAD: dict[str, object] = {
     "apps": [
         {
             "name": "Alertmanager",
-            "url": "http://alertmanager:9093",
+            "url": VALID_DATABAG["url"],
             "icon": "bell-alert",
         }
     ],
@@ -94,6 +94,11 @@ class TestValidateUrlSyntax:
         assert not check.passed
         assert "http" in check.message
 
+    def test_invalid_hostname_or_port(self) -> None:
+        assert not _validate_url_syntax("http://:9093").passed
+        assert not _validate_url_syntax("http://example.com:abc").passed
+        assert not _validate_url_syntax("http://example.com/a b").passed
+
     def test_missing_host(self) -> None:
         assert not _validate_url_syntax("http:///path/only").passed
 
@@ -101,6 +106,7 @@ class TestValidateUrlSyntax:
 class TestValidateApiEndpoints:
     def test_empty_is_accepted(self) -> None:
         assert _validate_api_endpoints("").passed
+        assert _validate_api_endpoints("null").passed
 
     def test_valid_json_object(self) -> None:
         assert _validate_api_endpoints('{"Alerts": "http://x/api"}').passed
@@ -118,20 +124,20 @@ class TestValidateApiEndpoints:
 
 class TestValidateItemServed:
     def test_item_present(self) -> None:
-        assert _validate_item_served(VALID_PAYLOAD, "Alertmanager").passed
+        assert _validate_item_served(VALID_PAYLOAD, VALID_DATABAG).passed
 
     def test_item_absent(self) -> None:
-        check = _validate_item_served(VALID_PAYLOAD, "Prometheus")
+        check = _validate_item_served(VALID_PAYLOAD, {**VALID_DATABAG, "name": "Prometheus"})
         assert not check.passed
         assert "Prometheus" in check.message
 
     def test_no_apps_list(self) -> None:
-        check = _validate_item_served({"title": "x"}, "Alertmanager")
+        check = _validate_item_served({"title": "x"}, VALID_DATABAG)
         assert not check.passed
         assert "apps" in check.message
 
     def test_none_payload(self) -> None:
-        assert not _validate_item_served(None, "Alertmanager").passed
+        assert not _validate_item_served(None, VALID_DATABAG).passed
 
 
 # ---------------------------------------------------------------------------
