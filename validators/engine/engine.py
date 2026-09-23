@@ -122,6 +122,9 @@ def run_for_charm(
         interface_name = metadata.interface_name or relation
 
         if relation not in charm.model.relations:
+            if metadata.optional:
+                logger.debug(f"Optional relation '{relation}' not found in model; skipping.")
+                continue
             logger.error(f"Relation '{relation}' defined in metadata but not found in model.")
             results.append(
                 ValidationResult(
