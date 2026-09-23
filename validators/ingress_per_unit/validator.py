@@ -266,17 +266,10 @@ def _unit_url_check(urls: dict[str, str], unit_name: str) -> tuple[ValidationChe
             ),
             "",
         )
-    parsed = urlparse(url)
-    if parsed.username is not None or parsed.password is not None:
-        return (
-            ValidationCheck(
-                name="unit_url",
-                passed=False,
-                message=f"Ingress URL for '{unit_name}' must not contain userinfo.",
-            ),
-            "",
-        )
-    return (ValidationCheck(name="unit_url", passed=True, message=f"Ingress URL for '{unit_name}' is advertised."), url)
+    return (
+        ValidationCheck(name="unit_url", passed=True, message=f"Ingress URL for '{unit_name}' is advertised."),
+        url,
+    )
 
 
 # ---------------------------------------------------------------------------
