@@ -188,12 +188,20 @@ Cross-model relations
 ---------------------
 
 By default the target and neighbor applications are deployed into a single model. To
-exercise a cross-model relation (CMR) instead, the neighbor application is deployed into
-a second model. There are two ways to place that second model:
+exercise a cross-model relation (CMR) instead, pass ``--neighbor-cloud``: the neighbor
+application is deployed into a second model on that cloud. ``--neighbor-cloud`` is
+required for any CMR variant; the same-platform case simply passes the same cloud as
+``--target-cloud``.
 
-- **Same controller** — pass ``--same-controller``. The neighbor model is created on the
-  target controller, so only one controller is bootstrapped. This is the cheapest CMR
-  variant and is what the same-platform/same-controller test matrix cell uses.
+``--same-controller`` is a modifier on top of ``--neighbor-cloud`` — it does not enable
+CMR by itself and is rejected if passed without ``--neighbor-cloud``. There are two ways
+to place the neighbor model:
+
+- **Same controller** — pass ``--same-controller --neighbor-cloud <cloud>``. The
+  neighbor model is created on the target controller (registering ``<cloud>`` there
+  first if it differs from ``--target-cloud`` and is a Kubernetes cloud), so only one
+  controller is bootstrapped. This is the cheapest CMR variant and is what the
+  same-platform/same-controller and multi-cloud-controller test matrix cells use.
 
   .. code:: bash
 
@@ -204,25 +212,23 @@ a second model. There are two ways to place that second model:
        --neighbor-charm "mysql-router" \
        --neighbor-endpoint "backend-database" \
        --same-controller \
+       --neighbor-cloud "${CLOUD_NAME}" \
        --current-state "no_bundle" \
        --charm-overrides "./static/charm-overrides/" \
        --log-dir "./test-logs"
 
-- **Cross controller** — pass ``--neighbor-cloud``. A second controller is bootstrapped
-  on that cloud and the neighbor model is created there.
+- **Cross controller** — pass ``--neighbor-cloud`` without ``--same-controller``. A
+  second controller is bootstrapped on that cloud and the neighbor model is created
+  there.
 
-The two options are orthogonal: ``--same-controller`` controls *whether a second
-controller is bootstrapped*, while ``--neighbor-cloud`` controls *which cloud the
-neighbor model lands on*. Combining them (``--same-controller --neighbor-cloud <cloud>``)
-places the neighbor model on a different cloud of the same controller, which requires a
-multi-cloud controller.
-
-When a same-controller run names a Kubernetes ``--neighbor-cloud``, the suite registers
-that cloud on the target controller before creating the neighbor model. The kubeconfig
-for the cloud must be exported via ``KUBECONFIG_<cloud>`` (hyphens replaced with
-underscores, e.g. ``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller``
-so no client-only registration is needed.
+When a same-controller run names a different Kubernetes ``--neighbor-cloud`` than
+``--target-cloud``, the suite registers that cloud on the target controller before
+creating the neighbor model. The kubeconfig for the cloud must be exported via
+``KUBECONFIG_<cloud>`` (hyphens replaced with underscores, e.g.
+``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller`` so no
+client-only registration is needed.
 
 In same-controller mode the neighbor model name is still generated separately, so the
 two models remain distinct. ``--neighbor-controller`` must not be passed alongside
 ``--same-controller``.
+

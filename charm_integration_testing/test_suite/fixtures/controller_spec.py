@@ -18,7 +18,15 @@ def pytest_configure(config: pytest.Config) -> None:
     model = config.getoption("--neighbor-model", default=None)
     same_controller = config.getoption("--same-controller", default=False)
 
-    is_cmr = cloud is not None or same_controller
+    is_cmr = cloud is not None
+
+    if same_controller and not is_cmr:
+        pytest.exit(
+            "--same-controller requires --neighbor-cloud: CMR always needs a neighbor cloud "
+            "(same-controller mode places the neighbor model on that cloud without "
+            "bootstrapping a second controller for it).",
+            returncode=4,
+        )
 
     if same_controller and controller is not None:
         pytest.exit(
@@ -29,8 +37,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     if (controller or model) and not is_cmr:
         pytest.exit(
-            "--neighbor-cloud or --same-controller is required when providing "
-            "--neighbor-controller or --neighbor-model.",
+            "--neighbor-cloud is required when providing --neighbor-controller or --neighbor-model.",
             returncode=4,
         )
 
@@ -44,8 +51,7 @@ def pytest_configure(config: pytest.Config) -> None:
         spurious = [opt for opt in neighbor_config_opts if config.getoption(opt, default=None)]
         if spurious:
             pytest.exit(
-                f"Neighbor config options require --neighbor-cloud or --same-controller. "
-                f"Spurious options: {', '.join(spurious)}",
+                f"Neighbor config options require --neighbor-cloud. Spurious options: {', '.join(spurious)}",
                 returncode=4,
             )
 
@@ -72,6 +78,17 @@ def pytest_configure(config: pytest.Config) -> None:
                 "CMR requires two distinct Juju models.",
                 returncode=4,
             )
+        if same_controller:
+            target_cloud = config.getoption("--target-cloud", default=None)
+            neighbor_platform = config.getoption("--neighbor-platform", default=None) or config.getoption(
+                "--target-platform", default=None
+            )
+            if cloud != target_cloud and neighbor_platform != "kubernetes":
+                pytest.exit(
+                    f"--same-controller with a different --neighbor-cloud ('{cloud}') is only "
+                    f"supported for Kubernetes neighbor platforms (got '{neighbor_platform}').",
+                    returncode=4,
+                )
 
     raw_state = config.getoption("--current-state", default=None)
     if raw_state:
@@ -93,6 +110,7 @@ def pytest_configure(config: pytest.Config) -> None:
             )
         if (
             is_cmr
+            and not same_controller
             and current_state not in STATES_WITHOUT_EXISTING_CONTROLLER
             and not config.getoption("--neighbor-controller", default=None)
         ):
@@ -160,9 +178,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Run a cross-model relation test where the neighbor model lives on the target "
-            "controller (same-controller CMR). Orthogonal to --neighbor-cloud: combine both "
-            "to place the neighbor model on a different cloud of the same controller."
+            "Place the neighbor model (from --neighbor-cloud) on the target controller "
+            "instead of bootstrapping a new one for it (same-controller CMR). Requires "
+            "--neighbor-cloud; use the same cloud as --target-cloud for a same-platform "
+            "neighbor, or a different cloud for a multi-cloud controller."
         ),
     )
     parser.addoption(
@@ -330,29 +349,23 @@ def same_controller(request: pytest.FixtureRequest) -> bool:
 
 @pytest.fixture(scope="session")
 def is_cmr_test(request: pytest.FixtureRequest) -> bool:
-    """True when a cross-model relation test is configured, either across controllers
-    (``--neighbor-cloud``) or on a single controller (``--same-controller``)."""
-    return bool(request.config.getoption("--neighbor-cloud")) or bool(request.config.getoption("--same-controller"))
+    """True when a cross-model relation test is configured (``--neighbor-cloud``).
+
+    ``--same-controller`` only changes where that neighbor cloud's model is created
+    (on the target controller instead of a new one); it never enables CMR by itself
+    (enforced by ``pytest_configure``).
+    """
+    return bool(request.config.getoption("--neighbor-cloud"))
 
 
 @pytest.fixture(scope="session")
-def neighbor_cloud(
-    request: pytest.FixtureRequest, is_cmr_test: bool, same_controller: bool, target_cloud: str
-) -> str | None:
-    """Juju cloud for the neighbor model. Returns ``None`` in non-CMR tests.
-
-    In same-controller mode without ``--neighbor-cloud`` the neighbor model is placed on
-    the target cloud.
-    """
+def neighbor_cloud(request: pytest.FixtureRequest, is_cmr_test: bool) -> str | None:
+    """Juju cloud for the neighbor model. Returns ``None`` in non-CMR tests."""
     if not is_cmr_test:
         return None
     value = request.config.getoption("--neighbor-cloud")
-    if value:
-        assert isinstance(value, str)
-        return value
-    if same_controller:
-        return target_cloud
-    pytest.fail("--neighbor-cloud is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
 
 
 @pytest.fixture(scope="session")
