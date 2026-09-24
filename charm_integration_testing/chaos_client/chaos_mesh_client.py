@@ -111,11 +111,20 @@ class ChaosMeshChaosClient(ChaosClient):
             "metadata": {"name": name, "namespace": namespace},
             "spec": spec,
         }
-        self._backend.custom_objects_api.create_namespaced_custom_object(
-            group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, body=body
-        )
-        self._created.append((plural, namespace, name))
+        # Track before POST because the resource may exist even if the response is lost.
+        resource = (plural, namespace, name)
+        self._created.append(resource)
         self._scopes[name] = (model.uri, unit, path)
+        try:
+            self._backend.custom_objects_api.create_namespaced_custom_object(
+                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, body=body
+            )
+        except ApiException as error:
+            if error.status == 409:
+                # A conflicting resource belongs to an earlier create request.
+                self._created.remove(resource)
+                del self._scopes[name]
+            raise
 
     @staticmethod
     def _selector(namespace: str, application: str) -> dict[str, object]:

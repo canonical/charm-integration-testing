@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from chaos_client import ChaosMeshChaosClient, ChaosMeshNotInstalledError
+from chaos_client import ChaosMeshChaosClient, ChaosMeshNotInstalledError, MetaChaosClient
 from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
@@ -28,6 +28,94 @@ class BackendStub(KubernetesBackend):
 
     def crd_exists(self, name: str) -> bool:
         return name in self._crds
+
+
+class FailedCreateApi(FakeCustomObjectsApi):
+    def __init__(self, *, resource_exists: bool, error: Exception) -> None:
+        super().__init__()
+        self.resource_exists = resource_exists
+        self.error = error
+        self.resources: set[tuple[str, str, str]] = set()
+
+    def create_namespaced_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, body: dict[str, object]
+    ) -> None:
+        super().create_namespaced_custom_object(
+            group=group, version=version, namespace=namespace, plural=plural, body=body
+        )
+        metadata = body["metadata"]
+        assert isinstance(metadata, dict)
+        name = metadata["name"]
+        assert isinstance(name, str)
+        if self.resource_exists:
+            self.resources.add((plural, namespace, name))
+        raise self.error
+
+    def delete_namespaced_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, name: str
+    ) -> None:
+        super().delete_namespaced_custom_object(
+            group=group, version=version, namespace=namespace, plural=plural, name=name
+        )
+        resource = (plural, namespace, name)
+        if resource not in self.resources:
+            raise ApiException(status=404)
+        self.resources.remove(resource)
+
+
+class TestCreationFailureCleanup:
+    @pytest.mark.parametrize("resource_exists", [True, False], ids=["created", "not-created"])
+    @pytest.mark.parametrize("operation", ["stress_cpu", "io_latency"])
+    def test_timeout_retains_resource_for_teardown(self, resource_exists: bool, operation: str) -> None:
+        # GIVEN a POST that times out, with or without a resource on the server
+        error = TimeoutError("Lost create response")
+        api = FailedCreateApi(resource_exists=resource_exists, error=error)
+        backend = BackendStub()
+        backend.custom_objects_api = api
+        mesh = ChaosMeshChaosClient(backend)
+        client = MetaChaosClient([mesh])
+
+        # WHEN execution fails
+        with pytest.raises(TimeoutError) as exc_info:
+            if operation == "stress_cpu":
+                client.stress_cpu(TEST_MODEL, UNIT, workers=1, duration=timedelta(seconds=10))
+            else:
+                client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10))
+        assert exc_info.value is error
+        assert len(mesh._created) == 1
+        resource = mesh._created[0]
+        expected_path = "" if operation == "stress_cpu" else "/data"
+        assert mesh._scopes[resource[2]] == (TEST_MODEL.uri, UNIT, expected_path)
+
+        # THEN teardown deletes the recorded resource or tolerates its absence
+        client.cleanup_all()
+        assert [(call["plural"], call["namespace"], call["name"]) for call in api.delete_calls] == [resource]
+        assert api.resources == set()
+        assert mesh._created == []
+        assert mesh._scopes == {}
+        client.cleanup_all()
+        assert len(api.delete_calls) == 1
+
+    def test_conflict_does_not_delete_existing_resource(self) -> None:
+        # GIVEN a POST rejected because its resource name already exists
+        error = ApiException(status=409)
+        api = FailedCreateApi(resource_exists=True, error=error)
+        backend = BackendStub()
+        backend.custom_objects_api = api
+        mesh = ChaosMeshChaosClient(backend)
+        client = MetaChaosClient([mesh])
+
+        # WHEN execution fails and teardown runs
+        with pytest.raises(ApiException) as exc_info:
+            client.stress_cpu(TEST_MODEL, UNIT, workers=1, duration=timedelta(seconds=10))
+        client.cleanup_all()
+
+        # THEN the original error propagates and the conflicting resource remains
+        assert exc_info.value is error
+        assert api.delete_calls == []
+        assert len(api.resources) == 1
+        assert mesh._created == []
+        assert mesh._scopes == {}
 
 
 class TestConstruction:
