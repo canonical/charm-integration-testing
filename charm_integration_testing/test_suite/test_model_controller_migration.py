@@ -41,21 +41,23 @@ def test_model_controller_migration(
     # Wait migration to start
     juju_client.wait_for_model_to_exist(model=temp_model_ref, timeout=timedelta(minutes=15))
 
+    models_to_validate = [m for m in (temp_model_ref, neighbor_model_ref) if m is not None]
+
     # Wait until model is idle in new controller
-    juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers don't
     # restart after migration, hanging `juju exec`. K8s-only.
     if juju_backend.is_k8s_controller(temp_juju_controller):
         juju_client.reboot_model_controller(model=temp_model_ref)
-        juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
+        juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
 
     # The model kept its units and relation ids, but its controller name changed. The extension
     # re-keyed its tracked state on post_migrate_model, so the checkpoint finds the state
     # seeded before migration.
 
     # Validate all applications and relations AFTER migration
-    for model_ref in (m for m in (temp_model_ref, neighbor_model_ref) if m is not None):
+    for model_ref in models_to_validate:
         juju_client.validate_model(model=model_ref, level="deep")
 
     # Migrate the model back to the original controller
@@ -66,15 +68,17 @@ def test_model_controller_migration(
     # Wait migration to start
     juju_client.wait_for_model_to_exist(model=target_model_ref, timeout=timedelta(minutes=15))
 
+    models_to_validate_back = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
+
     # Wait until model is idle in old controller
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    juju_client.multi_model_idle_for_period(models_to_validate_back, timeout=timedelta(minutes=15))
 
     # Workaround for https://github.com/juju/juju/issues/22114: CAAS workers on the
     # original controller don't restart after the return migration. K8s-only.
     if juju_backend.is_k8s_controller(target_controller):
         juju_client.reboot_model_controller(model=target_model_ref)
-        juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+        juju_client.multi_model_idle_for_period(models_to_validate_back, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER second migration
-    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+    for model_ref in models_to_validate_back:
         juju_client.validate_model(model=model_ref, level="deep")
