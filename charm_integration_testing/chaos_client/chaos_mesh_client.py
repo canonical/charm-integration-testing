@@ -9,10 +9,10 @@ from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient
+from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
-_REQUIRED_CRDS = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org")
 
 
 class ChaosMeshNotInstalledError(RuntimeError):
@@ -21,12 +21,13 @@ class ChaosMeshNotInstalledError(RuntimeError):
 
 class ChaosMeshChaosClient(ChaosClient):
     def __init__(self, backend: KubernetesBackend):
-        missing = [crd for crd in _REQUIRED_CRDS if not backend.crd_exists(crd)]
-        if missing:
+        missing = missing_chaos_mesh_crds(backend)
+        if len(missing) == len(CHAOS_MESH_CRDS):
             raise ChaosMeshNotInstalledError(
                 f"Chaos Mesh is not fully installed on the target cluster (CRDs absent: {', '.join(missing)})."
             )
         self._backend = backend
+        self._missing_crds = frozenset(missing)
         self._scopes: dict[str, tuple[str, str, str]] = {}
         self._created: list[tuple[str, str, str]] = []  # (plural, namespace, name)
 
@@ -104,6 +105,9 @@ class ChaosMeshChaosClient(ChaosClient):
     def _create(
         self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]
     ) -> None:
+        crd = f"{plural}.{_GROUP}"
+        if crd in self._missing_crds:
+            raise NotImplementedError(f"{kind} experiments require the '{crd}' CRD.")
         namespace = model.model
         body: dict[str, object] = {
             "apiVersion": f"{_GROUP}/{_VERSION}",

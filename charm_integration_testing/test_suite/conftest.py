@@ -83,7 +83,6 @@ pytest_plugins = [
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
-    "test_suite.fixtures.chaos_mesh",
 ]
 
 

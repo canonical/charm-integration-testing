@@ -221,7 +221,7 @@ class TestModelKubernetesClient:
         assert result is kubernetes
         assert client.lookups == [TEST_MODEL.uri]
 
-    def test_preserves_offering_model_owner(self) -> None:
+    def test_preserves_model_owner(self) -> None:
         # GIVEN a model owned by a different user
         model = JujuModelHandle(controller="shared", model="litmus", owner="other-user")
         client = ModelLookupClientStub({model.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="litmus"))})

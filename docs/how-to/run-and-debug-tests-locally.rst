@@ -106,8 +106,8 @@ cloud, replacing hyphens in the cloud name with underscores. For example:
 
 The combined tool report runs once per session, when a test first requests
 ``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
-the report checks each configured Kubernetes cloud once. Neither chaos
-detector runs automatically for unrelated tests.
+the report checks each configured Kubernetes cloud once. Detection does not
+run automatically for unrelated tests.
 Litmus requires its three CRDs and a ready ``litmus`` Deployment in
 ``litmus-system``.
 The shared operator namespace is independent of the test model namespace.
@@ -143,6 +143,10 @@ Disk fill and network isolation do not require Litmus or Chaos Mesh.
 The native CPU and memory commands are not used as fallback for external
 pressure experiments.
 
+Chaos Mesh support is checked per experiment. CPU and memory pressure require
+the ``stresschaos.chaos-mesh.org`` CRD, while Disk I/O latency requires
+``iochaos.chaos-mesh.org``. Either CRD enables its corresponding experiments.
+
 Only unsupported operations permit fallback. If no implementation supports
 the requested experiment, that test is skipped. API and execution errors
 are reported as failures. Pending experiments are cleaned up at test teardown,
@@ -150,7 +154,9 @@ including after a failure or skip. Cleanup errors are reported as failures.
 Explicit ``cleanup(model, unit, path)`` calls remove disk fill or I/O latency
 resources for that path only. An empty path selects CPU and memory stress
 for the model and unit. ``cleanup_all()`` removes all pending experiments.
-Tests using ``require_chaos_mesh`` retain their existing ``StressChaos`` check.
+The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
+Tests request an experiment through this client instead of checking a specific
+tool first. Unsupported experiments skip when requested.
 
 Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and

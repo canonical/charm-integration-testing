@@ -134,6 +134,8 @@ ERROR failed to bootstrap model: creating controller stack: creating statefulset
 - ⚠️ K8s bootstrap limited by sandbox resource constraints (not a code issue)
 - ℹ️ Log collection phase never reached because bootstrap failed (expected behavior)
 
+---
+
 ## Critical Parameters
 
 These parameters MUST be included when reproducing test observer executions (matching charm-testing.yaml workflow):

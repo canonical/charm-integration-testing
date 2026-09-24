@@ -1,10 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from dataclasses import dataclass
 from datetime import timedelta
+from typing import Callable
 
 import pytest
-from chaos_client import ChaosMeshChaosClient, ChaosMeshNotInstalledError, MetaChaosClient
+from chaos_client import ChaosClient, ChaosMeshChaosClient, ChaosMeshNotInstalledError, MetaChaosClient
 from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
@@ -24,9 +26,14 @@ class BackendStub(KubernetesBackend):
         raise_on_delete: ApiException | None = None,
     ) -> None:
         self._crds = set(crds)
+        self.crd_errors: dict[str, ApiException] = {}
+        self.crd_reads: list[str] = []
         self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete)
 
     def crd_exists(self, name: str) -> bool:
+        self.crd_reads.append(name)
+        if name in self.crd_errors:
+            raise self.crd_errors[name]
         return name in self._crds
 
 
@@ -128,12 +135,20 @@ class TestConstruction:
         with pytest.raises(ChaosMeshNotInstalledError, match="stresschaos.chaos-mesh.org"):
             ChaosMeshChaosClient(BackendStub(crds=()))
 
-    def test_raises_when_iochaos_crd_is_missing(self) -> None:
-        # GIVEN a backend stub with only the stresschaos CRD present
-        # WHEN constructing a ChaosMeshChaosClient
-        # THEN a ChaosMeshNotInstalledError is raised naming the missing CRD
-        with pytest.raises(ChaosMeshNotInstalledError, match="iochaos"):
-            ChaosMeshChaosClient(BackendStub(crds=("stresschaos.chaos-mesh.org",)))
+    @pytest.mark.parametrize("status", [401, 403, 500])
+    @pytest.mark.parametrize("stress_present", [False, True])
+    def test_crd_api_error_propagates(self, status: int, stress_present: bool) -> None:
+        # GIVEN an IOChaos lookup failure, regardless of StressChaos availability
+        backend = BackendStub(crds=("stresschaos.chaos-mesh.org",) if stress_present else ())
+        error = ApiException(status=status)
+        backend.crd_errors["iochaos.chaos-mesh.org"] = error
+
+        # WHEN constructing a client, THEN the error is not treated as an absent CRD
+        with pytest.raises(ApiException) as exc_info:
+            ChaosMeshChaosClient(backend)
+        assert exc_info.value is error
+        assert backend.crd_reads == ["stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org"]
+        assert backend.custom_objects_api.create_calls == []
 
     def test_succeeds_when_chaos_mesh_is_present(self) -> None:
         # GIVEN a backend stub with the Chaos Mesh CRD present
@@ -142,6 +157,83 @@ class TestConstruction:
 
         # THEN no CRs are tracked yet
         assert client._created == []
+
+
+class TestExperimentAvailability:
+    @dataclass(frozen=True)
+    class Params:
+        operation: str
+        plural: str
+        invoke: Callable[[ChaosClient], None]
+        path: str = ""
+
+    test_cases = [
+        Params("cpu", "stresschaos", lambda client: client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))),
+        Params(
+            "memory",
+            "stresschaos",
+            lambda client: client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=10)),
+        ),
+        Params(
+            "io",
+            "iochaos",
+            lambda client: client.io_latency(
+                TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10)
+            ),
+            "/data",
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.operation)
+    @pytest.mark.parametrize(
+        "crds",
+        [
+            ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org"),
+            ("stresschaos.chaos-mesh.org",),
+            ("iochaos.chaos-mesh.org",),
+        ],
+        ids=["both", "stress-only", "io-only"],
+    )
+    def test_only_supported_experiments_create_resources(self, params: Params, crds: tuple[str, ...]) -> None:
+        # GIVEN a client with all or some experiment CRDs
+        backend = BackendStub(crds=crds)
+        client = ChaosMeshChaosClient(backend)
+        api = backend.custom_objects_api
+
+        # WHEN an experiment is requested
+        if f"{params.plural}.chaos-mesh.org" in crds:
+            params.invoke(client)
+            client.cleanup(TEST_MODEL, UNIT, params.path)
+
+            # THEN supported resources are created and cleaned up
+            assert [call["plural"] for call in api.create_calls] == [params.plural]
+            assert [call["plural"] for call in api.delete_calls] == [params.plural]
+        else:
+            with pytest.raises(NotImplementedError, match=params.plural):
+                params.invoke(client)
+            client.cleanup(TEST_MODEL, UNIT, params.path)
+
+            # THEN unsupported operations leave no resources or cleanup work
+            assert api.create_calls == []
+            assert api.delete_calls == []
+        assert client._created == []
+        assert client._scopes == {}
+
+    def test_missing_capability_falls_back_to_next_client(self) -> None:
+        # GIVEN stress-only Mesh followed by a client capable of I/O latency
+        first = BackendStub(crds=("stresschaos.chaos-mesh.org",))
+        second = BackendStub(crds=("iochaos.chaos-mesh.org",))
+        client = MetaChaosClient([ChaosMeshChaosClient(first), ChaosMeshChaosClient(second)])
+
+        # WHEN requesting latency and cleaning up
+        client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10))
+        client.cleanup_all()
+
+        # THEN only the supporting client creates and cleans up a resource
+        assert first.custom_objects_api.create_calls == []
+        assert first.custom_objects_api.delete_calls == []
+        assert [call["plural"] for call in second.custom_objects_api.create_calls] == ["iochaos"]
+        assert [call["plural"] for call in second.custom_objects_api.delete_calls] == ["iochaos"]
 
 
 class TestStressCpu:

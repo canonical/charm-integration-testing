@@ -21,18 +21,21 @@ class BackendStub(KubernetesBackend):
 
 
 class TestChaosMeshIsAvailable:
-    @pytest.mark.parametrize("missing_crd", [None, *CHAOS_MESH_CRDS])
-    def test_requires_both_crds(self, missing_crd: str | None) -> None:
-        # GIVEN the required CRDs, optionally missing one
+    @pytest.mark.parametrize(
+        "crds",
+        [CHAOS_MESH_CRDS, ("stresschaos.chaos-mesh.org",), ("iochaos.chaos-mesh.org",), ()],
+        ids=["both", "stress-only", "io-only", "neither"],
+    )
+    def test_requires_at_least_one_crd(self, crds: tuple[str, ...]) -> None:
+        # GIVEN a cluster with the specified CRDs
         backend = BackendStub()
-        if missing_crd is not None:
-            backend.crds.remove(missing_crd)
+        backend.crds = set(crds)
 
         # WHEN checking Chaos Mesh availability
         result = chaos_mesh_is_available(backend)
 
-        # THEN both CRDs are required and checked
-        assert result is (missing_crd is None)
+        # THEN either CRD permits experiments, but both are checked
+        assert result is bool(crds)
         assert backend.crd_reads == list(CHAOS_MESH_CRDS)
 
     @pytest.mark.parametrize("status", [401, 403, 500])
@@ -75,6 +78,10 @@ class TestChaosMeshIsAvailable:
         backend.crds.update(CHAOS_MESH_CRDS)
         assert chaos_mesh_is_available(backend) is True
 
-        # WHEN IOChaos is removed, THEN detection reports incomplete availability
+        # WHEN IOChaos is removed, THEN stress experiments remain available
         backend.crds.remove("iochaos.chaos-mesh.org")
+        assert chaos_mesh_is_available(backend) is True
+
+        # WHEN StressChaos is also removed, THEN no experiments remain available
+        backend.crds.clear()
         assert chaos_mesh_is_available(backend) is False

@@ -170,11 +170,18 @@ class TestAvailableChaosTools:
             expected=frozenset(),
         ),
         Params(
-            label="incomplete-mesh",
+            label="stress-only-mesh",
             litmus_crd=False,
             operator_ready=False,
             mesh_crds=CHAOS_MESH_CRDS[:1],
-            expected=frozenset(),
+            expected=frozenset({ChaosTool.CHAOS_MESH}),
+        ),
+        Params(
+            label="io-only-mesh",
+            litmus_crd=False,
+            operator_ready=False,
+            mesh_crds=("iochaos.chaos-mesh.org",),
+            expected=frozenset({ChaosTool.CHAOS_MESH}),
         ),
     ]
 
@@ -443,6 +450,60 @@ class TestInitialDetectionFixture:
 
 
 class TestExperimentClients:
+    @pytest.mark.parametrize(
+        "crds",
+        [CHAOS_MESH_CRDS, ("stresschaos.chaos-mesh.org",), ("iochaos.chaos-mesh.org",), ()],
+        ids=["both", "stress-only", "io-only", "neither"],
+    )
+    def test_partial_installation_skips_only_unsupported_experiments(self, crds: tuple[str, ...]) -> None:
+        # GIVEN the target model with all, some or none of the Chaos Mesh CRDs
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update(crds)
+        client = chaos_client_for_model(backend, TARGET)
+        duration = timedelta(seconds=10)
+
+        # WHEN requesting each experiment through the common client
+        if "stresschaos.chaos-mesh.org" in crds:
+            client.stress_cpu(TARGET, "postgresql/0", 1, duration)
+            client.stress_memory(TARGET, "postgresql/0", 1, 128, duration)
+        else:
+            with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
+                client.stress_cpu(TARGET, "postgresql/0", 1, duration)
+            with pytest.raises(pytest.skip.Exception, match="stress_memory"):
+                client.stress_memory(TARGET, "postgresql/0", 1, 128, duration)
+
+        if "iochaos.chaos-mesh.org" in crds:
+            client.io_latency(TARGET, "postgresql/0", "/data", timedelta(seconds=1), 50, duration)
+        else:
+            with pytest.raises(pytest.skip.Exception, match="io_latency"):
+                client.io_latency(TARGET, "postgresql/0", "/data", timedelta(seconds=1), 50, duration)
+        client.cleanup_all()
+
+        # THEN supported experiments are cleaned up and unsupported ones have no side effects
+        expected = ["stresschaos"] * (2 if "stresschaos.chaos-mesh.org" in crds else 0)
+        if "iochaos.chaos-mesh.org" in crds:
+            expected.append("iochaos")
+        api = backend.kubernetes.custom_objects_api
+        assert [call["plural"] for call in api.create_calls] == expected
+        assert [call["plural"] for call in api.delete_calls] == list(reversed(expected))
+        assert backend.exec_calls == []
+
+    def test_neighbor_installation_does_not_satisfy_target(self) -> None:
+        # GIVEN Mesh installed only on the neighbor's cluster
+        backend = JujuBackendStub()
+        neighbor = KubernetesStub()
+        neighbor.crds.update(CHAOS_MESH_CRDS)
+        backend.clients[NEIGHBOR.uri] = KubernetesClient(neighbor)
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN requesting target stress, THEN the neighbor is not used as a fallback
+        with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
+            client.stress_cpu(TARGET, "postgresql/0", 1, timedelta(seconds=10))
+        client.cleanup_all()
+        assert backend.resolutions == [TARGET.uri]
+        assert neighbor.crd_reads == []
+        assert neighbor.custom_objects_api.create_calls == []
+
     def test_failed_network_creation_does_not_delete_existing_policy(self) -> None:
         # GIVEN a policy creation conflict
         error = ApiException(status=409)
@@ -548,9 +609,12 @@ class TestExperimentClients:
             client.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
         assert backend.exec_calls == []
 
-    def test_external_pressure_does_not_fall_back_to_native_stress(self) -> None:
-        # GIVEN a Kubernetes model without Chaos Mesh
+    @pytest.mark.parametrize("machine", [False, True], ids=["kubernetes", "machine"])
+    def test_external_pressure_does_not_fall_back_to_native_stress(self, machine: bool) -> None:
+        # GIVEN a model without a supported external pressure client
         backend = JujuBackendStub()
+        if machine:
+            backend.clients[TARGET.uri] = None
         client = chaos_client_for_model(backend, TARGET)
 
         # WHEN requesting pressure, THEN workload-local stress-ng is not used
@@ -559,6 +623,8 @@ class TestExperimentClients:
         with pytest.raises(pytest.skip.Exception, match="stress_memory"):
             client.stress_memory(TARGET, "postgresql/0", 2, 128, timedelta(seconds=30))
         assert backend.exec_calls == []
+        if machine:
+            assert backend.kubernetes.crd_reads == []
 
     @pytest.mark.parametrize("status", [401, 403, 500])
     def test_api_errors_are_not_skipped(self, status: int) -> None:
@@ -662,7 +728,7 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
         from juju import JujuModelHandle
         from kubernetes_client import KubernetesBackend, KubernetesClient
 
-        pytest_plugins = ["test_suite.fixtures.chaos_tools", "test_suite.fixtures.chaos_mesh"]
+        pytest_plugins = ["test_suite.fixtures.chaos_tools", "test_suite.scheduler.plugin"]
         TARGET = JujuModelHandle(controller="target-controller", model="target-model")
         CALLS = Path(__file__).with_name("api_calls.log")
 
@@ -670,14 +736,6 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
         def record(operation):
             with CALLS.open("a") as stream:
                 stream.write(operation + "\\n")
-
-
-        def pytest_addoption(parser):
-            parser.addoption("--current-state", default="deployed")
-            parser.addoption("--target-cloud", default="target")
-            parser.addoption("--target-platform", default="kubernetes")
-            parser.addoption("--neighbor-cloud", default=None)
-            parser.addoption("--neighbor-platform", default=None)
 
 
         class ApiClientStub:
@@ -710,17 +768,6 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
                 return KubernetesClient(BackendStub())
 
 
-        @pytest.fixture(scope="session", autouse=True)
-        def client_boundary():
-            def create_client(kubeconfig):
-                record("client creation")
-                return BackendStub()
-
-            with pytest.MonkeyPatch.context() as patch:
-                patch.setattr(KubernetesBackend, "k8s_client", staticmethod(create_client))
-                yield
-
-
         @pytest.fixture(scope="session")
         def logger():
             return logging.getLogger("chaos-tools-wiring-test")
@@ -733,17 +780,12 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
 
         @pytest.fixture(scope="session")
         def cloud_kubeconfigs():
-            return {"target": Path("/test/target.yaml")}
+            return {}
 
 
         @pytest.fixture(scope="session")
         def target_cloud():
             return "target"
-
-
-        @pytest.fixture(scope="session")
-        def target_platform():
-            return "kubernetes"
 
 
         @pytest.fixture(scope="session")
@@ -770,7 +812,7 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
 
 
 def test_detection_runs_only_when_a_chaos_fixture_is_requested(chaos_pytester: pytest.Pytester) -> None:
-    # GIVEN both chaos plugins and a backend that records every Kubernetes query
+    # GIVEN the common chaos plugin and a backend that records every Kubernetes query
     pytester = chaos_pytester
     calls_path = pytester.path / "api_calls.log"
     pytester.makepyfile(
@@ -791,32 +833,72 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(chaos_pytester: p
             pytest.fail("Unsupported experiments must skip")
 
 
-        def test_mesh_only(require_chaos_mesh):
-            pytest.fail("Missing Chaos Mesh must skip before running the test")
+        def test_stress_only(require_chaos_tool, target_model_ref):
+            from datetime import timedelta
+
+            require_chaos_tool.stress_cpu(target_model_ref, "postgresql/0", 1, timedelta(seconds=10))
+            pytest.fail("Unsupported experiments must skip")
         """
     )
 
     # WHEN only the unrelated test runs
-    unrelated_only = pytester.runpytest("-k", "test_native_without_chaos_tools", "--log-cli-level=INFO")
+    unrelated_only = pytester.runpytest(
+        "-k", "test_native_without_chaos_tools", "--current-state=deployed", "--log-cli-level=INFO"
+    )
 
-    # THEN neither plugin queries Kubernetes
+    # THEN the plugin does not query Kubernetes
     unrelated_only.assert_outcomes(passed=1)
     assert not calls_path.exists()
     assert "Initial chaos tools" not in unrelated_only.stdout.str()
-    assert "Chaos Mesh on cloud" not in unrelated_only.stdout.str()
 
     # WHEN two tool-dependent tests run in the same session
-    with_chaos_tests = pytester.runpytest("-k", "test_chaos_only or test_mesh_only", "--log-cli-level=INFO")
+    with_chaos_tests = pytester.runpytest(
+        "-k", "test_chaos_only or test_stress_only", "--current-state=deployed", "--log-cli-level=INFO"
+    )
 
-    # THEN both skip, with one report per detector and fresh prerequisite checks
+    # THEN both skip, with one session report and fresh checks for each client
     with_chaos_tests.assert_outcomes(skipped=2)
     calls = calls_path.read_text().splitlines()
     assert calls.count("chaosengines.litmuschaos.io") == 1
-    assert calls.count("stresschaos.chaos-mesh.org") == 4
-    assert calls.count("client creation") == 2
-    assert calls.count("close") == 2
+    assert calls.count("stresschaos.chaos-mesh.org") == 3
+    assert calls.count("iochaos.chaos-mesh.org") == 3
+    assert calls.count("close") == 0
     assert with_chaos_tests.stdout.str().count("Initial chaos tools for target-controller:target-model: none.") == 1
-    assert with_chaos_tests.stdout.str().count("Chaos Mesh on cloud target: not installed") == 1
+
+
+def test_unsupported_experiment_preserves_other_tests_and_scheduler(chaos_pytester: pytest.Pytester) -> None:
+    # GIVEN scheduled tests and no installed chaos operators
+    pytester = chaos_pytester
+    pytester.makepyfile(
+        """
+        from datetime import timedelta
+
+        import pytest
+        from test_suite.scheduler.states import State
+
+
+        @pytest.mark.state(requires=State.DEPLOYED)
+        def test_missing_stress(require_chaos_tool, target_model_ref):
+            require_chaos_tool.stress_cpu(target_model_ref, "postgresql/0", 1, timedelta(seconds=10))
+            pytest.fail("Unsupported experiments must skip")
+
+
+        @pytest.mark.state(requires=State.DEPLOYED)
+        def test_next_state_test():
+            pass
+
+
+        def test_unrelated():
+            pass
+        """
+    )
+
+    # WHEN the unsupported experiment skips
+    result = pytester.runpytest("--current-state=deployed", "-v", "-rs")
+
+    # THEN the scheduler continues in the same state and other tests still run
+    result.assert_outcomes(passed=2, skipped=1)
+    result.stdout.fnmatch_lines(["*test_missing_stress SKIPPED*", "*test_next_state_test PASSED*"])
 
 
 def test_experiments_are_cleaned_up_after_failure_skip_and_success(chaos_pytester: pytest.Pytester) -> None:
@@ -848,7 +930,7 @@ def test_experiments_are_cleaned_up_after_failure_skip_and_success(chaos_pyteste
     )
 
     # WHEN experiments precede a test failure, skip, or success
-    lifecycle = pytester.runpytest("-k", "test_disk_", "--log-cli-level=INFO")
+    lifecycle = pytester.runpytest("-k", "test_disk_", "--current-state=deployed", "--log-cli-level=INFO")
 
     # THEN teardown removes each experiment's file in all three cases
     lifecycle.assert_outcomes(passed=1, failed=1, skipped=1)

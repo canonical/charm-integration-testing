@@ -30,7 +30,7 @@ class ChaosCleanupError(RuntimeError):
 class _CleanupAction:
     scope: tuple[str, str]
     path: str
-    run: Callable[[str], None]
+    run: Callable[[], None]
 
 
 class MetaChaosClient(ChaosClient):
@@ -51,7 +51,7 @@ class MetaChaosClient(ChaosClient):
         self._dispatch(
             "fill_disk",
             lambda tool: tool.fill_disk(model, unit, path, size_mb),
-            lambda tool: _CleanupAction((model.uri, unit), path, lambda _: tool.cleanup(model, unit, path)),
+            lambda tool: self._experiment_cleanup(tool, model, unit, path),
             self._cleanups,
         )
 
@@ -91,7 +91,7 @@ class MetaChaosClient(ChaosClient):
         self._dispatch(
             "isolate_network",
             lambda tool: tool.isolate_network(model, unit),
-            lambda tool: _CleanupAction((model, unit), "", lambda _: tool.remove_network_isolation(model, unit)),
+            lambda tool: _CleanupAction((model, unit), "", lambda: tool.remove_network_isolation(model, unit)),
             self._network_cleanups,
         )
 
@@ -115,7 +115,7 @@ class MetaChaosClient(ChaosClient):
 
     @staticmethod
     def _experiment_cleanup(tool: ChaosClient, model: JujuModelHandle, unit: str, path: str = "") -> _CleanupAction:
-        return _CleanupAction((model.uri, unit), path, lambda _: tool.cleanup(model, unit, path))
+        return _CleanupAction((model.uri, unit), path, lambda: tool.cleanup(model, unit, path))
 
     def _dispatch(
         self,
@@ -145,7 +145,7 @@ class MetaChaosClient(ChaosClient):
             if scope is not None and (action.scope != scope or action.path != path):
                 continue
             try:
-                action.run(path)
+                action.run()
             except Exception as error:
                 # Keep failed actions for retry and continue cleanup.
                 errors.append(error)
