@@ -160,6 +160,8 @@ def _validate_url_syntax(url: str) -> ValidationCheck:
             parsed.scheme not in ("http", "https")
             or not parsed.netloc
             or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
             or any(character.isspace() for character in url)
         ):
             raise ValueError(f"Scheme '{parsed.scheme}' is not http/https or host is missing.")
@@ -335,6 +337,9 @@ def _catalogue_field_matches(field: str, actual: Any, expected: str) -> bool:
         return False
     return (
         actual_url.scheme == expected_url.scheme
+        and actual_url.port == expected_url.port
+        and actual_url.username == expected_url.username
+        and actual_url.password == expected_url.password
         and actual_url.path == expected_url.path
         and actual_url.params == expected_url.params
         and actual_url.query == expected_url.query

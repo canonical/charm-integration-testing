@@ -102,6 +102,7 @@ class TestValidateUrlSyntax:
     def test_invalid_hostname_or_port(self) -> None:
         assert not _validate_url_syntax("http://:9093").passed
         assert not _validate_url_syntax("http://example.com:abc").passed
+        assert not _validate_url_syntax("http://user:password@example.com").passed
         assert not _validate_url_syntax("http://example.com/a b").passed
 
     def test_missing_host(self) -> None:
@@ -158,6 +159,17 @@ class TestValidateItemServed:
             ]
         }
         assert _validate_item_served(payload, VALID_DATABAG).passed
+
+    def test_provider_port_override_is_rejected(self) -> None:
+        payload = {
+            "apps": [
+                {
+                    **VALID_PAYLOAD["apps"][0],
+                    "url": "http://public.example.test:8443",
+                }
+            ]
+        }
+        assert not _validate_item_served(payload, VALID_DATABAG).passed
 
 
 # ---------------------------------------------------------------------------
