@@ -16,15 +16,15 @@ from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 _REQUIRED_FIELDS = ("entity_id",)
-_SSO_ENDPOINTS = (
-    ("single_sign_on_service_redirect_url", "single_sign_on_service_redirect_binding"),
-    ("single_sign_on_service_post_url", "single_sign_on_service_post_binding"),
-)
 _HTTP_TIMEOUT = 10
 _MAX_METADATA_BYTES = 1024 * 1024
 _REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 _POST_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
 _SAML_METADATA_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:metadata"
+_SSO_ENDPOINTS = (
+    ("single_sign_on_service_redirect_url", "single_sign_on_service_redirect_binding", _REDIRECT_BINDING),
+    ("single_sign_on_service_post_url", "single_sign_on_service_post_binding", _POST_BINDING),
+)
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -50,8 +50,8 @@ class SamlValidator(BaseValidator):
         if not checks[0].passed:
             return self._fail_result(level, checks)
         checks.append(_entity_id_check(self.databag["entity_id"]))
-        endpoint_url, endpoint_binding = _select_sso_endpoint(self.databag)
-        if endpoint_url is None or endpoint_binding is None:
+        endpoint_url, endpoint_binding, expected_binding = _select_sso_endpoint(self.databag)
+        if endpoint_url is None or endpoint_binding is None or expected_binding is None:
             checks.append(
                 ValidationCheck(
                     name="sso_endpoint",
@@ -63,7 +63,7 @@ class SamlValidator(BaseValidator):
             checks.extend(
                 [
                     _url_check("single_sign_on_service_url", endpoint_url),
-                    _binding_check(endpoint_binding),
+                    _binding_check(endpoint_binding, expected_binding),
                 ]
             )
         if self.databag.get("x509certs"):
@@ -91,13 +91,13 @@ def _url_check(name: str, value: str) -> ValidationCheck:
     )
 
 
-def _select_sso_endpoint(databag: dict[str, str]) -> tuple[str | None, str | None]:
-    for url_field, binding_field in _SSO_ENDPOINTS:
+def _select_sso_endpoint(databag: dict[str, str]) -> tuple[str | None, str | None, str | None]:
+    for url_field, binding_field, expected_binding in _SSO_ENDPOINTS:
         url = databag.get(url_field)
         binding = databag.get(binding_field)
         if url or binding:
-            return url, binding
-    return None, None
+            return url, binding, expected_binding
+    return None, None, None
 
 
 def _entity_id_check(value: str) -> ValidationCheck:
@@ -121,8 +121,8 @@ def _entity_id_check(value: str) -> ValidationCheck:
     )
 
 
-def _binding_check(value: str) -> ValidationCheck:
-    passed = value in (_REDIRECT_BINDING, _POST_BINDING)
+def _binding_check(value: str, expected: str) -> ValidationCheck:
+    passed = value == expected
     return ValidationCheck(
         name="binding",
         passed=passed,
