@@ -199,9 +199,9 @@ to place the neighbor model:
 
 - **Same controller** — pass ``--same-controller --neighbor-cloud <cloud>``. The
   neighbor model is created on the target controller (registering ``<cloud>`` there
-  first if it differs from ``--target-cloud`` and is a Kubernetes cloud), so only one
-  controller is bootstrapped. This is the cheapest CMR variant and is what the
-  same-platform/same-controller and multi-cloud-controller test matrix cells use.
+  first if it differs from ``--target-cloud``), so only one controller is bootstrapped.
+  This is the cheapest CMR variant and is what the same-platform/same-controller and
+  multi-cloud-controller test matrix cells use.
 
   .. code:: bash
 
@@ -221,14 +221,21 @@ to place the neighbor model:
   second controller is bootstrapped on that cloud and the neighbor model is created
   there.
 
-When a same-controller run names a different Kubernetes ``--neighbor-cloud`` than
+When a same-controller run names a different ``--neighbor-cloud`` than
 ``--target-cloud``, the suite registers that cloud on the target controller before
-creating the neighbor model. The kubeconfig for the cloud must be exported via
-``KUBECONFIG_<cloud>`` (hyphens replaced with underscores, e.g.
-``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller`` so no
-client-only registration is needed.
+creating the neighbor model:
+
+- For a Kubernetes ``--neighbor-cloud``, export its kubeconfig via
+  ``KUBECONFIG_<cloud>`` (hyphens replaced with underscores, e.g.
+  ``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller`` so no
+  client-only registration is needed.
+- For any other ``--neighbor-cloud`` (e.g. OpenStack, LXD, manual), export the cloud
+  definition and credentials YAML file paths via ``CLOUD_DEFINITION_<cloud>`` and
+  ``CLOUD_CREDENTIALS_<cloud>``; they are passed to ``juju add-cloud --controller`` and
+  ``juju add-credential --controller`` respectively.
 
 In same-controller mode the neighbor model name is still generated separately, so the
 two models remain distinct. ``--neighbor-controller`` must not be passed alongside
 ``--same-controller``.
+
 

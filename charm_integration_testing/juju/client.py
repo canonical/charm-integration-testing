@@ -473,6 +473,10 @@ class JujuClient:
         self.logger.info(f"Registering Kubernetes cloud '{cloud}' on controller '{controller}'.")
         self.backend.add_k8s_cloud(cloud=cloud, controller=controller)
 
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")
+        self.backend.add_cloud(cloud=cloud, controller=controller)
+
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")
 

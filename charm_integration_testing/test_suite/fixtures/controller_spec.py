@@ -12,25 +12,25 @@ from utils import generate_juju_name
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 
-def needs_same_controller_k8s_cloud(
+def needs_same_controller_cloud_registration(
     *,
     is_cmr_test: bool,
     same_controller: bool,
     neighbor_cloud: str | None,
     target_cloud: str,
-    neighbor_platform: str,
 ) -> bool:
     """True when the neighbor cloud must be registered on the target controller.
 
     Same-controller mode (SQT-884: different platforms, same controller) shares a
     single controller between the target and neighbor models. If the neighbor lives on
-    a different, Kubernetes cloud than the target, that cloud is not yet known to the
-    controller and must be registered before a neighbor model can be created on it.
-    Used both right after a fresh bootstrap (``test_bootstrap_controller``) and, when
+    a different cloud than the target, that cloud is not yet known to the controller
+    and must be registered (via ``add_k8s_cloud`` for Kubernetes or ``add_cloud`` for
+    other platforms, e.g. OpenStack) before a neighbor model can be created on it. Used
+    both right after a fresh bootstrap (``test_bootstrap_controller``) and, when
     ``--current-state`` reuses a pre-existing controller, before the first test that
     needs the cloud (``register_preexisting_neighbor_cloud`` in ``conftest.py``).
     """
-    return is_cmr_test and same_controller and neighbor_cloud != target_cloud and neighbor_platform == "kubernetes"
+    return is_cmr_test and same_controller and neighbor_cloud != target_cloud
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -99,18 +99,6 @@ def pytest_configure(config: pytest.Config) -> None:
                 "CMR requires two distinct Juju models.",
                 returncode=4,
             )
-        if same_controller:
-            target_cloud = config.getoption("--target-cloud", default=None)
-            neighbor_platform = config.getoption("--neighbor-platform", default=None) or config.getoption(
-                "--target-platform", default=None
-            )
-            if cloud != target_cloud and neighbor_platform != "kubernetes":
-                pytest.exit(
-                    f"--same-controller with a different --neighbor-cloud ('{cloud}') is only "
-                    f"supported for Kubernetes neighbor platforms (got '{neighbor_platform}').",
-                    returncode=4,
-                )
-
     raw_state = config.getoption("--current-state", default=None)
     if raw_state:
         try:

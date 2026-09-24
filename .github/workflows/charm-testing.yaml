@@ -364,6 +364,10 @@ jobs:
         env:
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
+          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
+          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
+          CLOUD_DEFINITION_neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-definition-path }}
+          CLOUD_CREDENTIALS_neighbor_cloud: ${{ steps.setup_neighbor.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           neighbor_cloud: ${{ (inputs.same_controller && inputs.neighbor_environment
             == inputs.target_environment) && steps.setup_target.outputs.cloud-name

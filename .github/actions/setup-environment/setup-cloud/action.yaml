@@ -26,6 +26,14 @@ outputs:
     description: Path to the kubeconfig file written to disk (k8s only; empty string
       for o7k).
     value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+  cloud-definition-path:
+    description: Path to the cloud definition YAML file written to disk (o7k only;
+      empty string for k8s).
+    value: ${{ steps.setup-o7k.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to the credentials YAML file written to disk (o7k only; empty
+      string for k8s).
+    value: ${{ steps.setup-o7k.outputs.credentials-path }}
 runs:
   using: composite
   steps:

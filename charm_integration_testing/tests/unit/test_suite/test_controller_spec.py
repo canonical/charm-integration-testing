@@ -223,8 +223,9 @@ def test_configure_requires_neighbor_controller_for_cross_controller_existing_st
         controller_spec.pytest_configure(cast(pytest.Config, config))
 
 
-def test_configure_rejects_same_controller_non_k8s_neighbor_cloud() -> None:
-    # GIVEN --same-controller with a different neighbor cloud on a non-Kubernetes platform
+def test_configure_accepts_same_controller_non_k8s_neighbor_cloud() -> None:
+    # GIVEN --same-controller with a different neighbor cloud on a non-Kubernetes
+    # platform (e.g. OpenStack) -- supported via the generic add_cloud registration
     config = ConfigStub(
         {
             "--same-controller": True,
@@ -235,9 +236,8 @@ def test_configure_rejects_same_controller_non_k8s_neighbor_cloud() -> None:
     )
 
     # WHEN validating the options
-    # THEN the unsupported combination is rejected
-    with pytest.raises(pytest.exit.Exception, match="only supported for Kubernetes neighbor platforms"):
-        controller_spec.pytest_configure(cast(pytest.Config, config))
+    # THEN validation passes
+    controller_spec.pytest_configure(cast(pytest.Config, config))
 
 
 def test_configure_accepts_same_controller_k8s_neighbor_cloud() -> None:
@@ -257,39 +257,37 @@ def test_configure_accepts_same_controller_k8s_neighbor_cloud() -> None:
 
 
 @pytest.mark.parametrize(
-    ("is_cmr_test", "same_controller", "neighbor_cloud", "target_cloud", "neighbor_platform", "expected"),
+    ("is_cmr_test", "same_controller", "neighbor_cloud", "target_cloud", "expected"),
     [
-        # Same-controller, different Kubernetes cloud: registration is needed.
-        (True, True, "k8s-cloud", "lxd", "kubernetes", True),
+        # Same-controller, different cloud: registration is needed (Kubernetes or not;
+        # the caller dispatches to add_k8s_cloud vs add_cloud based on platform).
+        (True, True, "k8s-cloud", "lxd", True),
+        (True, True, "openstack-cloud", "lxd", True),
         # Same-controller, same cloud: nothing to register.
-        (True, True, "lxd", "lxd", "kubernetes", False),
-        # Same-controller, different non-Kubernetes cloud: not supported (rejected earlier).
-        (True, True, "openstack-cloud", "lxd", "machine", False),
+        (True, True, "lxd", "lxd", False),
         # Cross-controller CMR: the neighbor cloud is registered client-side, not on the
         # (different) neighbor controller.
-        (True, False, "k8s-cloud", "lxd", "kubernetes", False),
+        (True, False, "k8s-cloud", "lxd", False),
         # Non-CMR: no neighbor cloud at all.
-        (False, False, None, "lxd", "machine", False),
+        (False, False, None, "lxd", False),
     ],
 )
-def test_needs_same_controller_k8s_cloud(
+def test_needs_same_controller_cloud_registration(
     is_cmr_test: bool,
     same_controller: bool,
     neighbor_cloud: str | None,
     target_cloud: str,
-    neighbor_platform: str,
     expected: bool,
 ) -> None:
     # GIVEN the various CMR topologies same-controller mode can be combined with
     # WHEN checking whether the neighbor cloud needs registering on the target controller
-    # THEN only the same-controller, different-Kubernetes-cloud case needs it
+    # THEN only the same-controller, different-cloud case needs it
     assert (
-        controller_spec.needs_same_controller_k8s_cloud(
+        controller_spec.needs_same_controller_cloud_registration(
             is_cmr_test=is_cmr_test,
             same_controller=same_controller,
             neighbor_cloud=neighbor_cloud,
             target_cloud=target_cloud,
-            neighbor_platform=neighbor_platform,
         )
         is expected
     )
