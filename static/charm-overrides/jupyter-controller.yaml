@@ -2,7 +2,11 @@
 # Source: https://github.com/canonical/notebook-operators
 overrides:
   - criteria:
-      - ubuntu_version: '24.04'
+      - any_of:
+          - track: '1.11'
+          - track: latest
+            risk: edge
+            ubuntu_version: '24.04'
     provides:
       provide-cmr-mesh:
         optional: true  # cross-model service-mesh helper; metadata.yaml limits it to CMR deployments
