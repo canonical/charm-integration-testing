@@ -165,12 +165,28 @@ class TestValidationStatusStore:
 
         harness.cleanup()
 
-    def test_record_with_no_results_clears_status(self) -> None:
+    def test_record_with_no_results_preserves_prior_blocked_status(self) -> None:
+        # An empty result list can mean the check didn't actually run at all
+        # (e.g. the expected validator package failed to be discovered), so
+        # it must not be treated as evidence of a pass.
         harness = ops.testing.Harness(_MinimalCharm)
         harness.begin()
         store = ValidationStatusStore(harness.charm)
         store._stored.kind = "blocked"
         store._stored.message = "stale failure"
+
+        store.record([])
+
+        status = store.status()
+        assert isinstance(status, ops.BlockedStatus)
+        assert status.message == "stale failure"
+
+        harness.cleanup()
+
+    def test_record_with_no_results_and_no_prior_status_stays_clear(self) -> None:
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
 
         store.record([])
 

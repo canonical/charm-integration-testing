@@ -50,17 +50,20 @@ class ValidationStatusStore(Object):
         """Record the outcome of *results*.
 
         Sets a Blocked status if any result is FAIL/ERROR. Otherwise, clears
-        any prior failure only once every result is a genuine PASS: a
-        SKIPPED result (e.g. a relation that hasn't negotiated data yet)
-        leaves a previously recorded failure in place, since it means the
-        check didn't actually re-run to confirm the problem is resolved.
+        any prior failure only once every result is a genuine PASS. An empty
+        or all-SKIPPED *results* leaves a previously recorded failure in
+        place rather than clearing it: an empty list can mean the check
+        didn't actually run at all (e.g. the expected validator package
+        failed to be discovered), and a SKIPPED result means the check
+        didn't actually re-run to confirm the problem is resolved - neither
+        is evidence the failure is resolved.
         """
         failing = [r for r in results if r.status in ("FAIL", "ERROR")]
         if failing:
             summary = "; ".join(f"{r.endpoint} ({r.interface}): {r.status}" for r in failing)
             self._stored.kind = "blocked"
             self._stored.message = f"Integration check failed: {summary}"
-        elif all(r.status == "PASS" for r in results):
+        elif results and all(r.status == "PASS" for r in results):
             self.clear()
 
     def clear(self) -> None:
