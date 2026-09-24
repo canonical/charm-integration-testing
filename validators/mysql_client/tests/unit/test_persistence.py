@@ -366,7 +366,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         # THEN the state is rejected before any read/write
         mock_connect.assert_not_called()
 
-    @pytest.mark.parametrize("ref", [0, -1, 1 << 63])
+    @pytest.mark.parametrize("ref", [0, -1, 1 << 63, (1 << 63) - 1])
     def test_raises_when_expected_ref_is_out_of_range(self, ref: int) -> None:
         # GIVEN a restored/malformed PersistenceState with ref <= 0 (prepare() always returns
         # ref=1). An empty or partially recreated table (actual == 0) would otherwise satisfy
