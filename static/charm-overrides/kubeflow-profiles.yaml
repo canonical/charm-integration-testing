@@ -1,7 +1,9 @@
 ---
 # Kubeflow Profiles - manages user namespaces and access control
 overrides:
-  - provides:
+  - criteria:
+      - track: '2.0'
+    provides:
       kubeflow-profiles:
         features: [kubeflow-profiles]
       metrics-endpoint:
