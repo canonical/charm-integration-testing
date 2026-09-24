@@ -192,16 +192,12 @@ class ValidatorInjectorExtension(JujuExtension):
             }
         ):
             application = unit.split("/", maxsplit=1)[0]
-            if unit not in self.juju.application_units(model, application):
-                for key in [
-                    key
-                    for key in self.persistence_state
-                    if key.controller == model.controller and key.model == model.model and key.unit == unit
-                ]:
-                    del self.persistence_state[key]
-                continue
             endpoints = endpoint_filters.get(application) if endpoint_filters is not None else None
             if endpoint_filters is not None and not endpoints:
+                continue
+            if unit not in self.juju.application_units(model, application):
+                # Without a live unit, cleanup cannot run; keep the tracked state so the orphaned
+                # canary data is not silently forgotten.
                 continue
             outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s, endpoints=endpoints)
             if outcome is None:

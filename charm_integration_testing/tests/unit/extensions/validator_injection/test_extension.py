@@ -465,7 +465,7 @@ class TestValidatorInjectorExtension:
             assert persistence_units == ["myapp/0"]
             assert extension.persistence_state == {unrelated_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
 
-        def test_cleanup_drops_state_for_removed_units_without_remote_exec(
+        def test_cleanup_keeps_state_for_removed_units_without_remote_exec(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:
             # GIVEN state for a unit removed by scale-in
@@ -476,8 +476,8 @@ class TestValidatorInjectorExtension:
             # WHEN cleanup runs
             extension.pre_remove(TEST_MODEL, "myapp")
 
-            # THEN stale state is dropped without trying to exec into the removed unit
-            assert extension.persistence_state == {}
+            # THEN stale state is kept (cleanup never ran) without trying to exec into the removed unit
+            assert extension.persistence_state == {removed_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
             assert juju.exec_calls == []
 
         def test_cleanup_raises_when_a_result_is_fail_or_error(
