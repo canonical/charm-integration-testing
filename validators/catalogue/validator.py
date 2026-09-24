@@ -323,7 +323,7 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
 
 def _catalogue_field_matches(field: str, actual: Any, expected: str) -> bool:
     if field != "url":
-        return actual == expected
+        return bool(actual == expected)
     if not isinstance(actual, str):
         return False
     try:

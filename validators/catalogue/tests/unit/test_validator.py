@@ -57,15 +57,15 @@ VALID_DATABAG: dict[str, str] = {
     "api_endpoints": json.dumps({"Alerts": "http://alertmanager:9093/api/v2/alerts"}),
 }
 
+VALID_APP: dict[str, object] = {
+    "name": "Alertmanager",
+    "url": VALID_DATABAG["url"],
+    "icon": "bell-alert",
+}
+
 VALID_PAYLOAD: dict[str, object] = {
     "title": "Service Catalogue",
-    "apps": [
-        {
-            "name": "Alertmanager",
-            "url": VALID_DATABAG["url"],
-            "icon": "bell-alert",
-        }
-    ],
+    "apps": [VALID_APP],
 }
 
 
@@ -91,8 +91,11 @@ class TestValidateUrlSyntax:
         assert _validate_url_syntax("https://catalogue.internal:8443").passed
 
     def test_catalogue_opener_rejects_redirects(self) -> None:
-        handler = _NoRedirectHandler()
-        assert handler.redirect_request(None, None, 302, "Found", {}, "https://other.example") is None
+        handler: urllib.request.HTTPRedirectHandler = _NoRedirectHandler()
+        assert (
+            handler.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "https://other.example")
+            is None
+        )
 
     def test_invalid_scheme(self) -> None:
         check = _validate_url_syntax("ftp://example.com")
@@ -153,7 +156,7 @@ class TestValidateItemServed:
         payload = {
             "apps": [
                 {
-                    **VALID_PAYLOAD["apps"][0],
+                    **VALID_APP,
                     "url": "http://public.example.test:9093",
                 }
             ]
@@ -164,7 +167,7 @@ class TestValidateItemServed:
         payload = {
             "apps": [
                 {
-                    **VALID_PAYLOAD["apps"][0],
+                    **VALID_APP,
                     "url": "http://public.example.test:8443",
                 }
             ]
