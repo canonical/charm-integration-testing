@@ -143,6 +143,17 @@ class TestValidateItemServed:
         payload = {"apps": [{"name": VALID_DATABAG["name"], "icon": VALID_DATABAG["icon"]}]}
         assert not _validate_item_served(payload, VALID_DATABAG).passed
 
+    def test_provider_hostname_override_is_accepted(self) -> None:
+        payload = {
+            "apps": [
+                {
+                    **VALID_PAYLOAD["apps"][0],
+                    "url": "http://public.example.test:9093",
+                }
+            ]
+        }
+        assert _validate_item_served(payload, VALID_DATABAG).passed
+
 
 # ---------------------------------------------------------------------------
 # L1 – simple validation

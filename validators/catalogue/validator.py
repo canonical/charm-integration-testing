@@ -99,8 +99,7 @@ class CatalogueValidator(BaseValidator):
         if not endpoints_check.passed:
             return self._build_result("deep", checks)
 
-        config_url = self._provider_config_url()
-        fetch_check, payload = _fetch_catalogue(config_url)
+        fetch_check, payload = _fetch_catalogue(self._provider_config_urls())
         checks.append(fetch_check)
         if not fetch_check.passed:
             return self._build_result("deep", checks)
@@ -129,11 +128,12 @@ class CatalogueValidator(BaseValidator):
             return {}
         return dict(self.relation.data[self.charm.app])
 
-    def _provider_config_url(self) -> str:
-        """Derive the in-cluster URL at which the provider serves its catalogue."""
+    def _provider_config_urls(self) -> list[str]:
+        """Derive HTTP and HTTPS URLs at which the provider may serve its catalogue."""
         provider = self.relation.app.name if self.relation.app else ""
         model = self.charm.model.name
-        return f"http://{provider}.{model}.svc.cluster.local{_CONFIG_PATH}"
+        host = f"{provider}.{model}.svc.cluster.local"
+        return [f"http://{host}{_CONFIG_PATH}", f"https://{host}{_CONFIG_PATH}"]
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
         status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
@@ -194,56 +194,38 @@ def _validate_api_endpoints(raw: str) -> ValidationCheck:
     )
 
 
-def _fetch_catalogue(url: str) -> tuple[ValidationCheck, dict[str, Any] | None]:
+def _fetch_catalogue(urls: list[str]) -> tuple[ValidationCheck, dict[str, Any] | None]:
     """Perform an HTTP GET against *url* and return a (check, parsed-body) pair.
 
     Returns ``(check, None)`` when the request fails or the body is not a JSON object.
     """
-    try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
-            status_code = resp.status
-            body = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        return (
-            ValidationCheck(
-                name="http_reachability",
-                passed=False,
-                message=(
-                    f"HTTP {exc.code} from catalogue URL '{url}'. "
-                    f"Verify the provider is running and serving its catalogue."
-                ),
-            ),
-            None,
-        )
-    except urllib.error.URLError as exc:
-        return (
-            ValidationCheck(
-                name="http_reachability",
-                passed=False,
-                message=(
-                    f"Cannot reach catalogue URL '{url}': {exc.reason}. "
-                    f"Check that the provider is running and the host/port are accessible."
-                ),
-            ),
-            None,
-        )
-    except Exception as exc:
-        return (
-            ValidationCheck(
-                name="http_reachability",
-                passed=False,
-                message=f"Unexpected error fetching '{url}': {exc}.",
-            ),
-            None,
-        )
+    errors: list[str] = []
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
+                status_code = resp.status
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            errors.append(f"HTTP {exc.code}")
+            continue
+        except urllib.error.URLError as exc:
+            errors.append(str(exc.reason))
+            continue
+        except OSError as exc:
+            errors.append(str(exc))
+            continue
 
-    if status_code != 200:
+        if status_code != 200:
+            errors.append(f"HTTP {status_code}")
+            continue
+        break
+    else:
         return (
             ValidationCheck(
                 name="http_reachability",
                 passed=False,
-                message=f"Expected HTTP 200 from '{url}', got {status_code}.",
+                message=f"Cannot reach catalogue provider over HTTP or HTTPS: {'; '.join(errors)}.",
             ),
             None,
         )
@@ -293,7 +275,9 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
     for item in apps:
         if not isinstance(item, dict) or item.get("name") != name:
             continue
-        fields_match = all(item.get(field) == expected[field] for field in _REQUIRED_FIELDS)
+        fields_match = all(
+            _catalogue_field_matches(field, item.get(field), expected[field]) for field in _REQUIRED_FIELDS
+        )
         fields_match = fields_match and all(
             item.get(field) == value
             for field, value in expected.items()
@@ -310,6 +294,7 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
                 passed=True,
                 message=f"Item '{name}' is present in the served catalogue.",
             )
+
     served = [item.get("name") for item in apps if isinstance(item, dict)]
     if name not in served:
         return ValidationCheck(
@@ -324,4 +309,23 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
         name="item_served",
         passed=False,
         message=f"Item '{name}' is present but does not match the published catalogue fields.",
+    )
+
+
+def _catalogue_field_matches(field: str, actual: Any, expected: str) -> bool:
+    if field != "url":
+        return actual == expected
+    if not isinstance(actual, str):
+        return False
+    try:
+        actual_url = urllib.parse.urlparse(actual)
+        expected_url = urllib.parse.urlparse(expected)
+    except ValueError:
+        return False
+    return (
+        actual_url.scheme == expected_url.scheme
+        and actual_url.path == expected_url.path
+        and actual_url.params == expected_url.params
+        and actual_url.query == expected_url.query
+        and actual_url.fragment == expected_url.fragment
     )
