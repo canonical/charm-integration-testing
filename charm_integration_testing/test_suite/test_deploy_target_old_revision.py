@@ -42,6 +42,7 @@ def test_deploy_target_old_revision(
     juju_client: JujuClient,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
@@ -63,7 +64,7 @@ def test_deploy_target_old_revision(
     # Deploy the original bundle with only the target app revision overridden
     juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
 
-    # Wait until idle
+    # Wait for return to idle
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is deployed at the target revision and the model is healthy
@@ -74,5 +75,7 @@ def test_deploy_target_old_revision(
             f"got {deployed_revision}."
         )
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Validate all applications and relations, seeding canary data for later persistence checks.
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(model=model_ref, level="simple")
