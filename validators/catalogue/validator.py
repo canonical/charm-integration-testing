@@ -161,9 +161,9 @@ def _validate_url_syntax(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_syntax",
             passed=False,
-            message=f"Invalid url '{url}': {exc}. Expected a well-formed http(s):// URL.",
+            message=f"Catalogue URL is invalid: {exc}. Expected a well-formed http(s):// URL.",
         )
-    return ValidationCheck(name="url_syntax", passed=True, message=f"url '{url}' is a valid URL.")
+    return ValidationCheck(name="url_syntax", passed=True, message="Catalogue URL is a valid HTTP(S) URL.")
 
 
 def _validate_api_endpoints(raw: str) -> ValidationCheck:
@@ -237,7 +237,7 @@ def _fetch_catalogue(urls: list[str]) -> tuple[ValidationCheck, dict[str, Any] |
             ValidationCheck(
                 name="http_reachability",
                 passed=False,
-                message=f"Response from '{url}' is not valid JSON: {exc}.",
+                message=f"Catalogue provider response is not valid JSON: {exc}.",
             ),
             None,
         )
@@ -247,7 +247,7 @@ def _fetch_catalogue(urls: list[str]) -> tuple[ValidationCheck, dict[str, Any] |
             ValidationCheck(
                 name="http_reachability",
                 passed=False,
-                message=f"Response from '{url}' is not a JSON object, got {type(payload).__name__}.",
+                message=f"Catalogue provider response is not a JSON object, got {type(payload).__name__}.",
             ),
             None,
         )
@@ -256,7 +256,7 @@ def _fetch_catalogue(urls: list[str]) -> tuple[ValidationCheck, dict[str, Any] |
         ValidationCheck(
             name="http_reachability",
             passed=True,
-            message=f"Catalogue URL '{url}' returned HTTP 200 with valid JSON.",
+            message="Catalogue provider returned HTTP 200 with valid JSON.",
         ),
         payload,
     )
@@ -321,6 +321,10 @@ def _catalogue_field_matches(field: str, actual: Any, expected: str) -> bool:
         actual_url = urllib.parse.urlparse(actual)
         expected_url = urllib.parse.urlparse(expected)
     except ValueError:
+        return False
+    if not _validate_url_syntax(actual_url.geturl()).passed:
+        return False
+    if not _validate_url_syntax(expected_url.geturl()).passed:
         return False
     return (
         actual_url.scheme == expected_url.scheme
