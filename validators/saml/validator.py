@@ -79,6 +79,7 @@ def _entity_id_check(value: str) -> ValidationCheck:
             bool(value)
             and bool(parsed.scheme)
             and not any(character.isspace() for character in value)
+            and bool(parsed.netloc or parsed.path or parsed.params or parsed.query or parsed.fragment)
             and (parsed.scheme not in ("http", "https") or bool(parsed.hostname))
         )
     except ValueError:

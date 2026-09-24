@@ -100,6 +100,11 @@ def test_scheme_only_entity_id_fails() -> None:
     assert result.status == "FAIL"
 
 
+def test_empty_entity_id_component_fails() -> None:
+    result = _make_validator({**VALID_DATA, "entity_id": "urn:"}).validate()
+    assert result.status == "FAIL"
+
+
 def test_invalid_certificate_fails() -> None:
     result = _make_validator(
         {**VALID_DATA, "x509certs": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"}
