@@ -145,6 +145,11 @@ class TestDecodeProviderUrls:
         check, _ = _decode_provider_urls({"ingress": yaml.safe_dump({_UNIT_NAME: {"other": "x"}})})
         assert not check.passed
 
+    def test_invalid_yaml_does_not_echo_source(self) -> None:
+        check, _ = _decode_provider_urls({"ingress": "unit/0: [unclosed-secret-token"})
+        assert not check.passed
+        assert "secret-token" not in check.message
+
 
 class TestUnitUrlCheck:
     def test_unit_present(self) -> None:
@@ -186,6 +191,14 @@ class TestUrlFormatCheck:
         assert check.passed
         assert "secret-token" not in check.message
         assert "gateway" in check.message
+
+    def test_rejects_empty_explicit_port(self) -> None:
+        assert not _url_format_check("http://gateway:").passed
+
+    def test_invalid_port_does_not_echo_raw_value(self) -> None:
+        check = _url_format_check("http://gateway:secret-token")
+        assert not check.passed
+        assert "secret-token" not in check.message
 
 
 # ---------------------------------------------------------------------------
