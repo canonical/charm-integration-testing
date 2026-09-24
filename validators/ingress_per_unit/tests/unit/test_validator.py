@@ -102,6 +102,15 @@ class TestHostFormatCheck:
         assert not _host_format_check("/tmp").passed
         assert not _host_format_check("user@app.svc").passed
 
+    def test_invalid_dns_names_are_rejected(self) -> None:
+        assert not _host_format_check("foo..bar").passed
+        assert not _host_format_check("-bad").passed
+        assert not _host_format_check("host?token").passed
+
+    def test_ipv4_is_accepted_but_ipv6_is_rejected(self) -> None:
+        assert _host_format_check("192.0.2.1").passed
+        assert not _host_format_check("2001:db8::1").passed
+
 
 class TestPortRangeCheck:
     def test_valid_port(self) -> None:
@@ -211,6 +220,13 @@ class TestUrlFormatCheck:
 
     def test_accepts_ipv6_literal(self) -> None:
         assert _url_format_check("http://[2001:db8::1]/route").passed
+
+    def test_rejects_control_whitespace_and_non_ascii_characters(self) -> None:
+        for url in ("http://gateway/\nsecret", "http://gateway/has space", "http://gateway/café"):
+            check = _url_format_check(url)
+            assert not check.passed
+            assert "secret" not in check.message
+            assert "café" not in check.message
 
 
 # ---------------------------------------------------------------------------

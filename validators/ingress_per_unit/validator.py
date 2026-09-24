@@ -156,6 +156,12 @@ def _host_format_check(host: str) -> ValidationCheck:
             passed=False,
             message=f"host {host!r} must be a bare hostname or IPv4 address.",
         )
+    if not _is_valid_host(host):
+        return ValidationCheck(
+            name="host_format",
+            passed=False,
+            message="host is not a valid hostname or IPv4 address.",
+        )
     return ValidationCheck(name="host_format", passed=True, message=f"host {host!r} is well-formed.")
 
 
@@ -305,6 +311,24 @@ def _redact_url(url: str) -> str:
 
 def _url_format_check(url: str) -> ValidationCheck:
     """Validate that the ingress URL is a well-formed HTTP/HTTPS URL."""
+    if not url.isprintable():
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL contains control characters.",
+        )
+    if any(character.isspace() for character in url):
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL contains unescaped whitespace.",
+        )
+    if not url.isascii():
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL contains raw non-ASCII characters.",
+        )
     try:
         parsed = urlparse(url)
     except ValueError:
