@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
+from urllib.request import HTTPRedirectHandler
 
 import ops
 from cryptography import x509
@@ -179,8 +180,8 @@ def test_deep_metadata_fails() -> None:
 
 
 def test_metadata_opener_rejects_redirects() -> None:
-    handler = _NoRedirectHandler()
-    assert handler.redirect_request(None, None, 302, "Found", {}, "ftp://other.example") is None
+    handler: HTTPRedirectHandler = _NoRedirectHandler()
+    assert handler.redirect_request(MagicMock(), MagicMock(), 302, "Found", MagicMock(), "ftp://other.example") is None
 
 
 def test_deep_metadata_rejects_malformed_url() -> None:
