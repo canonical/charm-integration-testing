@@ -316,7 +316,7 @@ def _validate_item_served(payload: dict[str, Any] | None, expected: dict[str, st
             for field, value in expected.items()
             if field not in _REQUIRED_FIELDS and field != "api_endpoints" and field in item
         )
-        if "api_endpoints" in expected and "api_endpoints" in item:
+        if expected.get("api_endpoints") and "api_endpoints" in item:
             try:
                 fields_match = fields_match and item.get("api_endpoints") == json.loads(expected["api_endpoints"])
             except json.JSONDecodeError:

@@ -263,6 +263,14 @@ class TestCatalogueValidatorDeep:
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
 
+    def test_pass_when_item_served_with_empty_optional_api_endpoints(self) -> None:
+        databag = {**VALID_DATABAG, "api_endpoints": ""}
+        payload = {"title": "Service Catalogue", "apps": [{**VALID_APP, "api_endpoints": {}}]}
+        validator = _make_validator(databag)
+        with patch("validators.catalogue.validator._HTTP_OPENER.open", return_value=_mock_response(payload)):
+            result = validator.validate(level="deep")
+        assert result.status == "PASS", result.checks
+
     def test_fail_when_item_not_served(self) -> None:
         payload = {"apps": [{"name": "Prometheus"}]}
         validator = _make_validator(VALID_DATABAG)
