@@ -187,6 +187,17 @@ def test_deep_metadata_requires_entity_descriptor() -> None:
     assert result.status == "FAIL"
 
 
+def test_deep_metadata_accepts_entities_descriptor() -> None:
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = b"<EntitiesDescriptor xmlns='urn:oasis:names:tc:SAML:2.0:metadata'/>"
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
+            level="deep"
+        )
+    assert result.status == "PASS"
+
+
 def test_deep_metadata_requires_saml_namespace() -> None:
     response = MagicMock()
     response.__enter__.return_value = response

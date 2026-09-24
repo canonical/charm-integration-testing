@@ -163,9 +163,12 @@ def _metadata_check(url: str) -> ValidationCheck:
         if len(body) > _MAX_METADATA_BYTES:
             return ValidationCheck(name="metadata", passed=False, message="SAML metadata response is too large.")
         root = ElementTree.fromstring(body)
-        if root.tag != f"{{{_SAML_METADATA_NAMESPACE}}}EntityDescriptor":
+        if root.tag not in {
+            f"{{{_SAML_METADATA_NAMESPACE}}}EntityDescriptor",
+            f"{{{_SAML_METADATA_NAMESPACE}}}EntitiesDescriptor",
+        }:
             return ValidationCheck(
-                name="metadata", passed=False, message="SAML metadata response has no EntityDescriptor."
+                name="metadata", passed=False, message="SAML metadata response has no valid metadata descriptor."
             )
         return ValidationCheck(name="metadata", passed=True, message="SAML metadata is reachable and valid XML.")
     except (
