@@ -146,3 +146,34 @@ class TestValidationStatusStore:
         assert store.status() is None
 
         harness.cleanup()
+
+    def test_record_with_skipped_results_preserves_prior_blocked_status(self) -> None:
+        # A SKIPPED result (e.g. a relation that hasn't negotiated data yet)
+        # means the check didn't actually re-run, so a previously recorded
+        # failure must not be cleared out from under it.
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
+        store._stored.kind = "blocked"
+        store._stored.message = "stale failure"
+
+        store.record([_validation_result("SKIPPED")])
+
+        status = store.status()
+        assert isinstance(status, ops.BlockedStatus)
+        assert status.message == "stale failure"
+
+        harness.cleanup()
+
+    def test_record_with_no_results_clears_status(self) -> None:
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
+        store._stored.kind = "blocked"
+        store._stored.message = "stale failure"
+
+        store.record([])
+
+        assert store.status() is None
+
+        harness.cleanup()

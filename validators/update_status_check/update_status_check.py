@@ -33,9 +33,11 @@ class ValidationStatusStore(Object):
 
     Charms would otherwise each need their own `StoredState` fields plus the
     logic to turn FAIL/ERROR results into a status message and clear it once
-    the check passes again. Instantiate this once (e.g. in `__init__`), call
-    `record()` with the results of `run_simple_check()`, and read `status()`
-    from a `collect-status` handler.
+    the check passes again. Instantiate this once (e.g. in `__init__`), then
+    either pass this store to `run_simple_check(charm, store)` to have it
+    recorded automatically, or call `record()` yourself with the `.results`
+    of `run_simple_check(charm)`, and read `status()` from a `collect-status`
+    handler.
     """
 
     _stored = StoredState()  # type: ignore[no-untyped-call]
@@ -45,14 +47,21 @@ class ValidationStatusStore(Object):
         self._stored.set_default(kind=None, message="")
 
     def record(self, results: list[ValidationResult]) -> None:
-        """Record the outcome of *results*, clearing any prior failure once all pass."""
+        """Record the outcome of *results*.
+
+        Sets a Blocked status if any result is FAIL/ERROR. Otherwise, clears
+        any prior failure only once every result is a genuine PASS: a
+        SKIPPED result (e.g. a relation that hasn't negotiated data yet)
+        leaves a previously recorded failure in place, since it means the
+        check didn't actually re-run to confirm the problem is resolved.
+        """
         failing = [r for r in results if r.status in ("FAIL", "ERROR")]
-        if not failing:
+        if failing:
+            summary = "; ".join(f"{r.endpoint} ({r.interface}): {r.status}" for r in failing)
+            self._stored.kind = "blocked"
+            self._stored.message = f"Integration check failed: {summary}"
+        elif all(r.status == "PASS" for r in results):
             self.clear()
-            return
-        summary = "; ".join(f"{r.endpoint} ({r.interface}): {r.status}" for r in failing)
-        self._stored.kind = "blocked"
-        self._stored.message = f"Integration check failed: {summary}"
 
     def clear(self) -> None:
         """Clear any previously recorded failure."""
