@@ -169,6 +169,12 @@ class TestUrlFormatCheck:
     def test_missing_host(self) -> None:
         assert not _url_format_check("http:///path").passed
 
+    def test_missing_host_does_not_echo_userinfo(self) -> None:
+        check = _url_format_check("http://secret:password@")
+        assert not check.passed
+        assert "secret" not in check.message
+        assert "password" not in check.message
+
 
 # ---------------------------------------------------------------------------
 # L1 – simple validation

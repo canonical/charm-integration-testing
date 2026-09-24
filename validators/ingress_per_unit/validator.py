@@ -298,7 +298,7 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has no valid hostname.",
+            message="Ingress URL has no valid hostname.",
         )
     if parsed.username is not None or parsed.password is not None:
         return ValidationCheck(name="url_format", passed=False, message="Ingress URL must not contain userinfo.")
@@ -309,7 +309,7 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL {url!r} has an invalid port: {exc}",
+            message=f"Ingress URL has an invalid port: {exc}",
         )
 
     return ValidationCheck(name="url_format", passed=True, message=f"URL {url!r} is well-formed.")
