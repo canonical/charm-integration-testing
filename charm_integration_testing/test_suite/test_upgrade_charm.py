@@ -13,6 +13,7 @@ from .scheduler.states import State
 def test_upgrade_charm(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
@@ -34,6 +35,7 @@ def test_upgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
+    # Wait for return to idle
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is upgraded to the target revision and the model is healthy
@@ -44,3 +46,6 @@ def test_upgrade_charm(
             f"{target_revision}, got {upgraded_revision}."
         )
     juju_client.validate_model(model=target_model_ref, level="simple")
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(model=neighbor_model_ref, level="simple")

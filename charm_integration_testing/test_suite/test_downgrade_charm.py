@@ -14,6 +14,7 @@ def test_downgrade_charm(
     juju_client: JujuClient,
     target_downgrade_revision: int,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_charm: str,
     target_application: str,
     target_revision: int | None,
@@ -40,6 +41,7 @@ def test_downgrade_charm(
         model=target_model_ref,
         timeout=timedelta(minutes=5),
     )
+    # Wait for return to idle
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Verify the application is downgraded to the selected revision and the model is healthy
@@ -50,3 +52,6 @@ def test_downgrade_charm(
             f"{target_downgrade_revision}, got {downgraded_revision}."
         )
     juju_client.validate_model(model=target_model_ref, level="simple")
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
+    if neighbor_model_ref is not None:
+        juju_client.validate_model(model=neighbor_model_ref, level="simple")
