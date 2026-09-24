@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from validators.saml.validator import SamlValidator
+from validators.saml.validator import SamlValidator, _NoRedirectHandler
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub
 
@@ -139,6 +139,11 @@ def test_deep_metadata_fails() -> None:
             level="deep"
         )
     assert result.status == "FAIL"
+
+
+def test_metadata_opener_rejects_redirects() -> None:
+    handler = _NoRedirectHandler()
+    assert handler.redirect_request(None, None, 302, "Found", {}, "ftp://other.example") is None
 
 
 def test_deep_metadata_rejects_malformed_url() -> None:
