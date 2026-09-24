@@ -259,8 +259,9 @@ def test_configure_accepts_same_controller_k8s_neighbor_cloud() -> None:
 @pytest.mark.parametrize(
     ("is_cmr_test", "same_controller", "neighbor_cloud", "target_cloud", "expected"),
     [
-        # Same-controller, different cloud: registration is needed (Kubernetes or not;
-        # the caller dispatches to add_k8s_cloud vs add_cloud based on platform).
+        # Same-controller, different cloud: registration is needed (any platform;
+        # JujuClient.add_cloud dispatches internally based on how the cloud's
+        # connection details were supplied).
         (True, True, "k8s-cloud", "lxd", True),
         (True, True, "openstack-cloud", "lxd", True),
         # Same-controller, same cloud: nothing to register.

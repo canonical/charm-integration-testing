@@ -24,11 +24,11 @@ def needs_same_controller_cloud_registration(
     Same-controller mode (SQT-884: different platforms, same controller) shares a
     single controller between the target and neighbor models. If the neighbor lives on
     a different cloud than the target, that cloud is not yet known to the controller
-    and must be registered (via ``add_k8s_cloud`` for Kubernetes or ``add_cloud`` for
-    other platforms, e.g. OpenStack) before a neighbor model can be created on it. Used
-    both right after a fresh bootstrap (``test_bootstrap_controller``) and, when
-    ``--current-state`` reuses a pre-existing controller, before the first test that
-    needs the cloud (``register_preexisting_neighbor_cloud`` in ``conftest.py``).
+    and must be registered (via ``JujuClient.add_cloud``) before a neighbor model can
+    be created on it. Used both right after a fresh bootstrap
+    (``test_bootstrap_controller``) and, when ``--current-state`` reuses a pre-existing
+    controller, before the first test that needs the cloud
+    (``register_preexisting_neighbor_cloud`` in ``conftest.py``).
     """
     return is_cmr_test and same_controller and neighbor_cloud != target_cloud
 

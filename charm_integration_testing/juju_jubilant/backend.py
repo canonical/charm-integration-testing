@@ -739,19 +739,33 @@ class JubilantBackend(JujuCmdBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         self.client.model(None).add_model(model=model, controller=controller, config=model_config, cloud=cloud)
 
-    def add_k8s_cloud(self, cloud: str, controller: str) -> None:
-        """Register a Kubernetes cloud on an existing controller.
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a cloud not yet known to an existing controller.
+
+        Dispatches to the appropriate registration mechanism based on how the cloud's
+        connection details were supplied: ``juju add-k8s`` for a cloud with a configured
+        kubeconfig (``KUBECONFIG_<cloud>``), or ``juju add-cloud``/``add-credential`` for
+        a cloud with a configured cloud-definition/credentials file pair
+        (``CLOUD_DEFINITION_<cloud>``/``CLOUD_CREDENTIALS_<cloud>``).
 
         Idempotent: a no-op if the cloud is already registered on the controller (e.g.
         a later invocation against the same long-lived controller, such as a run using
         ``--current-state`` to reuse a pre-existing controller).
         """
-        kubeconfig = self._cloud_kubeconfigs.get(cloud)
-        if kubeconfig is None:
+        if cloud in self._cloud_kubeconfigs:
+            self._add_k8s_cloud(cloud, controller)
+        elif cloud in self._cloud_definitions:
+            self._add_generic_cloud(cloud, controller)
+        else:
+            normalized = cloud.replace("-", "_")
             raise ValueError(
-                f"No kubeconfig configured for cloud '{cloud}'. "
-                f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
+                f"No connection details configured for cloud '{cloud}'. Set "
+                f"KUBECONFIG_{normalized} for a Kubernetes cloud, or both "
+                f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} for any other cloud type."
             )
+
+    def _add_k8s_cloud(self, cloud: str, controller: str) -> None:
+        kubeconfig = self._cloud_kubeconfigs[cloud]
         # juju add-k8s reads the kubeconfig from stdin when KUBECONFIG is unset,
         # so the content is piped in rather than mutating the environment.
         try:
@@ -762,23 +776,8 @@ class JubilantBackend(JujuCmdBackend):
             if "already exists" not in str(exc):
                 raise
 
-    def add_cloud(self, cloud: str, controller: str) -> None:
-        """Register a non-Kubernetes cloud (e.g. OpenStack, LXD, manual) on an existing controller.
-
-        Idempotent, matching ``add_k8s_cloud``: a no-op if the cloud/credential is
-        already registered on the controller (e.g. a later invocation against the same
-        long-lived controller, such as a run using ``--current-state`` to reuse a
-        pre-existing controller).
-        """
-        definition = self._cloud_definitions.get(cloud)
-        if definition is None:
-            normalized = cloud.replace("-", "_")
-            raise ValueError(
-                f"No cloud definition configured for cloud '{cloud}'. Set "
-                f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} to the "
-                "cloud definition and credentials file paths."
-            )
-        cloud_definition, credentials = definition
+    def _add_generic_cloud(self, cloud: str, controller: str) -> None:
+        cloud_definition, credentials = self._cloud_definitions[cloud]
         try:
             self.client.model(None).cli(
                 "add-cloud", cloud, str(cloud_definition), "--controller", controller, include_model=False
