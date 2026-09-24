@@ -45,24 +45,20 @@ def _has_data(integration: Relation, app: Application | None, units: Iterable[Un
     return any(bool(dict(integration.data.get(unit, {}))) for unit in units)
 
 
-def _has_negotiated_data(integration: Relation, charm: CharmBase, role: ValidationRole) -> bool:
-    """Return True once the side being validated has data available to check.
+def _has_negotiated_data(integration: Relation, charm: CharmBase) -> bool:
+    """Return True once either side has published data on *integration*.
 
-    For `requires` validators this means the remote (provider) side has
-    published data - either on its app databag (most interfaces) or its unit
-    databags (e.g. `http_interface`, `loki_push_api`, `alertmanager_dispatch`,
-    `mysql`).
-
-    For `provides` validators, some interfaces (e.g. `kafka_client`,
-    `mysql`) publish the very fields the validator checks on *our own* app or
-    unit databag rather than the requirer's; gating on remote data there
-    would leave the validator stuck at SKIPPED forever whenever the requirer
-    legitimately never writes anything back.
+    Which side a validator actually reads from is validator- (not
+    role-)specific: e.g. `cross_model_mesh`'s `requires` role reads its own
+    local app databag, while `config_server`'s `provides` role reads the
+    remote requirer's; `kafka_client`'s `provides` role reads its own app
+    databag, while its `requires` role reads the remote's. Rather than
+    guess which side a given validator cares about, treat the relation as
+    ready once *either* side has published something - both are checked so
+    the gate can never get stuck at SKIPPED forever regardless of which
+    side actually negotiates first.
     """
-    if role == "provides":
-        return _has_data(integration, charm.app, [charm.unit])
-    return _has_data(integration, integration.app, integration.units)
-    return any(bool(dict(integration.data[unit])) for unit in integration.units)
+    return _has_data(integration, charm.app, [charm.unit]) or _has_data(integration, integration.app, integration.units)
 
 
 def load_validators() -> dict[str, list[type[BaseValidator]]]:
@@ -149,10 +145,9 @@ def run_for_charm(
     that exist in the model but have not negotiated data yet - e.g. immediately after
     `juju integrate`, before the two ends have finished negotiating - so periodic
     in-charm callers (update-status, `validate`) don't need to reimplement their own
-    readiness gate. What counts as negotiated depends on the validator's role: for
-    `requires` validators, it's the remote (provider) side publishing data; for
-    `provides` validators, some interfaces publish the checked fields on our own side,
-    so it's our own app/unit databag instead (see `_has_negotiated_data`).
+    readiness gate. Since which side a validator actually reads from is validator-specific
+    rather than role-specific (see `_has_negotiated_data`), an integration counts as ready
+    once either side has published any data.
     """
     if validators is None:
         validators = load_validators()
@@ -191,7 +186,7 @@ def run_for_charm(
             if (
                 skip_missing_unvalidated
                 and interface_name in validators
-                and not _has_negotiated_data(integration, charm, role)
+                and not _has_negotiated_data(integration, charm)
             ):
                 logger.debug(
                     f"Relation '{relation}' (id={integration.id}) has not negotiated data yet; skipping until it is ready."

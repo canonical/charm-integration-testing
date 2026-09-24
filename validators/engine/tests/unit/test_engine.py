@@ -297,6 +297,28 @@ class TestRunForCharm:
         assert len(results) == 1
         assert results[0].status == "PASS"
 
+    def test_runs_requires_validator_when_only_local_data_published(self) -> None:
+        # Some interfaces (e.g. cross_model_mesh's `requires` role) publish
+        # the fields their validator checks on the local charm's own
+        # application databag; the provider never publishes anything back on
+        # this relation at all. Readiness therefore is not simply
+        # "remote has data" for every `requires` validator either.
+        relation = RelationStub(name="cmr", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        integration = charm.model.relations["cmr"][0]
+        integration.data[charm.app] = {"app-name": "my-app"}
+        # Remote (provider) app databag stays empty, per RelationStub's default.
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "PASS"
+
     def test_skips_provides_validator_with_no_local_or_remote_data(self) -> None:
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.provides)
