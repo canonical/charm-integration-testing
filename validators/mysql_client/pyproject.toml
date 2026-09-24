@@ -24,6 +24,9 @@ dev = [
 [project.entry-points."endpoint_validators"]
 mysql_client = "validators.mysql_client:MySQLClientValidator"
 
+[project.entry-points."endpoint_persistence_validators"]
+mysql_client = "validators.mysql_client:MySQLClientPersistenceValidator"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
