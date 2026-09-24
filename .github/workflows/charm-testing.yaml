@@ -125,14 +125,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Validate CMR inputs
-        if: ${{ inputs.same_controller && inputs.neighbor_environment == '' }}
-        shell: bash
-        run: |
-          echo "::error::same_controller=true requires neighbor_environment to be set. CMR" \
-            "always needs a neighbor environment (same-controller mode places its model on" \
-            "the target controller instead of bootstrapping a new one for it)."
-          exit 1
       - name: Pick runner
         id: pick
         uses: ./.github/actions/pick-runner
@@ -373,7 +365,9 @@ jobs:
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
-          neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-name }}
+          neighbor_cloud: ${{ (inputs.same_controller && inputs.neighbor_environment
+            == inputs.target_environment) && steps.setup_target.outputs.cloud-name
+            || steps.setup_neighbor.outputs.cloud-name }}
           same_controller: ${{ inputs.same_controller }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
@@ -397,18 +391,16 @@ jobs:
           run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-          CMR_ARGS=()
+          SAME_CONTROLLER_ARG=()
           if [[ "${same_controller}" == "true" ]]; then
-            CMR_ARGS+=(--same-controller)
-          fi
-          if [[ -n "${neighbor_cloud}" ]]; then
-            CMR_ARGS+=(--neighbor-cloud "${neighbor_cloud}")
+            SAME_CONTROLLER_ARG=(--same-controller)
           fi
           ./scripts/run-tests.sh \
             --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
-            "${CMR_ARGS[@]}" \
+            --neighbor-cloud "${neighbor_cloud}" \
+            "${SAME_CONTROLLER_ARG[@]}" \
             --neighbor-bundle "${NEIGHBOR_BUNDLE_OUTPUT}" \
             \
             --target-controller-bootstrap-config "${bootstrap_config}" \

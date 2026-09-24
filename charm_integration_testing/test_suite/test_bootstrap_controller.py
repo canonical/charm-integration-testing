@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from juju import JujuClient
 
+from test_suite.fixtures.controller_spec import needs_same_controller_k8s_cloud
+
 from .scheduler.states import State
 
 
@@ -13,6 +15,7 @@ from .scheduler.states import State
 def test_bootstrap_controller(
     juju_client: JujuClient,
     is_cmr_test: bool,
+    same_controller: bool,
     target_cloud: str,
     target_controller: str,
     target_controller_bootstrap_constraints: dict[str, str],
@@ -53,12 +56,15 @@ def test_bootstrap_controller(
     # lives there (same-controller mode) but on a different cloud (SQT-884:
     # different platforms, same controller). The neighbor model is then created
     # on that cloud in test_create_model. Only Kubernetes clouds can be registered
-    # this way; other combinations are rejected during option validation.
-    if (
-        is_cmr_test
-        and neighbor_controller == target_controller
-        and neighbor_cloud != target_cloud
-        and neighbor_platform == "kubernetes"
+    # this way; other combinations are rejected during option validation. When
+    # --current-state reuses a pre-existing controller this test does not run at
+    # all; register_preexisting_neighbor_cloud in conftest.py handles that case.
+    if needs_same_controller_k8s_cloud(
+        is_cmr_test=is_cmr_test,
+        same_controller=same_controller,
+        neighbor_cloud=neighbor_cloud,
+        target_cloud=target_cloud,
+        neighbor_platform=neighbor_platform,
     ):
         assert neighbor_cloud is not None
         juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)

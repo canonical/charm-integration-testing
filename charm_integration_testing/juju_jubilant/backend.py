@@ -738,20 +738,27 @@ class JubilantBackend(JujuCmdBackend):
         self.client.model(None).add_model(model=model, controller=controller, config=model_config, cloud=cloud)
 
     def add_k8s_cloud(self, cloud: str, controller: str) -> None:
-        """Register a Kubernetes cloud on an existing controller."""
+        """Register a Kubernetes cloud on an existing controller.
+
+        Idempotent: a no-op if the cloud is already registered on the controller (e.g.
+        a later invocation against the same long-lived controller, such as a run using
+        ``--current-state`` to reuse a pre-existing controller).
+        """
         kubeconfig = self._cloud_kubeconfigs.get(cloud)
         if kubeconfig is None:
             raise ValueError(
                 f"No kubeconfig configured for cloud '{cloud}'. "
                 f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
             )
-        self._add_k8s_cloud(cloud, controller, kubeconfig.read_text())
-
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
-    def _add_k8s_cloud(self, cloud: str, controller: str, kubeconfig: str) -> None:
         # juju add-k8s reads the kubeconfig from stdin when KUBECONFIG is unset,
         # so the content is piped in rather than mutating the environment.
-        self.client.model(None).cli("add-k8s", cloud, "--controller", controller, include_model=False, stdin=kubeconfig)
+        try:
+            self.client.model(None).cli(
+                "add-k8s", cloud, "--controller", controller, include_model=False, stdin=kubeconfig.read_text()
+            )
+        except jubilant.CLIError as exc:
+            if "already exists" not in str(exc):
+                raise
 
     def refresh_application(
         self,

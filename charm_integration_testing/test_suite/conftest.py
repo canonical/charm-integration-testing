@@ -77,6 +77,7 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
+from test_suite.fixtures.controller_spec import needs_same_controller_k8s_cloud
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -275,6 +276,37 @@ def persistence_extension(
     tests never touch the state directly.
     """
     return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def register_preexisting_neighbor_cloud(
+    request: pytest.FixtureRequest,
+    juju_client: JujuClient,
+    is_cmr_test: bool,
+    same_controller: bool,
+    target_cloud: str,
+    target_controller: str,
+    neighbor_cloud: str | None,
+    neighbor_platform: str,
+) -> None:
+    """Register the same-controller Kubernetes neighbor cloud when --current-state
+    skips test_bootstrap_controller (the target controller, and any cloud it needs
+    beyond its own, must already exist before test_create_model runs). When the
+    controller is bootstrapped in this session instead, test_bootstrap_controller
+    performs this same registration itself right after bootstrap.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_CONTROLLER:
+        return
+    if needs_same_controller_k8s_cloud(
+        is_cmr_test=is_cmr_test,
+        same_controller=same_controller,
+        neighbor_cloud=neighbor_cloud,
+        target_cloud=target_cloud,
+        neighbor_platform=neighbor_platform,
+    ):
+        assert neighbor_cloud is not None
+        juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
 def _build_juju_client(
