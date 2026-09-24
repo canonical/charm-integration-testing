@@ -11,6 +11,8 @@ import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
     remote_validators_path,
+    uv_bin,
+    venv_runner,
 )
 from juju import JujuIntegrationApplication, JujuModelHandle, JujuValidationError, PersistenceKey
 from juju.backend import JujuExecOutput
@@ -140,8 +142,8 @@ def _persistence_runner_json(
 
 
 # Exec responses for a full injection + clean run cycle:
-#   1. test -f venv_runner → rc=1 (not present)
-#   2-4. three install commands (chmod, venv, pip install) → rc=0 each
+#   1. validator readiness check → rc=1 (not present)
+#   2-4. three install commands → rc=0 each
 #   5. run_validators       → rc=0 with PASS JSON
 def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -150,7 +152,7 @@ def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOu
 
 
 # Exec responses when the venv is already installed:
-#   1. test -f venv_runner → rc=0 (present)
+#   1. validator readiness check → rc=0 (present)
 #   2. run_validators      → rc=0 with PASS JSON
 def _preinstalled_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -669,6 +671,18 @@ class TestValidatorInjectorExtension:
                 # THEN scp + 3 install commands + run_validators all happened
                 assert len(juju.scp_calls) == 2  # validators + uv
                 assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
+
+            def test_reinjects_when_uv_is_missing(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+                # GIVEN the validator runner remains but uv was lost after pod rescheduling
+                juju.exec_responses.extend(_inject_and_pass_responses())
+
+                # WHEN
+                extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+                # THEN the missing uv triggers a complete reinjection
+                assert juju.exec_calls[0][2] == f"test -x {venv_runner} && test -x {uv_bin}"
+                assert len(juju.scp_calls) == 2
+                assert len(juju.exec_calls) == 5
 
         class TestResultHandling:
             def test_does_not_raise_when_all_pass(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
