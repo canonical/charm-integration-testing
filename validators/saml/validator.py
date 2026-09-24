@@ -15,15 +15,15 @@ from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
-_REQUIRED_FIELDS = (
-    "entity_id",
-    "single_sign_on_service_redirect_url",
-    "single_sign_on_service_redirect_binding",
-    "x509certs",
+_REQUIRED_FIELDS = ("entity_id",)
+_SSO_ENDPOINTS = (
+    ("single_sign_on_service_redirect_url", "single_sign_on_service_redirect_binding"),
+    ("single_sign_on_service_post_url", "single_sign_on_service_post_binding"),
 )
 _HTTP_TIMEOUT = 10
 _MAX_METADATA_BYTES = 1024 * 1024
 _REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+_POST_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
 _SAML_METADATA_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:metadata"
 
 
@@ -49,14 +49,25 @@ class SamlValidator(BaseValidator):
         checks = [self.validate_schema(list(_REQUIRED_FIELDS))]
         if not checks[0].passed:
             return self._fail_result(level, checks)
-        checks.extend(
-            [
-                _entity_id_check(self.databag["entity_id"]),
-                _url_check("single_sign_on_service_redirect_url", self.databag["single_sign_on_service_redirect_url"]),
-                _binding_check(self.databag["single_sign_on_service_redirect_binding"]),
-                _certificate_check(self.databag["x509certs"]),
-            ]
-        )
+        checks.append(_entity_id_check(self.databag["entity_id"]))
+        endpoint_url, endpoint_binding = _select_sso_endpoint(self.databag)
+        if endpoint_url is None or endpoint_binding is None:
+            checks.append(
+                ValidationCheck(
+                    name="sso_endpoint",
+                    passed=False,
+                    message="No supported SAML single sign-on endpoint was published.",
+                )
+            )
+        else:
+            checks.extend(
+                [
+                    _url_check("single_sign_on_service_url", endpoint_url),
+                    _binding_check(endpoint_binding),
+                ]
+            )
+        if self.databag.get("x509certs"):
+            checks.append(_certificate_check(self.databag["x509certs"]))
         if not all(check.passed for check in checks):
             return self._fail_result(level, checks)
         if level == "deep" and self.databag.get("metadata_url"):
@@ -78,6 +89,15 @@ def _url_check(name: str, value: str) -> ValidationCheck:
     return ValidationCheck(
         name=name, passed=passed, message="URL is valid." if passed else f"{name} is not a valid URL."
     )
+
+
+def _select_sso_endpoint(databag: dict[str, str]) -> tuple[str | None, str | None]:
+    for url_field, binding_field in _SSO_ENDPOINTS:
+        url = databag.get(url_field)
+        binding = databag.get(binding_field)
+        if url or binding:
+            return url, binding
+    return None, None
 
 
 def _entity_id_check(value: str) -> ValidationCheck:
@@ -102,7 +122,7 @@ def _entity_id_check(value: str) -> ValidationCheck:
 
 
 def _binding_check(value: str) -> ValidationCheck:
-    passed = value == _REDIRECT_BINDING
+    passed = value in (_REDIRECT_BINDING, _POST_BINDING)
     return ValidationCheck(
         name="binding",
         passed=passed,

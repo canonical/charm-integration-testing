@@ -83,6 +83,21 @@ def test_unsupported_binding_fails() -> None:
     assert result.status == "FAIL"
 
 
+def test_post_sso_endpoint_passes() -> None:
+    data = {
+        **VALID_DATA,
+        "single_sign_on_service_redirect_url": "",
+        "single_sign_on_service_redirect_binding": "",
+        "single_sign_on_service_post_url": "https://idp.example.com/sso",
+        "single_sign_on_service_post_binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+    }
+    assert _make_validator(data).validate().status == "PASS"
+
+
+def test_empty_certificates_are_optional() -> None:
+    assert _make_validator({**VALID_DATA, "x509certs": ""}).validate().status == "PASS"
+
+
 def test_malformed_url_fails() -> None:
     result = _make_validator(
         {**VALID_DATA, "single_sign_on_service_redirect_url": "https://idp.example.com:bad"}
