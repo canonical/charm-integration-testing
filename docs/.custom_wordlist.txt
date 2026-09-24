@@ -168,3 +168,6 @@ synthesizing
 urls
 url
 requirer
+CRDs
+kubeconfig
+sqa
