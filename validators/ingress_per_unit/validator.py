@@ -333,7 +333,7 @@ def _connectivity_check(host: str, port: int, url: str) -> ValidationCheck:
         return ValidationCheck(
             name="connect",
             passed=False,
-            message=f"TCP connection to {host}:{port} (from {url!r}) failed: {exc}",
+            message=f"TCP connection to {host}:{port} failed: {exc}",
         )
 
 
@@ -343,7 +343,7 @@ def _http_probe_check(url: str) -> ValidationCheck:
         req = Request(url)
         with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
             status = resp.status
-        return ValidationCheck(name="http_probe", passed=True, message=f"HTTP GET {url} -> {status}.")
+        return ValidationCheck(name="http_probe", passed=True, message=f"HTTP probe returned status {status}.")
     except HTTPError as exc:
         # Any HTTP status code proves the ingress is active and routing traffic.
         # HTTPError is also a file-like response object; close it to release the socket.
@@ -352,10 +352,10 @@ def _http_probe_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="http_probe",
             passed=True,
-            message=f"HTTP GET {url} -> {code} (HTTP service reachable).",
+            message=f"HTTP probe returned status {code} (service reachable).",
         )
     except Exception as exc:
-        return ValidationCheck(name="http_probe", passed=False, message=f"HTTP GET {url} failed: {exc}")
+        return ValidationCheck(name="http_probe", passed=False, message=f"HTTP probe failed: {exc}")
 
 
 def _tcp_ping(host: str, port: int, timeout: float = float(_TCP_TIMEOUT)) -> None:
