@@ -1,6 +1,5 @@
 ---
 # Kubeflow Profiles - manages user namespaces and access control
-platforms: [kubernetes]
 overrides:
   - provides:
       kubeflow-profiles:
