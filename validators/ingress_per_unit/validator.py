@@ -205,12 +205,12 @@ def _decode_provider_urls(databag: dict[str, str]) -> tuple[ValidationCheck, dic
 
     try:
         decoded = yaml.safe_load(raw)
-    except yaml.YAMLError as exc:
+    except yaml.YAMLError:
         return (
             ValidationCheck(
                 name="provider_urls",
                 passed=False,
-                message=f"Could not decode provider '{key}' field as YAML: {exc}.",
+                message=f"Could not decode provider '{key}' field as YAML.",
             ),
             {},
         )
@@ -323,14 +323,20 @@ def _url_format_check(url: str) -> ValidationCheck:
         )
     if parsed.username is not None or parsed.password is not None:
         return ValidationCheck(name="url_format", passed=False, message="Ingress URL must not contain userinfo.")
-
-    try:
-        _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
-    except ValueError as exc:
+    if parsed.netloc.endswith(":"):
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"Ingress URL has an invalid port: {exc}",
+            message="Ingress URL has an empty port.",
+        )
+
+    try:
+        _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
+    except ValueError:
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL has an invalid port.",
         )
 
     return ValidationCheck(name="url_format", passed=True, message=f"URL {_redact_url(url)!r} is well-formed.")
