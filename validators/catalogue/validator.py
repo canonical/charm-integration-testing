@@ -26,7 +26,7 @@ _CONFIG_PATH = "/config.json"
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
         return None
 
 
