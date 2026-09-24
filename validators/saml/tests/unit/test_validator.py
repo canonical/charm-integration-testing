@@ -105,6 +105,11 @@ def test_empty_entity_id_component_fails() -> None:
     assert result.status == "FAIL"
 
 
+def test_entity_id_with_invalid_port_fails() -> None:
+    result = _make_validator({**VALID_DATA, "entity_id": "https://idp.example.com:bad"}).validate()
+    assert result.status == "FAIL"
+
+
 def test_invalid_certificate_fails() -> None:
     result = _make_validator(
         {**VALID_DATA, "x509certs": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"}
@@ -121,7 +126,7 @@ def test_deep_metadata_passes() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b'<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"/>'
-    with patch("validators.saml.validator.urlopen", return_value=response):
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )
@@ -129,7 +134,7 @@ def test_deep_metadata_passes() -> None:
 
 
 def test_deep_metadata_fails() -> None:
-    with patch("validators.saml.validator.urlopen", side_effect=OSError("unreachable")):
+    with patch("validators.saml.validator._HTTP_OPENER.open", side_effect=OSError("unreachable")):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )
@@ -137,7 +142,7 @@ def test_deep_metadata_fails() -> None:
 
 
 def test_deep_metadata_rejects_malformed_url() -> None:
-    with patch("validators.saml.validator.urlopen") as open_url:
+    with patch("validators.saml.validator._HTTP_OPENER.open") as open_url:
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com:bad"}).validate(level="deep")
     assert result.status == "FAIL"
     open_url.assert_not_called()
@@ -147,7 +152,7 @@ def test_deep_metadata_requires_entity_descriptor() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b"<NotMetadata/>"
-    with patch("validators.saml.validator.urlopen", return_value=response):
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )
@@ -158,7 +163,7 @@ def test_deep_metadata_requires_saml_namespace() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b"<EntityDescriptor/>"
-    with patch("validators.saml.validator.urlopen", return_value=response):
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )
@@ -169,7 +174,7 @@ def test_deep_metadata_rejects_forbidden_xml() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b'<!DOCTYPE foo [<!ENTITY xxe "forbidden">]><EntityDescriptor>&xxe;</EntityDescriptor>'
-    with patch("validators.saml.validator.urlopen", return_value=response):
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )
@@ -180,7 +185,7 @@ def test_deep_metadata_rejects_oversized_response() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b"x" * (1024 * 1024 + 1)
-    with patch("validators.saml.validator.urlopen", return_value=response):
+    with patch("validators.saml.validator._HTTP_OPENER.open", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
         )

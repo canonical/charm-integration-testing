@@ -6,7 +6,7 @@ import binascii
 import http.client
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -25,6 +25,14 @@ _HTTP_TIMEOUT = 10
 _MAX_METADATA_BYTES = 1024 * 1024
 _REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 _SAML_METADATA_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:metadata"
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+_HTTP_OPENER = build_opener(_NoRedirectHandler())
 
 
 class SamlValidator(BaseValidator):
@@ -82,6 +90,8 @@ def _entity_id_check(value: str) -> ValidationCheck:
             and bool(parsed.netloc or parsed.path or parsed.params or parsed.query or parsed.fragment)
             and (parsed.scheme not in ("http", "https") or bool(parsed.hostname))
         )
+        if parsed.scheme in ("http", "https"):
+            _ = parsed.port
     except ValueError:
         passed = False
     return ValidationCheck(
@@ -128,7 +138,7 @@ def _metadata_check(url: str) -> ValidationCheck:
         return ValidationCheck(name="metadata", passed=False, message="metadata_url is not a valid HTTP(S) URL.")
     try:
         request = Request(url, headers={"User-Agent": "charm-integration-testing-saml-validator"})
-        with urlopen(request, timeout=_HTTP_TIMEOUT) as response:  # nosec B310 - scheme is checked above
+        with _HTTP_OPENER.open(request, timeout=_HTTP_TIMEOUT) as response:  # nosec B310 - scheme is checked above
             body = response.read(_MAX_METADATA_BYTES + 1)
         if len(body) > _MAX_METADATA_BYTES:
             return ValidationCheck(name="metadata", passed=False, message="SAML metadata response is too large.")
