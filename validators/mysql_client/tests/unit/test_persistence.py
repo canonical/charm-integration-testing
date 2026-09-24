@@ -123,6 +123,29 @@ class TestMySQLClientPersistenceValidatorConnection:
         # THEN
         assert conn.autocommit_calls == [True]
 
+    def test_closes_connection_when_autocommit_setup_fails(self) -> None:
+        # GIVEN a connection whose transaction-mode setup fails after connecting
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        class AutocommitFailureConnection(ConnStub):
+            closed = False
+
+            def autocommit(self, value: bool) -> None:
+                raise RuntimeError("autocommit failed")
+
+            def close(self) -> None:
+                self.closed = True
+
+        conn = AutocommitFailureConnection()
+
+        with patch.object(validator, "_connect", return_value=conn):
+            # WHEN / THEN opening the connection propagates the setup failure
+            with pytest.raises(RuntimeError, match="autocommit failed"):
+                validator._open_connection()
+
+        # THEN the already-open connection is not leaked
+        assert conn.closed
+
 
 class TestMySQLClientPersistenceValidatorPrepare:
     def test_creates_canary_table_and_returns_state(self) -> None:
@@ -343,7 +366,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         # THEN the state is rejected before any read/write
         mock_connect.assert_not_called()
 
-    @pytest.mark.parametrize("ref", [0, -1])
+    @pytest.mark.parametrize("ref", [0, -1, 1 << 63])
     def test_raises_when_expected_ref_is_out_of_range(self, ref: int) -> None:
         # GIVEN a restored/malformed PersistenceState with ref <= 0 (prepare() always returns
         # ref=1). An empty or partially recreated table (actual == 0) would otherwise satisfy

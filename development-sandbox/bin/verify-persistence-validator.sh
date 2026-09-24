@@ -287,7 +287,12 @@ EOF
 run_step wait_settled "$wait_cmd"
 
 # Verify the canary data survived the disruption.
-run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+if [ "${STEP_RC[wait_settled]:-1}" -eq 0 ]; then
+    run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+else
+    printf "[checkpoint] skipped because wait_settled failed\n  rc=1\n\n" >> "$summary"
+    STEP_RC[checkpoint]=1
+fi
 
 # Drop the canary data.
 run_step cleanup "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op cleanup --state-file $state_file"

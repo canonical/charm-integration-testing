@@ -26,6 +26,7 @@ _CANARY_TABLE_PREFIX = "validator_canary_"
 # digits); this bound lets it also reject an out-of-range look-alike that prepare() couldn't have
 # produced.
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+_MAX_CHECKPOINT_REF = (1 << 63) - 1
 
 # MySQL's LIKE treats backslash as the default escape character *inside string literals too*, so a
 # backslash escape would have to be written doubled in the SQL text. Use an escape character that
@@ -89,12 +90,12 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         self._require_requires_role()
-        if expected.ref < 1:
+        if not 1 <= expected.ref <= _MAX_CHECKPOINT_REF:
             # prepare() always returns ref=1 and checkpoint() only ever advances it, so a
-            # restored/malformed PersistenceState with ref <= 0 can't have come from a real prior
-            # run. Without this check, an empty or partially recreated table (actual == 0) could
-            # satisfy `actual == expected.ref` and report a false PASS.
-            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
+            # restored/malformed PersistenceState outside the signed BIGINT range cannot have
+            # come from a real prior run. Reject it before formatting queries or attempting the
+            # next insert, which would otherwise overflow the backend column.
+            raise ValueError(f"expected.ref {expected.ref} is out of range " f"(expected 1..{_MAX_CHECKPOINT_REF})")
         table_name = self._canary_table_name(expected.id)
         marker = expected.token
         conn = self._open_connection()
@@ -216,9 +217,13 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
             # otherwise reach PyMySQL as an empty host, which it silently resolves to localhost.
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'endpoints' is blank")
         conn = self._connect(data)
-        # Canary writes are useless if rolled back when the connection closes. DDL commits
-        # implicitly in MySQL, but INSERTs do not.
-        conn.autocommit(True)
+        try:
+            # Canary writes are useless if rolled back when the connection closes. DDL commits
+            # implicitly in MySQL, but INSERTs do not.
+            conn.autocommit(True)
+        except Exception:
+            conn.close()
+            raise
         return conn
 
     def _canary_table_prefix(self) -> str:
