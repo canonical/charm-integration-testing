@@ -38,6 +38,8 @@ def _validate_cmr_options(
     *,
     is_cmr: bool,
     same_controller: bool,
+    target_controller: str | None,
+    target_model: str | None,
     neighbor_controller: str | None,
     neighbor_model: str | None,
 ) -> None:
@@ -77,8 +79,6 @@ def _validate_cmr_options(
             )
 
     if is_cmr:
-        target_controller = config.getoption("--target-controller", default=None)
-        target_model = config.getoption("--target-model", default=None)
         if (
             neighbor_controller is not None
             and target_controller is not None
@@ -150,6 +150,8 @@ def _validate_current_state_options(
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    target_controller = config.getoption("--target-controller", default=None)
+    target_model = config.getoption("--target-model", default=None)
     neighbor_cloud = config.getoption("--neighbor-cloud", default=None)
     neighbor_controller = config.getoption("--neighbor-controller", default=None)
     neighbor_model = config.getoption("--neighbor-model", default=None)
@@ -160,6 +162,8 @@ def pytest_configure(config: pytest.Config) -> None:
         config,
         is_cmr=is_cmr,
         same_controller=same_controller,
+        target_controller=target_controller,
+        target_model=target_model,
         neighbor_controller=neighbor_controller,
         neighbor_model=neighbor_model,
     )
