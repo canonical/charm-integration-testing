@@ -232,7 +232,7 @@ run_step status_prepared "juju status -m $MODEL --relations"
 # checkpointing. Checkpointing while the disruption is still in flight would
 # test the wrong thing (and can produce ERROR/skipped results rather than a
 # genuine data-survival verdict).
-if [ "$PROVIDER_UNITS" = "auto" ]; then
+if [ -z "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
     # juju snap cannot redirect output to files directly, so capture via pipe.
     _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
     juju status -m "$MODEL" --format=json | cat > "$_status_file"
@@ -251,8 +251,10 @@ else:
 PY
     )
     rm -f "$_status_file"
-else
+elif [ -z "$DOWN_CMD" ]; then
     orig_units="$PROVIDER_UNITS"
+else
+    orig_units=0
 fi
 
 if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
@@ -275,7 +277,7 @@ run_step status_restored "juju status -m $MODEL --relations"
 # finish when the original unit disappears. Polling status avoids checkpointing during that gap.
 read -r -d '' wait_cmd <<EOF || true
 for attempt in \$(seq 1 180); do
-    if juju status -m "$MODEL" --format=json | cat | python3 -c 'import json, sys; d=json.load(sys.stdin); apps=d.get("applications", {}); provider=apps.get(sys.argv[1], {}); app=apps.get(sys.argv[2], {}); expected=int(sys.argv[3]); provider_units=provider.get("units", {}); app_units=app.get("units", {}); good_provider=provider.get("application-status", {}).get("current") == "active" and len(provider_units) >= expected and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in provider_units.values()); good_app=app.get("application-status", {}).get("current") == "active" and bool(app_units) and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in app_units.values()); sys.exit(0 if good_provider and good_app else 1)' "$PROVIDER" "$APP" "$orig_units"; then
+    if juju status -m "$MODEL" --format=json | cat | python3 -c 'import json, sys; d=json.load(sys.stdin); apps=d.get("applications", {}); provider=apps.get(sys.argv[1], {}); app=apps.get(sys.argv[2], {}); expected=int(sys.argv[3]); provider_units=provider.get("units", {}); app_units=app.get("units", {}); good_provider=expected == 0 or (provider.get("application-status", {}).get("current") == "active" and len(provider_units) >= expected and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in provider_units.values())); good_app=app.get("application-status", {}).get("current") == "active" and bool(app_units) and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in app_units.values()); sys.exit(0 if good_provider and good_app else 1)' "$PROVIDER" "$APP" "$orig_units"; then
         exit 0
     fi
     sleep 5
