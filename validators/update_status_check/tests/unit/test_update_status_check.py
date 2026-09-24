@@ -18,7 +18,7 @@ def _make_charm() -> CharmBaseStub:
     relation = RelationStub(name="database", id=1)
     charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
     # Populate the remote databag so the engine doesn't skip this integration as
-    # "not yet ready" (see validators.engine.engine._has_remote_data).
+    # "not yet ready" (see validators.engine.engine._has_negotiated_data).
     integration = charm.model.relations["database"][0]
     integration.data[integration.app] = {"endpoints": "postgresql:5432"}
     return charm
