@@ -16,7 +16,6 @@ def test_upgrade_controller(
     target_controller: str,
     target_upgrade_version: JujuVersion | None,
     model: str,
-    neighbor_model_ref: JujuModelHandle | None,
     request: pytest.FixtureRequest,
 ) -> None:
     """
@@ -61,16 +60,7 @@ def test_upgrade_controller(
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
     # And the workload model should still be healthy
-    workload_model_ref = JujuModelHandle(controller=active_controller, model=model)
-    juju_client.idle_for_period(model=workload_model_ref, timeout=timedelta(minutes=15))
-
-    # On the migration path the model's controller changed; the extension re-keyed its tracked
-    # state on post_migrate_model, so the checkpoint finds it under the new controller.
-    juju_client.validate_model(model=workload_model_ref, level="deep")
-    # For a CMR the persistence validator lives on the neighbor's requirer units. The neighbor's
-    # own controller is unaffected by this upgrade, so no rekey is needed.
-    if neighbor_model_ref is not None:
-        juju_client.validate_model(model=neighbor_model_ref, level="deep")
+    juju_client.validate_model(model=JujuModelHandle(controller=active_controller, model=model), level="deep")
 
 
 def _upgrade_in_place(

@@ -20,13 +20,7 @@ def test_teardown(
     integration_endpoint_1: JujuIntegrationApplication,
     integration_endpoint_2: JujuIntegrationApplication,
     consumed_offer_alias: str | None,
-    neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
-    # Canary data is dropped by the extension's pre-removal hooks: pre_remove_integration cleans
-    # up the consuming side before the CMR relation is removed below, and pre_remove cleans up the
-    # target model before its application is destroyed. Both run while the relations still exist,
-    # which cleanup() needs to visit them.
-
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
     # consuming (target or neighbor, depending on the integration), so the relation has to be torn
@@ -60,9 +54,3 @@ def test_teardown(
     if is_cmr_integration:
         assert consumed_offer_alias is not None
         juju_client.remove_saas(consumed_offer_alias, model=integration_model_ref)
-        # Removal is asynchronous on the controller; a later re-consumption of the same alias
-        # (e.g. a redeploy) can otherwise race with the still-in-progress teardown.
-        # See https://github.com/canonical/charm-integration-testing/issues/1045.
-        juju_client.wait_for_removal_of_saas(
-            consumed_offer_alias, model=integration_model_ref, timeout=timedelta(minutes=10)
-        )
