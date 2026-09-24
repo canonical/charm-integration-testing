@@ -156,14 +156,14 @@ class ValidatorInjectorExtension(JujuExtension):
                 failed_relation_ids = {
                     result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
                 }
-                cleaned_relation_ids = set(cleaned_relation_ids) - failed_relation_ids
+                cleaned_relation_id_set = set(cleaned_relation_ids) - failed_relation_ids
                 for key in [
                     key
                     for key in self.persistence_state
                     if key.controller == model.controller
                     and key.model == model.model
                     and key.unit == unit
-                    and key.relation_id in cleaned_relation_ids
+                    and key.relation_id in cleaned_relation_id_set
                 ]:
                     del self.persistence_state[key]
         return results
