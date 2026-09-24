@@ -396,6 +396,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a non-Kubernetes cloud (e.g. OpenStack, LXD, manual) on an existing controller."""
+        raise NotImplementedError
+
+    @abstractmethod
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 

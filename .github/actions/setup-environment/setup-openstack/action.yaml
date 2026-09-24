@@ -12,9 +12,21 @@ outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
     value: ${{ inputs.cloud-name }}
+  cloud-definition-path:
+    description: Path to the cloud definition YAML file written to disk.
+    value: ${{ steps.paths.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to the credentials YAML file written to disk.
+    value: ${{ steps.paths.outputs.credentials-path }}
 runs:
   using: composite
   steps:
+    - name: Report file paths
+      id: paths
+      shell: bash
+      run: |
+        echo "cloud-definition-path=${HOME}/openstack/openstack-cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${HOME}/openstack/openstack-credentials.yaml" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}

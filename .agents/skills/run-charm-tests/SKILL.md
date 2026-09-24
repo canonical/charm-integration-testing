@@ -396,8 +396,10 @@ Tests:      [Deploy] ─────[Relate] ──[Verify]
 - Tests cross-model relations without a second bootstrap
 - Requires `--neighbor-cloud` (rejected without it); pass the same cloud as
   `--target-cloud` for a same-platform neighbor, or a different cloud for a multi-cloud
-  controller. A different Kubernetes neighbor cloud is registered on the target
-  controller automatically from `KUBECONFIG_<cloud>`
+  controller. A different neighbor cloud is registered on the target controller
+  automatically: from `KUBECONFIG_<cloud>` for Kubernetes, or from
+  `CLOUD_DEFINITION_<cloud>`/`CLOUD_CREDENTIALS_<cloud>` for any other platform (e.g.
+  OpenStack)
 
 #### **Parallel (Future)**
 ```
