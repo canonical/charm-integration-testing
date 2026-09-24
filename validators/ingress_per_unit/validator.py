@@ -279,16 +279,23 @@ def _unit_url_check(urls: dict[str, str], unit_name: str) -> tuple[ValidationChe
 
 
 def _redact_url(url: str) -> str:
-    """Return *url* stripped of any ``?``/``#`` query or fragment component for display.
+    """Return *url* reduced to its scheme and authority (``scheme://host[:port]``) for display.
 
-    An advertised ingress URL is provider-controlled and may carry a query string such as
-    ``?token=...``; strip it before echoing the URL into a diagnostic message so secrets don't
-    end up in the ``ValidationResult`` or runner logs.
+    An advertised ingress URL is provider-controlled and its path, query string, or fragment
+    may carry a secret (for example ``/secret-token`` or ``?token=...``); strip all of them
+    before echoing the URL into a diagnostic message so secrets don't end up in the
+    ``ValidationResult`` or runner logs.
     """
-    for i, ch in enumerate(url):
-        if ch in "?#":
-            return url[:i]
-    return url
+    scheme_sep = url.find("://")
+    if scheme_sep == -1:
+        return url.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    authority_start = scheme_sep + len("://")
+    authority_end = len(url)
+    for i in range(authority_start, len(url)):
+        if url[i] in "/?#":
+            authority_end = i
+            break
+    return url[:authority_end]
 
 
 def _url_format_check(url: str) -> ValidationCheck:

@@ -181,6 +181,12 @@ class TestUrlFormatCheck:
         assert "token" not in check.message
         assert "super-secret" not in check.message
 
+    def test_success_message_does_not_echo_path(self) -> None:
+        check = _url_format_check("http://gateway/secret-token")
+        assert check.passed
+        assert "secret-token" not in check.message
+        assert "gateway" in check.message
+
 
 # ---------------------------------------------------------------------------
 # L1 – simple validation
