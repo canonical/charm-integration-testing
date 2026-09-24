@@ -106,6 +106,15 @@ def test_sso_binding_must_match_endpoint_field() -> None:
     assert _make_validator(data).validate().status == "FAIL"
 
 
+def test_all_published_sso_endpoints_are_validated() -> None:
+    data = {
+        **VALID_DATA,
+        "single_sign_on_service_post_url": "https://idp.example.com/sso",
+        "single_sign_on_service_post_binding": "invalid",
+    }
+    assert _make_validator(data).validate().status == "FAIL"
+
+
 def test_malformed_url_fails() -> None:
     result = _make_validator(
         {**VALID_DATA, "single_sign_on_service_redirect_url": "https://idp.example.com:bad"}

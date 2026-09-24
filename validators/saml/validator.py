@@ -50,8 +50,8 @@ class SamlValidator(BaseValidator):
         if not checks[0].passed:
             return self._fail_result(level, checks)
         checks.append(_entity_id_check(self.databag["entity_id"]))
-        endpoint_url, endpoint_binding, expected_binding = _select_sso_endpoint(self.databag)
-        if endpoint_url is None or endpoint_binding is None or expected_binding is None:
+        endpoint_checks = _sso_endpoint_checks(self.databag)
+        if not endpoint_checks:
             checks.append(
                 ValidationCheck(
                     name="sso_endpoint",
@@ -60,12 +60,7 @@ class SamlValidator(BaseValidator):
                 )
             )
         else:
-            checks.extend(
-                [
-                    _url_check("single_sign_on_service_url", endpoint_url),
-                    _binding_check(endpoint_binding, expected_binding),
-                ]
-            )
+            checks.extend(endpoint_checks)
         if self.databag.get("x509certs"):
             checks.append(_certificate_check(self.databag["x509certs"]))
         if not all(check.passed for check in checks):
@@ -91,13 +86,29 @@ def _url_check(name: str, value: str) -> ValidationCheck:
     )
 
 
-def _select_sso_endpoint(databag: dict[str, str]) -> tuple[str | None, str | None, str | None]:
+def _sso_endpoint_checks(databag: dict[str, str]) -> list[ValidationCheck]:
+    checks: list[ValidationCheck] = []
     for url_field, binding_field, expected_binding in _SSO_ENDPOINTS:
         url = databag.get(url_field)
         binding = databag.get(binding_field)
-        if url or binding:
-            return url, binding, expected_binding
-    return None, None, None
+        if not url and not binding:
+            continue
+        if not url or not binding:
+            checks.append(
+                ValidationCheck(
+                    name=f"{url_field}_pair",
+                    passed=False,
+                    message=f"{url_field} and {binding_field} must be published together.",
+                )
+            )
+            continue
+        checks.extend(
+            [
+                _url_check(url_field, url),
+                _binding_check(binding, expected_binding),
+            ]
+        )
+    return checks
 
 
 def _entity_id_check(value: str) -> ValidationCheck:
