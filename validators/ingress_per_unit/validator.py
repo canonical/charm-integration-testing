@@ -281,11 +281,11 @@ def _url_format_check(url: str) -> ValidationCheck:
     """Validate that the ingress URL is a well-formed HTTP/HTTPS URL."""
     try:
         parsed = urlparse(url)
-    except Exception as exc:
+    except ValueError:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"Failed to parse URL {url!r}: {exc}",
+            message="Ingress URL could not be parsed.",
         )
 
     if parsed.scheme not in ("http", "https"):
