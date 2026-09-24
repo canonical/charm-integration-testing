@@ -57,7 +57,8 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        validators_ready = f"test -x {venv_runner} && test -x {uv_bin}"
+        if self.juju.exec_unit(model, unit, validators_ready, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
