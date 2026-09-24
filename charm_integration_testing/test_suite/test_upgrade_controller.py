@@ -62,15 +62,15 @@ def test_upgrade_controller(
 
     # And the workload model should still be healthy
     workload_model_ref = JujuModelHandle(controller=active_controller, model=model)
-    juju_client.idle_for_period(model=workload_model_ref, timeout=timedelta(minutes=15))
+    models_to_validate = [m for m in (workload_model_ref, neighbor_model_ref) if m is not None]
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
 
     # On the migration path the model's controller changed; the extension re-keyed its tracked
     # state on post_migrate_model, so the checkpoint finds it under the new controller.
-    juju_client.validate_model(model=workload_model_ref, level="deep")
     # For a CMR the persistence validator lives on the neighbor's requirer units. The neighbor's
     # own controller is unaffected by this upgrade, so no rekey is needed.
-    if neighbor_model_ref is not None:
-        juju_client.validate_model(model=neighbor_model_ref, level="deep")
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="deep")
 
 
 def _upgrade_in_place(
