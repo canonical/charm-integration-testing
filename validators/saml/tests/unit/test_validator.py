@@ -122,6 +122,11 @@ def test_malformed_url_fails() -> None:
     assert result.status == "FAIL"
 
 
+def test_malformed_metadata_url_fails_at_simple_level() -> None:
+    result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com:bad"}).validate()
+    assert result.status == "FAIL"
+
+
 def test_urn_entity_id_passes() -> None:
     result = _make_validator({**VALID_DATA, "entity_id": "urn:example:idp"}).validate()
     assert result.status == "PASS"

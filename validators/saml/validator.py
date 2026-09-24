@@ -63,6 +63,8 @@ class SamlValidator(BaseValidator):
             checks.extend(endpoint_checks)
         if self.databag.get("x509certs"):
             checks.append(_certificate_check(self.databag["x509certs"]))
+        if self.databag.get("metadata_url"):
+            checks.append(_url_check("metadata_url", self.databag["metadata_url"]))
         if not all(check.passed for check in checks):
             return self._fail_result(level, checks)
         if level == "deep" and self.databag.get("metadata_url"):
@@ -182,10 +184,12 @@ def _metadata_check(url: str) -> ValidationCheck:
                 name="metadata", passed=False, message="SAML metadata response has no valid metadata descriptor."
             )
         return ValidationCheck(name="metadata", passed=True, message="SAML metadata is reachable and valid XML.")
+    except HTTPError as exc:
+        exc.close()
+        return ValidationCheck(name="metadata", passed=False, message=f"SAML metadata check failed: {exc}.")
     except (
         DefusedXmlException,
         ElementTree.ParseError,
-        HTTPError,
         URLError,
         http.client.HTTPException,
         OSError,
