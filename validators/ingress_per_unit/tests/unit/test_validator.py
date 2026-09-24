@@ -4,11 +4,14 @@
 from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
+from urllib.request import ProxyHandler
 
 import ops
 import yaml
 
 from validators.ingress_per_unit.validator import (
+    _HTTP_OPENER,
     IngressPerUnitValidator,
     _decode_provider_urls,
     _host_format_check,
@@ -264,6 +267,14 @@ class TestIngressPerUnitValidatorSimple:
 
 
 class TestIngressPerUnitValidatorDeep:
+    def test_opener_disables_environment_proxies(self) -> None:
+        proxy_handlers = [
+            handler
+            for handler in getattr(_HTTP_OPENER, "handlers")
+            if isinstance(handler, ProxyHandler)
+        ]
+        assert not proxy_handlers
+
     def test_pass_when_url_reachable(self) -> None:
         validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
         with (
@@ -272,6 +283,45 @@ class TestIngressPerUnitValidatorDeep:
         ):
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
+
+    def test_pass_when_url_redirects_without_following(self) -> None:
+        response = HTTPError(VALID_PROVIDER_URL, 302, "Found", {}, None)  # type: ignore[arg-type]
+        validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch("validators.ingress_per_unit.validator._HTTP_OPENER.open", side_effect=response) as open_request,
+        ):
+            result = validator.validate(level="deep")
+        probe_check = next(check for check in result.checks if check.name == "http_probe")
+        assert probe_check.passed
+        assert "302" in probe_check.message
+        open_request.assert_called_once()
+
+    def test_closes_http_error_response(self) -> None:
+        response = HTTPError(VALID_PROVIDER_URL, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+        response.close = MagicMock()
+        validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch("validators.ingress_per_unit.validator._HTTP_OPENER.open", side_effect=response),
+        ):
+            result = validator.validate(level="deep")
+        assert result.status == "PASS"
+        response.close.assert_called_once()
+
+    def test_fail_when_http_transport_fails(self) -> None:
+        validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch(
+                "validators.ingress_per_unit.validator._HTTP_OPENER.open",
+                side_effect=URLError("connection refused"),
+            ),
+        ):
+            result = validator.validate(level="deep")
+        probe_check = next(check for check in result.checks if check.name == "http_probe")
+        assert not probe_check.passed
+        assert "connection refused" in probe_check.message
 
     def test_fail_when_provider_has_no_urls(self) -> None:
         validator = _make_validator(VALID_UNIT_DATA, {})
