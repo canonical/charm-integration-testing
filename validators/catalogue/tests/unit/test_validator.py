@@ -253,7 +253,7 @@ class TestCatalogueValidatorDeep:
     def test_fail_when_http_error(self) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch(
-            "urllib.request.urlopen",
+            "validators.catalogue.validator._HTTP_OPENER.open",
             side_effect=urllib.error.HTTPError("http://x", 404, "Not Found", {}, None),  # type: ignore[arg-type]
         ):
             result = validator.validate(level="deep")
