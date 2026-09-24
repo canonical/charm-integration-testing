@@ -14,3 +14,10 @@ overrides:
         optional: true  # VeleroBackupProvider is additive; charm.py::_on_event reaches ActiveStatus without relations
     constraints:
       - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
+  - provides:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+      metrics-endpoint:
+        optional: true
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
