@@ -4,6 +4,7 @@
 import base64
 import binascii
 import http.client
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -28,7 +29,7 @@ _SSO_ENDPOINTS = (
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
         return None
 
 
