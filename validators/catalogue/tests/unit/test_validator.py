@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import json
+import ssl
 import urllib.error
 import urllib.request
 from importlib.metadata import entry_points
@@ -12,6 +13,7 @@ import ops
 
 from validators.catalogue.validator import (
     CatalogueValidator,
+    _insecure_https_context,
     _NoRedirectHandler,
     _validate_api_endpoints,
     _validate_item_served,
@@ -272,8 +274,15 @@ class TestCatalogueValidatorDeep:
 
     def test_fail_when_provider_unreachable(self) -> None:
         validator = _make_validator(VALID_DATABAG)
-        with patch(
-            "validators.catalogue.validator._HTTP_OPENER.open", side_effect=urllib.error.URLError("connection refused")
+        with (
+            patch(
+                "validators.catalogue.validator._HTTP_OPENER.open",
+                side_effect=urllib.error.URLError("connection refused"),
+            ),
+            patch(
+                "validators.catalogue.validator._HTTPS_OPENER.open",
+                side_effect=urllib.error.URLError("connection refused"),
+            ),
         ):
             result = validator.validate(level="deep")
         assert result.status == "FAIL"
@@ -283,14 +292,35 @@ class TestCatalogueValidatorDeep:
 
     def test_fail_when_http_error(self) -> None:
         validator = _make_validator(VALID_DATABAG)
-        with patch(
-            "validators.catalogue.validator._HTTP_OPENER.open",
-            side_effect=urllib.error.HTTPError("http://x", 404, "Not Found", {}, None),  # type: ignore[arg-type]
+        http_error = urllib.error.HTTPError("http://x", 404, "Not Found", {}, None)  # type: ignore[arg-type]
+        with (
+            patch("validators.catalogue.validator._HTTP_OPENER.open", side_effect=http_error),
+            patch("validators.catalogue.validator._HTTPS_OPENER.open", side_effect=http_error),
         ):
             result = validator.validate(level="deep")
         assert result.status == "FAIL"
         reach_check = next(c for c in result.checks if c.name == "http_reachability")
         assert not reach_check.passed
+
+    def test_pass_via_https_fallback_when_http_unreachable(self) -> None:
+        validator = _make_validator(VALID_DATABAG)
+        with (
+            patch(
+                "validators.catalogue.validator._HTTP_OPENER.open",
+                side_effect=urllib.error.URLError("connection refused"),
+            ),
+            patch(
+                "validators.catalogue.validator._HTTPS_OPENER.open",
+                return_value=_mock_response(VALID_PAYLOAD),
+            ),
+        ):
+            result = validator.validate(level="deep")
+        assert result.status == "PASS", result.checks
+
+    def test_insecure_https_context_disables_verification(self) -> None:
+        context = _insecure_https_context()
+        assert context.check_hostname is False
+        assert context.verify_mode == ssl.CERT_NONE
 
     def test_fail_when_body_not_json(self) -> None:
         validator = _make_validator(VALID_DATABAG)

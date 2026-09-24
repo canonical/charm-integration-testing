@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,7 +31,30 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _insecure_https_context() -> ssl.SSLContext:
+    """Build a TLS context that skips certificate verification for the HTTPS fallback probe.
+
+    ``catalogue-k8s`` issues a self-signed certificate for its optional HTTPS listener (its own
+    integration tests call ``requests.get(..., verify=False)``), and this validator has no trust
+    path to a per-model CA. Skip verification for this reachability-only probe, the same way a
+    basic health check (e.g. ``curl -k``) would.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 _HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirectHandler())
+_HTTPS_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoRedirectHandler(),
+    urllib.request.HTTPSHandler(context=_insecure_https_context()),
+)
+
+
+def _opener_for(url: str) -> urllib.request.OpenerDirector:
+    return _HTTPS_OPENER if url.startswith("https://") else _HTTP_OPENER
 
 
 class CatalogueValidator(BaseValidator):
@@ -212,7 +236,7 @@ def _fetch_catalogue(urls: list[str]) -> tuple[ValidationCheck, dict[str, Any] |
     for url in urls:
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with _HTTP_OPENER.open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
+            with _opener_for(url).open(req, timeout=_HTTP_TIMEOUT) as resp:  # nosec B310
                 status_code = resp.status
                 body = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
