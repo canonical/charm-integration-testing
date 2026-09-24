@@ -276,6 +276,41 @@ class TestRunForCharm:
         assert len(results) == 1
         assert results[0].status == "PASS"
 
+    def test_runs_provides_validator_when_only_local_data_published(self) -> None:
+        # Some interfaces (e.g. kafka_client, mysql) publish the fields their
+        # provider-side validator checks on the local charm's own app/unit
+        # databag, not the requirer's. A requirer that legitimately never
+        # writes anything back must not leave the provider stuck at SKIPPED.
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.provides)
+        integration = charm.model.relations["db"][0]
+        integration.data[charm.app] = {"endpoints": "db:5432"}
+        # Remote (requirer) app databag stays empty, per RelationStub's default.
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "PASS"
+
+    def test_skips_provides_validator_with_no_local_or_remote_data(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.provides)
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "SKIPPED"
+
     def test_reports_fail_for_integration_with_no_remote_data_by_default(self) -> None:
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)

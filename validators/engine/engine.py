@@ -14,10 +14,11 @@ defining what a validator is; only the three packages above need it.
 """
 
 import logging
+from collections.abc import Iterable
 from importlib.metadata import entry_points
 
 from ops.charm import CharmBase
-from ops.model import Relation
+from ops.model import Application, Relation, Unit
 
 from validators.base import (
     BaseValidator,
@@ -37,17 +38,30 @@ LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
 }
 
 
-def _has_remote_data(integration: Relation) -> bool:
-    """Return True if the remote side has published any data on *integration*.
+def _has_data(integration: Relation, app: Application | None, units: Iterable[Unit]) -> bool:
+    """Return True if *app* or any of *units* has published data on *integration*."""
+    if app is not None and bool(dict(integration.data.get(app, {}))):
+        return True
+    return any(bool(dict(integration.data.get(unit, {}))) for unit in units)
 
-    Checks both the remote application databag (used by most interfaces) and
-    the remote unit databags (used by some, e.g. `http_interface`,
-    `loki_push_api`, `alertmanager_dispatch`): a relation can have negotiated
-    data via one without the other.
+
+def _has_negotiated_data(integration: Relation, charm: CharmBase, role: ValidationRole) -> bool:
+    """Return True once the side being validated has data available to check.
+
+    For `requires` validators this means the remote (provider) side has
+    published data - either on its app databag (most interfaces) or its unit
+    databags (e.g. `http_interface`, `loki_push_api`, `alertmanager_dispatch`,
+    `mysql`).
+
+    For `provides` validators, some interfaces (e.g. `kafka_client`,
+    `mysql`) publish the very fields the validator checks on *our own* app or
+    unit databag rather than the requirer's; gating on remote data there
+    would leave the validator stuck at SKIPPED forever whenever the requirer
+    legitimately never writes anything back.
     """
-    if integration.app is not None and integration.app in integration.data:
-        if bool(dict(integration.data[integration.app])):
-            return True
+    if role == "provides":
+        return _has_data(integration, charm.app, [charm.unit])
+    return _has_data(integration, integration.app, integration.units)
     return any(bool(dict(integration.data[unit])) for unit in integration.units)
 
 
@@ -132,10 +146,13 @@ def run_for_charm(
     want to validate installed validators can set *skip_missing_unvalidated* to skip
     missing relations with no installed validator, as well as relations explicitly
     marked optional. The same flag also skips (as SKIPPED, not FAIL/ERROR) integrations
-    that exist in the model but whose remote application has not published any relation
-    data yet - e.g. immediately after `juju integrate`, before the two ends have
-    finished negotiating - so periodic in-charm callers (update-status, `validate`)
-    don't need to reimplement their own readiness gate.
+    that exist in the model but have not negotiated data yet - e.g. immediately after
+    `juju integrate`, before the two ends have finished negotiating - so periodic
+    in-charm callers (update-status, `validate`) don't need to reimplement their own
+    readiness gate. What counts as negotiated depends on the validator's role: for
+    `requires` validators, it's the remote (provider) side publishing data; for
+    `provides` validators, some interfaces publish the checked fields on our own side,
+    so it's our own app/unit databag instead (see `_has_negotiated_data`).
     """
     if validators is None:
         validators = load_validators()
@@ -171,10 +188,13 @@ def run_for_charm(
             )
             continue
         for integration in charm.model.relations[relation]:
-            if skip_missing_unvalidated and interface_name in validators and not _has_remote_data(integration):
+            if (
+                skip_missing_unvalidated
+                and interface_name in validators
+                and not _has_negotiated_data(integration, charm, role)
+            ):
                 logger.debug(
-                    f"Relation '{relation}' (id={integration.id}) has no data from the remote "
-                    "application yet; skipping until it is ready."
+                    f"Relation '{relation}' (id={integration.id}) has not negotiated data yet; skipping until it is ready."
                 )
                 results.append(
                     ValidationResult(
@@ -184,7 +204,7 @@ def run_for_charm(
                         role=role,
                         level=level,
                         relation_id=integration.id,
-                        error="Remote application has not published relation data yet.",
+                        error="Relation has not negotiated data yet.",
                     )
                 )
                 continue
