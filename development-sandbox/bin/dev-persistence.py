@@ -202,16 +202,18 @@ def main() -> None:
         uv_file=uv_file,
     )
 
-    persistence_state = load_state(state_file)
+    # The extension owns the canary state, so seed it from the state file and write back
+    # whatever this op left behind - that's what threads state across separate invocations.
+    extension.persistence_state = load_state(state_file)
     logger.info(
         "Running persistence op '%s' on %s (model=%s, tracked relations=%d)...",
         args.op,
         args.app,
         args.model,
-        len(persistence_state),
+        len(extension.persistence_state),
     )
-    results = extension.post_persistence(model, args.app, args.op, persistence_state)
-    save_state(state_file, persistence_state)
+    results = extension.post_persistence(model, args.app, args.op)
+    save_state(state_file, extension.persistence_state)
     logger.info("Persistence state written to %s", state_file)
     print_results(results)
 

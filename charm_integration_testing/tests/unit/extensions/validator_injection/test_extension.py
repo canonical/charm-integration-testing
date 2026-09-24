@@ -347,6 +347,21 @@ class TestValidatorInjectorExtension:
             assert "--persistence cleanup" in run_cmd
             assert "--refs" not in run_cmd
 
+        def test_post_persistence_cleanup_drops_cleaned_state(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN persistence state loaded by the standalone sandbox helper
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            extension.persistence_state = {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
+
+            # WHEN the explicit cleanup operation completes successfully
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
+
+            # THEN the helper's persisted state no longer tracks the removed canary
+            assert extension.persistence_state == {}
+
         def test_cleanup_keeps_state_for_a_relation_cleanup_never_visited(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:

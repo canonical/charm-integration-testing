@@ -122,7 +122,7 @@ class ValidatorInjectorExtension(JujuExtension):
                 # distinct from "ran and found nothing to report", which returns ([], {}) below.
                 results[unit] = []
                 continue
-            unit_results, updated_refs, _ = outcome
+            unit_results, updated_refs, cleaned_relation_ids = outcome
             results[unit] = unit_results
 
             try:
@@ -152,6 +152,20 @@ class ValidatorInjectorExtension(JujuExtension):
                 ]
                 continue
             self.persistence_state.update(new_entries)
+            if op == "cleanup":
+                failed_relation_ids = {
+                    result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
+                }
+                cleaned_relation_id_set = set(cleaned_relation_ids) - failed_relation_ids
+                for key in [
+                    key
+                    for key in self.persistence_state
+                    if key.controller == model.controller
+                    and key.model == model.model
+                    and key.unit == unit
+                    and key.relation_id in cleaned_relation_id_set
+                ]:
+                    del self.persistence_state[key]
         return results
 
     def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:

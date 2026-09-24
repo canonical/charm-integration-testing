@@ -232,16 +232,11 @@ run_step status_prepared "juju status -m $MODEL --relations"
 # checkpointing. Checkpointing while the disruption is still in flight would
 # test the wrong thing (and can produce ERROR/skipped results rather than a
 # genuine data-survival verdict).
-if [ -n "$DOWN_CMD" ]; then
-    run_step provider_down "$DOWN_CMD"
-    run_step status_down "juju status -m $MODEL --relations"
-    run_step provider_restore "$RESTORE_CMD"
-else
-    if [ "$PROVIDER_UNITS" = "auto" ]; then
-        # juju snap cannot redirect output to files directly, so capture via pipe.
-        _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
-        juju status -m "$MODEL" --format=json | cat > "$_status_file"
-        orig_units=$(python3 - "$PROVIDER" "$_status_file" <<'PY'
+if [ -z "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
+    # juju snap cannot redirect output to files directly, so capture via pipe.
+    _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
+    juju status -m "$MODEL" --format=json | cat > "$_status_file"
+    orig_units=$(python3 - "$PROVIDER" "$_status_file" <<'PY'
 import json, sys
 provider, status_file = sys.argv[1], sys.argv[2]
 with open(status_file) as f:
@@ -254,26 +249,50 @@ else:
     units = app.get("units", {})
     print(len(units) if isinstance(units, dict) else 1)
 PY
-        )
-        rm -f "$_status_file"
-    else
-        orig_units="$PROVIDER_UNITS"
-    fi
+    )
+    rm -f "$_status_file"
+elif [ -z "$DOWN_CMD" ]; then
+    orig_units="$PROVIDER_UNITS"
+else
+    orig_units=0
+fi
 
-    if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
-        orig_units=1
-    fi
+if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
+    orig_units=1
+fi
 
+if [ -n "$DOWN_CMD" ]; then
+    run_step provider_down "$DOWN_CMD"
+    run_step status_down "juju status -m $MODEL --relations"
+    run_step provider_restore "$RESTORE_CMD"
+else
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
 fi
 
 run_step status_restored "juju status -m $MODEL --relations"
-run_step wait_settled "juju wait-for application $APP -m $MODEL --timeout 15m"
+# Wait for the provider and validator units to actually exist, be active, and be idle.
+# Juju can report an application as active while replacing a unit, and `wait-for unit` may then
+# finish when the original unit disappears. Polling status avoids checkpointing during that gap.
+read -r -d '' wait_cmd <<EOF || true
+for attempt in \$(seq 1 180); do
+    if juju status -m "$MODEL" --format=json | cat | python3 -c 'import json, sys; d=json.load(sys.stdin); apps=d.get("applications", {}); provider=apps.get(sys.argv[1], {}); app=apps.get(sys.argv[2], {}); expected=int(sys.argv[3]); provider_units=provider.get("units", {}); app_units=app.get("units", {}); good_provider=expected == 0 or (provider.get("application-status", {}).get("current") == "active" and len(provider_units) >= expected and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in provider_units.values())); good_app=app.get("application-status", {}).get("current") == "active" and bool(app_units) and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in app_units.values()); sys.exit(0 if good_provider and good_app else 1)' "$PROVIDER" "$APP" "$orig_units"; then
+        exit 0
+    fi
+    sleep 5
+done
+exit 1
+EOF
+run_step wait_settled "$wait_cmd"
 
 # Verify the canary data survived the disruption.
-run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+if [ "${STEP_RC[wait_settled]:-1}" -eq 0 ]; then
+    run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+else
+    printf "[checkpoint] skipped because wait_settled failed\n  rc=1\n\n" >> "$summary"
+    STEP_RC[checkpoint]=1
+fi
 
 # Drop the canary data.
 run_step cleanup "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op cleanup --state-file $state_file"
