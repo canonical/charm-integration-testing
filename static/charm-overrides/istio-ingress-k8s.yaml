@@ -1,5 +1,6 @@
 ---
 # Source: https://github.com/canonical/istio-ingress-k8s-operator
+listed: true
 platforms: [kubernetes]
 overrides:
   - provides:
