@@ -23,7 +23,6 @@ def test_bootstrap_controller(
     target_controller_bootstrap_metadata_source: Path | None,
     neighbor_cloud: str | None,
     neighbor_controller: str | None,
-    neighbor_platform: str,
     neighbor_controller_bootstrap_constraints: dict[str, str] | None,
     neighbor_controller_bootstrap_config: dict[str, str] | None,
     neighbor_controller_bootstrap_metadata_source: Path | None,
@@ -65,7 +64,4 @@ def test_bootstrap_controller(
         target_cloud=target_cloud,
     ):
         assert neighbor_cloud is not None
-        if neighbor_platform == "kubernetes":
-            juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)
-        else:
-            juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)
+        juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)

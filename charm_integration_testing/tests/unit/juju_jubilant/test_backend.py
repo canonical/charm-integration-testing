@@ -2527,14 +2527,14 @@ class TestJubilantBackend:
             assert stub.add_model_calls == 3
             assert stub.switch_calls == 0
 
-        def test_add_k8s_cloud_success(self, tmp_path: Path) -> None:
+        def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
                 JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
-            backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+            backend.add_cloud(cloud="my-k8s", controller="test-controller")
 
             assert stub.cli_calls == [
                 (
@@ -2543,12 +2543,12 @@ class TestJubilantBackend:
                 )
             ]
 
-        def test_add_k8s_cloud_missing_kubeconfig(self) -> None:
+        def test_add_cloud_missing_connection_details(self) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            with pytest.raises(ValueError, match="No kubeconfig configured for cloud"):
-                backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+            with pytest.raises(ValueError, match="No connection details configured for cloud"):
+                backend.add_cloud(cloud="my-k8s", controller="test-controller")
 
             assert stub.cli_calls == []
 
@@ -2567,7 +2567,7 @@ class TestJubilantBackend:
 
             # A pre-existing controller reusing the same cloud (e.g. --current-state
             # reruns) must not fail just because the cloud is already registered.
-            backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+            backend.add_cloud(cloud="my-k8s", controller="test-controller")
 
             assert len(stub.cli_calls) == 1
 
@@ -2585,9 +2585,9 @@ class TestJubilantBackend:
             stub.cli = failing_cli
 
             with pytest.raises(jubilant.CLIError, match="unrelated failure"):
-                backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
+                backend.add_cloud(cloud="my-k8s", controller="test-controller")
 
-        def test_add_cloud_success(self, tmp_path: Path) -> None:
+        def test_add_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
                 JubilantClientStub(client=stub),
@@ -2615,15 +2615,6 @@ class TestJubilantBackend:
                     {"include_model": False, "stdin": None},
                 ),
             ]
-
-        def test_add_cloud_missing_definition(self) -> None:
-            stub = self.SetupStub()
-            backend = JubilantBackend(JubilantClientStub(client=stub))
-
-            with pytest.raises(ValueError, match="No cloud definition configured for cloud"):
-                backend.add_cloud(cloud="my-openstack", controller="test-controller")
-
-            assert stub.cli_calls == []
 
         def test_add_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()

@@ -202,9 +202,6 @@ class NullJujuBackend(JujuBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         raise NotImplementedError
 
-    def add_k8s_cloud(self, cloud: str, controller: str) -> None:
-        raise NotImplementedError
-
     def add_cloud(self, cloud: str, controller: str) -> None:
         raise NotImplementedError
 

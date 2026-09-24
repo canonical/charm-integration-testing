@@ -287,7 +287,6 @@ def register_preexisting_neighbor_cloud(
     target_cloud: str,
     target_controller: str,
     neighbor_cloud: str | None,
-    neighbor_platform: str,
 ) -> None:
     """Register the same-controller neighbor cloud when --current-state skips
     test_bootstrap_controller (the target controller, and any cloud it needs beyond
@@ -305,10 +304,7 @@ def register_preexisting_neighbor_cloud(
         target_cloud=target_cloud,
     ):
         assert neighbor_cloud is not None
-        if neighbor_platform == "kubernetes":
-            juju_client.add_k8s_cloud(cloud=neighbor_cloud, controller=target_controller)
-        else:
-            juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)
+        juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
 @pytest.fixture
