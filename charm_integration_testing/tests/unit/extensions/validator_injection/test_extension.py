@@ -434,6 +434,51 @@ class TestValidatorInjectorExtension:
 
             # THEN the state entry is dropped
             assert extension.persistence_state == {}
+            run_cmd = juju.exec_calls[-1][2]
+            assert "--endpoints" in run_cmd
+            assert json.loads(run_cmd.split("--endpoints ", 1)[1].strip("'")) == ["db"]
+
+        def test_pre_remove_integration_skips_units_outside_endpoint_apps(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN tracked state for an unrelated application in the same model
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            juju.units_by_app["otherapp"] = ["otherapp/0"]
+            juju.units_by_app["unrelated"] = ["unrelated/0"]
+            myapp_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            unrelated_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "unrelated/0", 9)
+            extension.persistence_state = {
+                myapp_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                unrelated_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN),
+            }
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
+
+            # WHEN removing an integration that only involves myapp/otherapp
+            extension.pre_remove_integration(
+                TEST_MODEL,
+                JujuIntegrationApplication(application="myapp", endpoint="db"),
+                JujuIntegrationApplication(application="otherapp", endpoint="db"),
+            )
+
+            # THEN only the involved app's unit is cleaned
+            persistence_units = [call[1] for call in juju.exec_calls if "--persistence cleanup" in call[2]]
+            assert persistence_units == ["myapp/0"]
+            assert extension.persistence_state == {unrelated_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN)}
+
+        def test_cleanup_drops_state_for_removed_units_without_remote_exec(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN state for a unit removed by scale-in
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            removed_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/1", 4)
+            extension.persistence_state = {removed_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+
+            # WHEN cleanup runs
+            extension.pre_remove(TEST_MODEL, "myapp")
+
+            # THEN stale state is dropped without trying to exec into the removed unit
+            assert extension.persistence_state == {}
+            assert juju.exec_calls == []
 
         def test_cleanup_raises_when_a_result_is_fail_or_error(
             self, extension: ValidatorInjectorExtension, juju: JujuStub

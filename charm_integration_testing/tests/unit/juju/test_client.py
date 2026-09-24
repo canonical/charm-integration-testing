@@ -124,14 +124,20 @@ class PersistenceExtensionStub(JujuExtension):
         self.state_updates = state_updates or {}
         self.keys_to_drop = keys_to_drop or []
         self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
-        self.calls: list[tuple[str, dict[PersistenceKey, PersistenceState]]] = []
+        self.calls: list[tuple[str, str | None, dict[PersistenceKey, PersistenceState]]] = []
+
+    def persistence_operation(self, model: JujuModelHandle) -> str:
+        if self.persistence_state:
+            return "checkpoint"
+        return "prepare"
 
     def post_persistence(
         self,
         model: JujuModelHandle,
         application: str,
+        persistence: str | None = None,
     ) -> dict[str, list[ValidationResult]]:
-        self.calls.append((application, dict(self.persistence_state)))
+        self.calls.append((application, persistence, dict(self.persistence_state)))
         self.persistence_state.update(self.state_updates)
         for key in self.keys_to_drop:
             self.persistence_state.pop(key, None)
@@ -518,7 +524,7 @@ class TestJujuClientValidateModel:
         client.validate_model(self._model(), level=None)
 
         # THEN the extension was invoked with the application
-        assert extension.calls == [("myapp", {})]
+        assert extension.calls == [("myapp", "prepare", {})]
 
     def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN a persistence extension that reports a FAIL
@@ -557,8 +563,24 @@ class TestJujuClientValidateModel:
         # WHEN / THEN both were run, and the persistence failure is raised
         with pytest.raises(JujuValidationError) as exc_info:
             client.validate_model(self._model(), level="simple")
-        assert extension.calls == [("myapp", {})]
+        assert extension.calls == [("myapp", "prepare", {})]
         assert "canary" in {r.endpoint for r in exc_info.value.failed_validations["myapp/0"]}
+
+    def test_selects_persistence_operation_once_per_model_validation(self, logger: LoggerStub) -> None:
+        # GIVEN two applications and an extension that records state after the first application
+        backend = BackendStub(app_list={"first": _app_info(), "second": _app_info()})
+        key = PersistenceKey(controller="ctrl", model="mymodel", unit="first/0", relation_id=4)
+        extension = PersistenceExtensionStub(
+            {"first": {"first/0": [_pass()]}, "second": {"second/0": [_pass()]}},
+            state_updates={key: PersistenceState(id=123, ref=1, token=TEST_TOKEN)},
+        )
+        client = self._client(logger, backend, [extension])
+
+        # WHEN validating the whole model
+        client.validate_model(self._model(), level=None)
+
+        # THEN both applications use the operation selected before either mutates extension state
+        assert [call[0:2] for call in extension.calls] == [("first", "prepare"), ("second", "prepare")]
 
     def test_delegates_to_backend_with_revision_only(self, logger: LoggerStub) -> None:
         # GIVEN a backend that records refresh calls

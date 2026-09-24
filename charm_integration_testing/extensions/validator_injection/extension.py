@@ -71,21 +71,23 @@ class ValidatorInjectorExtension(JujuExtension):
             results[unit] = self._run_validators_on_unit(model, unit, level, model_is_k8s)
         return results
 
+    def persistence_operation(self, model: JujuModelHandle) -> str:
+        # Auto-decide the op from tracked state: any state for this model means a previous
+        # "prepare" seeded canary data, so this run must verify it ("checkpoint"); otherwise
+        # seed it ("prepare"). This is selected once per validate_model() call, not per
+        # application, so one application's prepare updates do not make later applications in the
+        # same model switch to checkpoint before they have seeded their own state.
+        if any(key.controller == model.controller and key.model == model.model for key in self.persistence_state):
+            return "checkpoint"
+        return "prepare"
+
     def post_persistence(
         self,
         model: JujuModelHandle,
         application: str,
+        persistence: str | None = None,
     ) -> dict[str, list[ValidationResult]]:
-        # Auto-decide the op from tracked state: any state for this model means a previous
-        # "prepare" seeded canary data, so this run must verify it ("checkpoint"); otherwise
-        # seed it ("prepare"). Deciding per-model (not per-application) matters for same-model
-        # integrations, where the provider app in the same model has no tracked state for its
-        # own units (PersistenceNotApplicable skip) but the requirer does.
-        op = (
-            "checkpoint"
-            if any(key.controller == model.controller and key.model == model.model for key in self.persistence_state)
-            else "prepare"
-        )
+        op = persistence or self.persistence_operation(model)
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
@@ -165,12 +167,13 @@ class ValidatorInjectorExtension(JujuExtension):
         endpoint_2: JujuIntegrationApplication,
     ) -> None:
         # For a CMR teardown the integration is removed before the applications, so cleanup
-        # must run here (relations still exist) rather than in pre_remove. For a same-model
-        # integration this is a no-op: destroying the app removes the relation, and pre_remove
-        # handles cleanup on the model that owns the requirer's state.
-        self._cleanup_model(model)
+        # must run here (relations still exist) rather than in pre_remove.
+        endpoint_filters: dict[str, set[str]] = {}
+        for endpoint in (endpoint_1, endpoint_2):
+            endpoint_filters.setdefault(endpoint.application, set()).add(endpoint.endpoint)
+        self._cleanup_model(model, endpoint_filters=endpoint_filters)
 
-    def _cleanup_model(self, model: JujuModelHandle) -> None:
+    def _cleanup_model(self, model: JujuModelHandle, endpoint_filters: dict[str, set[str]] | None = None) -> None:
         """Drop canary data for every unit with tracked state in the model, raising on failure.
 
         Cleanup must run while the model's relations still exist, so it is invoked from the
@@ -188,7 +191,19 @@ class ValidatorInjectorExtension(JujuExtension):
                 if key.controller == model.controller and key.model == model.model
             }
         ):
-            outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s)
+            application = unit.split("/", maxsplit=1)[0]
+            if unit not in self.juju.application_units(model, application):
+                for key in [
+                    key
+                    for key in self.persistence_state
+                    if key.controller == model.controller and key.model == model.model and key.unit == unit
+                ]:
+                    del self.persistence_state[key]
+                continue
+            endpoints = endpoint_filters.get(application) if endpoint_filters is not None else None
+            if endpoint_filters is not None and not endpoints:
+                continue
+            outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s, endpoints=endpoints)
             if outcome is None:
                 # No validators_path configured: nothing was cleaned, so keep the state so
                 # orphaned canary data isn't forgotten.
@@ -241,6 +256,7 @@ class ValidatorInjectorExtension(JujuExtension):
         persistence: str,
         refs: dict[int, PersistenceState],
         is_k8s: bool = True,
+        endpoints: set[str] | None = None,
     ) -> tuple[list[ValidationResult], dict[str, PersistenceState], list[int]] | None:
         if persistence not in _PERSISTENCE_OPS:
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
@@ -262,6 +278,8 @@ class ValidatorInjectorExtension(JujuExtension):
         if persistence == "checkpoint":
             refs_json = json.dumps({str(relation_id): state.model_dump() for relation_id, state in refs.items()})
             cmd += f" --refs {shlex.quote(refs_json)}"
+        if endpoints is not None:
+            cmd += f" --endpoints {shlex.quote(json.dumps(sorted(endpoints)))}"
         run_result = self.juju.exec_unit(model, unit, cmd, operator=is_k8s)
         if run_result.return_code != 0:
             raise RuntimeError(

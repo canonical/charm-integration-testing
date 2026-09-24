@@ -30,7 +30,13 @@ class JujuExtension(ABC):
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return {}
 
-    def post_persistence(self, model: JujuModelHandle, application: str) -> dict[str, list[ValidationResult]]:
+    def persistence_operation(self, model: JujuModelHandle) -> str | None:
+        """Return the persistence lifecycle operation for one model validation, if any."""
+        return None
+
+    def post_persistence(
+        self, model: JujuModelHandle, application: str, persistence: str | None = None
+    ) -> dict[str, list[ValidationResult]]:
         """Run the persistence lifecycle for *application*, auto-deciding the op from tracked state."""
         return {}
 

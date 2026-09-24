@@ -388,6 +388,7 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
@@ -402,8 +403,8 @@ class JujuClient:
                     for unit, unit_results in extension.post_validate(model, application, level).items():
                         results.setdefault(unit, []).extend(unit_results)
 
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_persistence(model, application).items():
+            for extension, persistence_operation in persistence_operations:
+                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:

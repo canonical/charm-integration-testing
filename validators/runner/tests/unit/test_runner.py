@@ -307,28 +307,33 @@ class TestValidatorRunnerLoadPersistenceValidators:
 class TestParseCliArgs:
     def test_defaults_to_simple_level_with_no_flags(self) -> None:
         # WHEN no flags are passed at all
-        args, refs = _parse_cli_args([])
+        args, refs, endpoints = _parse_cli_args([])
 
         # THEN the pre-persistence CLI contract is preserved: level defaults to "simple"
         assert args.level == "simple"
         assert args.persistence is None
         assert refs == {}
+        assert endpoints is None
 
     def test_persistence_only_invocation_leaves_level_unset(self) -> None:
         # WHEN only --persistence is passed
-        args, refs = _parse_cli_args(["--persistence", "prepare"])
+        args, refs, endpoints = _parse_cli_args(["--persistence", "prepare"])
 
         # THEN level stays None rather than defaulting, so main() skips the functional run
         assert args.level is None
         assert args.persistence == "prepare"
+        assert refs == {}
+        assert endpoints is None
 
     def test_level_and_persistence_can_be_combined(self) -> None:
         # WHEN both --level and --persistence are passed
-        args, refs = _parse_cli_args(["--level", "deep", "--persistence", "cleanup"])
+        args, refs, endpoints = _parse_cli_args(["--level", "deep", "--persistence", "cleanup"])
 
         # THEN both are honoured as given, with no default substitution
         assert args.level == "deep"
         assert args.persistence == "cleanup"
+        assert refs == {}
+        assert endpoints is None
 
     def test_checkpoint_requires_refs(self) -> None:
         # WHEN --persistence checkpoint is passed without --refs
@@ -340,10 +345,11 @@ class TestParseCliArgs:
         # WHEN --refs is a valid JSON dict of relation_id -> PersistenceState
         refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
 
-        args, refs = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
+        args, refs, endpoints = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
 
         # THEN it's decoded into PersistenceState objects keyed by relation_id string
         assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+        assert endpoints is None
 
     def test_invalid_refs_json_exits(self) -> None:
         # WHEN --refs is not valid JSON
@@ -372,6 +378,21 @@ class TestParseCliArgs:
 
         with pytest.raises(SystemExit):
             _parse_cli_args(["--persistence", "cleanup", "--refs", refs_json])
+
+    def test_cleanup_parses_endpoints_json(self) -> None:
+        args, refs, endpoints = _parse_cli_args(["--persistence", "cleanup", "--endpoints", '["db", "cache"]'])
+
+        assert args.persistence == "cleanup"
+        assert refs == {}
+        assert endpoints == {"db", "cache"}
+
+    def test_endpoints_rejected_when_persistence_is_not_cleanup(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "prepare", "--endpoints", '["db"]'])
+
+    def test_invalid_endpoints_json_exits(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "cleanup", "--endpoints", '{"db": true}'])
 
 
 class TestValidatorRunnerRun:
@@ -823,6 +844,33 @@ class TestValidatorRunnerPersistence:
         assert results.results == []
         assert results.cleaned_relation_ids == [8]
 
+    def test_cleanup_all_can_filter_to_selected_endpoints(self) -> None:
+        # GIVEN two live relations on persistence-enabled interfaces
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        db = RelationStub(name="db", id=4)
+        cache = RelationStub(name="cache", id=9)
+        charm = CharmBaseStub(
+            meta=CharmMetaStub(
+                relations={
+                    "db": RelationMetaStub(
+                        relation_name="db", role=RelationRoleStub.requires, interface_name="test-interface"
+                    ),
+                    "cache": RelationMetaStub(
+                        relation_name="cache", role=RelationRoleStub.requires, interface_name="test-interface"
+                    ),
+                }
+            ),
+            model=ModelStub(relations={"db": [db], "cache": [cache]}),
+        )
+
+        # WHEN cleanup is filtered to one local endpoint
+        results = runner.cleanup_all(cast(ops.CharmBase, charm), endpoints={"db"})
+
+        # THEN only that relation is cleaned/reported
+        assert results.results == []
+        assert results.cleaned_relation_ids == [4]
+        assert PreparingPersistenceValidator.cleanup_calls == [4]
+
     def test_persistence_targets_ignored_when_interface_has_no_registered_validator(self) -> None:
         # GIVEN a runner with no persistence validators registered at all
         runner = ValidatorRunner.__new__(ValidatorRunner)
@@ -842,7 +890,7 @@ class TestValidatorRunnerPersistence:
         assert cleanup_results.results == []
         assert cleanup_results.cleaned_relation_ids == []
 
-    def test_prepare_all_reports_error_for_unestablished_metadata_relation(self) -> None:
+    def test_prepare_all_skips_unestablished_metadata_relation(self) -> None:
         # GIVEN a metadata relation with a registered persistence validator that has no live
         # relation in the model (ops.RelationMapping always contains the metadata key, so the
         # "not yet related" condition is an empty list, not a missing key)
@@ -855,15 +903,12 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.prepare_all(cast(ops.CharmBase, charm))
 
-        # THEN the unestablished relation surfaces as an ERROR (mirroring run()) instead of
-        # silently producing no state, which would make the following empty checkpoint look like
-        # a pass without any persistence validation having run
-        assert len(results.results) == 1
-        assert results.results[0].status == "ERROR"
-        assert "not found in model" in (results.results[0].error or "")
+        # THEN metadata-only optional/unrelated endpoints are ignored until they have a live
+        # relation. Stale refs are still reported by checkpoint_all().
+        assert results.results == []
         assert results.updated_refs == {}
 
-    def test_cleanup_all_reports_error_for_unestablished_metadata_relation(self) -> None:
+    def test_cleanup_all_skips_unestablished_metadata_relation(self) -> None:
         # GIVEN a metadata relation with a registered persistence validator that has no live relation
         runner = self._runner_with("test-interface", PreparingPersistenceValidator)
         charm = make_charm_from_relation(
@@ -874,11 +919,8 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.cleanup_all(cast(ops.CharmBase, charm))
 
-        # THEN cleanup reports an ERROR rather than an empty (and therefore state-clearing) result
-        # list, and the relation is not reported as cleaned
-        assert len(results.results) == 1
-        assert results.results[0].status == "ERROR"
-        assert "not found in model" in (results.results[0].error or "")
+        # THEN there is no live relation to clean, and no relation is reported as cleaned.
+        assert results.results == []
         assert results.cleaned_relation_ids == []
 
     def test_missing_relation_error_ignored_for_interface_without_persistence_validator(self) -> None:
