@@ -1,14 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import cast
 from unittest.mock import patch
 
 import ops
 import pymysql
 import pytest
 
+from validators.mysql_client.tests.unit.stubs import ConnStub, CursorStub
 from validators.mysql_client.validator import MySQLClientValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
@@ -29,54 +29,6 @@ def _make_validator(
     relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
     charm = make_charm_from_relation(relation, interface_name="mysql_client", role=role)
     return MySQLClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
-
-
-@dataclass
-class CursorStub:
-    """Minimal cursor context manager; raises execute_error if set."""
-
-    execute_error: Exception | None = None
-    # Rows returned by fetchone() for each successive call.
-    fetchone_rows: list[tuple[Any, ...]] = field(default_factory=list)
-    # Number of execute() calls to allow before raising execute_error.
-    execute_succeed_count: int = 0
-    lastrowid: int = 1
-    _fetch_count: int = field(default=0, init=False, repr=False)
-    _execute_count: int = field(default=0, init=False, repr=False)
-
-    def execute(self, query: str, params: Any = None) -> None:
-        if self.execute_error and self._execute_count >= self.execute_succeed_count:
-            raise self.execute_error
-        self._execute_count += 1
-
-    def fetchone(self) -> tuple[Any, ...] | None:
-        if self._fetch_count < len(self.fetchone_rows):
-            row = self.fetchone_rows[self._fetch_count]
-            self._fetch_count += 1
-            return row
-        return None
-
-    def __enter__(self) -> "CursorStub":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-
-@dataclass
-class ConnStub:
-    """Minimal connection stub; cursor_stub is returned by cursor()."""
-
-    cursor_stub: CursorStub = field(default_factory=CursorStub)
-
-    def cursor(self) -> CursorStub:
-        return self.cursor_stub
-
-    def autocommit(self, value: bool) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
 
 
 # ---------------------------------------------------------------------------
