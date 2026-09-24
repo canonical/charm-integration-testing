@@ -23,13 +23,15 @@ disruptive test (pod deletion,        --persistence checkpoint -> verify + advan
 scaling, migration, upgrade, ...)                                 canary state
       |
       v
-test_teardown              (harness)  --persistence cleanup    -> drop canary data
+test_teardown / relation removal
+                           (harness)  --persistence cleanup    -> drop canary data
 ```
 
-Each of the three lifecycle ops is a separate `run_validators` invocation on
-the unit, triggered by `JujuClient.validate_model(persistence=...)` calling
-`ValidatorInjectorExtension.post_persistence`, mirroring how
-`post_validate`/`validate_model(level=...)` works for functional checks. The
+Each lifecycle op is a separate `run_validators` invocation on the unit. The
+harness owns the lifecycle: `JujuClient.validate_model(level=...)` calls
+`ValidatorInjectorExtension.post_persistence`, and the extension auto-selects
+`prepare` or `checkpoint` from its tracked per-model state; cleanup runs from
+the extension's pre-removal hooks while relations still exist. The
 `BasePersistenceValidator`/`PersistenceState`/`PersistenceNotApplicable`
 docstrings in `validators/base/validator.py` are the source of truth for the
 protocol; see `docs/reference/validators.rst` for the higher-level design
@@ -101,15 +103,12 @@ class MyClientPersistenceValidator(BasePersistenceValidator):
     def cleanup(self) -> None:
         """Drop all canary data.
 
-        Within the test harness, invoked only from the `test_teardown` state transition, never
-        from `prepare()`/`checkpoint()` or mid-transition - though a single pytest session can
-        execute `test_teardown` more than once (e.g. an injected bridge transition ahead of a
-        later redeployment), so this is "once per `test_teardown` invocation," not strictly "once
-        per pytest session." (Manually invoking `run_validators --persistence cleanup` directly,
-        e.g. for iteration - see "Manually verify" below - bypasses the harness and can call this
-        method at any time.) A relation remove/re-add (e.g. in `test_remove_and_restore_integration`)
-        instead invalidates the *tracked* `PersistenceState` for the old relation_id and calls
-        `prepare()` again for the new one.
+        Within the test harness, invoked from pre-removal hooks while the relation still exists:
+        before application teardown, and before `test_remove_and_restore_integration` removes an
+        individual relation. After a remove/re-add, the old relation's tracked `PersistenceState`
+        is dropped and the next validation prepares fresh state for the new relation_id. Manually
+        invoking `run_validators --persistence cleanup` directly (see "Manually verify" below)
+        bypasses the harness and can call this method at any time.
 
         This is a real, accepted limitation, not just a delay: the discovery namespace (see
         `_canary_table_prefix`/"Common patterns" below) is derived from the *current* relation_id,
@@ -483,11 +482,10 @@ rather than registering multiple entry points for the same interface.
 
 7. No charm-specific harness changes are needed to wire persistence in:
    `ValidatorInjectorExtension.post_persistence` and
-   `JujuClient.validate_model(persistence=...)` are interface-agnostic and
-   pick up any registered `endpoint_persistence_validators` entry
-   automatically, once `test_deploy` (prepare), the disruptive tests
-   (checkpoint), and `test_teardown` (cleanup) run for a model containing
-   this interface.
+   `JujuClient.validate_model(level=...)` are interface-agnostic and pick up
+   any registered `endpoint_persistence_validators` entry automatically. The
+   extension auto-selects `prepare`/`checkpoint` from tracked state, and its
+   pre-removal hooks run cleanup while affected relations still exist.
 
 8. Manually verify end-to-end if a live model is available: deploy the
    two charms, then run the full test suite against that model at least
