@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import socket
+from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -31,7 +32,7 @@ _MAX_PORT = 65535
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
         return None
 
 
