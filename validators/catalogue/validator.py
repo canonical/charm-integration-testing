@@ -13,7 +13,6 @@ from validators.base import (
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
-    ValidationResultStatus,
 )
 
 # Required fields the consumer must publish in its own application databag.
@@ -167,8 +166,7 @@ class CatalogueValidator(BaseValidator):
         return [f"http://{host}{_CONFIG_PATH}", f"https://{host}{_CONFIG_PATH}"]
 
     def _build_result(self, level: ValidationLevel, checks: list[ValidationCheck]) -> ValidationResult:
-        status: ValidationResultStatus = "PASS" if all(c.passed for c in checks) else "FAIL"
-        return self._make_result(status=status, level=level, checks=checks)
+        return self._make_result(level=level, checks=checks)
 
 
 # ---------------------------------------------------------------------------
