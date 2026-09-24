@@ -11,12 +11,15 @@
 #    - logging-provider        => logging-consumer OR grafana-cloud-config
 #    - tracing-provider        => tracing OR grafana-cloud-config
 #    - grafana-dashboards-consumer => grafana-dashboards-provider OR grafana-cloud-config
+# Grafana Agent is deprioritized in favor of OpenTelemetry Collector; TLS compatibility is
+# unresolved upstream (https://github.com/canonical/charm-integration-testing/issues/512).
 overrides:
     # `data` storage (charmcraft.yaml) is backed by a Juju/K8s PVC, which is retained
     # across application removal/redeploy just like postgresql-k8s's pgdata (see
     # static/charm-overrides/postgresql-k8s.yaml); a leftover or re-created PVC is
     # expected, not a defect.
-  - resource_tracking:
+  - assumes: [unsupported-deprioritized]
+    resource_tracking:
       skip:
         - pvc
     provides:
