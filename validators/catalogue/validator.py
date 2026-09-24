@@ -23,7 +23,14 @@ _HTTP_TIMEOUT = 10
 
 # Path at which the catalogue provider serves its aggregated catalogue.
 _CONFIG_PATH = "/config.json"
-_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirectHandler())
 
 
 class CatalogueValidator(BaseValidator):

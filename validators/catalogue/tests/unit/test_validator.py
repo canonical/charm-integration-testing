@@ -12,6 +12,7 @@ import ops
 
 from validators.catalogue.validator import (
     CatalogueValidator,
+    _NoRedirectHandler,
     _validate_api_endpoints,
     _validate_item_served,
     _validate_url_syntax,
@@ -88,6 +89,10 @@ class TestValidateUrlSyntax:
 
     def test_valid_https_url(self) -> None:
         assert _validate_url_syntax("https://catalogue.internal:8443").passed
+
+    def test_catalogue_opener_rejects_redirects(self) -> None:
+        handler = _NoRedirectHandler()
+        assert handler.redirect_request(None, None, 302, "Found", {}, "https://other.example") is None
 
     def test_invalid_scheme(self) -> None:
         check = _validate_url_syntax("ftp://example.com")
