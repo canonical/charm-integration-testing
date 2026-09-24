@@ -263,41 +263,6 @@ class ValidatorRunner:
                 targets.append((integration, interface_name, role))
         return targets
 
-    def _persistence_missing_relation_results(self, charm: CharmBase) -> list[ValidationResult]:
-        """ERROR results for persistence interfaces whose metadata relation has no live relation.
-
-        ``_iter_persistence_targets`` iterates the relations present in the model, so a metadata
-        relation that is not (yet) established yields no target and is silently skipped. Reporting
-        an ERROR instead means a ``prepare`` on a partially initialized model cannot look like a
-        success whose following checkpoint trivially passes with nothing validated.
-
-        Only interfaces with a registered persistence validator (or a load error) are considered;
-        for any other interface there is no persistence validation to skip.
-        """
-        results: list[ValidationResult] = []
-        for relation_name, metadata in charm.meta.relations.items():
-            if (role := str_to_validation_role(metadata.role.name)) == "peer":
-                continue
-            interface_name = metadata.interface_name or relation_name
-            if interface_name not in self.persistence_validators and interface_name not in self.persistence_load_errors:
-                continue
-            if charm.model.relations.get(relation_name):
-                continue
-            error = f"Relation '{relation_name}' defined in metadata but not found in model."
-            logger.error(error)
-            results.append(
-                ValidationResult(
-                    status="ERROR",
-                    endpoint=relation_name,
-                    interface=interface_name,
-                    role=role,
-                    level=_PERSISTENCE_RESULT_LEVEL,
-                    relation_id=-1,
-                    error=error,
-                )
-            )
-        return results
-
     def _persistence_load_error_results(self, charm: CharmBase) -> list[ValidationResult]:
         """ERROR results for every live relation on an interface whose persistence validator failed to load.
 
@@ -355,8 +320,7 @@ class ValidatorRunner:
         the relation's Juju ``relation_id`` (as a string, matching the ``--refs`` wire format).
         """
         logger.info("Preparing persistence validators")
-        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
-        results += self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for integration, interface_name, role in self._iter_persistence_targets(charm):
             for validator_cls in self.persistence_validators[interface_name]:
@@ -399,8 +363,7 @@ class ValidatorRunner:
     def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
         """Verify all previously-seeded canary data is still present for every ref in *refs*."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
-        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
-        results += self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for relation_id_str, expected in refs.items():
             try:
@@ -512,13 +475,14 @@ class ValidatorRunner:
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
-    def cleanup_all(self, charm: CharmBase) -> ValidatorRunnerResults:
+    def cleanup_all(self, charm: CharmBase, endpoints: set[str] | None = None) -> ValidatorRunnerResults:
         """Drop all canary data for every relation with a registered persistence validator."""
         logger.info("Cleaning up persistence validators")
-        results: list[ValidationResult] = self._persistence_missing_relation_results(charm)
-        results += self._persistence_load_error_results(charm)
+        results: list[ValidationResult] = self._persistence_load_error_results(charm)
         cleaned_relation_ids: list[int] = []
         for integration, interface_name, role in self._iter_persistence_targets(charm):
+            if endpoints is not None and integration.name not in endpoints:
+                continue
             # Only report cleaned once cleanup() actually ran: a PersistenceNotApplicable skip
             # drops no canary data, so reporting it would make post_persistence() forget tracked
             # state for a relation whose cleanup never ran. Errors still count as "ran".
@@ -581,7 +545,9 @@ class ValidatorRunner:
             )
 
 
-def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, dict[str, PersistenceState]]:
+def _parse_cli_args(
+    argv: list[str] | None = None,
+) -> tuple[argparse.Namespace, dict[str, PersistenceState], set[str] | None]:
     """Parse and validate CLI args, including the ``--refs`` JSON payload.
 
     Split out from :func:`main` so the argument-parsing/validation logic (the ``--level``
@@ -599,6 +565,11 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
             "matching the state returned by --persistence prepare. Required for --persistence checkpoint."
         ),
     )
+    parser.add_argument(
+        "--endpoints",
+        default=None,
+        help='JSON list of local endpoint names to clean. Only valid for "--persistence cleanup".',
+    )
     args = parser.parse_args(argv)
 
     if args.persistence == "checkpoint" and args.refs is None:
@@ -609,6 +580,9 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
         # argument). Without this check, a typo such as "--persistence prepare --refs ..." would
         # parse and validate the JSON but then silently ignore it.
         parser.error("--refs is only valid when --persistence checkpoint is used")
+
+    if args.endpoints is not None and args.persistence != "cleanup":
+        parser.error("--endpoints is only valid when --persistence cleanup is used")
 
     # Preserve the pre-persistence CLI contract: invoking run_validators with no flags at all
     # still runs the "simple" functional level, matching every existing direct caller. Only
@@ -625,13 +599,23 @@ def _parse_cli_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, 
         except (json.JSONDecodeError, ValidationError, AttributeError) as exc:
             parser.error(f"Invalid --refs JSON: {exc}")
 
-    return args, refs
+    endpoints: set[str] | None = None
+    if args.endpoints is not None:
+        try:
+            raw_endpoints = json.loads(args.endpoints)
+            if not isinstance(raw_endpoints, list) or not all(isinstance(item, str) for item in raw_endpoints):
+                raise ValueError("expected a JSON list of strings")
+            endpoints = set(raw_endpoints)
+        except (json.JSONDecodeError, ValueError) as exc:
+            parser.error(f"Invalid --endpoints JSON: {exc}")
+
+    return args, refs, endpoints
 
 
 def main() -> None:
     _configure_logging()
 
-    args, refs = _parse_cli_args()
+    args, refs, endpoints = _parse_cli_args()
 
     logger.info(f"Starting validator run (level={args.level!r}, persistence={args.persistence!r})")
 
@@ -660,7 +644,7 @@ def main() -> None:
         elif args.persistence == "checkpoint":
             persistence_results = runner.checkpoint_all(charm, refs)
         elif args.persistence == "cleanup":
-            persistence_results = runner.cleanup_all(charm)
+            persistence_results = runner.cleanup_all(charm, endpoints=endpoints)
         else:
             persistence_results = None
 
