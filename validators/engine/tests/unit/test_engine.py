@@ -257,9 +257,8 @@ class TestRunForCharm:
         assert results[0].status == "PASS"
 
     def test_runs_integration_with_remote_unit_data_when_requested(self) -> None:
-        # Some interfaces (e.g. http_interface, loki_push_api,
-        # alertmanager_dispatch) publish endpoint data in the remote unit
-        # databag rather than the remote app databag.
+        # Some interfaces (e.g. http_interface, loki_push_api) publish in the
+        # remote unit databag rather than the remote app databag.
         remote_unit = UnitStub("db/0")
         relation = RelationStub(name="db", id=0, units=frozenset({remote_unit}))
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
@@ -277,10 +276,8 @@ class TestRunForCharm:
         assert results[0].status == "PASS"
 
     def test_runs_provides_validator_when_only_local_data_published(self) -> None:
-        # Some interfaces (e.g. kafka_client, mysql) publish the fields their
-        # provider-side validator checks on the local charm's own app/unit
-        # databag, not the requirer's. A requirer that legitimately never
-        # writes anything back must not leave the provider stuck at SKIPPED.
+        # kafka_client/mysql provider-side validators read the local databag, so a
+        # requirer that never writes back must not leave the provider at SKIPPED.
         relation = RelationStub(name="db", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.provides)
         integration = charm.model.relations["db"][0]
@@ -298,11 +295,8 @@ class TestRunForCharm:
         assert results[0].status == "PASS"
 
     def test_runs_requires_validator_when_only_local_data_published(self) -> None:
-        # Some interfaces (e.g. cross_model_mesh's `requires` role) publish
-        # the fields their validator checks on the local charm's own
-        # application databag; the provider never publishes anything back on
-        # this relation at all. Readiness therefore is not simply
-        # "remote has data" for every `requires` validator either.
+        # cross_model_mesh's `requires` validator reads the local app databag; the
+        # provider never publishes back, so "remote has data" isn't right either.
         relation = RelationStub(name="cmr", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
         integration = charm.model.relations["cmr"][0]

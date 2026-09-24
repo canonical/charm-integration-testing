@@ -49,14 +49,9 @@ class ValidationStatusStore(Object):
     def record(self, results: list[ValidationResult]) -> None:
         """Record the outcome of *results*.
 
-        Sets a Blocked status if any result is FAIL/ERROR. Otherwise, clears
-        any prior failure only once every result is a genuine PASS. An empty
-        or all-SKIPPED *results* leaves a previously recorded failure in
-        place rather than clearing it: an empty list can mean the check
-        didn't actually run at all (e.g. the expected validator package
-        failed to be discovered), and a SKIPPED result means the check
-        didn't actually re-run to confirm the problem is resolved - neither
-        is evidence the failure is resolved.
+        Sets a Blocked status if any result is FAIL/ERROR. A prior failure is
+        cleared only on an all-PASS, non-empty result set: empty or SKIPPED
+        results mean the check didn't actually confirm a pass.
         """
         failing = [r for r in results if r.status in ("FAIL", "ERROR")]
         if failing:

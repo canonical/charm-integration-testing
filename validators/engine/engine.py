@@ -48,15 +48,9 @@ def _has_data(integration: Relation, app: Application | None, units: Iterable[Un
 def _has_negotiated_data(integration: Relation, charm: CharmBase) -> bool:
     """Return True once either side has published data on *integration*.
 
-    Which side a validator actually reads from is validator- (not
-    role-)specific: e.g. `cross_model_mesh`'s `requires` role reads its own
-    local app databag, while `config_server`'s `provides` role reads the
-    remote requirer's; `kafka_client`'s `provides` role reads its own app
-    databag, while its `requires` role reads the remote's. Rather than
-    guess which side a given validator cares about, treat the relation as
-    ready once *either* side has published something - both are checked so
-    the gate can never get stuck at SKIPPED forever regardless of which
-    side actually negotiates first.
+    Which side a validator reads is validator-specific rather than derivable
+    from the relation role, so treat the relation as ready once either side
+    has published anything; the gate can then never get stuck at SKIPPED.
     """
     return _has_data(integration, charm.app, [charm.unit]) or _has_data(integration, integration.app, integration.units)
 
@@ -142,12 +136,8 @@ def run_for_charm(
     want to validate installed validators can set *skip_missing_unvalidated* to skip
     missing relations with no installed validator, as well as relations explicitly
     marked optional. The same flag also skips (as SKIPPED, not FAIL/ERROR) integrations
-    that exist in the model but have not negotiated data yet - e.g. immediately after
-    `juju integrate`, before the two ends have finished negotiating - so periodic
-    in-charm callers (update-status, `validate`) don't need to reimplement their own
-    readiness gate. Since which side a validator actually reads from is validator-specific
-    rather than role-specific (see `_has_negotiated_data`), an integration counts as ready
-    once either side has published any data.
+    that exist in the model but have not negotiated data yet, so periodic in-charm
+    callers (update-status, `validate`) don't need their own readiness gate.
     """
     if validators is None:
         validators = load_validators()

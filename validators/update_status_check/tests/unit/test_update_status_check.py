@@ -148,9 +148,7 @@ class TestValidationStatusStore:
         harness.cleanup()
 
     def test_record_with_skipped_results_preserves_prior_blocked_status(self) -> None:
-        # A SKIPPED result (e.g. a relation that hasn't negotiated data yet)
-        # means the check didn't actually re-run, so a previously recorded
-        # failure must not be cleared out from under it.
+        # A SKIPPED result means the check didn't re-run, so a prior failure stands.
         harness = ops.testing.Harness(_MinimalCharm)
         harness.begin()
         store = ValidationStatusStore(harness.charm)
@@ -166,9 +164,7 @@ class TestValidationStatusStore:
         harness.cleanup()
 
     def test_record_with_no_results_preserves_prior_blocked_status(self) -> None:
-        # An empty result list can mean the check didn't actually run at all
-        # (e.g. the expected validator package failed to be discovered), so
-        # it must not be treated as evidence of a pass.
+        # Empty results can mean the check never ran (e.g. validator discovery failed).
         harness = ops.testing.Harness(_MinimalCharm)
         harness.begin()
         store = ValidationStatusStore(harness.charm)
