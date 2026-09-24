@@ -278,6 +278,19 @@ def _unit_url_check(urls: dict[str, str], unit_name: str) -> tuple[ValidationChe
 # ---------------------------------------------------------------------------
 
 
+def _redact_url(url: str) -> str:
+    """Return *url* stripped of any ``?``/``#`` query or fragment component for display.
+
+    An advertised ingress URL is provider-controlled and may carry a query string such as
+    ``?token=...``; strip it before echoing the URL into a diagnostic message so secrets don't
+    end up in the ``ValidationResult`` or runner logs.
+    """
+    for i, ch in enumerate(url):
+        if ch in "?#":
+            return url[:i]
+    return url
+
+
 def _url_format_check(url: str) -> ValidationCheck:
     """Validate that the ingress URL is a well-formed HTTP/HTTPS URL."""
     try:
@@ -313,7 +326,7 @@ def _url_format_check(url: str) -> ValidationCheck:
             message=f"Ingress URL has an invalid port: {exc}",
         )
 
-    return ValidationCheck(name="url_format", passed=True, message=f"URL {url!r} is well-formed.")
+    return ValidationCheck(name="url_format", passed=True, message=f"URL {_redact_url(url)!r} is well-formed.")
 
 
 def _extract_host_port(url: str) -> tuple[str, int]:
