@@ -95,6 +95,11 @@ def test_urn_entity_id_passes() -> None:
     assert result.status == "PASS"
 
 
+def test_scheme_only_entity_id_fails() -> None:
+    result = _make_validator({**VALID_DATA, "entity_id": "https:"}).validate()
+    assert result.status == "FAIL"
+
+
 def test_invalid_certificate_fails() -> None:
     result = _make_validator(
         {**VALID_DATA, "x509certs": "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"}

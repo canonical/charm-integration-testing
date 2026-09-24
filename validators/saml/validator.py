@@ -3,6 +3,7 @@
 
 import base64
 import binascii
+import http.client
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -74,7 +75,12 @@ def _url_check(name: str, value: str) -> ValidationCheck:
 def _entity_id_check(value: str) -> ValidationCheck:
     try:
         parsed = urlparse(value)
-        passed = bool(parsed.scheme) and not any(character.isspace() for character in value)
+        passed = (
+            bool(value)
+            and bool(parsed.scheme)
+            and not any(character.isspace() for character in value)
+            and (parsed.scheme not in ("http", "https") or bool(parsed.hostname))
+        )
     except ValueError:
         passed = False
     return ValidationCheck(
@@ -131,5 +137,12 @@ def _metadata_check(url: str) -> ValidationCheck:
                 name="metadata", passed=False, message="SAML metadata response has no EntityDescriptor."
             )
         return ValidationCheck(name="metadata", passed=True, message="SAML metadata is reachable and valid XML.")
-    except (DefusedXmlException, ElementTree.ParseError, HTTPError, URLError, OSError) as exc:
+    except (
+        DefusedXmlException,
+        ElementTree.ParseError,
+        HTTPError,
+        URLError,
+        http.client.HTTPException,
+        OSError,
+    ) as exc:
         return ValidationCheck(name="metadata", passed=False, message=f"SAML metadata check failed: {exc}.")
