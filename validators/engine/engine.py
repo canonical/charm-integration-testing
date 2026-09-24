@@ -38,10 +38,17 @@ LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
 
 
 def _has_remote_data(integration: Relation) -> bool:
-    """Return True if the remote application has published any data on *integration*."""
-    if integration.app is None or integration.app not in integration.data:
-        return False
-    return bool(dict(integration.data[integration.app]))
+    """Return True if the remote side has published any data on *integration*.
+
+    Checks both the remote application databag (used by most interfaces) and
+    the remote unit databags (used by some, e.g. `http_interface`,
+    `loki_push_api`, `alertmanager_dispatch`): a relation can have negotiated
+    data via one without the other.
+    """
+    if integration.app is not None and integration.app in integration.data:
+        if bool(dict(integration.data[integration.app])):
+            return True
+    return any(bool(dict(integration.data[unit])) for unit in integration.units)
 
 
 def load_validators() -> dict[str, list[type[BaseValidator]]]:

@@ -10,7 +10,7 @@ import pytest
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.engine.engine import load_validators, run_for_charm
 from validators.test_utils.helpers import make_charm_from_relation
-from validators.test_utils.stubs import RelationRoleStub, RelationStub
+from validators.test_utils.stubs import RelationRoleStub, RelationStub, UnitStub
 
 
 class PassingValidator(BaseValidator):
@@ -245,6 +245,26 @@ class TestRunForCharm:
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
         integration = charm.model.relations["db"][0]
         integration.data[integration.app] = {"endpoints": "db:5432"}
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "PASS"
+
+    def test_runs_integration_with_remote_unit_data_when_requested(self) -> None:
+        # Some interfaces (e.g. http_interface, loki_push_api,
+        # alertmanager_dispatch) publish endpoint data in the remote unit
+        # databag rather than the remote app databag.
+        remote_unit = UnitStub("db/0")
+        relation = RelationStub(name="db", id=0, units=frozenset({remote_unit}))
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        integration = charm.model.relations["db"][0]
+        integration.data[remote_unit] = {"endpoint": "db:5432"}
 
         results = run_for_charm(
             cast(ops.CharmBase, charm),
