@@ -90,12 +90,12 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         self._require_requires_role()
-        if not 1 <= expected.ref <= _MAX_CHECKPOINT_REF:
+        if not 1 <= expected.ref < _MAX_CHECKPOINT_REF:
             # prepare() always returns ref=1 and checkpoint() only ever advances it, so a
             # restored/malformed PersistenceState outside the signed BIGINT range cannot have
             # come from a real prior run. Reject it before formatting queries or attempting the
             # next insert, which would otherwise overflow the backend column.
-            raise ValueError(f"expected.ref {expected.ref} is out of range " f"(expected 1..{_MAX_CHECKPOINT_REF})")
+            raise ValueError(f"expected.ref {expected.ref} is out of range " f"(expected 1..{_MAX_CHECKPOINT_REF - 1})")
         table_name = self._canary_table_name(expected.id)
         marker = expected.token
         conn = self._open_connection()
