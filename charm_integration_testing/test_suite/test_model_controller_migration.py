@@ -17,6 +17,7 @@ def test_model_controller_migration(
     temp_juju_controller: str,
     model: str,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
     temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
 
@@ -26,8 +27,12 @@ def test_model_controller_migration(
     if juju_client.version(target_model_ref).major >= 4:
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
 
-    # Validate all applications and relations before migration
-    juju_client.validate_model(model=target_model_ref, level="deep")
+    # Validate all applications and relations before migration. Only target_model_ref's controller
+    # is migrated below; the neighbor model stays on its own controller throughout, but is included
+    # here and after each migration step for a CMR (the persistence validator lives on the
+    # neighbor's requirer units).
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(model=model_ref, level="deep")
 
     juju_client.migrate_model(
         model_name=model, source_controller=target_controller, target_controller=temp_juju_controller
@@ -45,8 +50,13 @@ def test_model_controller_migration(
         juju_client.reboot_model_controller(model=temp_model_ref)
         juju_client.idle_for_period(model=temp_model_ref, timeout=timedelta(minutes=15))
 
+    # The model kept its units and relation ids, but its controller name changed. The extension
+    # re-keyed its tracked state on post_migrate_model, so the checkpoint finds the state
+    # seeded before migration.
+
     # Validate all applications and relations AFTER migration
-    juju_client.validate_model(model=temp_model_ref, level="deep")
+    for model_ref in (m for m in (temp_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(model=model_ref, level="deep")
 
     # Migrate the model back to the original controller
     juju_client.migrate_model(
@@ -66,4 +76,5 @@ def test_model_controller_migration(
         juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
 
     # Validate all applications and relations AFTER second migration
-    juju_client.validate_model(model=target_model_ref, level="deep")
+    for model_ref in (m for m in (target_model_ref, neighbor_model_ref) if m is not None):
+        juju_client.validate_model(model=model_ref, level="deep")
