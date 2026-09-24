@@ -21,6 +21,7 @@ _REQUIRED_FIELDS = (
     "x509certs",
 )
 _HTTP_TIMEOUT = 10
+_MAX_METADATA_BYTES = 1024 * 1024
 _REDIRECT_BINDING = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 _SAML_METADATA_NAMESPACE = "urn:oasis:names:tc:SAML:2.0:metadata"
 
@@ -41,7 +42,7 @@ class SamlValidator(BaseValidator):
             return self._fail_result(level, checks)
         checks.extend(
             [
-                _url_check("entity_id", self.databag["entity_id"]),
+                _entity_id_check(self.databag["entity_id"]),
                 _url_check("single_sign_on_service_redirect_url", self.databag["single_sign_on_service_redirect_url"]),
                 _binding_check(self.databag["single_sign_on_service_redirect_binding"]),
                 _certificate_check(self.databag["x509certs"]),
@@ -67,6 +68,19 @@ def _url_check(name: str, value: str) -> ValidationCheck:
         passed = False
     return ValidationCheck(
         name=name, passed=passed, message="URL is valid." if passed else f"{name} is not a valid URL."
+    )
+
+
+def _entity_id_check(value: str) -> ValidationCheck:
+    try:
+        parsed = urlparse(value)
+        passed = bool(parsed.scheme) and not any(character.isspace() for character in value)
+    except ValueError:
+        passed = False
+    return ValidationCheck(
+        name="entity_id",
+        passed=passed,
+        message="Entity ID is valid." if passed else "entity_id is not a valid URI.",
     )
 
 
@@ -108,7 +122,9 @@ def _metadata_check(url: str) -> ValidationCheck:
     try:
         request = Request(url, headers={"User-Agent": "charm-integration-testing-saml-validator"})
         with urlopen(request, timeout=_HTTP_TIMEOUT) as response:  # nosec B310 - scheme is checked above
-            body = response.read()
+            body = response.read(_MAX_METADATA_BYTES + 1)
+        if len(body) > _MAX_METADATA_BYTES:
+            return ValidationCheck(name="metadata", passed=False, message="SAML metadata response is too large.")
         root = ElementTree.fromstring(body)
         if root.tag != f"{{{_SAML_METADATA_NAMESPACE}}}EntityDescriptor":
             return ValidationCheck(

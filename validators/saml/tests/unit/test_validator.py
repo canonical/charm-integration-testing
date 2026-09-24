@@ -84,8 +84,15 @@ def test_unsupported_binding_fails() -> None:
 
 
 def test_malformed_url_fails() -> None:
-    result = _make_validator({**VALID_DATA, "entity_id": "https://idp.example.com:bad"}).validate()
+    result = _make_validator(
+        {**VALID_DATA, "single_sign_on_service_redirect_url": "https://idp.example.com:bad"}
+    ).validate()
     assert result.status == "FAIL"
+
+
+def test_urn_entity_id_passes() -> None:
+    result = _make_validator({**VALID_DATA, "entity_id": "urn:example:idp"}).validate()
+    assert result.status == "PASS"
 
 
 def test_invalid_certificate_fails() -> None:
@@ -152,6 +159,17 @@ def test_deep_metadata_rejects_forbidden_xml() -> None:
     response = MagicMock()
     response.__enter__.return_value = response
     response.read.return_value = b'<!DOCTYPE foo [<!ENTITY xxe "forbidden">]><EntityDescriptor>&xxe;</EntityDescriptor>'
+    with patch("validators.saml.validator.urlopen", return_value=response):
+        result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
+            level="deep"
+        )
+    assert result.status == "FAIL"
+
+
+def test_deep_metadata_rejects_oversized_response() -> None:
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.read.return_value = b"x" * (1024 * 1024 + 1)
     with patch("validators.saml.validator.urlopen", return_value=response):
         result = _make_validator({**VALID_DATA, "metadata_url": "https://idp.example.com/metadata"}).validate(
             level="deep"
