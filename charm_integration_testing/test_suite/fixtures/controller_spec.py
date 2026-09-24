@@ -12,6 +12,27 @@ from utils import generate_juju_name
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 
+def needs_same_controller_k8s_cloud(
+    *,
+    is_cmr_test: bool,
+    same_controller: bool,
+    neighbor_cloud: str | None,
+    target_cloud: str,
+    neighbor_platform: str,
+) -> bool:
+    """True when the neighbor cloud must be registered on the target controller.
+
+    Same-controller mode (SQT-884: different platforms, same controller) shares a
+    single controller between the target and neighbor models. If the neighbor lives on
+    a different, Kubernetes cloud than the target, that cloud is not yet known to the
+    controller and must be registered before a neighbor model can be created on it.
+    Used both right after a fresh bootstrap (``test_bootstrap_controller``) and, when
+    ``--current-state`` reuses a pre-existing controller, before the first test that
+    needs the cloud (``register_preexisting_neighbor_cloud`` in ``conftest.py``).
+    """
+    return is_cmr_test and same_controller and neighbor_cloud != target_cloud and neighbor_platform == "kubernetes"
+
+
 def pytest_configure(config: pytest.Config) -> None:
     cloud = config.getoption("--neighbor-cloud", default=None)
     controller = config.getoption("--neighbor-controller", default=None)

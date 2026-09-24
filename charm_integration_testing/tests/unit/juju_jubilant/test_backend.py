@@ -2552,44 +2552,40 @@ class TestJubilantBackend:
 
             assert stub.cli_calls == []
 
-        def test_add_k8s_cloud_retries_then_succeeds(self, tmp_path: Path) -> None:
+        def test_add_k8s_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
                 JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
-            def flaky_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+            def already_exists_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
                 stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
-                if len(stub.cli_calls) < 3:
-                    raise RuntimeError("transient add-k8s failure")
-                return ""
+                raise jubilant.CLIError(1, ["juju", "add-k8s"], "", 'ERROR cloud "my-k8s" already exists')
 
-            stub.cli = flaky_cli
-            with patch("tenacity.nap.sleep", return_value=None):
-                backend._add_k8s_cloud(cloud="my-k8s", controller="test-controller", kubeconfig="kubeconfig-content")
+            stub.cli = already_exists_cli
 
-            assert len(stub.cli_calls) == 3
+            # A pre-existing controller reusing the same cloud (e.g. --current-state
+            # reruns) must not fail just because the cloud is already registered.
+            backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
 
-        def test_add_k8s_cloud_retries_then_raises(self, tmp_path: Path) -> None:
+            assert len(stub.cli_calls) == 1
+
+        def test_add_k8s_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
                 JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
-            def flaky_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+            def failing_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
                 stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
-                raise RuntimeError("transient add-k8s failure")
+                raise jubilant.CLIError(1, ["juju", "add-k8s"], "", "ERROR unrelated failure")
 
-            stub.cli = flaky_cli
-            with patch("tenacity.nap.sleep", return_value=None):
-                with pytest.raises(RuntimeError, match="transient add-k8s failure"):
-                    backend._add_k8s_cloud(
-                        cloud="my-k8s", controller="test-controller", kubeconfig="kubeconfig-content"
-                    )
+            stub.cli = failing_cli
 
-            assert len(stub.cli_calls) == 3
+            with pytest.raises(jubilant.CLIError, match="unrelated failure"):
+                backend.add_k8s_cloud(cloud="my-k8s", controller="test-controller")
 
 
 class TestParseBundleFile:

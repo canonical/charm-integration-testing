@@ -254,3 +254,42 @@ def test_configure_accepts_same_controller_k8s_neighbor_cloud() -> None:
     # WHEN validating the options
     # THEN validation passes
     controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
+@pytest.mark.parametrize(
+    ("is_cmr_test", "same_controller", "neighbor_cloud", "target_cloud", "neighbor_platform", "expected"),
+    [
+        # Same-controller, different Kubernetes cloud: registration is needed.
+        (True, True, "k8s-cloud", "lxd", "kubernetes", True),
+        # Same-controller, same cloud: nothing to register.
+        (True, True, "lxd", "lxd", "kubernetes", False),
+        # Same-controller, different non-Kubernetes cloud: not supported (rejected earlier).
+        (True, True, "openstack-cloud", "lxd", "machine", False),
+        # Cross-controller CMR: the neighbor cloud is registered client-side, not on the
+        # (different) neighbor controller.
+        (True, False, "k8s-cloud", "lxd", "kubernetes", False),
+        # Non-CMR: no neighbor cloud at all.
+        (False, False, None, "lxd", "machine", False),
+    ],
+)
+def test_needs_same_controller_k8s_cloud(
+    is_cmr_test: bool,
+    same_controller: bool,
+    neighbor_cloud: str | None,
+    target_cloud: str,
+    neighbor_platform: str,
+    expected: bool,
+) -> None:
+    # GIVEN the various CMR topologies same-controller mode can be combined with
+    # WHEN checking whether the neighbor cloud needs registering on the target controller
+    # THEN only the same-controller, different-Kubernetes-cloud case needs it
+    assert (
+        controller_spec.needs_same_controller_k8s_cloud(
+            is_cmr_test=is_cmr_test,
+            same_controller=same_controller,
+            neighbor_cloud=neighbor_cloud,
+            target_cloud=target_cloud,
+            neighbor_platform=neighbor_platform,
+        )
+        is expected
+    )
