@@ -33,14 +33,14 @@ def needs_same_controller_cloud_registration(
     return is_cmr_test and same_controller and neighbor_cloud != target_cloud
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    cloud = config.getoption("--neighbor-cloud", default=None)
-    controller = config.getoption("--neighbor-controller", default=None)
-    model = config.getoption("--neighbor-model", default=None)
-    same_controller = config.getoption("--same-controller", default=False)
-
-    is_cmr = cloud is not None
-
+def _validate_cmr_options(
+    config: pytest.Config,
+    *,
+    is_cmr: bool,
+    same_controller: bool,
+    neighbor_controller: str | None,
+    neighbor_model: str | None,
+) -> None:
     if same_controller and not is_cmr:
         pytest.exit(
             "--same-controller requires --neighbor-cloud: CMR always needs a neighbor cloud "
@@ -49,14 +49,14 @@ def pytest_configure(config: pytest.Config) -> None:
             returncode=4,
         )
 
-    if same_controller and controller is not None:
+    if same_controller and neighbor_controller is not None:
         pytest.exit(
             "--neighbor-controller must not be provided with --same-controller: the neighbor "
             "model shares the target controller.",
             returncode=4,
         )
 
-    if (controller or model) and not is_cmr:
+    if (neighbor_controller or neighbor_model) and not is_cmr:
         pytest.exit(
             "--neighbor-cloud is required when providing --neighbor-controller or --neighbor-model.",
             returncode=4,
@@ -80,25 +80,40 @@ def pytest_configure(config: pytest.Config) -> None:
         target_controller = config.getoption("--target-controller", default=None)
         target_model = config.getoption("--target-model", default=None)
         if (
-            controller is not None
+            neighbor_controller is not None
             and target_controller is not None
-            and model is not None
+            and neighbor_model is not None
             and target_model is not None
-            and controller == target_controller
-            and model == target_model
+            and neighbor_controller == target_controller
+            and neighbor_model == target_model
         ):
             pytest.exit(
                 f"--neighbor-controller and --neighbor-model must not be the same as "
-                f"--target-controller and --target-model (got '{controller}:{model}'). "
+                f"--target-controller and --target-model (got '{neighbor_controller}:{neighbor_model}'). "
                 "CMR requires two distinct Juju models.",
                 returncode=4,
             )
-        if same_controller and model is not None and target_model is not None and model == target_model:
+        if (
+            same_controller
+            and neighbor_model is not None
+            and target_model is not None
+            and neighbor_model == target_model
+        ):
             pytest.exit(
-                f"--neighbor-model must not be the same as --target-model (got '{model}'). "
+                f"--neighbor-model must not be the same as --target-model (got '{neighbor_model}'). "
                 "CMR requires two distinct Juju models.",
                 returncode=4,
             )
+
+
+def _validate_current_state_options(
+    config: pytest.Config,
+    *,
+    is_cmr: bool,
+    same_controller: bool,
+    neighbor_controller: str | None,
+    neighbor_model: str | None,
+) -> None:
     raw_state = config.getoption("--current-state", default=None)
     if raw_state:
         try:
@@ -121,21 +136,40 @@ def pytest_configure(config: pytest.Config) -> None:
             is_cmr
             and not same_controller
             and current_state not in STATES_WITHOUT_EXISTING_CONTROLLER
-            and not config.getoption("--neighbor-controller", default=None)
+            and not neighbor_controller
         ):
             pytest.exit(
                 f"--neighbor-controller is required when --current-state={current_state.value} with CMR.",
                 returncode=4,
             )
-        if (
-            is_cmr
-            and current_state not in STATES_WITHOUT_EXISTING_MODEL
-            and not config.getoption("--neighbor-model", default=None)
-        ):
+        if is_cmr and current_state not in STATES_WITHOUT_EXISTING_MODEL and not neighbor_model:
             pytest.exit(
                 f"--neighbor-model is required when --current-state={current_state.value} with CMR.",
                 returncode=4,
             )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    neighbor_cloud = config.getoption("--neighbor-cloud", default=None)
+    neighbor_controller = config.getoption("--neighbor-controller", default=None)
+    neighbor_model = config.getoption("--neighbor-model", default=None)
+    same_controller = config.getoption("--same-controller", default=False)
+    is_cmr = neighbor_cloud is not None
+
+    _validate_cmr_options(
+        config,
+        is_cmr=is_cmr,
+        same_controller=same_controller,
+        neighbor_controller=neighbor_controller,
+        neighbor_model=neighbor_model,
+    )
+    _validate_current_state_options(
+        config,
+        is_cmr=is_cmr,
+        same_controller=same_controller,
+        neighbor_controller=neighbor_controller,
+        neighbor_model=neighbor_model,
+    )
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
