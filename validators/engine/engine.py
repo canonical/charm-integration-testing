@@ -37,6 +37,13 @@ LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
 }
 
 
+def _has_remote_data(integration: Relation) -> bool:
+    """Return True if the remote application has published any data on *integration*."""
+    if integration.app is None or integration.app not in integration.data:
+        return False
+    return bool(dict(integration.data[integration.app]))
+
+
 def load_validators() -> dict[str, list[type[BaseValidator]]]:
     """Discover installed endpoint validators via the `endpoint_validators` entry-point group."""
     validators: dict[str, list[type[BaseValidator]]] = {}
@@ -117,7 +124,11 @@ def run_for_charm(
     by default, preserving the CLI runner's historical behavior. Callers that only
     want to validate installed validators can set *skip_missing_unvalidated* to skip
     missing relations with no installed validator, as well as relations explicitly
-    marked optional.
+    marked optional. The same flag also skips (as SKIPPED, not FAIL/ERROR) integrations
+    that exist in the model but whose remote application has not published any relation
+    data yet - e.g. immediately after `juju integrate`, before the two ends have
+    finished negotiating - so periodic in-charm callers (update-status, `validate`)
+    don't need to reimplement their own readiness gate.
     """
     if validators is None:
         validators = load_validators()
@@ -153,5 +164,22 @@ def run_for_charm(
             )
             continue
         for integration in charm.model.relations[relation]:
+            if skip_missing_unvalidated and interface_name in validators and not _has_remote_data(integration):
+                logger.debug(
+                    f"Relation '{relation}' (id={integration.id}) has no data from the remote "
+                    "application yet; skipping until it is ready."
+                )
+                results.append(
+                    ValidationResult(
+                        status="SKIPPED",
+                        endpoint=relation,
+                        interface=interface_name,
+                        role=role,
+                        level=level,
+                        relation_id=integration.id,
+                        error="Remote application has not published relation data yet.",
+                    )
+                )
+                continue
             results += run_for_integration(validators, charm, interface_name, integration, level, role)
     return results

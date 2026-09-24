@@ -14,6 +14,7 @@ instead of pulling in every interface validator in this monorepo.
 
 import logging
 
+from ops import BlockedStatus, Object, StoredState
 from ops.charm import CharmBase
 from pydantic import BaseModel
 
@@ -27,12 +28,51 @@ class UpdateStatusCheckResults(BaseModel):
     results: list[ValidationResult]
 
 
-def run_simple_check(charm: CharmBase) -> UpdateStatusCheckResults:
+class ValidationStatusStore(Object):
+    """Persist the outcome of the periodic integration check across hooks.
+
+    Charms would otherwise each need their own `StoredState` fields plus the
+    logic to turn FAIL/ERROR results into a status message and clear it once
+    the check passes again. Instantiate this once (e.g. in `__init__`), call
+    `record()` with the results of `run_simple_check()`, and read `status()`
+    from a `collect-status` handler.
+    """
+
+    _stored = StoredState()  # type: ignore[no-untyped-call]
+
+    def __init__(self, charm: CharmBase, key: str = "validators-update-status-check") -> None:
+        super().__init__(charm, key)
+        self._stored.set_default(kind=None, message="")
+
+    def record(self, results: list[ValidationResult]) -> None:
+        """Record the outcome of *results*, clearing any prior failure once all pass."""
+        failing = [r for r in results if r.status in ("FAIL", "ERROR")]
+        if not failing:
+            self.clear()
+            return
+        summary = "; ".join(f"{r.endpoint} ({r.interface}): {r.status}" for r in failing)
+        self._stored.kind = "blocked"
+        self._stored.message = f"Integration check failed: {summary}"
+
+    def clear(self) -> None:
+        """Clear any previously recorded failure."""
+        self._stored.kind = None
+        self._stored.message = ""
+
+    def status(self) -> BlockedStatus | None:
+        """Return the stored status, or None if the last recorded check passed."""
+        if self._stored.kind == "blocked":  # type: ignore[comparison-overlap]
+            return BlockedStatus(str(self._stored.message))
+        return None
+
+
+def run_simple_check(charm: CharmBase, store: ValidationStatusStore | None = None) -> UpdateStatusCheckResults:
     """Run all installed validators for *charm* at the "simple" level.
 
     Logs an error for every FAIL/ERROR result. Returns the full results so
     the caller can build a unit status (e.g. from a collect-status handler)
-    without needing to re-run the validators.
+    without needing to re-run the validators. If *store* is given, also
+    records the outcome in it (see `ValidationStatusStore`).
     """
     results = run_for_charm(charm, level="simple", skip_missing_unvalidated=True)
 
@@ -47,4 +87,6 @@ def run_simple_check(charm: CharmBase) -> UpdateStatusCheckResults:
                 result.level,
                 result.error or failed_checks or "no details",
             )
+    if store is not None:
+        store.record(results)
     return UpdateStatusCheckResults(results=results)

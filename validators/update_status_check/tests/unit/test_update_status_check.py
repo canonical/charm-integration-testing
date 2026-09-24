@@ -4,12 +4,24 @@
 import logging
 from unittest.mock import patch
 
+import ops
+import ops.testing
 import pytest
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
+from validators.base import BaseValidator, ValidationLevel, ValidationResult, ValidationResultStatus
 from validators.test_utils.helpers import make_charm_from_relation
-from validators.test_utils.stubs import RelationRoleStub, RelationStub
-from validators.update_status_check import run_simple_check
+from validators.test_utils.stubs import CharmBaseStub, RelationRoleStub, RelationStub
+from validators.update_status_check import ValidationStatusStore, run_simple_check
+
+
+def _make_charm() -> CharmBaseStub:
+    relation = RelationStub(name="database", id=1)
+    charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+    # Populate the remote databag so the engine doesn't skip this integration as
+    # "not yet ready" (see validators.engine.engine._has_remote_data).
+    integration = charm.model.relations["database"][0]
+    integration.data[integration.app] = {"endpoints": "postgresql:5432"}
+    return charm
 
 
 class PassingValidator(BaseValidator):
@@ -40,8 +52,7 @@ class FailingValidator(BaseValidator):
 
 class TestRunSimpleCheck:
     def test_runs_at_simple_level_and_returns_results(self) -> None:
-        relation = RelationStub(name="database", id=1)
-        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+        charm = _make_charm()
 
         with patch(
             "validators.engine.engine.load_validators",
@@ -54,8 +65,7 @@ class TestRunSimpleCheck:
         assert results.results[0].level == "simple"
 
     def test_logs_error_for_failing_result(self, caplog: pytest.LogCaptureFixture) -> None:
-        relation = RelationStub(name="database", id=1)
-        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+        charm = _make_charm()
 
         with (
             patch(
@@ -71,8 +81,7 @@ class TestRunSimpleCheck:
         assert "database" in caplog.text
 
     def test_no_error_logged_for_passing_result(self, caplog: pytest.LogCaptureFixture) -> None:
-        relation = RelationStub(name="database", id=1)
-        charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+        charm = _make_charm()
 
         with (
             patch(
@@ -84,3 +93,56 @@ class TestRunSimpleCheck:
             run_simple_check(charm)  # type: ignore[arg-type]
 
         assert caplog.text == ""
+
+
+class _MinimalCharm(ops.CharmBase):
+    """Minimal concrete charm, sufficient to exercise `ValidationStatusStore`."""
+
+
+def _validation_result(status: ValidationResultStatus, error: str | None = None) -> ValidationResult:
+    return ValidationResult(
+        status=status,
+        endpoint="database",
+        interface="postgresql_client",
+        role="requires",
+        level="simple",
+        relation_id=1,
+        error=error,
+    )
+
+
+class TestValidationStatusStore:
+    def test_status_is_none_before_any_record(self) -> None:
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
+
+        assert store.status() is None
+
+        harness.cleanup()
+
+    def test_record_with_failing_results_sets_blocked_status(self) -> None:
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
+
+        store.record([_validation_result("FAIL")])
+
+        status = store.status()
+        assert isinstance(status, ops.BlockedStatus)
+        assert "database" in status.message
+
+        harness.cleanup()
+
+    def test_record_with_only_passing_results_clears_status(self) -> None:
+        harness = ops.testing.Harness(_MinimalCharm)
+        harness.begin()
+        store = ValidationStatusStore(harness.charm)
+        store._stored.kind = "blocked"
+        store._stored.message = "stale failure"
+
+        store.record([_validation_result("PASS")])
+
+        assert store.status() is None
+
+        harness.cleanup()

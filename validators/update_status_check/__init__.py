@@ -3,7 +3,8 @@
 
 from validators.update_status_check.update_status_check import (
     UpdateStatusCheckResults,
+    ValidationStatusStore,
     run_simple_check,
 )
 
-__all__ = ["UpdateStatusCheckResults", "run_simple_check"]
+__all__ = ["UpdateStatusCheckResults", "ValidationStatusStore", "run_simple_check"]

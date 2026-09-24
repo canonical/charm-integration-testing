@@ -16,6 +16,7 @@ interface validator in this monorepo.
 import json
 from typing import get_args
 
+from ops import Object
 from ops.charm import ActionEvent, CharmBase
 from pydantic import BaseModel
 
@@ -25,6 +26,58 @@ from validators.engine import run_for_charm
 
 class ValidateActionResults(BaseModel):
     results: list[ValidationResult]
+
+
+class _ValidateActionObserver(Object):
+    """Binds the `validate` action to `run_validate_action`.
+
+    `ops.Framework.observe` requires a bound method (not e.g. a lambda or
+    `functools.partial`) as its observer, so `observe_validate_action` needs
+    a real `Object` to own the callback.
+    """
+
+    def __init__(self, charm: CharmBase) -> None:
+        super().__init__(charm, "validators-validate-action")
+        self._charm = charm
+
+    def _on_validate_action(self, event: ActionEvent) -> None:
+        run_validate_action(self._charm, event)
+
+
+def observe_validate_action(charm: CharmBase) -> None:
+    """Wire the `validate` action to `run_validate_action`.
+
+    This charm must declare a `validate` action in its charmcraft.yaml, e.g.::
+
+        actions:
+          validate:
+            description: Runs integration validators against this charm's relations.
+            params:
+              level:
+                description: "The depth of validation to run"
+                type: string
+                enum: [simple, deep, uat]
+                default: simple
+
+    Juju generates `charm.on.validate_action` from that declaration; if it is
+    missing, this raises immediately with a clear message rather than letting
+    every hook fail later with an opaque `AttributeError`/`NoSuchEventError` the
+    first time something touches `charm.on.validate_action`.
+    """
+    try:
+        event_source = charm.on.validate_action
+    except AttributeError as exc:
+        raise RuntimeError(
+            "No `validate` action is declared for this charm. Add a `validate` action "
+            "to charmcraft.yaml (see observe_validate_action's docstring for the "
+            "expected schema) before calling observe_validate_action()."
+        ) from exc
+    observer = _ValidateActionObserver(charm)
+    # ops.Framework only holds weak references to registered Objects, so the
+    # observer must be kept alive elsewhere (i.e. an attribute on the charm)
+    # or it is garbage-collected before the action fires.
+    charm._validators_validate_action_observer = observer  # type: ignore[attr-defined]
+    charm.framework.observe(event_source, observer._on_validate_action)
 
 
 def run_validate_action(charm: CharmBase, event: ActionEvent) -> None:

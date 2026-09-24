@@ -224,6 +224,49 @@ class TestRunForCharm:
 
         assert results == []
 
+    def test_skips_integration_with_no_remote_data_when_requested(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        # RelationStub.__post_init__ defaults the app's databag to {}, i.e. no data published yet.
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "SKIPPED"
+        assert results[0].relation_id == 0
+
+    def test_runs_integration_with_remote_data_when_requested(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        integration = charm.model.relations["db"][0]
+        integration.data[integration.app] = {"endpoints": "db:5432"}
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "PASS"
+
+    def test_reports_fail_for_integration_with_no_remote_data_by_default(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm), level="simple", validators={"test-interface": [FailingValidator]}
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "FAIL"
+
     def test_skips_peer_relations(self) -> None:
         relation = RelationStub(name="cluster", id=0)
         charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.peer)

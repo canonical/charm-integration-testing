@@ -6,10 +6,14 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import patch
 
+import ops
+import ops.testing
+import pytest
+
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import CharmBaseStub, RelationRoleStub, RelationStub
-from validators.validate_action import run_validate_action
+from validators.validate_action import observe_validate_action, run_validate_action
 
 
 @dataclass
@@ -55,7 +59,12 @@ class ErroringValidator(BaseValidator):
 
 def _make_charm() -> CharmBaseStub:
     relation = RelationStub(name="database", id=1)
-    return make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+    charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
+    # Populate the remote databag so the engine doesn't skip this integration as
+    # "not yet ready" (see validators.engine.engine._has_remote_data).
+    integration = charm.model.relations["database"][0]
+    integration.data[integration.app] = {"endpoints": "postgresql:5432"}
+    return charm
 
 
 class TestRunValidateAction:
@@ -125,3 +134,42 @@ class TestRunValidateAction:
 
         assert event.results is not None
         assert event.results["summary"] == "pass=1 fail=0 error=0 skipped=0"
+
+
+class _CharmWithValidateAction(ops.CharmBase):
+    """Minimal concrete charm whose metadata declares the `validate` action."""
+
+
+class _CharmWithoutValidateAction(ops.CharmBase):
+    """Minimal concrete charm that does NOT declare the `validate` action."""
+
+
+class TestObserveValidateAction:
+    def test_raises_clear_error_when_action_not_declared(self) -> None:
+        harness = ops.testing.Harness(_CharmWithoutValidateAction, meta="name: test-charm")
+        harness.begin()
+
+        try:
+            with pytest.raises(RuntimeError, match="No `validate` action is declared"):
+                observe_validate_action(harness.charm)
+        finally:
+            harness.cleanup()
+
+    def test_wires_the_action_when_declared(self) -> None:
+        harness = ops.testing.Harness(
+            _CharmWithValidateAction,
+            meta="name: test-charm",
+            actions="validate:\n  params:\n    level:\n      type: string\n",
+        )
+        harness.begin()
+        observe_validate_action(harness.charm)
+
+        with patch(
+            "validators.engine.engine.load_validators",
+            return_value={},
+        ):
+            output = harness.run_action("validate")
+
+        assert "results" in output.results
+
+        harness.cleanup()
