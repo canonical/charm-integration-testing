@@ -181,7 +181,9 @@ class TestUrlFormatCheck:
         assert _url_format_check("http://10.9.43.201/path").passed
 
     def test_invalid_scheme(self) -> None:
-        assert not _url_format_check("ftp://example.com").passed
+        check = _url_format_check("ftp-secret://example.com")
+        assert not check.passed
+        assert "ftp-secret" not in check.message
 
     def test_missing_host(self) -> None:
         assert not _url_format_check("http:///path").passed
@@ -206,6 +208,9 @@ class TestUrlFormatCheck:
 
     def test_rejects_empty_explicit_port(self) -> None:
         assert not _url_format_check("http://gateway:").passed
+
+    def test_rejects_zero_explicit_port(self) -> None:
+        assert not _url_format_check("http://gateway:0").passed
 
     def test_invalid_port_does_not_echo_raw_value(self) -> None:
         check = _url_format_check("http://gateway:secret-token")

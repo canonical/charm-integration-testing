@@ -342,7 +342,7 @@ def _url_format_check(url: str) -> ValidationCheck:
         return ValidationCheck(
             name="url_format",
             passed=False,
-            message=f"URL scheme {parsed.scheme!r} is not 'http' or 'https'.",
+            message="Ingress URL scheme must be 'http' or 'https'.",
         )
     if not parsed.netloc or not parsed.hostname:
         return ValidationCheck(
@@ -368,6 +368,12 @@ def _url_format_check(url: str) -> ValidationCheck:
     try:
         _ = parsed.port  # raises ValueError for out-of-range or non-integer ports
     except ValueError:
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL has an invalid port.",
+        )
+    if parsed.port == 0:
         return ValidationCheck(
             name="url_format",
             passed=False,
