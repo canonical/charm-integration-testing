@@ -1,6 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ipaddress
+import re
 import socket
 from typing import Any
 from urllib.error import HTTPError
@@ -29,6 +31,9 @@ _HTTP_TIMEOUT = 10
 
 _MIN_PORT = 1
 _MAX_PORT = 65535
+
+_HOSTNAME_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+_HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -323,6 +328,12 @@ def _url_format_check(url: str) -> ValidationCheck:
         )
     if parsed.username is not None or parsed.password is not None:
         return ValidationCheck(name="url_format", passed=False, message="Ingress URL must not contain userinfo.")
+    if not _is_valid_host(parsed.hostname):
+        return ValidationCheck(
+            name="url_format",
+            passed=False,
+            message="Ingress URL has an invalid hostname.",
+        )
     if parsed.netloc.endswith(":"):
         return ValidationCheck(
             name="url_format",
@@ -340,6 +351,17 @@ def _url_format_check(url: str) -> ValidationCheck:
         )
 
     return ValidationCheck(name="url_format", passed=True, message=f"URL {_redact_url(url)!r} is well-formed.")
+
+
+def _is_valid_host(host: str) -> bool:
+    """Return True if host is a valid IPv4/IPv6 address or DNS hostname."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    dns_name = host[:-1] if host.endswith(".") else host
+    return len(dns_name) <= 253 and bool(_HOSTNAME_RE.fullmatch(dns_name))
 
 
 def _extract_host_port(url: str) -> tuple[str, int]:

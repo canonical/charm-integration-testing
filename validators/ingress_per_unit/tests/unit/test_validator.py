@@ -5,16 +5,16 @@ from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler
+from urllib.request import ProxyHandler, build_opener
 
 import ops
 import yaml
 
 from validators.ingress_per_unit.validator import (
-    _HTTP_OPENER,
     IngressPerUnitValidator,
     _decode_provider_urls,
     _host_format_check,
+    _NoRedirectHandler,
     _port_range_check,
     _unit_url_check,
     _url_format_check,
@@ -203,6 +203,15 @@ class TestUrlFormatCheck:
         assert not check.passed
         assert "secret-token" not in check.message
 
+    def test_rejects_invalid_hostname_without_echoing_authority(self) -> None:
+        check = _url_format_check("http://gateway;token=secret")
+        assert not check.passed
+        assert "token" not in check.message
+        assert "secret" not in check.message
+
+    def test_accepts_ipv6_literal(self) -> None:
+        assert _url_format_check("http://[2001:db8::1]/route").passed
+
 
 # ---------------------------------------------------------------------------
 # L1 – simple validation
@@ -268,12 +277,11 @@ class TestIngressPerUnitValidatorSimple:
 
 class TestIngressPerUnitValidatorDeep:
     def test_opener_disables_environment_proxies(self) -> None:
-        proxy_handlers = [
-            handler
-            for handler in getattr(_HTTP_OPENER, "handlers")
-            if isinstance(handler, ProxyHandler)
-        ]
+        with patch("urllib.request.getproxies", return_value={"http": "http://proxy.example:3128"}) as getproxies:
+            opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+        proxy_handlers = [handler for handler in getattr(opener, "handlers") if isinstance(handler, ProxyHandler)]
         assert not proxy_handlers
+        getproxies.assert_not_called()
 
     def test_pass_when_url_reachable(self) -> None:
         validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
