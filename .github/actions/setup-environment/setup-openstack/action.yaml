@@ -23,12 +23,11 @@ runs:
   steps:
     - name: Report file paths
       id: paths
-      env:
-        CLOUD: ${{ inputs.cloud-name }}
       shell: bash
       run: |
-        echo "cloud-definition-path=${HOME}/openstack/${CLOUD}-cloud.yaml" >> "$GITHUB_OUTPUT"
-        echo "credentials-path=${HOME}/openstack/${CLOUD}-credentials.yaml" >> "$GITHUB_OUTPUT"
+        mkdir -p "$HOME/openstack"
+        echo "cloud-definition-path=$(mktemp "$HOME/openstack/juju-cloud.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=$(mktemp "$HOME/openstack/juju-credentials.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}
