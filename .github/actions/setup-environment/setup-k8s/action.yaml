@@ -27,22 +27,6 @@ runs:
         KUBECONFIG_CONTENT: ${{ inputs.kubeconfig }}
         kubeconfig_path: ${{ inputs.kubeconfig_path }}
       shell: bash
-      run: |
+      run: |-
         mkdir -p $HOME/.kube
         echo "${KUBECONFIG_CONTENT}" > "${kubeconfig_path}"
-    - name: Add K8s
-      env:
-        CLOUD: ${{ inputs.cloud-name }}
-        kubeconfig_path: ${{ inputs.kubeconfig_path }}
-      shell: bash
-      run: |-
-        for ((attempt = 1; ; attempt++)); do
-          if KUBECONFIG="${kubeconfig_path}" juju add-k8s $CLOUD --client; then
-            break
-          elif [ "$attempt" -lt 3 ]; then
-            echo "Failed, retrying..."
-            sleep 5
-          else
-            exit 1
-          fi
-        done

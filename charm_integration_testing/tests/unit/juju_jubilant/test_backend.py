@@ -2543,6 +2543,22 @@ class TestJubilantBackend:
                 )
             ]
 
+        def test_register_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            backend.register_cloud(cloud="my-k8s")
+
+            assert stub.cli_calls == [
+                (
+                    ("add-k8s", "my-k8s", "--client"),
+                    {"include_model": False, "stdin": "kubeconfig-content"},
+                )
+            ]
+
         def test_add_cloud_missing_connection_details(self) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(JubilantClientStub(client=stub))
@@ -2612,6 +2628,28 @@ class TestJubilantBackend:
                         "--controller",
                         "test-controller",
                     ),
+                    {"include_model": False, "stdin": None},
+                ),
+            ]
+
+        def test_register_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={
+                    "my-openstack": (tmp_path / "cloud.yaml", tmp_path / "credentials.yaml"),
+                },
+            )
+
+            backend.register_cloud(cloud="my-openstack")
+
+            assert stub.cli_calls == [
+                (
+                    ("add-cloud", "my-openstack", str(tmp_path / "cloud.yaml"), "--client"),
+                    {"include_model": False, "stdin": None},
+                ),
+                (
+                    ("add-credential", "my-openstack", "-f", str(tmp_path / "credentials.yaml"), "--client"),
                     {"include_model": False, "stdin": None},
                 ),
             ]

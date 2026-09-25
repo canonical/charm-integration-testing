@@ -473,6 +473,10 @@ class JujuClient:
         self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")
         self.backend.add_cloud(cloud=cloud, controller=controller)
 
+    def register_cloud(self, cloud: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' with the Juju client.")
+        self.backend.register_cloud(cloud=cloud)
+
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")
 

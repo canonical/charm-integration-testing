@@ -180,6 +180,20 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str
     return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs, cloud_definitions=cloud_definitions)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def register_test_clouds(
+    juju_client: JujuClient,
+    target_cloud: str,
+    neighbor_cloud: str | None,
+) -> None:
+    """Register the test clouds with the local Juju client before any Juju operations."""
+    clouds = {target_cloud}
+    if neighbor_cloud is not None:
+        clouds.add(neighbor_cloud)
+    for cloud in clouds:
+        juju_client.register_cloud(cloud=cloud)
+
+
 @pytest.fixture(scope="session")
 def kubernetes_client(
     cloud_kubeconfigs: dict[str, Path],
