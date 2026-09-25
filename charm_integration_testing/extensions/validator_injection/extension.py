@@ -23,6 +23,7 @@ install_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/juju/validators"
+remote_packages_path = f"{remote_validators_path}/packages"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
@@ -57,7 +58,8 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        validators_ready = f"test -x {venv_runner} && test -x {uv_bin}"
+        if self.juju.exec_unit(model, unit, validators_ready, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
@@ -80,11 +82,15 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        mkdir = f"mkdir -p {remote_validators_path}"
+        mkdir = f"rm -rf {remote_packages_path} && mkdir -p {remote_validators_path}"
         if not is_k8s:
-            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
+            mkdir = (
+                f"sudo rm -rf {remote_packages_path} && "
+                f"sudo mkdir -p {remote_validators_path} && "
+                f"sudo chown -R $(id -u) {remote_validators_path}"
+            )
         self.juju.ssh(model, unit, mkdir)
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_packages_path}")
 
         # Copy uv binary
         uv_file = self._get_uv_file()
@@ -95,7 +101,7 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{install_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
+                f"{install_env} {uv_bin} venv --clear --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (

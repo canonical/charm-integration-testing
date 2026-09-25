@@ -117,7 +117,7 @@ def _error_result(endpoint: str = "db", error: str = "oops") -> ValidationResult
 
 
 # Exec responses for a full injection + clean run cycle:
-#   1. test -f venv_runner → rc=1 (not present)
+#   1. validator readiness check → rc=1 (not present)
 #   2-4. three install commands → rc=0 each
 #   5. run_validators       → rc=0 with PASS JSON
 def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
@@ -127,7 +127,7 @@ def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOu
 
 
 # Exec responses when the venv is already installed:
-#   1. test -f venv_runner → rc=0 (present)
+#   1. validator readiness check → rc=0 (present)
 #   2. run_validators      → rc=0 with PASS JSON
 def _preinstalled_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -262,6 +262,17 @@ class TestValidatorInjectorExtension:
                 # THEN scp + 3 install commands + run_validators all happened
                 assert len(juju.scp_calls) == 2  # validators + uv
                 assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
+
+            def test_reinjects_when_uv_is_missing(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+                # GIVEN the validator runner remains but uv was lost after pod rescheduling
+                juju.exec_responses.extend(_inject_and_pass_responses())
+
+                # WHEN
+                extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+                # THEN the missing uv triggers a complete reinjection
+                assert len(juju.scp_calls) == 2
+                assert len(juju.exec_calls) == 5
 
         class TestResultHandling:
             def test_does_not_raise_when_all_pass(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
@@ -402,7 +413,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
-            assert cmd == f"mkdir -p {remote_validators_path}"
+            assert cmd == f"rm -rf {remote_validators_path}/packages && mkdir -p {remote_validators_path}"
 
         def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
             self,
@@ -418,8 +429,9 @@ class TestValidatorInjectorExtension:
             # THEN ssh was called to create the remote directory before copying files
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
-            mkdir, chown = cmd.split(" && ")
+            remove, mkdir, chown = cmd.split(" && ")
             assert unit == "myapp/0"
+            assert remove == f"sudo rm -rf {remote_validators_path}/packages"
             assert mkdir == f"sudo mkdir -p {remote_validators_path}"
             assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
