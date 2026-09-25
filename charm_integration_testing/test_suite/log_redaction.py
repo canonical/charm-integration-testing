@@ -141,6 +141,23 @@ def _safe_extract(archive: tarfile.TarFile, destination: Path) -> None:
         archive.extractall(destination)  # nosec B202 - members validated above
 
 
+def _copy_tree(source: Path, destination: Path) -> None:
+    """Copy ``source`` into ``destination``, skipping any symlink entries.
+
+    Mirrors ``_safe_extract``'s policy: a symlink could point outside ``source``, so
+    following it would pull unrelated content into the scan tree.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    for entry in source.iterdir():
+        if entry.is_symlink():
+            continue
+        target = destination / entry.name
+        if entry.is_dir():
+            _copy_tree(entry, target)
+        elif entry.is_file():
+            shutil.copy2(entry, target)
+
+
 def prepare_redacted_scan_dir(log_dir: Path, scan_dir: Path) -> None:
     """Populate ``scan_dir`` with a redacted copy of ``log_dir`` for secret scanning.
 
@@ -150,6 +167,9 @@ def prepare_redacted_scan_dir(log_dir: Path, scan_dir: Path) -> None:
     """
     scan_dir.mkdir(parents=True, exist_ok=True)
     for entry in log_dir.iterdir():
+        if entry.is_symlink():
+            # A symlink could point outside log_dir; skip it rather than follow it.
+            continue
         if entry.is_file() and tarfile.is_tarfile(entry):
             extract_dir = scan_dir / f"{entry.name}.extracted"
             with tarfile.open(entry) as archive:
@@ -163,7 +183,7 @@ def prepare_redacted_scan_dir(log_dir: Path, scan_dir: Path) -> None:
             _redact_file_in_place(destination, root=scan_dir)
         elif entry.is_dir():
             destination = scan_dir / entry.name
-            shutil.copytree(entry, destination)
+            _copy_tree(entry, destination)
             for member_path in destination.rglob("*"):
                 if member_path.is_file():
                     _redact_file_in_place(member_path, root=scan_dir)

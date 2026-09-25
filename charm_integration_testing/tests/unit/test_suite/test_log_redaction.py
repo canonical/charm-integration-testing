@@ -298,3 +298,38 @@ class TestPrepareRedactedScanDir:
         # WHEN/THEN preparing the scan dir refuses to extract the special member
         with pytest.raises(ValueError, match="Refusing to extract special"):
             prepare_redacted_scan_dir(log_dir, scan_dir)
+
+    def test_skips_top_level_symlinks_instead_of_following_them(self, tmp_path: Path) -> None:
+        # GIVEN a log_dir with a symlink pointing at a real file outside log_dir
+        outside_secret = tmp_path / "outside-secret.txt"
+        outside_secret.write_text("a host secret that must never be scanned")
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "juju-controller.log").write_text("nothing interesting here")
+        (log_dir / "sneaky-link").symlink_to(outside_secret)
+        scan_dir = tmp_path / "scan"
+
+        # WHEN preparing the redacted scan dir
+        prepare_redacted_scan_dir(log_dir, scan_dir)
+
+        # THEN the symlink is skipped rather than dereferenced into the scan tree
+        assert not (scan_dir / "sneaky-link").exists()
+        assert (scan_dir / "juju-controller.log").read_text() == "nothing interesting here"
+
+    def test_skips_nested_symlinks_in_copied_directory_trees(self, tmp_path: Path) -> None:
+        # GIVEN a directory tree in log_dir containing a symlink to a file outside log_dir
+        outside_secret = tmp_path / "outside-secret.txt"
+        outside_secret.write_text("a host secret that must never be scanned")
+        log_dir = tmp_path / "logs"
+        nested_dir = log_dir / "controller-charmqa"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "juju-controller.log").write_text("nothing interesting here")
+        (nested_dir / "sneaky-link").symlink_to(outside_secret)
+        scan_dir = tmp_path / "scan"
+
+        # WHEN preparing the redacted scan dir
+        prepare_redacted_scan_dir(log_dir, scan_dir)
+
+        # THEN the nested symlink is skipped rather than dereferenced into the scan tree
+        assert not (scan_dir / "controller-charmqa" / "sneaky-link").exists()
+        assert (scan_dir / "controller-charmqa" / "juju-controller.log").read_text() == "nothing interesting here"
