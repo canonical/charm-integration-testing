@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from typing import Any
 
 from requests.adapters import HTTPAdapter
 from test_observer_client.client import DEFAULT_RETRY_KWARGS
@@ -55,10 +56,12 @@ class TestHistoricalRevisionSelection:
     def test_iter_historical_revisions_with_passing_test_yields_all_matching_revisions(self) -> None:
         # GIVEN a client with multiple historical builds, each with a passing deploy result
         class FakeClient(ObserverClient):
-            def query_artefacts_history(self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10):
+            def query_artefacts_history(
+                self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10
+            ) -> dict[str, Any]:
                 return {"artefacts": [{"id": 42}]}
 
-            def query_artefact_builds(self, artefact_id: int, limit: int = 100):
+            def query_artefact_builds(self, artefact_id: int, limit: int = 100) -> dict[str, Any]:
                 assert artefact_id == 42
                 return {
                     "builds": [
@@ -67,7 +70,7 @@ class TestHistoricalRevisionSelection:
                     ]
                 }
 
-            def query_test_results_for_execution(self, execution_id: int):
+            def query_test_results_for_execution(self, execution_id: int) -> dict[str, Any]:
                 assert execution_id in {101, 201}
                 return {"test_results": [{"name": "test_deploy", "status": "PASSED"}]}
 
@@ -90,10 +93,12 @@ class TestHistoricalRevisionSelection:
     def test_choose_historical_revision_with_passing_test_returns_first_match(self) -> None:
         # GIVEN a client with a passing historical revision after a failed one
         class FakeClient(ObserverClient):
-            def query_artefacts_history(self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10):
+            def query_artefacts_history(
+                self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10
+            ) -> dict[str, Any]:
                 return {"artefacts": [{"id": 7}]}
 
-            def query_artefact_builds(self, artefact_id: int, limit: int = 100):
+            def query_artefact_builds(self, artefact_id: int, limit: int = 100) -> dict[str, Any]:
                 assert artefact_id == 7
                 return {
                     "builds": [
@@ -102,7 +107,7 @@ class TestHistoricalRevisionSelection:
                     ]
                 }
 
-            def query_test_results_for_execution(self, execution_id: int):
+            def query_test_results_for_execution(self, execution_id: int) -> dict[str, Any]:
                 if execution_id == 401:
                     return {"test_results": [{"name": "test_deploy", "status": "FAILED"}]}
                 return {"test_results": [{"name": "test_deploy", "status": "PASSED"}]}

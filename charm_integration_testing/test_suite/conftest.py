@@ -604,13 +604,26 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
         test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
         resolved_channel = channel or target.channel
 
+        resolved_revision: int | None = None
         try:
-            resolved_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
+            historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
                 charm_name=target_charm,
                 stage=resolved_channel.risk or "stable",
                 current_revision=target.revision,
                 track=resolved_channel.explicit_track,
             )
+            for candidate_revision in historical_revisions:
+                try:
+                    charmhub_client.charm_from_store(
+                        charm_name=target_charm,
+                        ubuntu_arch=target_arch,
+                        charm_revision=candidate_revision,
+                        ubuntu_version=target_base,
+                    )
+                except BaseMismatchError:
+                    continue
+                resolved_revision = candidate_revision
+                break
         except TestObserverClientError as exc:
             raise RuntimeError(f"Test Observer query failed: {exc}") from exc
 
