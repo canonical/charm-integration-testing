@@ -80,6 +80,16 @@ def _validate_cmr_options(
 
     if is_cmr:
         if (
+            not same_controller
+            and neighbor_controller is not None
+            and target_controller is not None
+            and neighbor_controller == target_controller
+        ):
+            pytest.exit(
+                "--neighbor-controller must differ from --target-controller unless --same-controller is set.",
+                returncode=4,
+            )
+        if (
             neighbor_controller is not None
             and target_controller is not None
             and neighbor_model is not None
