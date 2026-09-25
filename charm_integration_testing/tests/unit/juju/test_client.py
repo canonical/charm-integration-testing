@@ -13,12 +13,15 @@ from juju.extension import JujuExtension
 from juju.models import (
     JujuApplicationInfo,
     JujuIntegrationApplication,
+    PersistenceKey,
 )
 from juju.version import JujuVersion
 
-from validators.base.validator import ValidationCheck, ValidationResult
+from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
 from ..extensions.shared import NullJujuBackend
+
+TEST_TOKEN = "test-token"
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -106,6 +109,54 @@ class ExtensionStub(JujuExtension):
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
+
+
+class PersistenceExtensionStub(JujuExtension):
+    """Extension that returns configurable persistence results and records how it was called."""
+
+    def __init__(
+        self,
+        results: dict[str, dict[str, list[ValidationResult]]],
+        state_updates: dict[PersistenceKey, PersistenceState] | None = None,
+        keys_to_drop: list[PersistenceKey] | None = None,
+    ) -> None:
+        self.results = results
+        self.state_updates = state_updates or {}
+        self.keys_to_drop = keys_to_drop or []
+        self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
+        self.calls: list[tuple[str, str | None, dict[PersistenceKey, PersistenceState]]] = []
+
+    def persistence_operation(self, model: JujuModelHandle) -> str:
+        if self.persistence_state:
+            return "checkpoint"
+        return "prepare"
+
+    def post_persistence(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        persistence: str | None = None,
+    ) -> dict[str, list[ValidationResult]]:
+        self.calls.append((application, persistence, dict(self.persistence_state)))
+        self.persistence_state.update(self.state_updates)
+        for key in self.keys_to_drop:
+            self.persistence_state.pop(key, None)
+        return self.results.get(application, {})
+
+
+class PreRemoveIntegrationExtensionStub(JujuExtension):
+    """Extension that records pre_remove_integration calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[JujuModelHandle, JujuIntegrationApplication, JujuIntegrationApplication]] = []
+
+    def pre_remove_integration(
+        self,
+        model: JujuModelHandle,
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+    ) -> None:
+        self.calls.append((model, endpoint_1, endpoint_2))
 
 
 @dataclass
@@ -451,6 +502,85 @@ class TestJujuClientValidateModel:
         # THEN the unit is not skipped and validation passed is logged
         assert any("Validation passed for unit 'myapp/0'" in info for info in logger.infos)
         assert not any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
+
+    def test_skips_functional_validation_when_level_is_none(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that would FAIL functional validation
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_fail()]}},
+        )
+        client = self._client(logger, backend)
+
+        # WHEN level=None (functional validation skipped entirely) / THEN no exception
+        client.validate_model(self._model(), level=None)
+
+    def test_calls_post_persistence_on_each_extension(self, logger: LoggerStub) -> None:
+        # GIVEN an application and a persistence extension
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}})
+        client = self._client(logger, backend, [extension])
+
+        # WHEN
+        client.validate_model(self._model(), level=None)
+
+        # THEN the extension was invoked with the application
+        assert extension.calls == [("myapp", "prepare", {})]
+
+    def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
+        # GIVEN a persistence extension that reports a FAIL
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail()]}})
+        client = self._client(logger, backend, [extension])
+
+        # WHEN / THEN
+        with pytest.raises(JujuValidationError) as exc_info:
+            client.validate_model(self._model(), level=None)
+        assert "myapp/0" in exc_info.value.failed_validations
+
+    def test_persistence_extension_owns_its_state(self, logger: LoggerStub) -> None:
+        # GIVEN an extension that adds a new state entry on prepare
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        key = PersistenceKey(controller="ctrl", model="mymodel", unit="myapp/0", relation_id=4)
+        new_state = PersistenceState(id=123, ref=1, token=TEST_TOKEN)
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_pass()]}}, state_updates={key: new_state})
+        client = self._client(logger, backend, [extension])
+
+        # WHEN
+        client.validate_model(self._model(), level=None)
+
+        # THEN the extension's own state was updated
+        assert extension.persistence_state == {key: new_state}
+
+    def test_both_functional_and_persistence_run_when_both_requested(self, logger: LoggerStub) -> None:
+        # GIVEN backend validation passes but the persistence extension reports a FAIL
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_pass()]}},
+        )
+        extension = PersistenceExtensionStub({"myapp": {"myapp/0": [_fail("canary")]}})
+        client = self._client(logger, backend, [extension])
+
+        # WHEN / THEN both were run, and the persistence failure is raised
+        with pytest.raises(JujuValidationError) as exc_info:
+            client.validate_model(self._model(), level="simple")
+        assert extension.calls == [("myapp", "prepare", {})]
+        assert "canary" in {r.endpoint for r in exc_info.value.failed_validations["myapp/0"]}
+
+    def test_selects_persistence_operation_once_per_model_validation(self, logger: LoggerStub) -> None:
+        # GIVEN two applications and an extension that records state after the first application
+        backend = BackendStub(app_list={"first": _app_info(), "second": _app_info()})
+        key = PersistenceKey(controller="ctrl", model="mymodel", unit="first/0", relation_id=4)
+        extension = PersistenceExtensionStub(
+            {"first": {"first/0": [_pass()]}, "second": {"second/0": [_pass()]}},
+            state_updates={key: PersistenceState(id=123, ref=1, token=TEST_TOKEN)},
+        )
+        client = self._client(logger, backend, [extension])
+
+        # WHEN validating the whole model
+        client.validate_model(self._model(), level=None)
+
+        # THEN both applications use the operation selected before either mutates extension state
+        assert [call[0:2] for call in extension.calls] == [("first", "prepare"), ("second", "prepare")]
 
     def test_delegates_to_backend_with_revision_only(self, logger: LoggerStub) -> None:
         # GIVEN a backend that records refresh calls
@@ -983,6 +1113,14 @@ class TestIntegrationMethods:
         backend = IntegrationTrackingBackendStub()
         _client(backend).remove_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
 
+        assert backend.remove_calls == [(_MODEL, _EP1, _EP2)]
+
+    def test_remove_integration_fires_pre_remove_integration_hook_before_backend(self) -> None:
+        backend = IntegrationTrackingBackendStub()
+        extension = PreRemoveIntegrationExtensionStub()
+        _client(backend, [extension]).remove_integration(endpoint_1=_EP1, endpoint_2=_EP2, model=_MODEL)
+
+        assert extension.calls == [(_MODEL, _EP1, _EP2)]
         assert backend.remove_calls == [(_MODEL, _EP1, _EP2)]
 
     def test_wait_for_removal_of_integration_delegates_to_backend(self) -> None:

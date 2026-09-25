@@ -476,7 +476,9 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         # missing the rest raise, turning it into a failed teardown.
         creds = self._resolve_credentials()
         if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
-            return
+            raise PersistenceNotApplicable(
+                "Relation credentials are incomplete; cleanup cannot remove canary data yet."
+            )
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
