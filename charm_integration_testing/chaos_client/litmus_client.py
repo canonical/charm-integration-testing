@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from time import monotonic, sleep
 from typing import Any, Callable
@@ -39,6 +39,7 @@ class _ExperimentRun:
     execution_error: RuntimeError | None = None
     engine_requested: bool = False
     uid: str | None = None
+    cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 class LitmusChaosClient(ChaosClient):
@@ -140,6 +141,7 @@ class LitmusChaosClient(ChaosClient):
             for pod in pods.items
             if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
             and pod.metadata.deletion_timestamp is None
+            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
         ]
         if len(matches) != 1:
             raise RuntimeError(f"Expected one live Pod for {namespace}/{unit}, found {len(matches)}.")
@@ -347,12 +349,23 @@ class LitmusChaosClient(ChaosClient):
             namespace=engine.namespace, label_selector=selector, _request_timeout=REQUEST_TIMEOUT
         )
         for job in jobs.items:
+            self._remember_cleanup_uid(engine, "jobs", job.metadata.name, job.metadata.uid)
             self._delete_child(self._batch.delete_namespaced_job, engine.namespace, job.metadata)
         pods = self._backend.core_v1_api.list_namespaced_pod(
             namespace=engine.namespace, label_selector=selector, _request_timeout=REQUEST_TIMEOUT
         )
         for pod in pods.items:
+            self._remember_cleanup_uid(engine, "pods", pod.metadata.name, pod.metadata.uid)
             self._delete_child(self._backend.core_v1_api.delete_namespaced_pod, engine.namespace, pod.metadata)
+
+    @staticmethod
+    def _remember_cleanup_uid(engine: _ExperimentRun, kind: str, name: str, uid: str | None) -> None:
+        if not uid:
+            raise RuntimeError(f"Cannot verify UID of {kind} {engine.namespace}/{name}.")
+        key = (kind, name)
+        original = engine.cleanup_uids.setdefault(key, uid)
+        if original != uid:
+            raise RuntimeError(f"{kind} {engine.namespace}/{name} was replaced; cleanup retained.")
 
     @staticmethod
     def _delete_child(delete: Callable[..., object], namespace: str, metadata: Any) -> None:
@@ -384,6 +397,7 @@ class LitmusChaosClient(ChaosClient):
     def _remove_results(self, engine: _ExperimentRun) -> None:
         for result in self._results(engine):
             metadata = result["metadata"]
+            self._remember_cleanup_uid(engine, "chaosresults", metadata["name"], metadata.get("uid"))
             self._delete_custom("chaosresults", engine.namespace, metadata["name"], metadata["uid"])
 
     def _results(self, engine: _ExperimentRun) -> list[dict[str, Any]]:

@@ -653,3 +653,66 @@ def test_rejected_stop_does_not_suppress_later_execution_failure(context: Client
     assert "experiment" in str(error.value.errors[0])
     assert not context.engines
     context.setups[0].cleanup.assert_called_once()
+
+
+@pytest.mark.parametrize("kind", ["jobs", "pods", "chaosresults"])
+@pytest.mark.parametrize("failure_status", [409, 503])
+def test_cleanup_retry_does_not_adopt_replacement_uid(context: ClientContext, kind: str, failure_status: int) -> None:
+    # GIVEN a child whose first UID-preconditioned delete fails
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    metadata = client.V1ObjectMeta(name="child", uid="original")
+    if kind == "jobs":
+        context.batch.list_namespaced_job.return_value = client.V1JobList(items=[client.V1Job(metadata=metadata)])
+        delete = context.batch.delete_namespaced_job
+    elif kind == "pods":
+        context.children = [client.V1Pod(metadata=metadata)]
+        delete = context.backend.core_v1_api.delete_namespaced_pod
+    else:
+        delete = context.backend.custom_objects_api.delete_namespaced_custom_object
+    delete.side_effect = ApiException(status=failure_status)
+    with pytest.raises(ChaosCleanupError):
+        chaos.cleanup(MODEL, UNIT, "")
+    assert delete.call_count == 1
+
+    # WHEN the name is reused with a new UID, THEN retries never delete the replacement
+    if kind == "chaosresults":
+        context.results[0]["metadata"]["uid"] = "replacement"
+    else:
+        metadata.uid = "replacement"
+    for _ in range(2):
+        with pytest.raises(ChaosCleanupError) as error:
+            chaos.cleanup(MODEL, UNIT, "")
+        assert "was replaced" in str(error.value.errors[0])
+        assert delete.call_count == 1
+        context.setups[0].cleanup.assert_not_called()
+
+    # WHEN the replacement is removed externally, THEN pending cleanup can finish
+    if kind == "jobs":
+        context.batch.list_namespaced_job.return_value.items.clear()
+    elif kind == "pods":
+        context.children.clear()
+    else:
+        context.results.clear()
+        delete.side_effect = context.delete
+    chaos.cleanup(MODEL, UNIT, "")
+    context.setups[0].cleanup.assert_called_once()
+
+
+@pytest.mark.parametrize("phase", ["Succeeded", "Failed"])
+@pytest.mark.parametrize("has_live_pod", [True, False])
+def test_terminal_pods_are_not_stress_targets(context: ClientContext, phase: str, has_live_pod: bool) -> None:
+    # GIVEN a retained terminal Pod with the same Juju unit annotation
+    terminal = target_pod(name="old-pod")
+    terminal.status = client.V1PodStatus(phase=phase)
+    context.pods = [terminal, target_pod()] if has_live_pod else [terminal]
+    chaos = context.chaos_client()
+
+    # WHEN resolving the target, THEN only the live Pod is eligible
+    if has_live_pod:
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+        assert context.created[0]["spec"]["selectors"]["pods"][0]["names"] == "postgresql-random-pod"
+    else:
+        with pytest.raises(RuntimeError, match="Expected one live Pod"):
+            chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+        assert not context.setups
