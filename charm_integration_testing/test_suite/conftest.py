@@ -596,12 +596,14 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
 
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
     target_base = target.ubuntu_version
+    resolved_channel = channel or target.channel
 
     def supports_target_base(revision: int) -> bool:
         try:
             charmhub_client.charm_from_store(
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
+                charm_track=resolved_channel.explicit_track,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
@@ -618,9 +620,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
                 "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
-
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
-    resolved_channel = channel or target.channel
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
             charm_name=target_charm,
