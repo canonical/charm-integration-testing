@@ -29,17 +29,22 @@ runs:
         echo "cloud-definition-path=$(mktemp "$HOME/openstack/juju-cloud.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
         echo "credentials-path=$(mktemp "$HOME/openstack/juju-credentials.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
+      id: novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}
       shell: bash
       run: |
         mkdir -p $HOME/openstack
-        echo "${NOVARC_CONTENT}" > $HOME/openstack/novarc
+        novarc_path="$(mktemp "$HOME/openstack/novarc.XXXXXX")"
+        echo "${NOVARC_CONTENT}" > "${novarc_path}"
+        echo "path=${novarc_path}" >> "$GITHUB_OUTPUT"
     - name: Setup Image Metadata
+      env:
+        NOVARC_PATH: ${{ steps.novarc.outputs.path }}
       shell: bash
       run: |
         sudo snap install openstack
-        source $HOME/openstack/novarc
+        source "${NOVARC_PATH}"
         openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble") and test("amd64") ) and .Status == "active") | .ID' | while read -r id; do
           juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
         done
@@ -48,9 +53,10 @@ runs:
         CLOUD: ${{ inputs.cloud-name }}
         CLOUD_DEFINITION_PATH: ${{ steps.paths.outputs.cloud-definition-path }}
         CREDENTIALS_PATH: ${{ steps.paths.outputs.credentials-path }}
+        NOVARC_PATH: ${{ steps.novarc.outputs.path }}
       shell: bash
       run: |-
-        source $HOME/openstack/novarc
+        source "${NOVARC_PATH}"
         cat > "${CLOUD_DEFINITION_PATH}" << EOF
         clouds:
           ${CLOUD}:
