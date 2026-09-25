@@ -31,15 +31,15 @@ runs:
       id: paths
       shell: bash
       run: |
-        echo "cloud-definition-path=$(mktemp "${{ inputs.workspace }}/juju-cloud.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
-        echo "credentials-path=$(mktemp "${{ inputs.workspace }}/juju-credentials.XXXXXX.yaml")" >> "$GITHUB_OUTPUT"
+        echo "cloud-definition-path=${{ inputs.workspace }}/cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${{ inputs.workspace }}/credentials.yaml" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
       id: novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}
       shell: bash
       run: |
-        novarc_path="$(mktemp "${{ inputs.workspace }}/novarc.XXXXXX")"
+        novarc_path="${{ inputs.workspace }}/novarc"
         echo "${NOVARC_CONTENT}" > "${novarc_path}"
         echo "path=${novarc_path}" >> "$GITHUB_OUTPUT"
     - name: Setup Image Metadata
