@@ -199,6 +199,14 @@ jobs:
           echo "| \`downgrade_revision\` | \`${downgrade_revision}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`channel\` | \`${channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
+      - name: Validate CMR inputs
+        if: ${{ inputs.same_controller }}
+        shell: bash
+        run: |
+          if [[ -z "${{ inputs.neighbor_environment }}" ]]; then
+            echo "same_controller requires neighbor_environment." >&2
+            exit 1
+          fi
       - name: Report Test Execution Start To Test Observer
         if: ${{ !cancelled() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/patch-test-execution
@@ -442,7 +450,7 @@ jobs:
             --junit-xml=junit.xml
       - name: Run charm tests
         id: run_tests
-        if: ${{ inputs.neighbor_environment == '' }}
+        if: ${{ inputs.neighbor_environment == '' && !inputs.same_controller }}
         continue-on-error: true
         shell: bash
         env:

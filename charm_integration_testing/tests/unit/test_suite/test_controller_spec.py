@@ -204,6 +204,22 @@ def test_configure_accepts_same_controller_with_existing_controller_state() -> N
     controller_spec.pytest_configure(cast(pytest.Config, config))
 
 
+def test_configure_rejects_equal_controllers_without_same_controller() -> None:
+    # GIVEN a cross-controller CMR run that names the target controller as the neighbor
+    config = ConfigStub(
+        {
+            "--neighbor-cloud": "lxd",
+            "--target-controller": "target",
+            "--neighbor-controller": "target",
+        }
+    )
+
+    # WHEN validating the options
+    # THEN the equal controller names are rejected
+    with pytest.raises(pytest.exit.Exception, match="must differ from --target-controller"):
+        controller_spec.pytest_configure(cast(pytest.Config, config))
+
+
 def test_configure_requires_neighbor_controller_for_cross_controller_existing_state() -> None:
     # GIVEN a cross-controller CMR run with a state that implies an existing controller
     # and no --neighbor-controller
