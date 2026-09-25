@@ -84,6 +84,7 @@ class RelationMetaStub:
     relation_name: str
     interface_name: str | None = None
     role: RelationRoleStub = field(default_factory=lambda: RelationRoleStub.requires)
+    optional: bool = False
 
 
 @dataclass

@@ -2752,6 +2752,29 @@ type = "directory"
 url = "validators/cve_catalog"
 
 [[package]]
+name = "validators-engine"
+version = "0.1.0"
+description = "Shared validator-discovery and relation-running engine for the Interface Validators Framework"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/engine"
+
+[[package]]
 name = "validators-etcd-client"
 version = "0.1.0"
 description = "Validator for etcd_client interface"
@@ -3228,6 +3251,7 @@ validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cross-model-mesh = "*"
 validators-cve-catalog = "*"
+validators-engine = "*"
 validators-etcd-client = "*"
 validators-external-provider = "*"
 validators-grafana-dashboard = "*"
@@ -3406,6 +3430,54 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/trino_client"
+
+[[package]]
+name = "validators-update-status-check"
+version = "0.1.0"
+description = "Runs endpoint validators at the 'simple' level on every update-status hook"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-engine = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/update_status_check"
+
+[[package]]
+name = "validators-validate-action"
+version = "0.1.0"
+description = "Runs endpoint validators at a user-chosen level for a charm's 'validate' action"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+ops = ">=2.0.0"
+pydantic = ">=2.0.0"
+validators-base = "*"
+validators-engine = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/validate_action"
 
 [[package]]
 name = "websocket-client"
@@ -3591,4 +3663,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "0922f58ae483aa3197d4a97ba5da71a0945cd0151ddef5b8b92714a1f9b8474c"
+content-hash = "0dfb6f00bbee428d87f65187968dcd1a56531fdbc64005613bad08ef14a101be"
