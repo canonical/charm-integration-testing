@@ -559,6 +559,7 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
     channel_track = channel.track or None if channel else None
     channel_risk = channel.risk or None if channel else None
+    channel_branch = channel.branch or None if channel else None
 
     try:
         return charmhub_client.charm_from_store(
@@ -566,6 +567,7 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
             ubuntu_arch=target_arch,
             charm_track=channel_track,
             charm_risk=channel_risk,
+            charm_branch=channel_branch,
             charm_revision=target_revision,
             ubuntu_version=target_series,
         )
@@ -617,6 +619,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
                 ubuntu_arch=target_arch,
                 charm_track=resolved_channel.explicit_track,
                 charm_risk=resolved_channel.risk,
+                charm_branch=resolved_channel.branch or None,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )

@@ -428,6 +428,24 @@ class TestCharmhubClient:
             # THEN it succeeds
             assert charm.platforms == ["machine"]
 
+        def test_preserves_requested_channel_branch(self) -> None:
+            # GIVEN a charm requested from a channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with the branch included
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                charm_branch="candidate-build",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains that branch
+            assert charm.channel.branch == "candidate-build"
+
     # ---------------------------------------------------------------------------
     # TestBundleBuilderPlatformMismatch
     # ---------------------------------------------------------------------------
