@@ -23,10 +23,12 @@ runs:
   steps:
     - name: Report file paths
       id: paths
+      env:
+        CLOUD: ${{ inputs.cloud-name }}
       shell: bash
       run: |
-        echo "cloud-definition-path=${HOME}/openstack/openstack-cloud.yaml" >> "$GITHUB_OUTPUT"
-        echo "credentials-path=${HOME}/openstack/openstack-credentials.yaml" >> "$GITHUB_OUTPUT"
+        echo "cloud-definition-path=${HOME}/openstack/${CLOUD}-cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${HOME}/openstack/${CLOUD}-credentials.yaml" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}
@@ -45,10 +47,12 @@ runs:
     - name: Create Openstack cloud files
       env:
         CLOUD: ${{ inputs.cloud-name }}
+        CLOUD_DEFINITION_PATH: ${{ steps.paths.outputs.cloud-definition-path }}
+        CREDENTIALS_PATH: ${{ steps.paths.outputs.credentials-path }}
       shell: bash
       run: |-
         source $HOME/openstack/novarc
-        cat >> $HOME/openstack/openstack-cloud.yaml << EOF
+        cat > "${CLOUD_DEFINITION_PATH}" << EOF
         clouds:
           ${CLOUD}:
             type: openstack
@@ -57,7 +61,7 @@ runs:
               ${OS_REGION_NAME}:
                 endpoint: ${OS_AUTH_URL}
         EOF
-        cat >> $HOME/openstack/openstack-credentials.yaml << EOF
+        cat > "${CREDENTIALS_PATH}" << EOF
         credentials:
           ${CLOUD}:
             default-region: ${OS_REGION_NAME}
