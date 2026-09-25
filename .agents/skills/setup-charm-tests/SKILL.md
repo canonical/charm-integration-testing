@@ -172,10 +172,12 @@ pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caae
 
 For Kubernetes sandbox tests, set
 `KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
-Tests that require Chaos Mesh should request `require_chaos_mesh`. It checks
-for the StressChaos CRD and skips on non-Kubernetes targets or when that CRD
-is absent. Missing configuration and API errors fail rather than skip.
-This check does not prove that a chaos experiment will succeed.
+Tests request experiments through `require_chaos_tool`, which selects a
+supporting client. Chaos Mesh CPU and memory experiments require the
+StressChaos CRD, while I/O latency requires the IOChaos CRD. If no configured
+client supports an experiment, it skips when requested. Missing Kubernetes
+configuration and API errors fail rather than skip. CRD presence does not
+prove that a chaos experiment will succeed.
 
 Once setup is complete, run tests with the test suite. The suite handles controller bootstrap based on `--current-state`:
 

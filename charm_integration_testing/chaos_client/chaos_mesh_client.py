@@ -9,10 +9,10 @@ from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient
+from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
-_REQUIRED_CRDS = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org")
 
 
 class ChaosMeshNotInstalledError(RuntimeError):
@@ -21,12 +21,14 @@ class ChaosMeshNotInstalledError(RuntimeError):
 
 class ChaosMeshChaosClient(ChaosClient):
     def __init__(self, backend: KubernetesBackend):
-        missing = [crd for crd in _REQUIRED_CRDS if not backend.crd_exists(crd)]
-        if missing:
+        missing = missing_chaos_mesh_crds(backend)
+        if len(missing) == len(CHAOS_MESH_CRDS):
             raise ChaosMeshNotInstalledError(
                 f"Chaos Mesh is not fully installed on the target cluster (CRDs absent: {', '.join(missing)})."
             )
         self._backend = backend
+        self._missing_crds = frozenset(missing)
+        self._scopes: dict[str, tuple[str, str, str]] = {}
         self._created: list[tuple[str, str, str]] = []  # (plural, namespace, name)
 
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
@@ -56,12 +58,14 @@ class ChaosMeshChaosClient(ChaosClient):
             "percent": percent,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("IOChaos", "iochaos", model.model, self._name("io-latency", application), spec)
+        self._create("IOChaos", "iochaos", model, unit, volume_path, self._name("io-latency", application), spec)
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
-        # path is unused (kept for the ChaosClient API)
-        while self._created:
-            plural, namespace, name = self._created[-1]
+        """Clean resources for the model, unit and path. An empty path selects stress."""
+        for resource in reversed(tuple(self._created)):
+            plural, namespace, name = resource
+            if self._scopes[name] != (model.uri, unit, path):
+                continue
             try:
                 self._backend.custom_objects_api.delete_namespaced_custom_object(
                     group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name
@@ -69,7 +73,8 @@ class ChaosMeshChaosClient(ChaosClient):
             except ApiException as error:
                 if error.status != 404:
                     raise
-            self._created.pop()
+            self._created.remove(resource)
+            del self._scopes[name]
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
@@ -95,19 +100,35 @@ class ChaosMeshChaosClient(ChaosClient):
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("StressChaos", "stresschaos", model.model, self._name(label, application), spec)
+        self._create("StressChaos", "stresschaos", model, unit, "", self._name(label, application), spec)
 
-    def _create(self, kind: str, plural: str, namespace: str, name: str, spec: dict[str, object]) -> None:
+    def _create(
+        self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]
+    ) -> None:
+        crd = f"{plural}.{_GROUP}"
+        if crd in self._missing_crds:
+            raise NotImplementedError(f"{kind} experiments require the '{crd}' CRD.")
+        namespace = model.model
         body: dict[str, object] = {
             "apiVersion": f"{_GROUP}/{_VERSION}",
             "kind": kind,
             "metadata": {"name": name, "namespace": namespace},
             "spec": spec,
         }
-        self._backend.custom_objects_api.create_namespaced_custom_object(
-            group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, body=body
-        )
-        self._created.append((plural, namespace, name))
+        # Track before POST because the resource may exist even if the response is lost.
+        resource = (plural, namespace, name)
+        self._created.append(resource)
+        self._scopes[name] = (model.uri, unit, path)
+        try:
+            self._backend.custom_objects_api.create_namespaced_custom_object(
+                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, body=body
+            )
+        except ApiException as error:
+            if error.status == 409:
+                # A conflicting resource belongs to an earlier create request.
+                self._created.remove(resource)
+                del self._scopes[name]
+            raise
 
     @staticmethod
     def _selector(namespace: str, application: str) -> dict[str, object]:
