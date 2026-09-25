@@ -597,62 +597,50 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
     target_base = target.ubuntu_version
 
+    def supports_target_base(revision: int) -> bool:
+        try:
+            charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch=target_arch,
+                charm_revision=revision,
+                ubuntu_version=target_base,
+            )
+        except BaseMismatchError:
+            return False
+        return True
+
     value = request.config.getoption("--target-downgrade-revision")
     if value != "default":
         previous_revision = int(value)
-    else:
-        test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
-        resolved_channel = channel or target.channel
-
-        resolved_revision: int | None = None
-        try:
-            historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
-                charm_name=target_charm,
-                stage=resolved_channel.risk or "stable",
-                current_revision=target.revision,
-                track=resolved_channel.explicit_track,
-            )
-            for candidate_revision in historical_revisions:
-                try:
-                    charmhub_client.charm_from_store(
-                        charm_name=target_charm,
-                        ubuntu_arch=target_arch,
-                        charm_revision=candidate_revision,
-                        ubuntu_version=target_base,
-                    )
-                except BaseMismatchError:
-                    continue
-                resolved_revision = candidate_revision
-                break
-        except TestObserverClientError as exc:
-            raise RuntimeError(f"Test Observer query failed: {exc}") from exc
-
-        if resolved_revision is None:
-            # No usable historical revision (e.g. all prior revisions predate a base change and are
-            # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
-            # cycle is reported as untestable instead of a test failure.
+        if not supports_target_base(previous_revision):
             pytest.skip(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{resolved_channel}'."
+                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
+                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
-        previous_revision = resolved_revision
+        return previous_revision
 
-    # test_downgrade_charm and test_upgrade_charm reach their target revision via juju refresh, which
-    # Juju rejects across incompatible bases (this framework does not use --force-series). Skip when
-    # the downgrade revision cannot run on the base the target is deployed on.
+    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+    resolved_channel = channel or target.channel
     try:
-        charmhub_client.charm_from_store(
+        historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
             charm_name=target_charm,
-            ubuntu_arch=target_arch,
-            charm_revision=previous_revision,
-            ubuntu_version=target_base,
+            stage=resolved_channel.risk or "stable",
+            current_revision=target.revision,
+            track=resolved_channel.explicit_track,
         )
-    except BaseMismatchError:
-        pytest.skip(
-            f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
-            "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
-        )
-    return previous_revision
+        for candidate_revision in historical_revisions:
+            if supports_target_base(candidate_revision):
+                return candidate_revision
+    except TestObserverClientError as exc:
+        raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+
+    # No usable historical revision (e.g. all prior revisions predate a base change and are
+    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
+    # cycle is reported as untestable instead of a test failure.
+    pytest.skip(
+        "Unable to find a historical revision with a passing test_deploy result "
+        f"for charm '{target_charm}' in channel '{resolved_channel}'."
+    )
 
 
 @pytest.fixture
