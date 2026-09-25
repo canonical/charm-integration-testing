@@ -3,6 +3,9 @@
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.overrides import CharmOverridesCriteria, OverridesClient
 
@@ -78,6 +81,39 @@ class TestResourceTrackingOverrides:
 
         # THEN no skips are reported
         assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14"), "22.04") == frozenset()
+
+
+class TestHaOverrides:
+    def test_missing_values_use_ha_defaults(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text("overrides: []\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8"), "22.04") == 3
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8"), "22.04") is True
+
+    def test_values_are_scoped_to_matching_version(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text(
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '8.0'\n"
+            "        ubuntu_version: '22.04'\n"
+            "    ha_units: 5\n"
+            "    scale_down: false\n",
+            encoding="utf-8",
+        )
+        client = OverridesClient(overrides=tmp_path)
+
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "22.04") == 5
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8.0"), "22.04") is False
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "24.04") == 3
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8.0"), "24.04") is True
+
+    def test_ha_units_must_be_positive(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text("overrides:\n  - ha_units: 0\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        with pytest.raises(ValidationError):
+            client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "22.04")
 
 
 class TestGetCharmEndpointRemovable:

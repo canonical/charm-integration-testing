@@ -563,6 +563,18 @@ typing-extensions = {version = ">=4.13.2", markers = "python_full_version < \"3.
 ssh = ["bcrypt (>=3.1.5)"]
 
 [[package]]
+name = "defusedxml"
+version = "0.7.1"
+description = "XML bomb protection for Python stdlib modules"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+groups = ["main"]
+files = [
+    {file = "defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61"},
+    {file = "defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69"},
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 description = "Distro - an OS platform information API"
@@ -3262,6 +3274,7 @@ validators-postgresql-client = "*"
 validators-prometheus-remote-write = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
+validators-saml = "*"
 validators-temporal-host-info = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
 validators-trino-catalog = "*"
@@ -3291,6 +3304,29 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/s3"
+
+[[package]]
+name = "validators-saml"
+version = "0.1.0"
+description = "Validator for the saml interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = "*"
+defusedxml = "*"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/saml"
 
 [[package]]
 name = "validators-temporal-host-info"
@@ -3627,4 +3663,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "fd736f6c008e8f6c2b1f01c76090738e7577f8dd06b186b905ecb08890276b23"
+content-hash = "0dfb6f00bbee428d87f65187968dcd1a56531fdbc64005613bad08ef14a101be"
