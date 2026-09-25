@@ -7,10 +7,12 @@ from datetime import timedelta
 from inspect import unwrap
 from pathlib import Path
 from typing import Callable, cast
+from unittest.mock import MagicMock
 
 import pytest
 from chaos_client import ChaosCleanupError, MetaChaosClient
 from chaos_client.chaos_mesh_detection import CHAOS_MESH_CRDS
+from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
 from juju import JujuModelHandle
 from juju.backend import JujuExecOutput
@@ -504,6 +506,83 @@ class TestExperimentClients:
         assert neighbor.crd_reads == []
         assert neighbor.custom_objects_api.create_calls == []
 
+    def test_litmus_handles_stress_when_both_tools_are_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN both tools and a Litmus execution client
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        litmus = MagicMock(spec=LitmusChaosClient)
+        factory = MagicMock(return_value=litmus)
+        monkeypatch.setattr(chaos_tools, "LitmusChaosClient", factory)
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN tests request CPU and memory stress without selecting a tool
+        client.stress_cpu(TARGET, "postgresql/0", 2, timedelta(seconds=30))
+        client.stress_memory(TARGET, "postgresql/0", 1, 128, timedelta(seconds=30))
+        client.cleanup_all()
+
+        # THEN Litmus owns both operations and Mesh is not used
+        factory.assert_called_once_with(backend.kubernetes)
+        litmus.stress_cpu.assert_called_once_with(TARGET, "postgresql/0", 2, timedelta(seconds=30))
+        litmus.stress_memory.assert_called_once_with(TARGET, "postgresql/0", 1, 128, timedelta(seconds=30))
+        assert litmus.cleanup.call_count == 2
+        assert backend.kubernetes.custom_objects_api.create_calls == []
+        assert backend.exec_calls == []
+
+    def test_litmus_execution_error_does_not_fall_back_to_mesh(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN both tools and a failing Litmus operation
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        failure = ApiException(status=403)
+        litmus = MagicMock(spec=LitmusChaosClient)
+        litmus.stress_cpu.side_effect = failure
+        monkeypatch.setattr(chaos_tools, "LitmusChaosClient", lambda _: litmus)
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN execution fails and teardown runs
+        with pytest.raises(ApiException) as exc_info:
+            client.stress_cpu(TARGET, "postgresql/0", 1, timedelta(seconds=30))
+        client.cleanup_all()
+
+        # THEN the failure is preserved and cleanup goes to Litmus
+        assert exc_info.value is failure
+        litmus.cleanup.assert_called_once_with(TARGET, "postgresql/0", "")
+        assert backend.kubernetes.custom_objects_api.create_calls == []
+
+    def test_mesh_handles_stress_without_litmus(self) -> None:
+        # GIVEN only Chaos Mesh installed
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
+        client = chaos_client_for_model(backend, TARGET)
+
+        # WHEN requesting stress
+        client.stress_cpu(TARGET, "postgresql/0", 1, timedelta(seconds=30))
+        client.cleanup_all()
+
+        # THEN the available Mesh client creates and removes StressChaos
+        api = backend.kubernetes.custom_objects_api
+        assert len(api.create_calls) == 1
+        assert api.create_calls[0]["plural"] == "stresschaos"
+        assert len(api.delete_calls) == 1
+
+    def test_each_request_rechecks_litmus_without_preparing_resources(self) -> None:
+        # GIVEN a Litmus installation at the first client request
+        backend = JujuBackendStub()
+        backend.kubernetes.crds.update(LITMUS_CRDS)
+        backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
+        previous = chaos_client_for_model(backend, TARGET)
+
+        # WHEN Litmus disappears before a later request
+        backend.kubernetes.crds.clear()
+        current = chaos_client_for_model(backend, TARGET)
+
+        # THEN detection is refreshed and neither construction creates experiment resources
+        assert current is not previous
+        with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
+            current.stress_cpu(TARGET, "postgresql/0", 1, timedelta(seconds=30))
+        assert backend.kubernetes.custom_objects_api.create_calls == []
+
     def test_failed_network_creation_does_not_delete_existing_policy(self) -> None:
         # GIVEN a policy creation conflict
         error = ApiException(status=409)
@@ -859,7 +938,7 @@ def test_detection_runs_only_when_a_chaos_fixture_is_requested(chaos_pytester: p
     # THEN both skip, with one session report and fresh checks for each client
     with_chaos_tests.assert_outcomes(skipped=2)
     calls = calls_path.read_text().splitlines()
-    assert calls.count("chaosengines.litmuschaos.io") == 1
+    assert calls.count("chaosengines.litmuschaos.io") == 3
     assert calls.count("stresschaos.chaos-mesh.org") == 3
     assert calls.count("iochaos.chaos-mesh.org") == 3
     assert calls.count("close") == 0

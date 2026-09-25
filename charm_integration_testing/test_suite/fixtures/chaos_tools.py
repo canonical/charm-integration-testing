@@ -10,6 +10,7 @@ import pytest
 from chaos_client import ChaosClient, ChaosMeshChaosClient, MetaChaosClient
 from chaos_client.adapters import DiskFillClient, NetworkIsolationClient
 from chaos_client.chaos_mesh_detection import chaos_mesh_is_available
+from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import litmus_is_available
 from juju import JujuBackend, JujuModelHandle
 from kubernetes_client import KubernetesBackend
@@ -101,6 +102,8 @@ def chaos_client_for_model(backend: JujuBackend, model: JujuModelHandle) -> Meta
     tools: list[ChaosClient] = []
     kubernetes = backend.get_kubernetes_client_for_model(model)
     if kubernetes is not None:
+        if litmus_is_available(kubernetes.backend):
+            tools.append(LitmusChaosClient(kubernetes.backend))
         if chaos_mesh_is_available(kubernetes.backend):
             tools.append(ChaosMeshChaosClient(kubernetes.backend))
         tools.append(NetworkIsolationClient(kubernetes.backend))
