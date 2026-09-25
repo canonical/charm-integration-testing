@@ -39,6 +39,7 @@ dependencies = [
     "validators-grafana-datasource",
     "validators-ingress",
     "validators-ingress-auth",
+    "validators-ingress-per-unit",
     "validators-istio-ingress-route",
     "validators-prometheus-remote-write",
     "validators-alertmanager-dispatch",

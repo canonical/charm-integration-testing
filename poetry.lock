@@ -2900,6 +2900,28 @@ type = "directory"
 url = "validators/ingress_auth"
 
 [[package]]
+name = "validators-ingress-per-unit"
+version = "0.1.0"
+description = "Validator for the ingress_per_unit interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+pyyaml = ">=6.0,<7.0"
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/ingress_per_unit"
+
+[[package]]
 name = "validators-istio-ingress-route"
 version = "0.1.0"
 description = "Validator for the istio_ingress_route interface"
@@ -3235,6 +3257,7 @@ validators-grafana-datasource = "*"
 validators-http-interface = "*"
 validators-ingress = "*"
 validators-ingress-auth = "*"
+validators-ingress-per-unit = "*"
 validators-istio-ingress-route = "*"
 validators-kafka-client = "*"
 validators-livepatch-pro-airgapped-server = "*"
@@ -3591,4 +3614,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "0922f58ae483aa3197d4a97ba5da71a0945cd0151ddef5b8b92714a1f9b8474c"
+content-hash = "c88aafbc0101775482fc3397bcf6e8c4f4356368012381f2e378ca5a26769d75"
