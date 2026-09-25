@@ -93,7 +93,8 @@ def test_logs_privacy_check_redacts_juju_bootstrap_keys_before_scanning(
     with Juju's own ephemeral bootstrap private keys must be redacted before TruffleHog
     ever scans it, so it doesn't trigger a false-positive PrivateKey finding.
     """
-    configmap_file = tmp_path / "describe-controller-configmap.txt"
+    configmap_file = tmp_path / "configmap" / "describe-controller-configmap.txt"
+    configmap_file.parent.mkdir()
     configmap_file.write_text(
         "controller-agent.conf:\n----\ncontrollerkey: |\n  totally-fake-controller-key-body-line\n"
     )
@@ -106,7 +107,9 @@ def test_logs_privacy_check_redacts_juju_bootstrap_keys_before_scanning(
         if cmd[:2] == ["trufflehog", "--version"]:
             return version_check
         # Inspect the scan target while the temporary directory still exists.
-        scanned_configmap_contents.append((Path(cmd[2]) / "describe-controller-configmap.txt").read_text())
+        scanned_configmap_contents.append(
+            (Path(cmd[2]) / "configmap" / "describe-controller-configmap.txt").read_text()
+        )
         return scan_result
 
     monkeypatch.setattr(subprocess, "run", fake_run)

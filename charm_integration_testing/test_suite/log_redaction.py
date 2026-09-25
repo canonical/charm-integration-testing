@@ -13,9 +13,11 @@ from typing import Callable
 class RedactionRule:
     """A pattern matching one known false-positive secret, scoped to where it occurs.
 
-    A rule only fires on files whose name matches ``file_name_pattern``, and only
-    within the body captured by ``section_pattern`` (group 1), so a field name
-    never triggers a redaction outside the exact section it's known to come from.
+    A rule only fires on paths whose relative path (including any parent
+    directories, e.g. an archive member path) matches ``file_name_pattern``, and
+    only within the body captured by ``section_pattern`` (group 1), so a field
+    name never triggers a redaction outside the exact location it's known to
+    come from.
     """
 
     file_name_pattern: re.Pattern[str]
@@ -23,8 +25,8 @@ class RedactionRule:
     field_pattern: re.Pattern[str]
     replace: Callable[[re.Match[str]], str]
 
-    def apply(self, file_name: str, text: str) -> str:
-        if not self.file_name_pattern.search(file_name):
+    def apply(self, relative_path: str, text: str) -> str:
+        if not self.file_name_pattern.search(relative_path):
             return text
 
         def _redact_section(section_match: re.Match[str]) -> str:
@@ -70,7 +72,7 @@ def _configmap_section_key_rule(section_name: str, field_names: tuple[str, ...],
         return f"{indent}{field}: [REDACTED - {reason}]\n"
 
     return RedactionRule(
-        file_name_pattern=re.compile(r"^describe-controller-configmap\.txt$"),
+        file_name_pattern=re.compile(r"(?:^|/)configmap/describe-controller-configmap\.txt$"),
         section_pattern=_describe_configmap_section(section_name),
         field_pattern=_yaml_block_scalar_pattern(field_names),
         replace=_replace,
@@ -91,24 +93,27 @@ _REDACTION_RULES: list[RedactionRule] = [
 ]
 
 
-def redact_known_false_positives(file_name: str, text: str) -> str:
-    """Redact known false-positive secrets from ``text``, scoped by ``file_name``.
+def redact_known_false_positives(relative_path: str, text: str) -> str:
+    """Redact known false-positive secrets from ``text``, scoped by ``relative_path``.
 
-    Only content matching a rule's file name and section is touched; everything
-    else, including a real secret under the same field name elsewhere, is left
-    intact.
+    ``relative_path`` should include any parent directories (e.g. an archive
+    member path like ``controller-charmqa/configmap/describe-controller-configmap.txt``),
+    since rules match on the full path, not just the file's basename. Only content
+    matching a rule's path and section is touched; everything else, including a
+    real secret under the same field name elsewhere, is left intact.
     """
     for rule in _REDACTION_RULES:
-        text = rule.apply(file_name, text)
+        text = rule.apply(relative_path, text)
     return text
 
 
-def _redact_file_in_place(path: Path) -> None:
+def _redact_file_in_place(path: Path, root: Path) -> None:
     try:
         text = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, ValueError):
         return  # binary content; nothing to redact
-    redacted = redact_known_false_positives(path.name, text)
+    relative_path = path.relative_to(root).as_posix()
+    redacted = redact_known_false_positives(relative_path, text)
     if redacted != text:
         path.write_text(redacted, encoding="utf-8")
 
@@ -151,14 +156,14 @@ def prepare_redacted_scan_dir(log_dir: Path, scan_dir: Path) -> None:
                 _safe_extract(archive, extract_dir)
             for member_path in extract_dir.rglob("*"):
                 if member_path.is_file():
-                    _redact_file_in_place(member_path)
+                    _redact_file_in_place(member_path, root=extract_dir)
         elif entry.is_file():
             destination = scan_dir / entry.name
             shutil.copy2(entry, destination)
-            _redact_file_in_place(destination)
+            _redact_file_in_place(destination, root=scan_dir)
         elif entry.is_dir():
             destination = scan_dir / entry.name
             shutil.copytree(entry, destination)
             for member_path in destination.rglob("*"):
                 if member_path.is_file():
-                    _redact_file_in_place(member_path)
+                    _redact_file_in_place(member_path, root=scan_dir)

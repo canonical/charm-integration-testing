@@ -17,14 +17,15 @@ _CA_CERT_PEM = "ca-cert: |\n  totally-fake-public-certificate-body-line\n"
 
 
 class TestRedactKnownFalsePositives:
-    _CONFIGMAP_FILE = "describe-controller-configmap.txt"
+    # The known location per issue #1033: under the controller's configmap/ dir.
+    _CONFIGMAP_PATH = "controller-charmqa/configmap/describe-controller-configmap.txt"
 
     def test_redacts_controllerkey_and_caprivatekey_pem_blocks(self) -> None:
         # GIVEN describe-configmap-style text with both known Juju agent-conf key fields
         text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_CA_PRIVATE_KEY_PEM}"
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN both PEM bodies are gone, replaced with a placeholder on the field line
         assert "totally-fake-controller-key-body-line" not in redacted
@@ -37,7 +38,7 @@ class TestRedactKnownFalsePositives:
         text = f"{_SECTION_HEADER}controller-config:\n  {_CA_CERT_PEM}{_CONTROLLER_KEY_PEM}other-field: value\n"
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN the public certificate and unrelated fields are unchanged
         assert "totally-fake-public-certificate-body-line" in redacted
@@ -50,7 +51,7 @@ class TestRedactKnownFalsePositives:
         text = "some-field: value\nanother-field: |\n  plain multi-line\n  block scalar\n"
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN nothing changes
         assert redacted == text
@@ -66,14 +67,28 @@ class TestRedactKnownFalsePositives:
         # THEN the rule doesn't fire: the field name alone isn't enough to redact it
         assert redacted == text
 
+    def test_same_basename_in_an_unrelated_subdirectory_is_preserved(self) -> None:
+        # GIVEN the exact same basename as the known configmap dump, but reached via
+        # a different directory than the known configmap/ location (issue #1033
+        # requires the field to come from that specific path)
+        text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}"
+
+        # WHEN redacting content whose path doesn't have the configmap/ parent
+        redacted = redact_known_false_positives(
+            "controller-charmqa/some-other-dir/describe-controller-configmap.txt", text
+        )
+
+        # THEN the rule doesn't fire: matching basename alone isn't enough
+        assert redacted == text
+
     def test_field_name_without_section_header_is_preserved(self) -> None:
-        # GIVEN the right file name, but content that doesn't have the
+        # GIVEN the right path, but content that doesn't have the
         # controller-agent.conf section header this field is known to appear under
         # (e.g. a real secret happens to reuse the field name elsewhere in the file)
         text = _CONTROLLER_KEY_PEM
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN the rule doesn't fire: field name alone, without the known section,
         # isn't enough to redact it
@@ -87,7 +102,7 @@ class TestRedactKnownFalsePositives:
         text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_NEXT_SECTION_HEADER}{later_section_secret}"
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN only the field inside controller-agent.conf is redacted...
         assert "totally-fake-controller-key-body-line" not in redacted
@@ -96,30 +111,32 @@ class TestRedactKnownFalsePositives:
         assert redacted.count("controllerkey: [REDACTED") == 1
 
     def test_plain_scalar_value_is_preserved(self) -> None:
-        # GIVEN the right file/section, but the field is a plain scalar, not a
+        # GIVEN the right path/section, but the field is a plain scalar, not a
         # block scalar (e.g. a real secret assigned directly, with no "|")
         text = f"{_SECTION_HEADER}controllerkey: totally-real-secret-value\n"
 
         # WHEN redacting
-        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+        redacted = redact_known_false_positives(self._CONFIGMAP_PATH, text)
 
         # THEN the rule doesn't fire: only the "|" block-scalar form is redacted
         assert redacted == text
 
 
 class TestPrepareRedactedScanDir:
-    def test_copies_plain_files_and_redacts_matching_content(self, tmp_path: Path) -> None:
-        # GIVEN a log_dir with a plain text file containing an agent-conf key field
+    def test_copies_directory_trees_and_redacts_matching_content(self, tmp_path: Path) -> None:
+        # GIVEN a log_dir with an already-extracted directory tree (not a tar.gz)
+        # whose configmap dump sits under the known configmap/ path
         log_dir = tmp_path / "logs"
-        log_dir.mkdir()
-        (log_dir / "describe-controller-configmap.txt").write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}")
+        nested_dir = log_dir / "controller-charmqa" / "configmap"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "describe-controller-configmap.txt").write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}")
         scan_dir = tmp_path / "scan"
 
         # WHEN preparing the redacted scan dir
         prepare_redacted_scan_dir(log_dir, scan_dir)
 
         # THEN the copy exists with the key redacted
-        copied = (scan_dir / "describe-controller-configmap.txt").read_text()
+        copied = (scan_dir / "controller-charmqa" / "configmap" / "describe-controller-configmap.txt").read_text()
         assert "totally-fake-controller-key-body-line" not in copied
         assert "controllerkey: [REDACTED" in copied
 
@@ -176,14 +193,32 @@ class TestPrepareRedactedScanDir:
         assert "totally-fake-controller-key-body-line" in copied
         assert "[REDACTED" not in copied
 
+    def test_preserves_same_basename_in_an_unrelated_subdirectory(self, tmp_path: Path) -> None:
+        # GIVEN a describe-controller-configmap.txt-named file that isn't under the
+        # known configmap/ directory (e.g. a same-named file from another tool)
+        log_dir = tmp_path / "logs"
+        nested_dir = log_dir / "controller-charmqa" / "some-other-dir"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "describe-controller-configmap.txt").write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}")
+        scan_dir = tmp_path / "scan"
+
+        # WHEN preparing the redacted scan dir
+        prepare_redacted_scan_dir(log_dir, scan_dir)
+
+        # THEN the field is left untouched: matching basename alone isn't enough
+        copied = (scan_dir / "controller-charmqa" / "some-other-dir" / "describe-controller-configmap.txt").read_text()
+        assert "totally-fake-controller-key-body-line" in copied
+        assert "[REDACTED" not in copied
+
     def test_preserves_same_field_name_in_a_later_unrelated_section(self, tmp_path: Path) -> None:
         # GIVEN a describe-controller-configmap.txt with the known key inside
         # controller-agent.conf, and a real secret reusing the same field name in a
         # later, unrelated section of the same file
         log_dir = tmp_path / "logs"
-        log_dir.mkdir()
+        nested_dir = log_dir / "controller-charmqa" / "configmap"
+        nested_dir.mkdir(parents=True)
         later_section_secret = "controllerkey: |\n  totally-real-secret-in-a-later-section\n"
-        (log_dir / "describe-controller-configmap.txt").write_text(
+        (nested_dir / "describe-controller-configmap.txt").write_text(
             f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_NEXT_SECTION_HEADER}{later_section_secret}"
         )
         scan_dir = tmp_path / "scan"
@@ -192,7 +227,7 @@ class TestPrepareRedactedScanDir:
         prepare_redacted_scan_dir(log_dir, scan_dir)
 
         # THEN only the field inside controller-agent.conf is redacted...
-        copied = (scan_dir / "describe-controller-configmap.txt").read_text()
+        copied = (scan_dir / "controller-charmqa" / "configmap" / "describe-controller-configmap.txt").read_text()
         assert "totally-fake-controller-key-body-line" not in copied
         # ...while the same-named field in the later section survives for scanning
         assert "totally-real-secret-in-a-later-section" in copied
