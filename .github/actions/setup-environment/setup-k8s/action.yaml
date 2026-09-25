@@ -12,6 +12,9 @@ inputs:
   cloud-name:
     description: Name to register the Juju cloud under.
     required: true
+  workspace:
+    description: Per-cloud temporary workspace.
+    required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
@@ -31,8 +34,7 @@ runs:
         if [[ -n "${REQUESTED_PATH}" ]]; then
           echo "kubeconfig_path=${REQUESTED_PATH}" >> "$GITHUB_OUTPUT"
         else
-          mkdir -p "$HOME/.kube"
-          echo "kubeconfig_path=$(mktemp "$HOME/.kube/juju-kubeconfig.XXXXXX")" >> "$GITHUB_OUTPUT"
+          echo "kubeconfig_path=$(mktemp "${{ inputs.workspace }}/kubeconfig.XXXXXX")" >> "$GITHUB_OUTPUT"
         fi
     - name: Setup Kubeconfig
       env:
