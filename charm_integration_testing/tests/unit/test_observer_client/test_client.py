@@ -49,3 +49,74 @@ class TestClientInit:
         adapter = client._session.get_adapter("https://example.com")
         assert isinstance(adapter, HTTPAdapter)
         assert adapter.max_retries is custom_retries
+
+
+class TestHistoricalRevisionSelection:
+    def test_iter_historical_revisions_with_passing_test_yields_all_matching_revisions(self) -> None:
+        # GIVEN a client with multiple historical builds, each with a passing deploy result
+        class FakeClient(ObserverClient):
+            def query_artefacts_history(self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10):
+                return {"artefacts": [{"id": 42}]}
+
+            def query_artefact_builds(self, artefact_id: int, limit: int = 100):
+                assert artefact_id == 42
+                return {
+                    "builds": [
+                        {"revision": 12, "test_executions": [{"id": 201}]},
+                        {"revision": 11, "test_executions": [{"id": 101}]},
+                    ]
+                }
+
+            def query_test_results_for_execution(self, execution_id: int):
+                assert execution_id in {101, 201}
+                return {"test_results": [{"name": "test_deploy", "status": "PASSED"}]}
+
+        client = FakeClient(logging.getLogger(__name__), api_url="https://example.com", token="token")
+
+        # WHEN scanning backwards for passing deploys
+        revisions = list(
+            client.iter_historical_revisions_with_passing_test(
+                charm_name="postgresql-k8s",
+                stage="stable",
+                current_revision=13,
+                track="14",
+                test_name="test_deploy",
+            )
+        )
+
+        # THEN all matching revisions are yielded in search order
+        assert revisions == [12, 11]
+
+    def test_choose_historical_revision_with_passing_test_returns_first_match(self) -> None:
+        # GIVEN a client with a passing historical revision after a failed one
+        class FakeClient(ObserverClient):
+            def query_artefacts_history(self, stage: str, name: str, track: str, family: str = "charm", limit: int = 10):
+                return {"artefacts": [{"id": 7}]}
+
+            def query_artefact_builds(self, artefact_id: int, limit: int = 100):
+                assert artefact_id == 7
+                return {
+                    "builds": [
+                        {"revision": 99, "test_executions": [{"id": 401}]},
+                        {"revision": 98, "test_executions": [{"id": 301}]},
+                    ]
+                }
+
+            def query_test_results_for_execution(self, execution_id: int):
+                if execution_id == 401:
+                    return {"test_results": [{"name": "test_deploy", "status": "FAILED"}]}
+                return {"test_results": [{"name": "test_deploy", "status": "PASSED"}]}
+
+        client = FakeClient(logging.getLogger(__name__), api_url="https://example.com", token="token")
+
+        # WHEN selecting the first passing revision
+        revision = client.choose_historical_revision_with_passing_test(
+            charm_name="postgresql-k8s",
+            stage="stable",
+            current_revision=100,
+            track="14",
+            test_name="test_deploy",
+        )
+
+        # THEN it stops at the first passing result in search order
+        assert revision == 98

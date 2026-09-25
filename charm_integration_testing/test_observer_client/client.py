@@ -4,6 +4,7 @@
 """Test Observer API client for querying charm test results and metadata."""
 
 import logging
+from collections.abc import Iterator
 from types import MappingProxyType
 from typing import Any
 
@@ -287,27 +288,10 @@ class TestObserverClient:
 
         raise TestObserverQueryError(f"Unable to query test results for execution {execution_id}; ")
 
-    def choose_historical_revision_with_passing_test(
+    def iter_historical_revisions_with_passing_test(
         self, charm_name: str, stage: str, current_revision: int, track: str, test_name: str = "test_deploy"
-    ) -> int | None:
-        """Find a historical revision with a passing test.
-
-        Queries the Test Observer API to find a previous revision of the charm that has
-        a passing test result for the specified test.
-
-        Args:
-            charm_name: Name of the charm.
-            stage: Release stage (e.g., "stable", "edge").
-            current_revision: Current revision to exclude from results.
-            track: Release track (e.g., "14").
-            test_name: Name of the test to check for passing status (default: "test_deploy").
-
-        Returns:
-            The first historical revision with a passing test, or None if none found.
-
-        Raises:
-            TestObserverQueryError: If API queries fail.
-        """
+    ) -> Iterator[int]:
+        """Yield historical revisions with a passing test in search order."""
         self.logger.debug(
             f"Searching for historical {charm_name} revision in {track}/{stage} "
             f"with passing {test_name} (excluding revision {current_revision})"
@@ -362,32 +346,50 @@ class TestObserverClient:
                                 f"Found historical revision {revision} with passing {test_name} "
                                 f"(execution {execution_id})"
                             )
-                            return revision
+                            yield revision
                     except TestObserverQueryError as exc:
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
                         continue
 
-        self.logger.info(f"No historical revision found with passing {test_name}")
-        return None
+        self.logger.info(f"No more historical revisions found with passing {test_name}")
 
-    def choose_historical_revision_with_passing_deploy(
-        self, charm_name: str, stage: str, current_revision: int, track: str
+    def choose_historical_revision_with_passing_test(
+        self, charm_name: str, stage: str, current_revision: int, track: str, test_name: str = "test_deploy"
     ) -> int | None:
-        """Convenience method: find a historical revision with a passing test_deploy.
+        """Return the first historical revision with a passing test."""
+        return next(
+            self.iter_historical_revisions_with_passing_test(
+                charm_name=charm_name,
+                stage=stage,
+                current_revision=current_revision,
+                track=track,
+                test_name=test_name,
+            ),
+            None,
+        )
 
-        Args:
-            charm_name: Name of the charm.
-            stage: Release stage (e.g., "stable", "edge").
-            current_revision: Current revision to exclude from results.
-            track: Release track (e.g., "14").
-
-        Returns:
-            The first historical revision with a passing test_deploy, or None if none found.
-        """
-        return self.choose_historical_revision_with_passing_test(
+    def iter_historical_revisions_with_passing_deploy(
+        self, charm_name: str, stage: str, current_revision: int, track: str
+    ) -> Iterator[int]:
+        """Yield historical revisions with a passing test_deploy in search order."""
+        yield from self.iter_historical_revisions_with_passing_test(
             charm_name=charm_name,
             stage=stage,
             current_revision=current_revision,
             track=track,
             test_name="test_deploy",
+        )
+
+    def choose_historical_revision_with_passing_deploy(
+        self, charm_name: str, stage: str, current_revision: int, track: str
+    ) -> int | None:
+        """Return the first historical revision with a passing test_deploy."""
+        return next(
+            self.iter_historical_revisions_with_passing_deploy(
+                charm_name=charm_name,
+                stage=stage,
+                current_revision=current_revision,
+                track=track,
+            ),
+            None,
         )
