@@ -413,7 +413,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
-            assert cmd == f"mkdir -p {remote_validators_path}"
+            assert cmd == f"rm -rf {remote_validators_path}/packages && mkdir -p {remote_validators_path}"
 
         def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
             self,
@@ -429,8 +429,9 @@ class TestValidatorInjectorExtension:
             # THEN ssh was called to create the remote directory before copying files
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
-            mkdir, chown = cmd.split(" && ")
+            remove, mkdir, chown = cmd.split(" && ")
             assert unit == "myapp/0"
+            assert remove == f"sudo rm -rf {remote_validators_path}/packages"
             assert mkdir == f"sudo mkdir -p {remote_validators_path}"
             assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
