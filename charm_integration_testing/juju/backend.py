@@ -460,3 +460,10 @@ class JujuBackend(ABC):
         controller cloud configuration.
         """
         raise NotImplementedError
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Return a client for the model's Kubernetes cloud, or None for a machine model.
+
+        Unsupported backends raise rather than infer the cloud from the controller.
+        """
+        raise NotImplementedError("Model-aware Kubernetes client resolution is not supported by this backend.")

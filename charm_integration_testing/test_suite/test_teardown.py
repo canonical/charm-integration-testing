@@ -10,7 +10,7 @@ from juju import JujuClient, JujuIntegrationApplication, JujuModelHandle
 from .scheduler.states import State
 
 
-@pytest.mark.state(requires=State.DEPLOYED, provides=State.NEIGHBOR_ONLY)
+@pytest.mark.state(requires=[State.DEPLOYED, State.DEPLOYED_HA], provides=State.NEIGHBOR_ONLY)
 def test_teardown(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
