@@ -42,7 +42,7 @@ runs:
         openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble") and test("amd64") ) and .Status == "active") | .ID' | while read -r id; do
           juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
         done
-    - name: Add Openstack
+    - name: Create Openstack cloud files
       env:
         CLOUD: ${{ inputs.cloud-name }}
       shell: bash
@@ -70,5 +70,3 @@ runs:
               user-domain-name: ${OS_USER_DOMAIN_NAME}
               username: ${OS_USERNAME}
         EOF
-        juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
-        juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client

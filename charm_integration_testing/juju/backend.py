@@ -391,6 +391,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def register_cloud(self, cloud: str) -> None:
+        """Register a cloud with the local Juju client."""
+        raise NotImplementedError
+
+    @abstractmethod
     def add_cloud(self, cloud: str, controller: str) -> None:
         """Register a cloud (Kubernetes, OpenStack, LXD, manual, etc.) on an existing controller."""
         raise NotImplementedError

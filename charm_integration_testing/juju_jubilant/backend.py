@@ -739,8 +739,8 @@ class JubilantBackend(JujuCmdBackend):
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         self.client.model(None).add_model(model=model, controller=controller, config=model_config, cloud=cloud)
 
-    def add_cloud(self, cloud: str, controller: str) -> None:
-        """Register a cloud not yet known to an existing controller.
+    def register_cloud(self, cloud: str) -> None:
+        """Register a cloud with the local Juju client.
 
         Dispatches to the appropriate registration mechanism based on how the cloud's
         connection details were supplied: ``juju add-k8s`` for a cloud with a configured
@@ -748,14 +748,12 @@ class JubilantBackend(JujuCmdBackend):
         a cloud with a configured cloud-definition/credentials file pair
         (``CLOUD_DEFINITION_<cloud>``/``CLOUD_CREDENTIALS_<cloud>``).
 
-        Idempotent: a no-op if the cloud is already registered on the controller (e.g.
-        a later invocation against the same long-lived controller, such as a run using
-        ``--current-state`` to reuse a pre-existing controller).
+        Idempotent: a no-op if the cloud is already registered locally.
         """
         if cloud in self._cloud_kubeconfigs:
-            self._add_k8s_cloud(cloud, controller)
+            self._register_k8s_cloud(cloud)
         elif cloud in self._cloud_definitions:
-            self._add_generic_cloud(cloud, controller)
+            self._register_generic_cloud(cloud)
         else:
             normalized = cloud.replace("-", "_")
             raise ValueError(
@@ -764,30 +762,46 @@ class JubilantBackend(JujuCmdBackend):
                 f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} for any other cloud type."
             )
 
-    def _add_k8s_cloud(self, cloud: str, controller: str) -> None:
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a cloud on an existing Juju controller."""
+        if cloud in self._cloud_kubeconfigs:
+            self._register_k8s_cloud(cloud, controller=controller)
+        elif cloud in self._cloud_definitions:
+            self._register_generic_cloud(cloud, controller=controller)
+        else:
+            normalized = cloud.replace("-", "_")
+            raise ValueError(
+                f"No connection details configured for cloud '{cloud}'. Set "
+                f"KUBECONFIG_{normalized} for a Kubernetes cloud, or both "
+                f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} for any other cloud type."
+            )
+
+    def _register_k8s_cloud(self, cloud: str, controller: str | None = None) -> None:
         kubeconfig = self._cloud_kubeconfigs[cloud]
         # juju add-k8s reads the kubeconfig from stdin when KUBECONFIG is unset,
         # so the content is piped in rather than mutating the environment.
+        controller_args = ("--controller", controller) if controller else ("--client",)
         try:
             self.client.model(None).cli(
-                "add-k8s", cloud, "--controller", controller, include_model=False, stdin=kubeconfig.read_text()
+                "add-k8s", cloud, *controller_args, include_model=False, stdin=kubeconfig.read_text()
             )
         except jubilant.CLIError as exc:
             if "already exists" not in str(exc):
                 raise
 
-    def _add_generic_cloud(self, cloud: str, controller: str) -> None:
+    def _register_generic_cloud(self, cloud: str, controller: str | None = None) -> None:
         cloud_definition, credentials = self._cloud_definitions[cloud]
+        controller_args = ("--controller", controller) if controller else ("--client",)
         try:
             self.client.model(None).cli(
-                "add-cloud", cloud, str(cloud_definition), "--controller", controller, include_model=False
+                "add-cloud", cloud, str(cloud_definition), *controller_args, include_model=False
             )
         except jubilant.CLIError as exc:
             if "already exists" not in str(exc):
                 raise
         try:
             self.client.model(None).cli(
-                "add-credential", cloud, "-f", str(credentials), "--controller", controller, include_model=False
+                "add-credential", cloud, "-f", str(credentials), *controller_args, include_model=False
             )
         except jubilant.CLIError as exc:
             if "already exists" not in str(exc):

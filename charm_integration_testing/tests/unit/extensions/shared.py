@@ -205,6 +205,9 @@ class NullJujuBackend(JujuBackend):
     def add_cloud(self, cloud: str, controller: str) -> None:
         raise NotImplementedError
 
+    def register_cloud(self, cloud: str) -> None:
+        raise NotImplementedError
+
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
