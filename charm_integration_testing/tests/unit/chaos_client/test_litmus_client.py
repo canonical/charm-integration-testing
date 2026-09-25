@@ -122,13 +122,14 @@ class ClientContext:
         if self.create_error is not None:
             raise self.create_error
         if self.auto_inject:
+            pod_name = body["spec"]["selectors"]["pods"][0]["names"]
             self.results.append(
                 {
                     "metadata": {
                         "name": f"{name}-{name}",
                         "uid": f"result-{name}",
                         "labels": {"chaosUID": f"uid-{name}"},
-                        "annotations": {f"pod/{body["spec"]["selectors"]["pods"][0]["names"]}": "injected"},
+                        "annotations": {f"pod/{pod_name}": "injected"},
                     },
                     "status": {"experimentStatus": {"phase": "Running", "verdict": "Awaited"}},
                 }
@@ -148,14 +149,13 @@ class ClientContext:
         if self.stop_completes:
             engine["status"]["engineStatus"] = "stopped"
         if self.auto_revert:
+            pod_name = engine["spec"]["selectors"]["pods"][0]["names"]
             for result in self.results:
                 if (
                     result["metadata"].get("labels", {}).get("chaosUID", engine["metadata"]["uid"])
                     == engine["metadata"]["uid"]
                 ):
-                    result["metadata"]["annotations"] = {
-                        f"pod/{engine["spec"]["selectors"]["pods"][0]["names"]}": "reverted"
-                    }
+                    result["metadata"]["annotations"] = {f"pod/{pod_name}": "reverted"}
 
     def delete(self, *, plural: str, name: str, body: dict[str, Any], **kwargs: Any) -> None:
         if self.delete_error is not None:
