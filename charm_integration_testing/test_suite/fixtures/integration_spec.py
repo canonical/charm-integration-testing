@@ -189,6 +189,7 @@ def _resolve_deployed_charm(
     model_ref: JujuModelHandle,
     application: str,
     cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+    arch: str,
 ) -> Charm | None:
     if model_ref not in cache:
         cache[model_ref] = juju_client.list_applications(model=model_ref)
@@ -198,7 +199,7 @@ def _resolve_deployed_charm(
     channel = CharmChannel.model_validate(str(info.channel))
     return charmhub_client.charm_from_store(
         info.charm,
-        ubuntu_arch="amd64",
+        ubuntu_arch=arch,
         charm_track=channel.track or None,
         charm_risk=channel.risk or None,
         charm_revision=info.revision,
@@ -212,13 +213,19 @@ def target_deployed_charm(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     target_application: str,
+    target_arch: str,
     _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
 ) -> Charm | None:
     """Canonical charm metadata (with overrides merged) for whatever is actually deployed as the
     target application, or ``None`` if the application isn't found or has no resolvable channel.
     """
     return _resolve_deployed_charm(
-        charmhub_client, juju_client, target_model_ref, target_application, _applications_cache
+        charmhub_client,
+        juju_client,
+        target_model_ref,
+        target_application,
+        _applications_cache,
+        target_arch,
     )
 
 
@@ -229,6 +236,7 @@ def neighbor_deployed_charm(
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str,
+    neighbor_arch: str,
     _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
 ) -> Charm | None:
     """Canonical charm metadata for whatever is actually deployed as the neighbor application, or
@@ -237,7 +245,9 @@ def neighbor_deployed_charm(
     Non-CMR tests have no neighbor model; the neighbor application lives in target_model_ref.
     """
     model_ref = neighbor_model_ref or target_model_ref
-    return _resolve_deployed_charm(charmhub_client, juju_client, model_ref, neighbor_application, _applications_cache)
+    return _resolve_deployed_charm(
+        charmhub_client, juju_client, model_ref, neighbor_application, _applications_cache, neighbor_arch
+    )
 
 
 @pytest.fixture

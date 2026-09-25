@@ -60,6 +60,8 @@ from bundle_builder_x import (
     BaseMismatchError,
     BundleBuilder,
     BundleDiagnostic,
+    Charm,
+    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -386,6 +388,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Platform for the neighbor model in CMR tests: 'kubernetes' or 'machine'. Defaults to --target-platform value.",
     )
     parser.addoption(
+        "--target-arch",
+        type=str,
+        default="amd64",
+        help="Architecture for the target model, e.g. 'amd64' or 'arm64' (default: 'amd64').",
+    )
+    parser.addoption(
+        "--neighbor-arch",
+        type=str,
+        default=None,
+        help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
         "--charm-overrides",
         type=str,
         default="./static/charm-overrides/",
@@ -527,46 +541,122 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
 
 
 @pytest.fixture
+def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
+    """Canonical charm metadata for the target revision the cycle refreshes back to.
+
+    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
+    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
+    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
+    when the target cannot be resolved on the requested series.
+    """
+    target_charm: str = request.getfixturevalue("target_charm")
+    target_channel: str | None = request.getfixturevalue("target_channel")
+    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_series: str | None = request.getfixturevalue("target_series")
+    target_arch: str = request.getfixturevalue("target_arch")
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    channel_track = channel.track or None if channel else None
+    channel_risk = channel.risk or None if channel else None
+    channel_branch = channel.branch or None if channel else None
+
+    try:
+        return charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            ubuntu_arch=target_arch,
+            charm_track=channel_track,
+            charm_risk=channel_risk,
+            charm_branch=channel_branch,
+            charm_revision=target_revision,
+            ubuntu_version=target_series,
+        )
+    except BaseMismatchError:
+        # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
+        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
+        pytest.skip(
+            f"Charm '{target_charm}' target does not support the requested base "
+            f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
+        )
+    except ReleaseUnavailableError as exc:
+        if (
+            target_revision is None
+            and target_channel is None
+            and target_series is not None
+            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
+        ):
+            pytest.skip(
+                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
+                "the downgrade/upgrade refresh cycle is untestable."
+            )
+        raise
+
+
+@pytest.fixture
 def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
-    returned directly. When the value is ``"default"``, Test Observer is queried
-    for a historical revision with a passing deploy for the target charm.
+    used. When the value is ``"default"``, Test Observer is queried for a
+    historical revision with a passing deploy for the target charm. Either way
+    the selected revision is validated against the base the target is deployed
+    on, and the cycle is skipped when the two are incompatible.
     """
-    value = request.config.getoption("--target-downgrade-revision")
-    if value != "default":
-        return int(value)
-
-    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
-    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target: Charm = request.getfixturevalue("target_resolved_charm")
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
-    if target_revision is None or target_channel is None:
-        pytest.fail(
-            "--target-revision and --target-channel must be provided for this test to select a historical revision."
-        )
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    target_base = target.ubuntu_version
+    resolved_channel = channel or target.channel
 
-    parts = target_channel.split("/", maxsplit=1)
-    track = parts[0]
-    stage = parts[1] if len(parts) > 1 else "stable"
+    def supports_target_base(revision: int) -> bool:
+        try:
+            charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch=target_arch,
+                charm_track=resolved_channel.explicit_track,
+                charm_risk=resolved_channel.risk,
+                charm_branch=resolved_channel.branch or None,
+                charm_revision=revision,
+                ubuntu_version=target_base,
+            )
+        except BaseMismatchError:
+            return False
+        return True
 
-    try:
-        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
-            charm_name=target_charm,
-            stage=stage,
-            current_revision=target_revision,
-            track=track,
-        )
-        if previous_revision is None:
-            pytest.fail(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{target_channel}'."
+    value = request.config.getoption("--target-downgrade-revision")
+    if value != "default":
+        previous_revision = int(value)
+        if not supports_target_base(previous_revision):
+            pytest.skip(
+                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
+                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
+    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+    try:
+        historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
+            charm_name=target_charm,
+            stage=resolved_channel.risk or "stable",
+            current_revision=target.revision,
+            track=resolved_channel.explicit_track,
+        )
+        for candidate_revision in historical_revisions:
+            if supports_target_base(candidate_revision):
+                return candidate_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+
+    # No usable historical revision (e.g. all prior revisions predate a base change and are
+    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
+    # cycle is reported as untestable instead of a test failure.
+    pytest.skip(
+        "Unable to find a historical revision with a passing test_deploy result "
+        f"for charm '{target_charm}' in channel '{resolved_channel}'."
+    )
 
 
 @pytest.fixture
@@ -585,6 +675,13 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-platform")
     if not value:
         pytest.fail("--target-platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def target_arch(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
     return value
 
@@ -644,6 +741,26 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     value = request.config.getoption("--neighbor-platform")
     if not value:
         return target_platform
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_arch(
+    request: pytest.FixtureRequest,
+    target_arch: str,
+    neighbor_model_ref: JujuModelHandle | None,
+) -> str:
+    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch.
+
+    In non-CMR tests there is no neighbor model: the neighbor application is deployed
+    into the target model, so it necessarily uses ``target_arch``.
+    """
+    if neighbor_model_ref is None:
+        return target_arch
+    value = request.config.getoption("--neighbor-arch")
+    if not value:
+        return target_arch
     assert isinstance(value, str)
     return value
 
