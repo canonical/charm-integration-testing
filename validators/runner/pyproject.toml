@@ -29,6 +29,7 @@ dependencies = [
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
+    "validators-catalogue",
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
     "validators-parca-store",
