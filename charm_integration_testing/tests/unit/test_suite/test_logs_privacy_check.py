@@ -39,13 +39,16 @@ def test_logs_privacy_check_with_no_controllers(
     assert "log-dir is empty" in caplog.text
 
 
-def test_logs_privacy_check_scans_archives_and_tolerates_bad_bytes(
+def test_logs_privacy_check_scans_a_redacted_copy_and_tolerates_bad_bytes(
     tmp_path: Path,
     logger: logging.Logger,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """TruffleHog is invoked against the whole log directory, with no exclusions, so
-    archives (e.g. juju-crashdump tarballs) are still decoded and scanned for secrets.
+    """TruffleHog is invoked against a redacted copy of the log directory (see
+    ``log_redaction.prepare_redacted_scan_dir``), not the log directory itself, so that
+    known, non-sensitive ephemeral Juju bootstrap keys don't trigger false positives
+    (issue #1033) while every other file and archive member -- including any real
+    secret -- is still fully scanned.
 
     Also verifies the subprocess call tolerates non-UTF-8 bytes in TruffleHog's own
     stdout (e.g. leftover binary content it decoded from a scanned archive) instead of
@@ -57,12 +60,15 @@ def test_logs_privacy_check_scans_archives_and_tolerates_bad_bytes(
     version_check = MagicMock(returncode=0)
     scan_result = MagicMock(returncode=0, stdout=json.dumps({"level": "info-0", "msg": "no secrets found"}), stderr="")
     calls: list[list[str]] = []
+    scanned_log_contents: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
         calls.append(cmd)
         if cmd[:2] == ["trufflehog", "--version"]:
             return version_check
         assert kwargs.get("errors") == "replace", "must tolerate non-UTF-8 bytes in TruffleHog output"
+        # Inspect the scan target while the temporary directory still exists.
+        scanned_log_contents.append((Path(cmd[2]) / "juju-controller.log").read_text())
         return scan_result
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -70,7 +76,44 @@ def test_logs_privacy_check_scans_archives_and_tolerates_bad_bytes(
     test_logs_privacy_check(tmp_path, logger)
 
     scan_cmd = calls[-1]
-    assert scan_cmd == ["trufflehog", "filesystem", str(tmp_path), "--no-update", "--json", "--fail"]
+    assert scan_cmd[:2] == ["trufflehog", "filesystem"]
+    assert Path(scan_cmd[2]) != tmp_path, "must scan a copy, not the original log directory"
+    assert scan_cmd[3:] == ["--no-update", "--json", "--fail"]
+    # The redacted copy must still contain the original (unredacted, since it has no
+    # matching fields) file content -- nothing is silently dropped from the scan.
+    assert scanned_log_contents == ["nothing interesting here"]
+
+
+def test_logs_privacy_check_redacts_juju_bootstrap_keys_before_scanning(
+    tmp_path: Path,
+    logger: logging.Logger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for issue #1033: describe-controller-configmap.txt-style content
+    with Juju's own ephemeral bootstrap private keys must be redacted before TruffleHog
+    ever scans it, so it doesn't trigger a false-positive PrivateKey finding.
+    """
+    configmap_file = tmp_path / "describe-controller-configmap.txt"
+    configmap_file.write_text("bootstrap-params:\ncontrollerkey: |\n  totally-fake-controller-key-body-line\n")
+
+    version_check = MagicMock(returncode=0)
+    scan_result = MagicMock(returncode=0, stdout="", stderr="")
+    scanned_configmap_contents: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
+        if cmd[:2] == ["trufflehog", "--version"]:
+            return version_check
+        # Inspect the scan target while the temporary directory still exists.
+        scanned_configmap_contents.append((Path(cmd[2]) / "describe-controller-configmap.txt").read_text())
+        return scan_result
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    test_logs_privacy_check(tmp_path, logger)
+
+    (scanned_text,) = scanned_configmap_contents
+    assert "totally-fake-controller-key-body-line" not in scanned_text
+    assert "controllerkey: [REDACTED" in scanned_text
 
 
 def test_logs_privacy_check_redacts_secrets_in_logs_and_failure(
