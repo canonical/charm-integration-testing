@@ -576,6 +576,18 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
             f"Charm '{target_charm}' target does not support the requested base "
             f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
         )
+    except ReleaseUnavailableError as exc:
+        if (
+            target_revision is None
+            and target_channel is None
+            and target_series is not None
+            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
+        ):
+            pytest.skip(
+                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
+                "the downgrade/upgrade refresh cycle is untestable."
+            )
+        raise
 
 
 @pytest.fixture
