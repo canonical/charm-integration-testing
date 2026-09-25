@@ -3251,6 +3251,7 @@ validators-prometheus-remote-write = "*"
 validators-prometheus-scrape = "*"
 validators-s3 = "*"
 validators-saml = "*"
+validators-smtp = "*"
 validators-temporal-host-info = "*"
 validators-tracing = {version = "*", extras = ["deep"]}
 validators-trino-catalog = "*"
@@ -3303,6 +3304,27 @@ dev = ["validators-test-utils"]
 [package.source]
 type = "directory"
 url = "validators/saml"
+
+[[package]]
+name = "validators-smtp"
+version = "0.1.0"
+description = "Validator for the smtp interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/smtp"
 
 [[package]]
 name = "validators-temporal-host-info"
@@ -3591,4 +3613,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "0922f58ae483aa3197d4a97ba5da71a0945cd0151ddef5b8b92714a1f9b8474c"
+content-hash = "d07b8283c2682c160ef7ef6b36a15ca9cc044b6b02d51bb906c6e4690d2b7888"
