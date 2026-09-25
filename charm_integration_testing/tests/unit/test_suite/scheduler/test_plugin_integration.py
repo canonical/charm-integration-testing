@@ -25,21 +25,8 @@ from pytest import Pytester
 pytest_plugins = ["pytester"]
 
 
-def test_disabled_transition_is_excluded_and_planner_uses_alternate_path(pytester: Pytester) -> None:
-    pytester.makeconftest(
-        textwrap.dedent(
-            """
-            import pytest
-
-            pytest_plugins = ["test_suite.scheduler.plugin"]
-
-            @pytest.hookimpl(trylast=True)
-            def pytest_itemcollected(item):
-                if item.name == "test_scale_from_ha":
-                    item.add_marker("state_disabled")
-            """
-        )
-    )
+def test_skipped_transition_is_excluded_and_planner_uses_alternate_path(pytester: Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
         textwrap.dedent(
             """
@@ -48,7 +35,7 @@ def test_disabled_transition_is_excluded_and_planner_uses_alternate_path(pyteste
 
             @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED)
             def test_scale_from_ha():
-                pass
+                pytest.skip("scale down is unsupported")
 
             @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.NEIGHBOR_ONLY)
             def test_teardown():
@@ -67,9 +54,10 @@ def test_disabled_transition_is_excluded_and_planner_uses_alternate_path(pyteste
 
     result = pytester.runpytest("-v", "--current-state", "deployed_ha", "-k", "test_destination")
 
-    result.assert_outcomes(passed=3)
-    assert any("[injected] test_teardown PASSED" in line for line in result.outlines)
-    assert any("[injected] test_redeploy PASSED" in line for line in result.outlines)
+    result.assert_outcomes(passed=3, skipped=1)
+    assert any("[injected] test_scale_from_ha SKIPPED" in line for line in result.outlines)
+    assert any("[injected] test_teardown(recovered)[1] PASSED" in line for line in result.outlines)
+    assert any("[injected] test_redeploy(recovered)[2] PASSED" in line for line in result.outlines)
     assert any("test_destination PASSED" in line for line in result.outlines)
     result.stdout.no_fnmatch_line("*test_scale_from_ha*PASSED*")
 

@@ -143,6 +143,49 @@ def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> Charmhu
 
 
 class TestCharmhubClient:
+    class TestBuildCharmHa:
+        def test_build_charm_uses_ha_defaults(self) -> None:
+            client = _client({})
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 3
+            assert charm.scale_down is True
+
+        def test_build_charm_populates_release_specific_ha_overrides(self) -> None:
+            client = _client(
+                {
+                    "overrides": [
+                        {
+                            "criteria": [{"track": "latest", "ubuntu_version": _UBUNTU_VERSION}],
+                            "ha_units": 5,
+                            "scale_down": False,
+                        }
+                    ]
+                }
+            )
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 5
+            assert charm.scale_down is False
+
     # ---------------------------------------------------------------------------
     # TestBuildCharmPlatforms
     # ---------------------------------------------------------------------------

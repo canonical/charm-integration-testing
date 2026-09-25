@@ -6,6 +6,8 @@ from datetime import timedelta
 import pytest
 from juju import JujuClient, JujuModelHandle
 
+from bundle_builder_x import Charm
+
 from .scheduler.states import State
 
 
@@ -14,8 +16,12 @@ def test_scale_to_ha(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     target_application: str,
-    ha_units: int,
+    target_deployed_charm: Charm | None,
 ) -> None:
+    if target_deployed_charm is None:
+        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
+
+    ha_units = target_deployed_charm.ha_units
     current_units = juju_client.num_units(target_application, model=target_model_ref)
     if current_units < ha_units:
         juju_client.scale_application(target_application, ha_units, model=target_model_ref)
@@ -30,7 +36,13 @@ def test_scale_from_ha(
     target_model_ref: JujuModelHandle,
     target_application: str,
     original_units: int,
+    target_deployed_charm: Charm | None,
 ) -> None:
+    if target_deployed_charm is None:
+        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
+    if not target_deployed_charm.scale_down:
+        pytest.skip(f"{target_deployed_charm.name} does not support scaling down from HA.")
+
     juju_client.scale_application(target_application, original_units, model=target_model_ref)
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
     juju_client.validate_model(model=target_model_ref, level="simple")

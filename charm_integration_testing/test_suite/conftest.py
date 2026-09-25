@@ -61,8 +61,6 @@ from bundle_builder_x import (
     BaseMismatchError,
     BundleBuilder,
     BundleDiagnostic,
-    Charm,
-    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -87,24 +85,6 @@ pytest_plugins = [
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
 ]
-
-
-def _target_scale_down_enabled(config: pytest.Config) -> bool:
-    charm = config.getoption("--target-charm")
-    raw_channel = config.getoption("--target-channel")
-    ubuntu_version = config.getoption("--target-series")
-    overrides_path = config.getoption("--charm-overrides")
-    if not all(isinstance(value, str) and value for value in (charm, raw_channel, ubuntu_version, overrides_path)):
-        return True
-
-    channel = CharmChannel.model_validate(raw_channel)
-    return OverridesClient(overrides=Path(overrides_path)).get_charm_scale_down(charm, channel, ubuntu_version)
-
-
-@pytest.hookimpl(trylast=True)
-def pytest_itemcollected(item: pytest.Item) -> None:
-    if getattr(item, "originalname", item.name) == "test_scale_from_ha" and not _target_scale_down_enabled(item.config):
-        item.add_marker("state_disabled")
 
 
 @pytest.fixture
@@ -645,18 +625,6 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
-
-
-@pytest.fixture
-def ha_units(target_deployed_charm: Charm | None, overrides_client: OverridesClient) -> int:
-    """HA unit target for the deployed target charm version."""
-    if target_deployed_charm is None:
-        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
-    return overrides_client.get_charm_ha_units(
-        target_deployed_charm.name,
-        target_deployed_charm.channel,
-        target_deployed_charm.ubuntu_version,
-    )
 
 
 def _bundle_application_units(bundle_path: Path, application: str, platform: str) -> int:
