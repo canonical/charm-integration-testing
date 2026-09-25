@@ -34,9 +34,18 @@ outputs:
     description: Path to the credentials YAML file written to disk (o7k only; empty
       string for k8s).
     value: ${{ steps.setup-o7k.outputs.credentials-path }}
+  metadata-source:
+    description: Path to image metadata (o7k only; empty string for k8s).
+    value: ${{ steps.setup-o7k.outputs.metadata-source }}
 runs:
   using: composite
   steps:
+    - name: Create cloud workspace
+      id: workspace
+      shell: bash
+      run: |
+        workspace="$(mktemp -d "${RUNNER_TEMP}/juju-cloud.XXXXXX")"
+        echo "path=${workspace}" >> "$GITHUB_OUTPUT"
     - name: Setup K8s Cloud
       id: setup-k8s
       if: ${{ inputs.cloud-type == 'k8s' }}
@@ -44,6 +53,7 @@ runs:
       with:
         kubeconfig: ${{ inputs.kubeconfig }}
         cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup OpenStack Cloud
       id: setup-o7k
       if: ${{ inputs.cloud-type == 'o7k' }}
@@ -51,3 +61,4 @@ runs:
       with:
         novarc: ${{ inputs.novarc }}
         cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}

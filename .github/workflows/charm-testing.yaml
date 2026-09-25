@@ -386,11 +386,11 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
-          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+          metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
           neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
           neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
           neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
-          neighbor_metadata_source: ${{ steps.neighbor_env_info.outputs.metadata-source }}
+          neighbor_metadata_source: ${{ steps.setup_neighbor.outputs.metadata-source }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
           run_id: ${{ github.run_id }}
         run: |
@@ -461,7 +461,7 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
-          metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+          metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
