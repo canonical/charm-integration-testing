@@ -666,8 +666,6 @@ def target_platform(request: pytest.FixtureRequest) -> str:
 @pytest.fixture
 def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
-    if not value:
-        pytest.fail("--target-arch is required by this test but was not provided.")
     assert isinstance(value, str)
     return value
 

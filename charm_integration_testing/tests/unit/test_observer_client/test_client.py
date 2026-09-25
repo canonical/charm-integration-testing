@@ -65,13 +65,13 @@ class TestHistoricalRevisionSelection:
                 assert artefact_id == 42
                 return {
                     "builds": [
-                        {"revision": 12, "test_executions": [{"id": 201}]},
+                        {"revision": 12, "test_executions": [{"id": 201}, {"id": 202}]},
                         {"revision": 11, "test_executions": [{"id": 101}]},
                     ]
                 }
 
             def query_test_results_for_execution(self, execution_id: int) -> dict[str, Any]:
-                assert execution_id in {101, 201}
+                assert execution_id in {101, 201, 202}
                 return {"test_results": [{"name": "test_deploy", "status": "PASSED"}]}
 
         client = FakeClient(logging.getLogger(__name__), api_url="https://example.com", token="token")

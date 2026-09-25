@@ -347,6 +347,7 @@ class TestObserverClient:
                                 f"(execution {execution_id})"
                             )
                             yield revision
+                            break
                     except TestObserverQueryError as exc:
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
                         continue
