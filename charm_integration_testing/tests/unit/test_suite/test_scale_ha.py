@@ -9,7 +9,6 @@ from typing import cast
 
 import pytest
 from juju import JujuClient, JujuModelHandle
-from test_suite import conftest as suite_conftest
 from test_suite import test_scale_ha as scale_ha
 
 from bundle_builder_x import Charm, CharmChannel
@@ -37,7 +36,7 @@ class RecordingJujuClient:
 MODEL = JujuModelHandle(controller="controller", model="model")
 
 
-def _charm(*, ha_units: int = 3, scale_down: bool = True) -> Charm:
+def _charm(*, ha_units: int = 3, scale_down: bool = True, subordinate: bool = False) -> Charm:
     return Charm(
         name="mysql-k8s",
         channel=CharmChannel.model_validate("8.0/stable"),
@@ -46,9 +45,16 @@ def _charm(*, ha_units: int = 3, scale_down: bool = True) -> Charm:
         ubuntu_arch="amd64",
         endpoints={},
         platforms=["kubernetes"],
+        subordinate=subordinate,
         ha_units=ha_units,
         scale_down=scale_down,
     )
+
+
+def _write_bundle(tmp_path: Path, *, application: str = "target", units: int = 2) -> Path:
+    bundle = tmp_path / "bundle.yaml"
+    bundle.write_text(f"applications:\n  {application}:\n    scale: {units}\n", encoding="utf-8")
+    return bundle
 
 
 def test_scale_to_ha_validates_immediately_when_application_is_already_large_enough() -> None:
@@ -75,11 +81,30 @@ def test_scale_to_ha_scales_waits_and_deep_validates() -> None:
     ]
 
 
-def test_scale_from_ha_restores_original_units_waits_and_simple_validates() -> None:
+def test_scale_to_ha_skips_subordinate_before_accessing_juju() -> None:
+    client = RecordingJujuClient(current_units=1)
+
+    with pytest.raises(pytest.skip.Exception, match="mysql-k8s is subordinate"):
+        scale_ha.test_scale_to_ha(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            _charm(subordinate=True),
+        )
+
+    assert client.calls == []
+
+
+def test_scale_from_ha_restores_original_units_waits_and_simple_validates(tmp_path: Path) -> None:
     client = RecordingJujuClient(current_units=3)
 
     scale_ha.test_scale_from_ha(
-        cast(JujuClient, client), MODEL, "target", original_units=2, target_deployed_charm=_charm()
+        cast(JujuClient, client),
+        MODEL,
+        _write_bundle(tmp_path),
+        "target",
+        "kubernetes",
+        _charm(),
     )
 
     assert client.calls == [
@@ -89,16 +114,33 @@ def test_scale_from_ha_restores_original_units_waits_and_simple_validates() -> N
     ]
 
 
-def test_scale_from_ha_skips_before_mutating_when_scaling_down_is_unsupported() -> None:
+def test_scale_from_ha_skips_before_parsing_or_mutating_when_scaling_down_is_unsupported(tmp_path: Path) -> None:
     client = RecordingJujuClient(current_units=3)
 
     with pytest.raises(pytest.skip.Exception, match="mysql-k8s does not support scaling down"):
         scale_ha.test_scale_from_ha(
             cast(JujuClient, client),
             MODEL,
+            tmp_path / "missing.yaml",
             "target",
-            original_units=2,
-            target_deployed_charm=_charm(scale_down=False),
+            "kubernetes",
+            _charm(scale_down=False),
+        )
+
+    assert client.calls == []
+
+
+def test_scale_from_ha_skips_subordinate_before_parsing_or_accessing_juju(tmp_path: Path) -> None:
+    client = RecordingJujuClient(current_units=3)
+
+    with pytest.raises(pytest.skip.Exception, match="mysql-k8s is subordinate"):
+        scale_ha.test_scale_from_ha(
+            cast(JujuClient, client),
+            MODEL,
+            tmp_path / "missing.yaml",
+            "target",
+            "kubernetes",
+            _charm(subordinate=True),
         )
 
     assert client.calls == []
@@ -119,5 +161,5 @@ def test_bundle_application_units_reads_platform_specific_unit_key(tmp_path: Pat
         encoding="utf-8",
     )
 
-    assert suite_conftest._bundle_application_units(bundle, "target", "kubernetes") == 2
-    assert suite_conftest._bundle_application_units(bundle, "machine-target", "machine") == 4
+    assert scale_ha._bundle_application_units(bundle, "target", "kubernetes") == 2
+    assert scale_ha._bundle_application_units(bundle, "machine-target", "machine") == 4

@@ -11,7 +11,6 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
-import yaml
 from extensions import (
     ConfigureLivepatchServerExtension,
     IstioMeshExtension,
@@ -625,35 +624,6 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
-
-
-def _bundle_application_units(bundle_path: Path, application: str, platform: str) -> int:
-    with bundle_path.open(encoding="utf-8") as file:
-        try:
-            bundle = next(yaml.safe_load_all(file))
-        except StopIteration:
-            raise ValueError(f"Bundle is empty: {bundle_path}") from None
-
-    if not isinstance(bundle, dict):
-        raise ValueError(f"Invalid bundle document in {bundle_path}.")
-    applications = bundle.get("applications")
-    if not isinstance(applications, dict) or application not in applications:
-        raise ValueError(f"Application '{application}' not found in bundle: {bundle_path}")
-    application_data = applications[application]
-    if not isinstance(application_data, dict):
-        raise ValueError(f"Invalid application definition for '{application}' in {bundle_path}.")
-
-    units_key = "scale" if platform == "kubernetes" else "num_units"
-    units = application_data.get(units_key)
-    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
-        raise ValueError(f"Application '{application}' in {bundle_path} must define a positive integer '{units_key}'.")
-    return units
-
-
-@pytest.fixture
-def original_units(target_bundle: Path, target_application: str, target_platform: str) -> int:
-    """Unit count originally declared for the target application."""
-    return _bundle_application_units(target_bundle, target_application, target_platform)
 
 
 @pytest.fixture
