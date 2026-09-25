@@ -6,7 +6,13 @@ from datetime import timedelta
 from typing import Any, Callable
 
 import pytest
-from chaos_client import ChaosClient, ChaosMeshChaosClient, ChaosMeshNotInstalledError, MetaChaosClient
+from chaos_client import (
+    ChaosCleanupError,
+    ChaosClient,
+    ChaosMeshChaosClient,
+    ChaosMeshNotInstalledError,
+    MetaChaosClient,
+)
 from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
@@ -55,9 +61,10 @@ class FailedCreateApi(FakeCustomObjectsApi):
 
 
 class TestCreationFailureCleanup:
+    @pytest.mark.parametrize("replaced", [False, True], ids=["original", "replacement"])
     @pytest.mark.parametrize("resource_exists", [True, False], ids=["created", "not-created"])
     @pytest.mark.parametrize("operation", ["stress_cpu", "io_latency"])
-    def test_timeout_retains_resource_for_teardown(self, resource_exists: bool, operation: str) -> None:
+    def test_timeout_retains_resource_for_teardown(self, resource_exists: bool, operation: str, replaced: bool) -> None:
         # GIVEN a POST that times out, with or without a resource on the server
         error = TimeoutError("Lost create response")
         api = FailedCreateApi(resource_exists=resource_exists, error=error)
@@ -78,15 +85,24 @@ class TestCreationFailureCleanup:
         expected_path = "" if operation == "stress_cpu" else "/data"
         assert mesh._scopes[resource[2]] == (TEST_MODEL.uri, UNIT, expected_path)
 
-        # THEN teardown deletes the recorded resource or tolerates its absence
+        # THEN an existing object cannot be identified, even with the original owner annotation
+        if resource_exists:
+            if replaced:
+                api.objects[resource]["metadata"]["uid"] = "replacement"
+            for _ in range(2):
+                with pytest.raises(ChaosCleanupError) as cleanup_error:
+                    client.cleanup_all()
+                assert "Creation UID was not recorded" in str(cleanup_error.value.errors[0])
+                assert mesh._created == [resource]
+                assert mesh._uids == {}
+                assert api.delete_calls == []
+                assert resource in api.objects
+            # Once an external actor removes it, a 404 safely clears the pending action.
+            api.objects.clear()
         client.cleanup_all()
-        expected = [resource] if resource_exists else []
-        assert [(call["plural"], call["namespace"], call["name"]) for call in api.delete_calls] == expected
-        assert api.objects == {}
+        assert api.delete_calls == []
         assert mesh._created == []
         assert mesh._scopes == {}
-        client.cleanup_all()
-        assert len(api.delete_calls) == int(resource_exists)
 
     def test_conflict_does_not_delete_existing_resource(self) -> None:
         # GIVEN a POST rejected because its resource name already exists
@@ -438,7 +454,7 @@ class TestCleanupIdentity:
         else:
             del metadata[identity]
 
-        with pytest.raises(RuntimeError, match="Cannot verify"):
+        with pytest.raises(RuntimeError, match="Cannot verify|Creation UID was not recorded"):
             mesh.cleanup(TEST_MODEL, UNIT, "")
 
         assert api.delete_calls == []
@@ -487,11 +503,9 @@ class TestCleanupIdentity:
 
     def test_replacement_during_delete_is_protected_on_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend = BackendStub()
-        api = FailedCreateApi(resource_exists=True, error=TimeoutError())
-        backend.custom_objects_api = api
+        api = backend.custom_objects_api
         mesh = ChaosMeshChaosClient(backend)
-        with pytest.raises(TimeoutError):
-            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))
+        mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))
         resource = mesh._created[0]
         uid = api.objects[resource]["metadata"]["uid"]
         delete = api.delete_namespaced_custom_object

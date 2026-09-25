@@ -40,9 +40,10 @@ class TestExperimentManifest:
         assert isinstance(spec, dict)
         definition = spec["definition"]
         assert definition["args"] == ["-c", f"./experiments -name {params.experiment}"]
-        assert definition["image"] == "litmuschaos.docker.scarf.sh/litmuschaos/go-runner:3.31.0"
+        assert definition["image"] == "docker.io/litmuschaos/go-runner:3.31.0"
         env = {entry["name"]: entry["value"] for entry in definition["env"]}
         assert env["LIB_IMAGE"] == definition["image"]
+        assert env["TERMINATION_GRACE_PERIOD_SECONDS"] == "30"
         assert params.settings.items() <= env.items()
         assert env["CONTAINER_RUNTIME"] == "containerd"
         assert env["SOCKET_PATH"] == "/run/containerd/containerd.sock"

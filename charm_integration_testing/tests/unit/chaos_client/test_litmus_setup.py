@@ -122,8 +122,11 @@ def test_setup_cleans_up_only_its_own_execution(context: SetupContext) -> None:
 
 
 @pytest.mark.parametrize("kind", ["account", "role", "binding", "experiment"])
+@pytest.mark.parametrize("replaced", [False, True], ids=["original", "replacement"])
 @pytest.mark.parametrize("created", [False, True], ids=["not-created", "response-lost"])
-def test_partial_preparation_failure_remains_cleanable(context: SetupContext, kind: str, created: bool) -> None:
+def test_partial_preparation_retains_unverified_identity(
+    context: SetupContext, kind: str, created: bool, replaced: bool
+) -> None:
     # GIVEN a failed create at any preparation stage
     setup = context.setup()
     failure = TimeoutError("Create response lost")
@@ -133,8 +136,20 @@ def test_partial_preparation_failure_remains_cleanable(context: SetupContext, ki
     with pytest.raises(TimeoutError) as exc_info:
         setup.prepare("pod-cpu-hog")
 
-    # THEN the original failure propagates and partial resources can be removed
+    # THEN only resources whose creation UID is known may be deleted
     assert exc_info.value is failure
+    if created:
+        key = (kind, "model", "cit-test")
+        if replaced:
+            context.store.resources[key]["metadata"]["uid"] = "replacement"
+        for _ in range(2):
+            with pytest.raises(ChaosCleanupError) as cleanup_error:
+                setup.cleanup()
+            assert "Creation UID was not recorded" in str(cleanup_error.value.errors[0])
+            assert key in context.store.resources
+            assert kind not in context.store.deleted
+            assert any(resource.uid is None for resource in setup._pending)
+        del context.store.resources[key]
     setup.cleanup()
     assert setup.cleanup()
     assert context.store.resources == {}

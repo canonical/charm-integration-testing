@@ -77,10 +77,12 @@ class ChaosMeshChaosClient(ChaosClient):
                 if (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner:
                     raise RuntimeError(f"Cannot verify ownership of {plural} {namespace}/{name}.")
                 uid = metadata.get("uid")
-                if not uid or self._uids.get(name, uid) != uid:
+                if not self._uids.get(name):
+                    raise RuntimeError(
+                        f"Creation UID was not recorded for {plural} {namespace}/{name}; cleanup retained."
+                    )
+                if not uid or self._uids[name] != uid:
                     raise RuntimeError(f"Cannot verify UID of {plural} {namespace}/{name}.")
-                # Preserve the identity across failed deletes and retries.
-                self._uids[name] = uid
                 self._backend.custom_objects_api.delete_namespaced_custom_object(
                     group=_GROUP,
                     version=_VERSION,

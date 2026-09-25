@@ -126,7 +126,13 @@ The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
 Only unsupported operations permit fallback. Tests skip when no available
 implementation supports the requested experiment. Each test uses separate
 clients with cleanup at teardown, including after failure or skip.
-API, execution and cleanup errors are reported as failures.
+API, execution and cleanup errors fail the test. Cleanup retains resources for manual
+investigation when their recorded creation identifier cannot be verified.
+
+Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Cleanup allows graceful termination and requires reversion evidence for observed
+injections before deleting results and permissions; otherwise, it reports an
+error and retains them for investigation.
 
 Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and

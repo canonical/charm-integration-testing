@@ -129,9 +129,12 @@ class LitmusSetup:
         uid = metadata.get("uid")
         if not uid or (metadata.get("annotations") or {}).get(OWNER_ANNOTATION) != self._owner:
             raise RuntimeError(f"Cannot verify ownership of {resource.kind} {self._namespace}/{self._name}.")
-        if resource.uid is not None and resource.uid != uid:
+        if resource.uid is None:
+            raise RuntimeError(
+                f"Creation UID was not recorded for {resource.kind} {self._namespace}/{self._name}; cleanup retained."
+            )
+        if resource.uid != uid:
             raise RuntimeError(f"{resource.kind} {self._namespace}/{self._name} was replaced.")
-        resource.uid = uid
         if not resource.deletion_requested:
             try:
                 resource.delete(body=client.V1DeleteOptions(preconditions=client.V1Preconditions(uid=uid)))

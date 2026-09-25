@@ -14,7 +14,7 @@ from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient
 from .litmus_detection import LITMUS_CRDS
-from .litmus_experiments import LitmusExperiment
+from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
 from .meta_client import ChaosCleanupError
 
@@ -32,6 +32,11 @@ class _ExperimentRun:
     namespace: str
     name: str
     setup: LitmusSetup
+    pod: str
+    injected: bool = False
+    reverted: bool = False
+    stop_requested: bool = False
+    execution_error: RuntimeError | None = None
     engine_requested: bool = False
     uid: str | None = None
 
@@ -44,6 +49,7 @@ class LitmusChaosClient(ChaosClient):
         backend: KubernetesBackend,
         *,
         target_container: str | None = None,
+        startup_timeout: timedelta = timedelta(minutes=5),
         cleanup_timeout: timedelta = timedelta(minutes=5),
         poll_interval: timedelta = timedelta(seconds=1),
         clock: Callable[[], float] = monotonic,
@@ -52,11 +58,12 @@ class LitmusChaosClient(ChaosClient):
         missing = [crd for crd in LITMUS_CRDS if not backend.crd_exists(crd)]
         if missing:
             raise LitmusNotInstalledError(f"Litmus CRDs absent: {', '.join(missing)}.")
-        if cleanup_timeout.total_seconds() <= 0 or poll_interval.total_seconds() <= 0:
-            raise ValueError("Cleanup timeout and poll interval must be positive.")
+        if min(startup_timeout.total_seconds(), cleanup_timeout.total_seconds(), poll_interval.total_seconds()) <= 0:
+            raise ValueError("Startup timeout, cleanup timeout and poll interval must be positive.")
         self._backend = backend
         self._batch = client.BatchV1Api(backend.api_client)
         self._target_container = target_container
+        self._startup_timeout = startup_timeout.total_seconds()
         self._cleanup_timeout = cleanup_timeout.total_seconds()
         self._poll_interval = poll_interval.total_seconds()
         self._clock = clock
@@ -116,6 +123,8 @@ class LitmusChaosClient(ChaosClient):
                 errors.append(error)
             else:
                 self._created.remove(engine)
+                if engine.execution_error is not None:
+                    errors.append(engine.execution_error)
         if errors:
             raise ChaosCleanupError(errors) from errors[0]
 
@@ -167,7 +176,7 @@ class LitmusChaosClient(ChaosClient):
         # Litmus combines Engine and experiment names in generated resource names.
         name = f"cit-{uuid4().hex[:16]}"
         setup = LitmusSetup(self._backend, model.model, name, self._owner)
-        engine = _ExperimentRun((model.uri, unit), model.model, name, setup)
+        engine = _ExperimentRun((model.uri, unit), model.model, name, setup, pod)
         body = {
             "apiVersion": f"{_GROUP}/{_VERSION}",
             "kind": "ChaosEngine",
@@ -178,6 +187,8 @@ class LitmusChaosClient(ChaosClient):
             },
             "spec": {
                 "engineState": "active",
+                "components": {"runner": {"image": RUNNER_IMAGE}},
+                "terminationGracePeriodSeconds": TERMINATION_GRACE_SECONDS,
                 "annotationCheck": "false",
                 "chaosServiceAccount": name,
                 "jobCleanUpPolicy": "delete",
@@ -208,6 +219,58 @@ class LitmusChaosClient(ChaosClient):
                 engine.engine_requested = False
             raise
         engine.uid = created["metadata"]["uid"]
+        self._wait(lambda: self._started(engine), self._clock() + self._startup_timeout, engine.name, "startup")
+
+    @staticmethod
+    def _target_status(result: dict[str, Any], pod: str) -> str | None:
+        # Helpers annotate live transitions; the experiment later moves them into history.
+        annotation = (result.get("metadata", {}).get("annotations") or {}).get(f"pod/{pod}")
+        if annotation is not None:
+            return str(annotation)
+        for target in (result.get("status", {}).get("history") or {}).get("targets", []):
+            if target.get("kind") == "pod" and target.get("name") == pod:
+                return str(target.get("chaosStatus"))
+        return None
+
+    def _observe(self, engine: _ExperimentRun) -> list[dict[str, Any]]:
+        results = self._results(engine)
+        for result in results:
+            status = result.get("status", {}).get("experimentStatus", {})
+            if (
+                status.get("verdict") in {"Fail", "Error"}
+                or status.get("phase") == "Error"
+                or status.get("errorOutput")
+            ):
+                engine.execution_error = RuntimeError(f"Litmus experiment {engine.name} failed: {status}")
+            if self._target_status(result, engine.pod) in {"injected", "reverted"}:
+                engine.injected = True
+        return results
+
+    def _started(self, engine: _ExperimentRun) -> bool:
+        current = self._read_engine(engine)
+        results = self._observe(engine)
+        if engine.execution_error is not None:
+            raise engine.execution_error
+        if current is None:
+            raise RuntimeError(f"Litmus Engine {engine.name} disappeared before stress started.")
+        if current.get("status", {}).get("engineStatus") in {"completed", "stopped"} or any(
+            result.get("status", {}).get("experimentStatus", {}).get("phase") in {"Completed", "Stopped"}
+            or self._target_status(result, engine.pod) == "reverted"
+            for result in results
+        ):
+            raise RuntimeError(f"Litmus experiment {engine.name} ended before stress could be observed.")
+        return any(self._target_status(result, engine.pod) == "injected" for result in results)
+
+    def _reverted(self, engine: _ExperimentRun) -> bool:
+        if engine.reverted:
+            return True
+        results = self._results(engine)
+        # A startup timeout may race with injection, so inspect results even if startup failed.
+        statuses = [self._target_status(result, engine.pod) for result in results]
+        if "injected" in statuses:
+            engine.injected = True
+        engine.reverted = bool(statuses) and all(status == "reverted" for status in statuses)
+        return not engine.injected or engine.reverted
 
     def _read_engine(self, engine: _ExperimentRun) -> dict[str, Any] | None:
         try:
@@ -227,15 +290,25 @@ class LitmusChaosClient(ChaosClient):
         uid = metadata.get("uid")
         if not uid or (metadata.get("annotations") or {}).get(OWNER_ANNOTATION) != self._owner:
             raise RuntimeError(f"Cannot verify ownership of ChaosEngine {engine.namespace}/{engine.name}.")
-        if engine.uid is not None and engine.uid != uid:
+        if engine.uid is None:
+            raise RuntimeError(
+                f"Creation UID was not recorded for ChaosEngine {engine.namespace}/{engine.name}; cleanup retained."
+            )
+        if engine.uid != uid:
             raise RuntimeError(f"ChaosEngine {engine.namespace}/{engine.name} was replaced.")
-        engine.uid = uid
         return current
 
     def _cleanup_engine(self, engine: _ExperimentRun, deadline: float) -> None:
         if not engine.engine_requested:
             return
         current = self._read_engine(engine)
+        observation_error: Exception | None = None
+        if engine.uid is not None and not engine.stop_requested:
+            try:
+                self._observe(engine)
+            except Exception as error:
+                # A result API failure must not leave stress running. Preserve evidence for retry.
+                observation_error = error
         if current is not None:
             self._backend.custom_objects_api.patch_namespaced_custom_object(
                 group=_GROUP,
@@ -249,11 +322,15 @@ class LitmusChaosClient(ChaosClient):
                 },
                 _request_timeout=REQUEST_TIMEOUT,
             )
+            engine.stop_requested = True
             self._wait(lambda: self._stopped(engine), deadline, engine.name)
         if engine.uid is None:
             return
         self._remove_children(engine)
         self._wait(lambda: self._children_removed(engine), deadline, engine.name)
+        if observation_error is not None:
+            raise observation_error
+        self._wait(lambda: self._reverted(engine), deadline, engine.name, "stress reversion")
         self._remove_results(engine)
         self._wait(lambda: not self._results(engine), deadline, engine.name)
         if self._read_engine(engine) is not None:
@@ -338,9 +415,9 @@ class LitmusChaosClient(ChaosClient):
             if error.status != 404:
                 raise
 
-    def _wait(self, check: Callable[[], bool], deadline: float, name: str) -> None:
+    def _wait(self, check: Callable[[], bool], deadline: float, name: str, stage: str = "cleanup") -> None:
         while self._clock() < deadline:
             if check():
                 return
             self._pause(min(self._poll_interval, max(0, deadline - self._clock())))
-        raise TimeoutError(f"Litmus cleanup timed out for {name}.")
+        raise TimeoutError(f"Litmus {stage} timed out for {name}.")

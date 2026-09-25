@@ -64,6 +64,8 @@ class ClientContext:
         self.create_error: Exception | None = None
         self.create_resource = True
         self.stop_completes = True
+        self.auto_inject = True
+        self.auto_revert = True
         self.delete_error: Exception | None = None
         monkeypatch.setattr(client, "BatchV1Api", lambda _: self.batch)
         monkeypatch.setattr(module, "LitmusSetup", self.make_setup)
@@ -73,7 +75,13 @@ class ClientContext:
         api.get_namespaced_custom_object.side_effect = self.read
         api.patch_namespaced_custom_object.side_effect = self.stop
         api.delete_namespaced_custom_object.side_effect = self.delete
-        api.list_namespaced_custom_object.side_effect = lambda **_: {"items": deepcopy(self.results)}
+        api.list_namespaced_custom_object.side_effect = self.list_results
+
+    def list_results(self, *, label_selector: str, **kwargs: Any) -> dict[str, Any]:
+        uid = label_selector.removeprefix("chaosUID=")
+        return {
+            "items": deepcopy([r for r in self.results if r["metadata"].get("labels", {}).get("chaosUID", uid) == uid])
+        }
 
     def make_setup(self, backend: KubernetesBackend, namespace: str, name: str, owner: str) -> LitmusSetup:
         setup = MagicMock(spec=LitmusSetup)
@@ -91,6 +99,7 @@ class ClientContext:
         return LitmusChaosClient(
             self.backend,
             target_container=target_container,
+            startup_timeout=timedelta(seconds=3),
             cleanup_timeout=timedelta(seconds=3),
             clock=lambda: self.now,
             pause=self.pause,
@@ -112,6 +121,18 @@ class ClientContext:
             self.engines[name] = resource
         if self.create_error is not None:
             raise self.create_error
+        if self.auto_inject:
+            self.results.append(
+                {
+                    "metadata": {
+                        "name": f"{name}-{name}",
+                        "uid": f"result-{name}",
+                        "labels": {"chaosUID": f"uid-{name}"},
+                        "annotations": {f"pod/{body["spec"]["selectors"]["pods"][0]["names"]}": "injected"},
+                    },
+                    "status": {"experimentStatus": {"phase": "Running", "verdict": "Awaited"}},
+                }
+            )
         return deepcopy(resource)
 
     def read(self, *, name: str, **kwargs: Any) -> dict[str, Any]:
@@ -126,6 +147,15 @@ class ClientContext:
         self.events.append(f"stop:{name}")
         if self.stop_completes:
             engine["status"]["engineStatus"] = "stopped"
+        if self.auto_revert:
+            for result in self.results:
+                if (
+                    result["metadata"].get("labels", {}).get("chaosUID", engine["metadata"]["uid"])
+                    == engine["metadata"]["uid"]
+                ):
+                    result["metadata"]["annotations"] = {
+                        f"pod/{engine["spec"]["selectors"]["pods"][0]["names"]}": "reverted"
+                    }
 
     def delete(self, *, plural: str, name: str, body: dict[str, Any], **kwargs: Any) -> None:
         if self.delete_error is not None:
@@ -191,6 +221,8 @@ class TestStress:
         assert "appinfo" not in spec
         assert spec["selectors"] == {"pods": [{"namespace": MODEL.model, "names": "postgresql-random-pod"}]}
         assert spec["chaosServiceAccount"] == name
+        assert spec["components"]["runner"]["image"] == "docker.io/litmuschaos/chaos-runner:3.31.0"
+        assert spec["terminationGracePeriodSeconds"] == 30
         assert spec["experiments"][0]["name"] == name
         env = {entry["name"]: entry["value"] for entry in spec["experiments"][0]["spec"]["components"]["env"]}
         assert params.settings.items() <= env.items()
@@ -259,22 +291,41 @@ def test_preparation_failure_is_cleaned_through_meta_client(context: ClientConte
     assert context.created == []
 
 
+@pytest.mark.parametrize("replaced", [False, True], ids=["original", "replacement"])
 @pytest.mark.parametrize("created", [False, True], ids=["not-created", "response-lost"])
-def test_failed_engine_post_remains_cleanable(context: ClientContext, created: bool) -> None:
+def test_failed_engine_post_retains_unverified_identity(context: ClientContext, created: bool, replaced: bool) -> None:
     # GIVEN a lost Engine POST response
     failure = TimeoutError("Lost response")
     context.create_error = failure
     context.create_resource = created
-    meta = MetaChaosClient([context.chaos_client()])
+    chaos = context.chaos_client()
+    meta = MetaChaosClient([chaos])
 
     # WHEN execution fails and teardown runs
     with pytest.raises(TimeoutError) as exc_info:
         meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
-    meta.cleanup_all()
-
-    # THEN any created Engine and its setup are cleaned
     assert exc_info.value is failure
-    assert context.engines == {}
+    if created:
+        name = context.created[0]["metadata"]["name"]
+        if replaced:
+            context.engines[name]["metadata"]["uid"] = "replacement"
+        for _ in range(2):
+            with pytest.raises(ChaosCleanupError) as cleanup_error:
+                meta.cleanup_all()
+            nested = cleanup_error.value.errors[0]
+            assert isinstance(nested, ChaosCleanupError)
+            assert "Creation UID was not recorded" in str(nested.errors[0])
+            assert len(chaos._created) == 1
+            assert chaos._created[0].uid is None
+            assert name in context.engines
+            context.backend.custom_objects_api.patch_namespaced_custom_object.assert_not_called()
+            context.backend.custom_objects_api.delete_namespaced_custom_object.assert_not_called()
+            context.batch.delete_namespaced_job.assert_not_called()
+            context.backend.core_v1_api.delete_namespaced_pod.assert_not_called()
+            context.setups[0].cleanup.assert_not_called()
+        context.engines.clear()
+    meta.cleanup_all()
+    assert chaos._created == []
     context.setups[0].cleanup.assert_called_once()
 
 
@@ -438,3 +489,167 @@ def test_unsupported_operations_never_prepare_resources(context: ClientContext) 
         chaos.remove_network_isolation(MODEL.model, UNIT)
     assert context.setups == []
     assert context.created == []
+
+
+def test_startup_waits_for_injection_not_engine_creation(context: ClientContext) -> None:
+    context.auto_inject = False
+    chaos = context.chaos_client()
+    with pytest.raises(TimeoutError, match="startup"):
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert context.now == 3
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+
+
+@pytest.mark.parametrize("verdict", ["Fail", "Error"])
+def test_startup_reports_failed_result(context: ClientContext, verdict: str) -> None:
+    context.auto_inject = False
+    context.results = [{"metadata": {}, "status": {"experimentStatus": {"phase": "Error", "verdict": verdict}}}]
+    with pytest.raises(RuntimeError, match="experiment .* failed"):
+        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert context.now == 0
+
+
+def test_late_failure_is_reported_after_cleanup(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"reason": "helper failed"},
+    }
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "helper failed" in str(error.value.errors[0])
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    chaos.cleanup(MODEL, UNIT, "")
+
+
+def test_missing_reversion_retains_result_and_permissions(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    context.auto_revert = False
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "reversion" in str(error.value.errors[0])
+    assert context.results
+    context.setups[0].cleanup.assert_not_called()
+    context.auto_revert = True
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.results
+
+
+def test_reversion_history_survives_annotation_removal(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    context.auto_revert = False
+    result = context.results[0]
+    result["metadata"].pop("annotations")
+    result["status"]["history"] = {
+        "targets": [{"kind": "pod", "name": context.pods[0].metadata.name, "chaosStatus": "reverted"}]
+    }
+    result["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+
+
+def test_startup_api_error_propagates(context: ClientContext) -> None:
+    context.backend.custom_objects_api.list_namespaced_custom_object.side_effect = ApiException(status=403)
+    with pytest.raises(ApiException) as error:
+        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert error.value.status == 403
+
+
+def test_startup_waits_through_running_until_injection(context: ClientContext) -> None:
+    context.auto_inject = False
+
+    def progress(seconds: float) -> None:
+        context.now += seconds
+        name = next(iter(context.engines))
+        context.results = [
+            {
+                "metadata": {
+                    "name": name,
+                    "uid": "result-uid",
+                    "annotations": {"pod/postgresql-random-pod": "targeted" if context.now < 2 else "injected"},
+                },
+                "status": {"experimentStatus": {"phase": "Running", "verdict": "Awaited"}},
+            }
+        ]
+
+    context.pause = progress
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert context.now == 2
+    chaos.cleanup(MODEL, UNIT, "")
+
+
+def test_completed_run_is_not_reported_as_active_stress(context: ClientContext) -> None:
+    context.auto_inject = False
+    context.results = [
+        {
+            "metadata": {"annotations": {"pod/postgresql-random-pod": "injected"}},
+            "status": {"experimentStatus": {"phase": "Completed", "verdict": "Pass"}},
+        }
+    ]
+    with pytest.raises(RuntimeError, match="ended before stress"):
+        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+
+
+def test_helper_error_is_reported_before_final_verdict(context: ClientContext) -> None:
+    context.auto_inject = False
+    context.results = [
+        {
+            "metadata": {},
+            "status": {
+                "experimentStatus": {
+                    "phase": "Running",
+                    "verdict": "Awaited",
+                    "errorOutput": {"reason": "injection failed"},
+                }
+            },
+        }
+    ]
+    with pytest.raises(RuntimeError, match="injection failed"):
+        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+
+
+def test_result_read_failure_still_stops_stress_and_retains_evidence(context: ClientContext) -> None:
+    # GIVEN active stress followed by a failure to read its result
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    api.list_namespaced_custom_object.side_effect = ApiException(status=503)
+
+    # WHEN cleaning up, THEN stress is stopped but results and permissions are retained
+    with pytest.raises(ChaosCleanupError):
+        chaos.cleanup(MODEL, UNIT, "")
+    api.patch_namespaced_custom_object.assert_called_once()
+    assert context.results
+    context.setups[0].cleanup.assert_not_called()
+
+    # WHEN the result API recovers, THEN cleanup can finish
+    api.list_namespaced_custom_object.side_effect = context.list_results
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.results
+
+
+def test_rejected_stop_does_not_suppress_later_execution_failure(context: ClientContext) -> None:
+    # GIVEN active stress and a rejected stop request
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    api.patch_namespaced_custom_object.side_effect = ApiException(status=409)
+    with pytest.raises(ChaosCleanupError):
+        chaos.cleanup(MODEL, UNIT, "")
+
+    # WHEN execution fails before the successful retry, THEN its failure is still reported
+    context.results[0]["status"]["experimentStatus"] = {"phase": "Error", "verdict": "Error"}
+    api.patch_namespaced_custom_object.side_effect = context.stop
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "experiment" in str(error.value.errors[0])
+    assert not context.engines
+    context.setups[0].cleanup.assert_called_once()

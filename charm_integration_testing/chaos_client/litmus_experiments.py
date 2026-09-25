@@ -6,7 +6,9 @@ from typing import Literal
 LitmusExperiment = Literal["pod-cpu-hog", "pod-memory-hog"]
 
 _VERSION = "3.31.0"
-_IMAGE = f"litmuschaos.docker.scarf.sh/litmuschaos/go-runner:{_VERSION}"
+_IMAGE = f"docker.io/litmuschaos/go-runner:{_VERSION}"
+RUNNER_IMAGE = f"docker.io/litmuschaos/chaos-runner:{_VERSION}"
+TERMINATION_GRACE_SECONDS = 30
 _GROUP = "litmuschaos.io"
 
 
@@ -27,6 +29,7 @@ def experiment_manifest(namespace: str, name: str, experiment: LitmusExperiment)
             "SOCKET_PATH": "/run/containerd/containerd.sock",
             "DEFAULT_HEALTH_CHECK": "false",
             "SEQUENCE": "parallel",
+            "TERMINATION_GRACE_PERIOD_SECONDS": str(TERMINATION_GRACE_SECONDS),
         }
     )
     return {
