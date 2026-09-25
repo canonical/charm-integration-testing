@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 from test_suite.log_redaction import prepare_redacted_scan_dir, redact_known_false_positives
 
+# kubectl `describe configmap` renders each Data key as `<key>:\n----\n<value>`.
+# controllerkey/caprivatekey live inside the controller-agent.conf section.
+_SECTION_HEADER = "controller-agent.conf:\n----\n"
+_NEXT_SECTION_HEADER = "controller-unit-agent.conf:\n----\n"
 _CONTROLLER_KEY_PEM = "controllerkey: |\n  totally-fake-controller-key-body-line\n"
 _CA_PRIVATE_KEY_PEM = "caprivatekey: |\n  totally-fake-ca-private-key-body-line\n"
 _CA_CERT_PEM = "ca-cert: |\n  totally-fake-public-certificate-body-line\n"
@@ -16,8 +20,8 @@ class TestRedactKnownFalsePositives:
     _CONFIGMAP_FILE = "describe-controller-configmap.txt"
 
     def test_redacts_controllerkey_and_caprivatekey_pem_blocks(self) -> None:
-        # GIVEN describe-configmap-style text with both known Juju bootstrap key fields
-        text = f"bootstrap-params:\n{_CONTROLLER_KEY_PEM}{_CA_PRIVATE_KEY_PEM}"
+        # GIVEN describe-configmap-style text with both known Juju agent-conf key fields
+        text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_CA_PRIVATE_KEY_PEM}"
 
         # WHEN redacting
         redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
@@ -30,7 +34,7 @@ class TestRedactKnownFalsePositives:
 
     def test_leaves_unrelated_fields_and_public_cert_untouched(self) -> None:
         # GIVEN text with the two sensitive fields alongside a public CA cert and other content
-        text = f"bootstrap-params:\ncontroller-config:\n  {_CA_CERT_PEM}{_CONTROLLER_KEY_PEM}other-field: value\n"
+        text = f"{_SECTION_HEADER}controller-config:\n  {_CA_CERT_PEM}{_CONTROLLER_KEY_PEM}other-field: value\n"
 
         # WHEN redacting
         redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
@@ -42,7 +46,7 @@ class TestRedactKnownFalsePositives:
         assert "controllerkey: [REDACTED" in redacted
 
     def test_no_matching_fields_is_a_no_op(self) -> None:
-        # GIVEN text with no known bootstrap key fields
+        # GIVEN text with no known agent-conf key fields
         text = "some-field: value\nanother-field: |\n  plain multi-line\n  block scalar\n"
 
         # WHEN redacting
@@ -54,7 +58,7 @@ class TestRedactKnownFalsePositives:
     def test_same_field_name_in_unrelated_file_is_preserved(self) -> None:
         # GIVEN a real secret using the same field name, but in a file/context that
         # isn't the known Juju configmap dump (e.g. an application log or config)
-        text = f"bootstrap-params:\n{_CONTROLLER_KEY_PEM}"
+        text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}"
 
         # WHEN redacting content from an unrelated file
         redacted = redact_known_false_positives("app.log", text)
@@ -62,23 +66,39 @@ class TestRedactKnownFalsePositives:
         # THEN the rule doesn't fire: the field name alone isn't enough to redact it
         assert redacted == text
 
-    def test_field_name_without_bootstrap_params_context_is_preserved(self) -> None:
-        # GIVEN the right file name, but content that doesn't have the bootstrap-params
-        # structure this field is known to appear in (e.g. a real secret happens to
-        # reuse the field name elsewhere in the same file)
+    def test_field_name_without_section_header_is_preserved(self) -> None:
+        # GIVEN the right file name, but content that doesn't have the
+        # controller-agent.conf section header this field is known to appear under
+        # (e.g. a real secret happens to reuse the field name elsewhere in the file)
         text = _CONTROLLER_KEY_PEM
 
         # WHEN redacting
         redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
 
-        # THEN the rule doesn't fire: field name alone, without the known structure,
+        # THEN the rule doesn't fire: field name alone, without the known section,
         # isn't enough to redact it
         assert redacted == text
 
+    def test_field_name_in_a_later_unrelated_section_is_preserved(self) -> None:
+        # GIVEN a real secret that reuses the field name, but in a *different*,
+        # later Data section of the same file (only the controller-agent.conf
+        # section is known to hold Juju's own ephemeral key)
+        later_section_secret = "controllerkey: |\n  totally-real-secret-in-a-later-section\n"
+        text = f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_NEXT_SECTION_HEADER}{later_section_secret}"
+
+        # WHEN redacting
+        redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
+
+        # THEN only the field inside controller-agent.conf is redacted...
+        assert "totally-fake-controller-key-body-line" not in redacted
+        # ...while the same-named field in the later, unrelated section survives
+        assert "totally-real-secret-in-a-later-section" in redacted
+        assert redacted.count("controllerkey: [REDACTED") == 1
+
     def test_plain_scalar_value_is_preserved(self) -> None:
-        # GIVEN the right file/context, but the field is a plain scalar, not a
+        # GIVEN the right file/section, but the field is a plain scalar, not a
         # block scalar (e.g. a real secret assigned directly, with no "|")
-        text = "bootstrap-params:\ncontrollerkey: totally-real-secret-value\n"
+        text = f"{_SECTION_HEADER}controllerkey: totally-real-secret-value\n"
 
         # WHEN redacting
         redacted = redact_known_false_positives(self._CONFIGMAP_FILE, text)
@@ -89,10 +109,10 @@ class TestRedactKnownFalsePositives:
 
 class TestPrepareRedactedScanDir:
     def test_copies_plain_files_and_redacts_matching_content(self, tmp_path: Path) -> None:
-        # GIVEN a log_dir with a plain text file containing a bootstrap key field
+        # GIVEN a log_dir with a plain text file containing an agent-conf key field
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
-        (log_dir / "describe-controller-configmap.txt").write_text(f"bootstrap-params:\n{_CONTROLLER_KEY_PEM}")
+        (log_dir / "describe-controller-configmap.txt").write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}")
         scan_dir = tmp_path / "scan"
 
         # WHEN preparing the redacted scan dir
@@ -111,7 +131,7 @@ class TestPrepareRedactedScanDir:
         source = tmp_path / "source"
         source.mkdir()
         configmap_file = source / "describe-controller-configmap.txt"
-        configmap_file.write_text(f"bootstrap-params:\n{_CONTROLLER_KEY_PEM}{_CA_PRIVATE_KEY_PEM}")
+        configmap_file.write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_CA_PRIVATE_KEY_PEM}")
         other_file = source / "unit-app-0.log"
         other_file.write_text("some-other-real-looking-secret=abc123")
 
@@ -145,16 +165,37 @@ class TestPrepareRedactedScanDir:
         # field name, but in a file that isn't the known Juju configmap dump
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
-        (log_dir / "app.log").write_text(f"bootstrap-params:\n{_CONTROLLER_KEY_PEM}")
+        (log_dir / "app.log").write_text(f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}")
         scan_dir = tmp_path / "scan"
 
         # WHEN preparing the redacted scan dir
         prepare_redacted_scan_dir(log_dir, scan_dir)
 
-        # THEN the field is left untouched: the rule is scoped to the known file/structure
+        # THEN the field is left untouched: the rule is scoped to the known file/section
         copied = (scan_dir / "app.log").read_text()
         assert "totally-fake-controller-key-body-line" in copied
         assert "[REDACTED" not in copied
+
+    def test_preserves_same_field_name_in_a_later_unrelated_section(self, tmp_path: Path) -> None:
+        # GIVEN a describe-controller-configmap.txt with the known key inside
+        # controller-agent.conf, and a real secret reusing the same field name in a
+        # later, unrelated section of the same file
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        later_section_secret = "controllerkey: |\n  totally-real-secret-in-a-later-section\n"
+        (log_dir / "describe-controller-configmap.txt").write_text(
+            f"{_SECTION_HEADER}{_CONTROLLER_KEY_PEM}{_NEXT_SECTION_HEADER}{later_section_secret}"
+        )
+        scan_dir = tmp_path / "scan"
+
+        # WHEN preparing the redacted scan dir
+        prepare_redacted_scan_dir(log_dir, scan_dir)
+
+        # THEN only the field inside controller-agent.conf is redacted...
+        copied = (scan_dir / "describe-controller-configmap.txt").read_text()
+        assert "totally-fake-controller-key-body-line" not in copied
+        # ...while the same-named field in the later section survives for scanning
+        assert "totally-real-secret-in-a-later-section" in copied
 
     def test_rejects_archive_members_that_escape_destination(self, tmp_path: Path) -> None:
         # GIVEN a maliciously-crafted tar.gz whose member path escapes the extraction dir

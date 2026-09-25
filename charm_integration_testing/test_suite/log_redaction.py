@@ -13,61 +13,79 @@ from typing import Callable
 class RedactionRule:
     """A pattern matching one known false-positive secret, scoped to where it occurs.
 
-    A rule only fires on files whose name matches ``file_name_pattern`` and whose
-    content matches ``required_context``, so a field name alone never triggers a
-    redaction outside the specific file/structure it's known to come from.
+    A rule only fires on files whose name matches ``file_name_pattern``, and only
+    within the body captured by ``section_pattern`` (group 1), so a field name
+    never triggers a redaction outside the exact section it's known to come from.
     """
 
     file_name_pattern: re.Pattern[str]
-    required_context: re.Pattern[str]
-    pattern: re.Pattern[str]
+    section_pattern: re.Pattern[str]
+    field_pattern: re.Pattern[str]
     replace: Callable[[re.Match[str]], str]
 
     def apply(self, file_name: str, text: str) -> str:
-        if not (self.file_name_pattern.search(file_name) and self.required_context.search(text)):
+        if not self.file_name_pattern.search(file_name):
             return text
-        return self.pattern.sub(self.replace, text)
+
+        def _redact_section(section_match: re.Match[str]) -> str:
+            header = section_match.group(0)[: section_match.start(1) - section_match.start(0)]
+            return header + self.field_pattern.sub(self.replace, section_match.group(1))
+
+        return self.section_pattern.sub(_redact_section, text)
 
 
-def _yaml_block_scalar_rule(
-    file_name_pattern: str,
-    required_context: str,
-    field_names: tuple[str, ...],
-    reason: str,
-) -> RedactionRule:
-    """Build a rule that redacts a top-level YAML block-scalar field's body.
+def _yaml_block_scalar_pattern(field_names: tuple[str, ...]) -> re.Pattern[str]:
+    """Match a top-level YAML block-scalar field's header and indented body.
 
     Matches ``<field>: |`` (optionally with chomping/indentation indicators, e.g.
     ``|-``, ``|2``) followed by its indented lines, e.g. a PEM block. A plain scalar
     value like ``<field>: some-value`` is left untouched.
     """
-    pattern = re.compile(
+    return re.compile(
         rf"^([ \t]*)({'|'.join(field_names)}):[ \t]*\|(?:[+-]\d?|\d[+-]?)?[ \t]*\n(?:\1[ \t]+\S.*\n?)*",
         re.MULTILINE,
     )
+
+
+def _describe_configmap_section(section_name: str) -> re.Pattern[str]:
+    """Match a kubectl ``describe configmap`` Data section's raw body.
+
+    kubectl renders each Data key as ``<key>:\\n----\\n<raw value>``, with the next
+    key's own ``----`` header marking where the section ends. Capturing only the
+    body (group 1) scopes redaction to fields inside this specific section.
+    """
+    return re.compile(
+        rf"^{re.escape(section_name)}:\n----\n(.*?)(?=^[\w./-]+:\n----\n|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+
+
+def _configmap_section_key_rule(section_name: str, field_names: tuple[str, ...], reason: str) -> RedactionRule:
+    """Build a rule redacting ``field_names`` only inside a named Data section of a
+    ``kubectl describe configmap`` dump.
+    """
 
     def _replace(match: re.Match[str]) -> str:
         indent, field = match.group(1), match.group(2)
         return f"{indent}{field}: [REDACTED - {reason}]\n"
 
     return RedactionRule(
-        file_name_pattern=re.compile(file_name_pattern),
-        required_context=re.compile(required_context, re.MULTILINE),
-        pattern=pattern,
+        file_name_pattern=re.compile(r"^describe-controller-configmap\.txt$"),
+        section_pattern=_describe_configmap_section(section_name),
+        field_pattern=_yaml_block_scalar_pattern(field_names),
         replace=_replace,
     )
 
 
 # Known false positives to redact before secret scanning. Each rule is scoped to a
-# specific file/structure, so unrelated files with a same-named field are untouched.
+# specific file and section, so a same-named field elsewhere is untouched.
 _REDACTION_RULES: list[RedactionRule] = [
-    # Juju's controller configmap describe output embeds these ephemeral bootstrap
-    # keys under a bootstrap-params blob; they're regenerated per bootstrap and not
-    # real secrets. See issue #1033.
-    _yaml_block_scalar_rule(
-        file_name_pattern=r"^describe-controller-configmap\.txt$",
-        required_context=r"^bootstrap-params:",
-        field_names=("controllerkey", "caprivatekey"),
+    # Juju's controller agent.conf (embedded verbatim in the configmap describe
+    # dump) carries the controller's own ephemeral TLS key material; it's
+    # regenerated per bootstrap and not a real secret. See issue #1033.
+    _configmap_section_key_rule(
+        "controller-agent.conf",
+        ("controllerkey", "caprivatekey"),
         reason="ephemeral Juju bootstrap key, see issue #1033",
     ),
 ]
@@ -76,9 +94,9 @@ _REDACTION_RULES: list[RedactionRule] = [
 def redact_known_false_positives(file_name: str, text: str) -> str:
     """Redact known false-positive secrets from ``text``, scoped by ``file_name``.
 
-    Only content matching a rule's file name and structural context is touched;
-    everything else, including a real secret under the same field name elsewhere,
-    is left intact.
+    Only content matching a rule's file name and section is touched; everything
+    else, including a real secret under the same field name elsewhere, is left
+    intact.
     """
     for rule in _REDACTION_RULES:
         text = rule.apply(file_name, text)

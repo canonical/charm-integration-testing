@@ -94,7 +94,9 @@ def test_logs_privacy_check_redacts_juju_bootstrap_keys_before_scanning(
     ever scans it, so it doesn't trigger a false-positive PrivateKey finding.
     """
     configmap_file = tmp_path / "describe-controller-configmap.txt"
-    configmap_file.write_text("bootstrap-params:\ncontrollerkey: |\n  totally-fake-controller-key-body-line\n")
+    configmap_file.write_text(
+        "controller-agent.conf:\n----\ncontrollerkey: |\n  totally-fake-controller-key-body-line\n"
+    )
 
     version_check = MagicMock(returncode=0)
     scan_result = MagicMock(returncode=0, stdout="", stderr="")
