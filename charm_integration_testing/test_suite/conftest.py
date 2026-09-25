@@ -75,6 +75,7 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
+from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -154,8 +155,47 @@ def cloud_kubeconfigs() -> dict[str, Path]:
 
 
 @pytest.fixture(scope="session")
-def juju_backend(cloud_kubeconfigs: dict[str, Path]) -> JujuBackend:
-    return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs)
+def cloud_definitions() -> dict[str, tuple[Path, Path]]:
+    """Map of Juju cloud name to (cloud-definition, credentials) file paths.
+
+    Sourced from paired CLOUD_DEFINITION_<cloud>/CLOUD_CREDENTIALS_<cloud> env vars, for
+    registering non-Kubernetes clouds (e.g. OpenStack) on an existing controller. Same
+    cloud name convention as ``cloud_kubeconfigs``.
+    """
+    definitions: dict[str, Path] = {}
+    credentials: dict[str, Path] = {}
+    for key, val in os.environ.items():
+        stripped = val.strip()
+        if not stripped:
+            continue
+        if key.startswith("CLOUD_DEFINITION_"):
+            definitions[key[len("CLOUD_DEFINITION_") :].lower().replace("_", "-")] = Path(stripped)
+        elif key.startswith("CLOUD_CREDENTIALS_"):
+            credentials[key[len("CLOUD_CREDENTIALS_") :].lower().replace("_", "-")] = Path(stripped)
+    return {cloud: (path, credentials[cloud]) for cloud, path in definitions.items() if cloud in credentials}
+
+
+@pytest.fixture(scope="session")
+def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str, tuple[Path, Path]]) -> JujuBackend:
+    return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs, cloud_definitions=cloud_definitions)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def register_test_clouds(
+    juju_backend: JujuBackend,
+    cloud_kubeconfigs: dict[str, Path],
+    cloud_definitions: dict[str, tuple[Path, Path]],
+    target_cloud: str,
+    neighbor_cloud: str | None,
+) -> None:
+    """Register configured test clouds with the local Juju client before Juju operations."""
+    clouds = {target_cloud}
+    if neighbor_cloud is not None:
+        clouds.add(neighbor_cloud)
+    for cloud in clouds:
+        if cloud not in cloud_kubeconfigs and cloud not in cloud_definitions:
+            continue
+        juju_backend.register_cloud(cloud=cloud)
 
 
 @pytest.fixture(scope="session")
@@ -254,6 +294,35 @@ def register_preexisting_resources(
             handle=JujuModelHandle(controller=neighbor_controller, model=neighbor_model),
             parent=neighbor_ctrl_handle,
         )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def register_preexisting_neighbor_cloud(
+    request: pytest.FixtureRequest,
+    juju_backend: JujuBackend,
+    is_cmr_test: bool,
+    same_controller: bool,
+    target_cloud: str,
+    target_controller: str,
+    neighbor_cloud: str | None,
+) -> None:
+    """Register the same-controller neighbor cloud when --current-state skips
+    test_bootstrap_controller (the target controller, and any cloud it needs beyond
+    its own, must already exist before test_create_model runs). When the controller
+    is bootstrapped in this session instead, test_bootstrap_controller performs this
+    same registration itself right after bootstrap.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_CONTROLLER:
+        return
+    if needs_same_controller_cloud_registration(
+        is_cmr_test=is_cmr_test,
+        same_controller=same_controller,
+        neighbor_cloud=neighbor_cloud,
+        target_cloud=target_cloud,
+    ):
+        assert neighbor_cloud is not None
+        juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
 @pytest.fixture

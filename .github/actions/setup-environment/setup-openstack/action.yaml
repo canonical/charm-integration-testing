@@ -8,35 +8,64 @@ inputs:
   cloud-name:
     description: Name to register the Juju cloud under.
     required: true
+  workspace:
+    description: Per-cloud temporary workspace.
+    required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to
     value: ${{ inputs.cloud-name }}
+  cloud-definition-path:
+    description: Path to the cloud definition YAML file written to disk.
+    value: ${{ steps.paths.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to the credentials YAML file written to disk.
+    value: ${{ steps.paths.outputs.credentials-path }}
+  metadata-source:
+    description: Path to generated image metadata.
+    value: ${{ steps.metadata.outputs.path }}
 runs:
   using: composite
   steps:
+    - name: Report file paths
+      id: paths
+      shell: bash
+      run: |
+        echo "cloud-definition-path=${{ inputs.workspace }}/cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${{ inputs.workspace }}/credentials.yaml" >> "$GITHUB_OUTPUT"
     - name: Setup Novarc
+      id: novarc
       env:
         NOVARC_CONTENT: ${{ inputs.novarc }}
       shell: bash
       run: |
-        mkdir -p $HOME/openstack
-        echo "${NOVARC_CONTENT}" > $HOME/openstack/novarc
+        novarc_path="${{ inputs.workspace }}/novarc"
+        echo "${NOVARC_CONTENT}" > "${novarc_path}"
+        echo "path=${novarc_path}" >> "$GITHUB_OUTPUT"
     - name: Setup Image Metadata
+      id: metadata
+      env:
+        NOVARC_PATH: ${{ steps.novarc.outputs.path }}
       shell: bash
       run: |
         sudo snap install openstack
-        source $HOME/openstack/novarc
+        source "${NOVARC_PATH}"
+        metadata_path="${{ inputs.workspace }}/images"
+        mkdir -p "${metadata_path}"
+        echo "path=${metadata_path}" >> "$GITHUB_OUTPUT"
         openstack image list -f json | jq -r '.[] | select((.Name | test("focal|jammy|noble") and test("amd64") ) and .Status == "active") | .ID' | while read -r id; do
-          juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d /home/ubuntu/openstack
+          juju metadata generate-image -a amd64 -i ${id} -r ${OS_REGION_NAME} -u ${OS_AUTH_URL} -d "${metadata_path}"
         done
-    - name: Add Openstack
+    - name: Create Openstack cloud files
       env:
         CLOUD: ${{ inputs.cloud-name }}
+        CLOUD_DEFINITION_PATH: ${{ steps.paths.outputs.cloud-definition-path }}
+        CREDENTIALS_PATH: ${{ steps.paths.outputs.credentials-path }}
+        NOVARC_PATH: ${{ steps.novarc.outputs.path }}
       shell: bash
       run: |-
-        source $HOME/openstack/novarc
-        cat >> $HOME/openstack/openstack-cloud.yaml << EOF
+        source "${NOVARC_PATH}"
+        cat > "${CLOUD_DEFINITION_PATH}" << EOF
         clouds:
           ${CLOUD}:
             type: openstack
@@ -45,7 +74,7 @@ runs:
               ${OS_REGION_NAME}:
                 endpoint: ${OS_AUTH_URL}
         EOF
-        cat >> $HOME/openstack/openstack-credentials.yaml << EOF
+        cat > "${CREDENTIALS_PATH}" << EOF
         credentials:
           ${CLOUD}:
             default-region: ${OS_REGION_NAME}
@@ -58,5 +87,3 @@ runs:
               user-domain-name: ${OS_USER_DOMAIN_NAME}
               username: ${OS_USERNAME}
         EOF
-        juju add-cloud $CLOUD $HOME/openstack/openstack-cloud.yaml --client
-        juju add-credential $CLOUD -f $HOME/openstack/openstack-credentials.yaml --client
