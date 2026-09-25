@@ -30,6 +30,7 @@ validators-etcd-client = { path = "./validators/etcd_client", develop = true, ex
 validators-opensearch-client = { path = "./validators/opensearch_client", develop = true }
 validators-config-server = { path = "./validators/config_server", develop = true }
 validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
+validators-catalogue = { path = "./validators/catalogue", develop = true, extras = ["dev"] }
 validators-livepatch-pro-airgapped-server = { path = "./validators/livepatch_pro_airgapped_server", develop = true }
 validators-azure-storage = { path = "./validators/azure_storage", develop = true }
 validators-parca-store = { path = "./validators/parca_store", develop = true, extras = ["dev"] }
