@@ -8,7 +8,7 @@ inputs:
   kubeconfig_path:
     description: Path to write the kubeconfig file to.
     required: false
-    default: /home/ubuntu/.kube/config
+    default: ''
   cloud-name:
     description: Name to register the Juju cloud under.
     required: true
@@ -18,15 +18,15 @@ outputs:
     value: ${{ inputs.cloud-name }}
   kubeconfig_path:
     description: Path to kubeconfig file
-    value: ${{ inputs.kubeconfig_path }}
+    value: ${{ inputs.kubeconfig_path || format('/home/ubuntu/.kube/{0}.config', inputs.cloud-name) }}
 runs:
   using: composite
   steps:
     - name: Setup Kubeconfig
       env:
         KUBECONFIG_CONTENT: ${{ inputs.kubeconfig }}
-        kubeconfig_path: ${{ inputs.kubeconfig_path }}
+        KUBECONFIG_PATH: ${{ inputs.kubeconfig_path || format('/home/ubuntu/.kube/{0}.config', inputs.cloud-name) }}
       shell: bash
       run: |-
         mkdir -p $HOME/.kube
-        echo "${KUBECONFIG_CONTENT}" > "${kubeconfig_path}"
+        echo "${KUBECONFIG_CONTENT}" > "${KUBECONFIG_PATH}"
