@@ -447,6 +447,8 @@ jobs:
         shell: bash
         env:
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
+          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
           target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}

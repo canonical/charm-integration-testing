@@ -183,14 +183,18 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str
 @pytest.fixture(scope="session", autouse=True)
 def register_test_clouds(
     juju_backend: JujuBackend,
+    cloud_kubeconfigs: dict[str, Path],
+    cloud_definitions: dict[str, tuple[Path, Path]],
     target_cloud: str,
     neighbor_cloud: str | None,
 ) -> None:
-    """Register the test clouds with the local Juju client before any Juju operations."""
+    """Register configured test clouds with the local Juju client before Juju operations."""
     clouds = {target_cloud}
     if neighbor_cloud is not None:
         clouds.add(neighbor_cloud)
     for cloud in clouds:
+        if cloud not in cloud_kubeconfigs and cloud not in cloud_definitions:
+            continue
         juju_backend.register_cloud(cloud=cloud)
 
 
