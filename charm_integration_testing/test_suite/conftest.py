@@ -604,6 +604,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
                 charm_track=resolved_channel.explicit_track,
+                charm_risk=resolved_channel.risk,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
