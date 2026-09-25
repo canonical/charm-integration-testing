@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PositiveInt
 
 from .charm import CharmChannel, CharmConfigValue, CharmEndpointProxy, CharmResourceValue, EndpointType
 from .timing import NullTimeline, Timeline
@@ -64,6 +64,8 @@ class CharmOverrides(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     assumes: list[str | dict[str, Any]] | None = None
     resource_tracking: CharmResourceTrackingOverrides = Field(default_factory=CharmResourceTrackingOverrides)
+    ha_units: PositiveInt = 3
+    scale_down: bool = True
 
     def meets(self, channel: CharmChannel, ubuntu_version: str) -> bool:
         return all(criterion.meets(channel, ubuntu_version) for criterion in self.criteria)
@@ -161,6 +163,12 @@ class OverridesClient:
         self, charm: str, channel: CharmChannel, ubuntu_version: str
     ) -> frozenset[str]:
         return frozenset(self._get_charm_overrides(charm, channel, ubuntu_version).resource_tracking.skip)
+
+    def get_charm_ha_units(self, charm: str, channel: CharmChannel, ubuntu_version: str) -> int:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).ha_units
+
+    def get_charm_scale_down(self, charm: str, channel: CharmChannel, ubuntu_version: str) -> bool:
+        return self._get_charm_overrides(charm, channel, ubuntu_version).scale_down
 
     def get_charm_endpoint_removable(
         self, charm: str, channel: CharmChannel, endpoint: str, ubuntu_version: str

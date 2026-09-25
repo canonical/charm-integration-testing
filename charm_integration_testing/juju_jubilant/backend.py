@@ -792,6 +792,13 @@ class JubilantBackend(JujuCmdBackend):
             return None
         return self.get_kubernetes_client(model_info.cloud)
 
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Resolve the model's current cloud independently of its controller's cloud."""
+        model_info = self.client.model(model).show_model()
+        if model_info.type != "kubernetes":
+            return None
+        return self.get_kubernetes_client(model_info.cloud)
+
     def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller
         controller_model = JujuModelHandle(controller=controller_name, model="controller")
