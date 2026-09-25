@@ -182,7 +182,7 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str
 
 @pytest.fixture(scope="session", autouse=True)
 def register_test_clouds(
-    juju_client: JujuClient,
+    juju_backend: JujuBackend,
     target_cloud: str,
     neighbor_cloud: str | None,
 ) -> None:
@@ -191,7 +191,7 @@ def register_test_clouds(
     if neighbor_cloud is not None:
         clouds.add(neighbor_cloud)
     for cloud in clouds:
-        juju_client.register_cloud(cloud=cloud)
+        juju_backend.register_cloud(cloud=cloud)
 
 
 @pytest.fixture(scope="session")
@@ -295,7 +295,7 @@ def register_preexisting_resources(
 @pytest.fixture(scope="session", autouse=True)
 def register_preexisting_neighbor_cloud(
     request: pytest.FixtureRequest,
-    juju_client: JujuClient,
+    juju_backend: JujuBackend,
     is_cmr_test: bool,
     same_controller: bool,
     target_cloud: str,
@@ -318,7 +318,7 @@ def register_preexisting_neighbor_cloud(
         target_cloud=target_cloud,
     ):
         assert neighbor_cloud is not None
-        juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)
+        juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
 @pytest.fixture
