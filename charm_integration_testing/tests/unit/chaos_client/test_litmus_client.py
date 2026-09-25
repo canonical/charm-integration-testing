@@ -188,11 +188,14 @@ class TestStress:
         engine = context.created[0]
         name = engine["metadata"]["name"]
         spec = engine["spec"]
+        assert "appinfo" not in spec
+        assert spec["selectors"] == {"pods": [{"namespace": MODEL.model, "names": "postgresql-random-pod"}]}
         assert spec["chaosServiceAccount"] == name
         assert spec["experiments"][0]["name"] == name
         env = {entry["name"]: entry["value"] for entry in spec["experiments"][0]["spec"]["components"]["env"]}
         assert params.settings.items() <= env.items()
         assert env["TARGET_PODS"] == "postgresql-random-pod"
+        assert spec["selectors"]["pods"][0]["names"] == env["TARGET_PODS"]
         assert env["TARGET_CONTAINER"] == "postgresql"
         assert env["TOTAL_CHAOS_DURATION"] == "30"
         assert len(f"{name}-{name}") <= 63

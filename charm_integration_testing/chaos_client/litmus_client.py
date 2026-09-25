@@ -181,10 +181,7 @@ class LitmusChaosClient(ChaosClient):
                 "annotationCheck": "false",
                 "chaosServiceAccount": name,
                 "jobCleanUpPolicy": "delete",
-                "appinfo": {
-                    "appns": engine.namespace,
-                    "applabel": f"app.kubernetes.io/name={unit.split('/')[0]}",
-                },
+                "selectors": {"pods": [{"namespace": engine.namespace, "names": pod}]},
                 "experiments": [
                     {
                         "name": name,
