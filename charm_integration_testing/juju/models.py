@@ -4,6 +4,8 @@
 from dataclasses import dataclass, field
 from functools import total_ordering
 
+from .handles import JujuModelHandle
+
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
 
@@ -51,6 +53,8 @@ class JujuApplicationInfo:
     charm: str
     revision: int
     channel: CharmChannel | None = None
+    # Ubuntu base the application is deployed on (e.g. "22.04"), when known.
+    base: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,38 @@ class JujuIntegration:
 
 
 @dataclass(frozen=True)
+class ParsedOfferUrl:
+    """The parts of a consumed offer's URL (``controller:user/model.offer-name``).
+
+    ``model`` carries the owner parsed from the URL, so callers can address the offering model
+    directly via ``model.uri``.
+    """
+
+    model: JujuModelHandle
+    offer_name: str
+
+
+@dataclass(frozen=True)
 class JujuConsumedOfferInfo:
     url: str
     endpoints: frozenset[str] = field(default_factory=frozenset)
+
+    def parse_url(self) -> ParsedOfferUrl | None:
+        """Parse ``url`` (``controller:user/model.offer-name``) into its constituent parts.
+
+        Returns None if the URL doesn't match the expected shape.
+        """
+        if ":" not in self.url:
+            return None
+        controller, rest = self.url.split(":", 1)
+        if "/" not in rest:
+            return None
+        owner, model_and_offer = rest.split("/", 1)
+        if "." not in model_and_offer:
+            return None
+        model, offer_name = model_and_offer.rsplit(".", 1)
+        if not controller or not owner or not model or not offer_name:
+            return None
+        return ParsedOfferUrl(
+            model=JujuModelHandle(controller=controller, model=model, owner=owner), offer_name=offer_name
+        )

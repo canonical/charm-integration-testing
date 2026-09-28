@@ -1,6 +1,14 @@
 ---
+# Source: https://github.com/canonical/superset-k8s-operator
 overrides:
-  - requires:
+  - criteria:
+      - any_of:
+          - track: '5'
+          - track: '6'
+          - all_of:
+              - track: latest
+              - risk: stable
+    requires:
       nginx-route:
         optional: true
     provides:

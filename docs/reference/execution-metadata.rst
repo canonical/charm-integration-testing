@@ -96,7 +96,7 @@ Integration Information
      - Normalized
      - Example Value
    * - ``integration``
-     - Integrations between charms deployed in the test model. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded.
+     - Integrations between charms involved in the test model, including cross-model relations (CMRs) where one side is a remote SAAS entry backed by a consumed offer. Each integration is recorded in the format ``<provider>:<provider_endpoint>/<interface>/<requirer>:<requirer_endpoint>``. Collected at start and end of test. Peer integrations are automatically excluded. For CMRs, the remote side's charm is resolved by checking the offering model's status, so it is recorded identically to a same-model integration (i.e. by charm name, not by the offer URL). Offer URLs embed randomly generated controller/model names and are never used for this value, since that would make it unique per run and useless for matching. If the offering model can't be reached to resolve the charm, the offer's local alias is recorded instead, in the form ``offer:<alias>:<endpoint>``.
      - No
      - ``postgresql:db/postgresql/app:database``
 
@@ -155,6 +155,10 @@ Failure Information
      - Failure message when a test fails. Contains the error message from failed tests.
      - Yes
      - ``AssertionError: Expected 'active'``
+   * - ``failure:charm``
+     - Name of a charm involved in a Juju wait timeout failure. Recorded for every noncompliant application, unit, or unit agent so failures can be filtered by charm regardless of the specific status value.
+     - No
+     - ``postgresql``
    * - ``failure:charm:<name>:status``
      - Status information for a specific charm when a test times out waiting for Juju. Format: ``application:<status>:<message>``, ``unit:<status>:<message>``, or ``unit_agent:<status>:<message>``. The message portion is normalized.
      - Partial

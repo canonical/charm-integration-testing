@@ -8,11 +8,21 @@
 # Evidence gathered from src/charm.py and src/cloud_integration.py
 # (main branch, 2025).
 #
-# Four criteria blocks cover the four distinct endpoint generations:
-#   1.23:       legacy reactive charm
-#   1.24-1.28:  legacy reactive charm, adds scrape (Prometheus) in provides
-#   1.29:       ops-based rewrite; azure/gcp absent, tokens added, cos-agent added
-#   1.30+:      same ops charm; azure and gcp restored as optional
+# Four *generations* of endpoint sets exist, but they no longer align cleanly
+# with track boundaries: tracks 1.29+ still publish revisions of the legacy
+# reactive charm on the 16.04/18.04 bases (verified via Charmhub `refresh`),
+# alongside the rewritten ops charm on 20.04+. Generation is therefore matched
+# by (a) track for the tracks that only ever had one generation (1.23-1.28),
+# and (b) ubuntu_version for the legacy generations that persist on old bases
+# under newer tracks. Blocks are evaluated in order and the first match wins,
+# so the ubuntu_version-scoped legacy blocks are listed before the 1.29/1.30+
+# blocks to take priority on 16.04/18.04 regardless of track.
+#   1.23:            legacy reactive charm
+#   1.24-1.28:       legacy reactive charm, adds scrape (Prometheus) in provides
+#   any track, 16.04: legacy reactive charm (same generation as 1.23)
+#   any track, 18.04: legacy reactive charm, adds scrape (same generation as 1.24-1.28)
+#   1.29:            ops-based rewrite; azure/gcp absent, tokens added, cos-agent added
+#   1.30+:           same ops charm; azure and gcp restored as optional
 #
 # Truly required in all tracks (DO NOT mark optional):
 #   certificates  - ReconcilerError("CA Certificate not ready") raised in
@@ -113,9 +123,82 @@ overrides:
       # CNI plugin subordinate must be on the same track.
       - 'tracks(charms(endpoint[cni])) <= tracks({self})'
 
+  # -- Legacy reactive charm still served on 16.04, regardless of track ------
+  # Charmhub confirms tracks 1.29+ still publish a 16.04 base whose revision
+  # is the pre-rewrite reactive charm (same metadata shape as the 1.23 track),
+  # not the ops-based rewrite. Matched by ubuntu_version (no track filter) so
+  # it takes priority over the 1.29/1.30+ blocks below for any track whenever
+  # the resolved base is 16.04.
+  # Evidence: `refresh` against kubernetes-worker channel 1.31/stable and
+  # 1.32/stable with base 16.04/amd64 both resolve revision 10 (the same
+  # revision served for the 1.23 track), which lacks cos-agent/tokens and has
+  # kube-api-endpoint instead.
+  - criteria:
+      - ubuntu_version: '16.04'
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      gcp:
+        optional: true
+      kube-api-endpoint:
+        optional: true
+      nfs:
+        optional: true
+      openstack:
+        optional: true
+      vsphere:
+        optional: true
+    provides:
+      ingress-proxy:
+        optional: true
+      nrpe-external-master:
+        optional: true
+    constraints:
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+
+  # -- Legacy reactive charm (with scrape) still served on 18.04 -------------
+  # Same rationale as the 16.04 block above, but 18.04 revisions under tracks
+  # 1.29+ resolve to the "1.24-1.28 generation" (adds `scrape`), not the 16.04
+  # generation and not the ops rewrite.
+  # Evidence: `refresh` against kubernetes-worker channel 1.31/stable and
+  # 1.32/stable with base 18.04/amd64 both resolve revision 77, whose
+  # provides/requires exactly match the 1.24-1.28 block above.
+  - criteria:
+      - ubuntu_version: '18.04'
+    requires:
+      aws:
+        optional: true
+      azure:
+        optional: true
+      gcp:
+        optional: true
+      kube-api-endpoint:
+        optional: true
+      nfs:
+        optional: true
+      openstack:
+        optional: true
+      vsphere:
+        optional: true
+    provides:
+      ingress-proxy:
+        optional: true
+      nrpe-external-master:
+        optional: true
+      scrape:
+        optional: true
+    constraints:
+      - 'tracks(charms(endpoint[container-runtime])) <= tracks({self})'
+      - 'tracks(charms(endpoint[cni])) <= tracks({self})'
+
   # -- 1.29 track (ops rewrite; azure/gcp absent in this generation) ---------
   # Major rewrite dropped the old reactive cloud endpoints and kube-api-endpoint.
   # azure and gcp are not present in this track's charmcraft.yaml metadata.
+  # Only reached for bases other than 16.04/18.04 (see blocks above), which
+  # is where this track actually serves the rewritten ops charm.
   - criteria:
       - track: '1.29'
     requires:
@@ -134,6 +217,8 @@ overrides:
       - 'tracks(charms(endpoint[cni])) <= tracks({self})'
 
   # -- 1.30+ tracks (ops charm; azure and gcp restored as optional) ----------
+  # Only reached for bases other than 16.04/18.04 (see blocks above), which
+  # is where these tracks actually serve the rewritten ops charm.
   - requires:
       aws:
         optional: true

@@ -1,6 +1,19 @@
 ---
 # Kubeflow Profiles - manages user namespaces and access control
 overrides:
+  - criteria:
+      - track: '2.0'
+    provides:
+      kubeflow-profiles:
+        features: [kubeflow-profiles]
+      metrics-endpoint:
+        optional: true
+      profiles-backup-config:
+        optional: true  # VeleroBackupProvider is additive; charm.py::_on_event reaches ActiveStatus without relations
+      user-workloads-backup-config:
+        optional: true  # VeleroBackupProvider is additive; charm.py::_on_event reaches ActiveStatus without relations
+    constraints:
+      - '"kubeflow-profiles" in features(endpoint[kubeflow-profiles])'
   - provides:
       kubeflow-profiles:
         features: [kubeflow-profiles]

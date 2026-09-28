@@ -71,6 +71,7 @@ rst
 sitemapindex
 subproject
 subprojects
+SAAS
 SVG
 tex
 texlive
@@ -156,3 +157,17 @@ ServiceAccounts
 StatefulSets
 xid
 Unioning
+istio
+ConfigMap
+istiod's
+SAAS
+synthesized
+synthesizes
+synthesize
+synthesizing
+urls
+url
+requirer
+CRDs
+kubeconfig
+sqa

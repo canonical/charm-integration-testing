@@ -721,9 +721,12 @@ If the bundle pulls in something unexpected, check whether that endpoint should 
   - Use a sentinel name that captures *why* the charm is unsupported, so overrides remain
     self-documenting and distinguishable at a glance. Existing conventions:
     `unsupported-openstack` for OpenStack-family charms untestable under SQT-1081 (still
-    listed - see above), and `unsupported-obsolete` for charms that are abandoned/EOL and
-    also delisted (`listed: false`). Prefer reusing or extending this naming pattern
-    (`unsupported-<reason>`) over inventing an unrelated scheme.
+    listed - see above), `unsupported-obsolete` for charms that are abandoned/EOL and
+    also delisted (`listed: false`), and `unsupported-deprioritized` for charms that are
+    still maintained/listed but whose maintainers have deprioritized fixing bugs in our
+    pipeline until the charm has real users (e.g. hockeypuck-k8s, IQA-3762) - stays listed,
+    since deprioritized is not the same as abandoned. Prefer reusing or extending this
+    naming pattern (`unsupported-<reason>`) over inventing an unrelated scheme.
 - **Exception:** charms whose Charmhub entry is actually a *bundle*, not a charm (e.g.
   `ceph-base`, `openstack-base`, `openstack-telemetry`) have no charm metadata/bases at all.
   We only override charms, not bundles - do not create (or keep) an override file for a

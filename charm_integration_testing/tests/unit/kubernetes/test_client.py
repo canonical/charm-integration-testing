@@ -3,7 +3,7 @@
 
 import logging
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
-from urllib3.exceptions import ProtocolError
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 
 class KubernetesExtensionSpy(KubernetesExtension):
@@ -172,6 +172,22 @@ class RaisingWatchStub:
             yield  # pragma: no cover - unreachable, keeps this a generator
 
         return _raise()
+
+    def stop(self) -> None:
+        self.stop_call_count += 1
+
+
+@dataclass
+class RecordingWatchStub:
+    """A watch stub that records the kwargs each `stream()` call was made with."""
+
+    events: list[dict[str, Any]]
+    stop_call_count: int = 0
+    stream_calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def stream(self, func: Callable[..., Any], **kwargs: Any) -> Iterator[dict[str, Any]]:
+        self.stream_calls.append(kwargs)
+        return iter(self.events)
 
     def stop(self) -> None:
         self.stop_call_count += 1
@@ -1121,6 +1137,68 @@ class TestKubernetesClientInit:
             with pytest.raises(TimeoutError, match="my-sts"):
                 client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=0)
             assert raising_stub.stop_call_count == 1
+
+        def test_reconnects_after_read_timeout_and_succeeds(self) -> None:
+            # GIVEN a watch stream that stalls (no data, no server-side close) and raises the
+            # client-side read timeout instead, then a second watch that delivers the ready event
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            raising_stub = RaisingWatchStub(exception=ReadTimeoutError(MagicMock(), "http://x", "Read timed out."))
+            success_stub = WatchStub(events=[{"object": ready_sts}])
+            stubs = iter([raising_stub, success_stub])
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub, watch_factory=lambda: next(stubs))
+
+            # WHEN/THEN it reconnects instead of hanging or raising, and succeeds
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=60)
+            assert raising_stub.stop_call_count == 1
+            assert success_stub.stop_call_count == 1
+
+        def test_raises_timeout_when_read_timeout_occurs_after_deadline(self) -> None:
+            # GIVEN a watch that always stalls, with the timeout already elapsed
+            raising_stub = RaisingWatchStub(exception=ReadTimeoutError(MagicMock(), "http://x", "Read timed out."))
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=1, observed_generation=1, updated_replicas=0, ready_replicas=0, replicas=1
+                )
+            )
+            client = KubernetesClient(backend=backend_stub, watch_factory=lambda: raising_stub)
+
+            # WHEN/THEN it gives up with TimeoutError instead of hanging forever
+            with pytest.raises(TimeoutError, match="my-sts"):
+                client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=0)
+            assert raising_stub.stop_call_count == 1
+
+        def test_bounds_watch_request_with_client_side_read_timeout(self) -> None:
+            # GIVEN a watch stub that records the kwargs it was called with
+            ready_sts = create_statefulset_stub(
+                generation=2, observed_generation=2, updated_replicas=2, ready_replicas=2, replicas=2
+            )
+            watch_stub = RecordingWatchStub(events=[{"object": ready_sts}])
+            backend_stub = KubernetesBackendStub(
+                read_stateful_set_result=create_statefulset_stub(
+                    generation=2, observed_generation=2, updated_replicas=0, ready_replicas=0, replicas=2
+                )
+            )
+            client = KubernetesClient(backend=backend_stub, watch_factory=lambda: watch_stub)
+
+            # WHEN waiting for the statefulset restart
+            client.wait_for_statefulset_restart(namespace="test-ns", statefulset_name="my-sts", timeout_seconds=60)
+
+            # THEN the watch request is given its own client-side read timeout, independent of
+            # (and larger than) the server-side timeout_seconds hint, so a stalled stream can't
+            # block past its budget even if the server never closes the connection
+            assert watch_stub.stream_calls
+            kwargs = watch_stub.stream_calls[0]
+            assert "_request_timeout" in kwargs
+            connect_timeout, read_timeout = kwargs["_request_timeout"]
+            assert connect_timeout == KubernetesClient._WATCH_CONNECT_TIMEOUT_SECONDS
+            assert read_timeout > kwargs["timeout_seconds"]
 
 
 @dataclass

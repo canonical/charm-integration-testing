@@ -72,6 +72,14 @@ environments:
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
   ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-3: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-4: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-5: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-6: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-7: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-8: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-9: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-10: *ps7-sqa-prod_charm_qa_kubernetes
   # PS7 PROD OPENSTACK
   ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
     github-runner: ps7-private-endpoint-runners

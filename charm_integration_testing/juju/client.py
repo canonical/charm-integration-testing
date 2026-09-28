@@ -290,6 +290,14 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
 
+    def remove_saas(self, alias: str, *, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing SAAS proxy (if any) named {alias!r}.")
+        self.backend.remove_saas(model, alias)
+
+    def wait_for_removal_of_saas(self, alias: str, *, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of SAAS proxy {alias!r}.")
+        self.backend.wait_for_removal_of_saas(model, alias, timeout)
+
     def wait_for_removal_of_units(
         self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
@@ -323,6 +331,10 @@ class JujuClient:
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         self.logger.info("Getting list of consumed offers.")
         return self.backend.list_consumed_offers(model)
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        self.logger.info(f"Resolving application behind consumed offer '{offer.url}'.")
+        return self.backend.resolve_consumed_offer_application(offer)
 
     def application_revision(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")

@@ -104,10 +104,16 @@ class _StubHttpClient(CharmhubHttpClient):
 
 
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
+_UBUNTU_VERSION = "22.04"
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
 _METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
 _METADATA_WITH_LEGACY_KUBERNETES_SERIES = CharmMetadata(series=["kubernetes"])
+_METADATA_WITH_K8S_API_ASSUMES = CharmMetadata(assumes=["k8s-api"])
+_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES = CharmMetadata(assumes=[{"any-of": ["k8s-api", "juju >= 3.0"]}])
+_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF = CharmMetadata(
+    assumes=[{"any-of": ["k8s-api", {"all-of": ["k8s-api", "juju >= 3.0"]}]}]
+)
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
@@ -137,6 +143,49 @@ def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> Charmhu
 
 
 class TestCharmhubClient:
+    class TestBuildCharmHa:
+        def test_build_charm_uses_ha_defaults(self) -> None:
+            client = _client({})
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 3
+            assert charm.scale_down is True
+
+        def test_build_charm_populates_release_specific_ha_overrides(self) -> None:
+            client = _client(
+                {
+                    "overrides": [
+                        {
+                            "criteria": [{"track": "latest", "ubuntu_version": _UBUNTU_VERSION}],
+                            "ha_units": 5,
+                            "scale_down": False,
+                        }
+                    ]
+                }
+            )
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 5
+            assert charm.scale_down is False
+
     # ---------------------------------------------------------------------------
     # TestBuildCharmPlatforms
     # ---------------------------------------------------------------------------
@@ -197,6 +246,85 @@ class TestCharmhubClient:
                 ubuntu_version="22.04",
                 ubuntu_arch="amd64",
                 metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_unconditional_k8s_api_assumes(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block but an unconditional `assumes: [k8s-api]` (e.g.
+            # nginx-ingress-integrator, which only talks to the Kubernetes API and hosts no
+            # workload container of its own)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_uses_assumes_overrides_for_platform_inference(self) -> None:
+            # GIVEN metadata with no kubernetes hints, plus a channel-scoped override that
+            # requires k8s-api unconditionally
+            client = _client(
+                {"overrides": [{"criteria": [{"track": "latest", "risk": "stable"}], "assumes": ["k8s-api"]}]}
+            )
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the override-aware assumes also drive the inferred platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_ignores_k8s_api_named_only_in_an_any_of_assumes_branch(self) -> None:
+            # GIVEN metadata whose assumes only mentions k8s-api as one alternative inside an
+            # any-of branch (so it is not unconditionally required)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_treats_any_of_as_unconditional_when_every_branch_requires_k8s_api(self) -> None:
+            # GIVEN metadata whose any-of alternatives all still require k8s-api
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF,
                 config_schema=_EMPTY_CONFIG,
             )
 
@@ -869,13 +997,13 @@ class TestCharmhubClient:
             # WHEN building endpoints
             # THEN UnparsableCharmException is raised mentioning "requires"
             with pytest.raises(UnparsableCharmException, match="requires"):
-                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
 
         def test_valid_requires_key_passes(self) -> None:
             # GIVEN an override for a requires endpoint that exists in metadata
             client = _client({"overrides": [{"requires": {"db": {"optional": True}}}]})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             # THEN the endpoint is present
             assert "db" in endpoints
 
@@ -885,13 +1013,13 @@ class TestCharmhubClient:
             # WHEN building endpoints
             # THEN UnparsableCharmException is raised mentioning "provides"
             with pytest.raises(UnparsableCharmException, match="provides"):
-                client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL)
+                client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL, _UBUNTU_VERSION)
 
         def test_valid_provides_key_passes(self) -> None:
             # GIVEN an override for a provides endpoint that exists in metadata
             client = _client({"overrides": [{"provides": {"web": {"optional": True}}}]})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL, _UBUNTU_VERSION)
             # THEN the endpoint is present
             assert "web" in endpoints
 
@@ -899,13 +1027,29 @@ class TestCharmhubClient:
             # GIVEN no overrides
             client = _client({})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             # THEN all metadata endpoints are returned
             assert "db" in endpoints
 
+        def test_no_override_defaults_removable_true(self) -> None:
+            # GIVEN no overrides
+            client = _client({})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+            # THEN removable defaults to True
+            assert endpoints["db"].removable is True
+
+        def test_override_removable_false_is_applied(self) -> None:
+            # GIVEN an override marking a requires endpoint non-removable
+            client = _client({"overrides": [{"requires": {"db": {"removable": False}}}]})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+            # THEN removable reflects the override
+            assert endpoints["db"].removable is False
+
         def test_injects_juju_info_when_absent(self) -> None:
             client = _client({})
-            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             assert "juju-info" in endpoints
             ep = endpoints["juju-info"]
             assert ep.type == EndpointType.PROVIDES
@@ -921,13 +1065,13 @@ class TestCharmhubClient:
                 requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")},
             )
             client = _client({})
-            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL, _UBUNTU_VERSION)
             assert "juju-info" not in endpoints
 
         def test_does_not_overwrite_explicit_juju_info(self) -> None:
             metadata = CharmMetadata(provides={"juju-info": CharmMetadata.Endpoint(interface="juju-info", limit=5)})
             client = _client({})
-            endpoints = client._get_charm_endpoints("special", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("special", metadata, _CHANNEL, _UBUNTU_VERSION)
             # Explicit declaration wins; the injected one would have limit=None
             assert endpoints["juju-info"].limit == 5
 
@@ -936,13 +1080,44 @@ class TestCharmhubClient:
                 requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")}
             )
             client = _client({})
-            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL, _UBUNTU_VERSION)
             assert endpoints["general-info"].scope == EndpointScope.CONTAINER
 
         def test_scope_none_when_metadata_has_no_scope(self) -> None:
             client = _client({})
-            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             assert endpoints["db"].scope is None
+
+        def test_ubuntu_version_scoped_block_takes_priority_over_catch_all(self) -> None:
+            # GIVEN a base-specific override block (matching ubuntu_version) listed before a
+            # catch-all block with no criteria at all, mirroring kubernetes-worker's structure.
+            client = _client(
+                {
+                    "overrides": [
+                        {"criteria": [{"ubuntu_version": "16.04"}], "requires": {"db": {"optional": True}}},
+                        {"requires": {"db": {}}},
+                    ]
+                }
+            )
+            # WHEN the resolved base matches the scoped block
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, "16.04")
+            # THEN the scoped block's override (optional=True) wins, not the catch-all (optional defaults False)
+            assert endpoints["db"].optional is True
+
+        def test_ubuntu_version_scoped_block_does_not_match_other_bases(self) -> None:
+            # GIVEN the same criteria as above
+            client = _client(
+                {
+                    "overrides": [
+                        {"criteria": [{"ubuntu_version": "16.04"}], "requires": {"db": {"optional": True}}},
+                        {"requires": {"db": {}}},
+                    ]
+                }
+            )
+            # WHEN the resolved base does NOT match the scoped block
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, "22.04")
+            # THEN the catch-all block is used instead (optional defaults to False)
+            assert endpoints["db"].optional is False
 
     class TestCharmMetadataSubordinateFields:
         """CharmMetadata.subordinate and CharmMetadata.Endpoint.scope fields."""
@@ -971,14 +1146,14 @@ class TestCharmhubClient:
             # WHEN building configs
             # THEN UnparsableCharmException is raised mentioning "config"
             with pytest.raises(UnparsableCharmException, match="config"):
-                client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG)
+                client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG, _UBUNTU_VERSION)
 
         def test_valid_config_key_passes(self) -> None:
             # GIVEN an override for a config key that exists in the schema
             schema = CharmConfigSchema(options={"my-option": CharmConfigSchema.Option(type="string")})
             client = _client({"overrides": [{"configs": {"my-option": ["v1"]}}]})
             # WHEN building configs
-            result = client._get_charm_configs("mycharm", _CHANNEL, schema)
+            result = client._get_charm_configs("mycharm", _CHANNEL, schema, _UBUNTU_VERSION)
             # THEN the override value is returned
             assert result == {"my-option": ["v1"]}
 
@@ -987,7 +1162,7 @@ class TestCharmhubClient:
             client = _client({})
             # WHEN building configs
             # THEN an empty dict is returned
-            assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG) == {}
+            assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG, _UBUNTU_VERSION) == {}
 
     class TestGetCharmResources:
         def test_stale_resource_key_raises(self) -> None:
@@ -996,14 +1171,14 @@ class TestCharmhubClient:
             # WHEN building resources
             # THEN UnparsableCharmException is raised mentioning "resource"
             with pytest.raises(UnparsableCharmException, match="resource"):
-                client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata())
+                client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata(), _UBUNTU_VERSION)
 
         def test_valid_resource_key_passes(self) -> None:
             # GIVEN an override for a resource key that exists in the metadata
             metadata = CharmMetadata(resources={"my-image": CharmMetadata.Resource(type="oci-image")})
             client = _client({"overrides": [{"resources": {"my-image": ["ghcr.io/foo:v1"]}}]})
             # WHEN building resources
-            result = client._get_charm_resources("mycharm", _CHANNEL, metadata)
+            result = client._get_charm_resources("mycharm", _CHANNEL, metadata, _UBUNTU_VERSION)
             # THEN the override value is returned
             assert result == {"my-image": ["ghcr.io/foo:v1"]}
 
@@ -1012,7 +1187,7 @@ class TestCharmhubClient:
             client = _client({})
             # WHEN building resources
             # THEN an empty dict is returned
-            assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata()) == {}
+            assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata(), _UBUNTU_VERSION) == {}
 
     # ---------------------------------------------------------------------------
     # TestFindCharms

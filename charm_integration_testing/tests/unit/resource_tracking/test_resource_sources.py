@@ -311,6 +311,44 @@ class TestConfigMapSource:
         # THEN data_keys is empty
         assert snapshots == [ConfigMapSnapshot(name="empty", namespace=MODEL, data_keys="")]
 
+    def test_istio_root_cert_config_map_is_not_tracked(self) -> None:
+        # GIVEN the istio-injected root-cert ConfigMap alongside a charm-owned one
+        istio = SimpleNamespace(
+            metadata=_meta("istio-ca-root-cert", labels={"istio.io/config": "true"}),
+            data={"root-cert.pem": "-----BEGIN CERTIFICATE-----"},
+        )
+        charm_owned = SimpleNamespace(
+            metadata=_meta("target-config", labels={"app.kubernetes.io/name": "target"}),
+            data={"a.conf": "value"},
+        )
+        client = _client(core=_FakeCoreApi(config_maps=[istio, charm_owned]))
+
+        # WHEN the source collects snapshots
+        snapshots = ConfigMapSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN the cluster-provisioned ConfigMap is dropped and the charm's is kept
+        assert snapshots == [
+            ConfigMapSnapshot(name="target-config", namespace=MODEL, data_keys="a.conf", application="target")
+        ]
+
+    def test_labelled_config_map_named_like_istio_root_cert_is_tracked(self) -> None:
+        # GIVEN a charm-owned ConfigMap that happens to use the istio root-cert name
+        raw = SimpleNamespace(
+            metadata=_meta("istio-ca-root-cert", labels={"app.kubernetes.io/name": "target"}),
+            data={"root-cert.pem": "-----BEGIN CERTIFICATE-----"},
+        )
+        client = _client(core=_FakeCoreApi(config_maps=[raw]))
+
+        # WHEN the source collects snapshots
+        snapshots = ConfigMapSource().collect(client, MODEL)  # type: ignore[arg-type]
+
+        # THEN it is still tracked, because the drop only applies when no app.kubernetes.io/name label is present
+        assert snapshots == [
+            ConfigMapSnapshot(
+                name="istio-ca-root-cert", namespace=MODEL, data_keys="root-cert.pem", application="target"
+            )
+        ]
+
 
 class TestSecretSource:
     def test_records_type_and_keys_without_values(self) -> None:

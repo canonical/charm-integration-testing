@@ -1,9 +1,8 @@
 ---
-# Source: https://github.com/canonical/anbox-cloud-charms (charms/ams-node-controller)
-#
-# nrpe-external-master (provides): optional - standard Juju NRPE subordinate
-#   monitoring hook, purely additive, never blocking.
+# ams-node-controller: deprecated by Anbox Cloud as of 1.26.0, unsupported as of 1.28.0
+# (superseded by ams-lxd). Charmhub-published charm; no public source repository found
+# (checked canonical/anbox-cloud-charms, canonical/ams-old, canonical/ams-operator - none
+# of which host this subordinate charm's actual source).
+listed: false  # Task to remove filed under https://warthogs.atlassian.net/browse/IQA-3663
 overrides:
-  - provides:
-      nrpe-external-master:
-        optional: true
+  - assumes: [unsupported-obsolete]

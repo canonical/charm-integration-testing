@@ -11,7 +11,7 @@ from typing import Callable, Collection, TypeVar
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from urllib3.exceptions import ProtocolError
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 from kubernetes_client.backend import KubernetesBackend, KubernetesExtension
 
@@ -29,6 +29,14 @@ class PodStatus(Enum):
 class KubernetesClient:
     backend: KubernetesBackend
     extensions: list[KubernetesExtension]
+
+    # `timeout_seconds` on a watch is only a server-side hint: the server is expected to close
+    # the connection once it elapses, but nothing guarantees it will (e.g. a proxy or an
+    # unresponsive API server can leave the connection open with no data and no error). These
+    # bound the watch's underlying HTTP request itself so a stalled stream can't block past its
+    # budget regardless of what the server does.
+    _WATCH_CONNECT_TIMEOUT_SECONDS = 10
+    _WATCH_READ_TIMEOUT_BUFFER_SECONDS = 30
 
     def __init__(
         self,
@@ -329,6 +337,14 @@ class KubernetesClient:
         remains of `timeout_seconds`; a stream that ends on its own (internal timeout, no
         matching event) is still treated as a real timeout.
 
+        `timeout_seconds` is only a hint the server is expected to honor by closing the
+        connection; it is not enforced by the client. If the connection instead stalls (no
+        data, no error, e.g. because of a silently dropped proxy or an unresponsive API
+        server) the watch would otherwise block indefinitely. To bound this, the underlying
+        HTTP request is also given its own read timeout (`timeout_seconds` plus a buffer), so
+        a stalled stream is treated the same as a reset connection: reconnected if time
+        remains, or surfaced as `TimeoutError` if not.
+
         Args:
             namespace: Namespace where the StatefulSet is located.
             statefulset_name: Name of the StatefulSet to watch.
@@ -351,13 +367,18 @@ class KubernetesClient:
         deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
         while True:
             remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
+            server_timeout_seconds = max(0, math.ceil(remaining_seconds))
             watcher = self.watch_factory()
             try:
                 for event in watcher.stream(
                     self.backend.apps_v1_api.list_namespaced_stateful_set,
                     namespace=namespace,
                     field_selector=f"metadata.name={statefulset_name}",
-                    timeout_seconds=max(0, math.ceil(remaining_seconds)),
+                    timeout_seconds=server_timeout_seconds,
+                    _request_timeout=(
+                        self._WATCH_CONNECT_TIMEOUT_SECONDS,
+                        server_timeout_seconds + self._WATCH_READ_TIMEOUT_BUFFER_SECONDS,
+                    ),
                 ):
                     sts = event["object"]
                     status = sts.status
@@ -384,13 +405,14 @@ class KubernetesClient:
 
                     self.logger.info(f"Successfully rolled out generation '{target_generation}'.")
                     return
-            except ProtocolError as exc:
+            except (ProtocolError, ReadTimeoutError) as exc:
                 remaining_seconds = (deadline - datetime.now(timezone.utc)).total_seconds()
                 if remaining_seconds <= 0:
                     break
                 self.logger.warning(
-                    f"Watch stream for StatefulSet '{statefulset_name}' in namespace '{namespace}' was reset "
-                    f"({exc}); reconnecting with {math.ceil(remaining_seconds)}s remaining to resume waiting."
+                    f"Watch stream for StatefulSet '{statefulset_name}' in namespace '{namespace}' was "
+                    f"interrupted ({exc}); reconnecting with {math.ceil(remaining_seconds)}s remaining to "
+                    "resume waiting."
                 )
                 continue
             finally:

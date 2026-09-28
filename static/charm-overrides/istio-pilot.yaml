@@ -5,9 +5,18 @@ overrides:
   - provides:
       istio-pilot:
         features: [istio-pilot]
+      # istio-pilot's `ingress` provides endpoint is driven by legacy
+      # serialized_data_interface (SDI), not the modern
+      # charms.traefik_k8s.v2.ingress library. Force sdi-legacy active so the
+      # solver still pairs it with SDI requirers (e.g. dex-auth) while
+      # rejecting pairings with modern v2-only providers/requirers.
+      # See: https://github.com/canonical/charm-integration-testing/issues/976
+      ingress:
+        features: [sdi-legacy]
       metrics-endpoint:
         optional: true
       grafana-dashboard:
         optional: true
     constraints:
       - '"istio-pilot" in features(endpoint[istio-pilot])'
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'

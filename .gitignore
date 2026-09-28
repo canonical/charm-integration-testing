@@ -128,11 +128,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# minio client
-/mc
-/minio
-/static/minio
-
 # test artifacts
 /junit-*.xml
 /generated-*.mmd

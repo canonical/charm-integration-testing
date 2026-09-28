@@ -4,6 +4,7 @@
 import ipaddress
 import json
 import re
+import ssl
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +21,29 @@ _SCRAPE_METADATA_REQUIRED_KEYS = ("model", "model_uuid", "application", "unit")
 _LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Hosts that are bind-all placeholders and cannot be used as scrape targets directly.
 _WILDCARD_HOSTS: frozenset[str] = frozenset({"*", "0.0.0.0"})  # nosec B104
+
+
+def _insecure_https_context() -> ssl.SSLContext:
+    """Build a TLS context that skips certificate verification for https:// probes.
+
+    The prometheus_scrape interface deliberately never carries a `tls_config`: per the
+    upstream charm library, certs for `https` scrape targets are expected to be trusted via
+    `update-ca-certificates` on the machine actually running Prometheus, not via relation
+    data. This validator has no such trust path to a per-model self-signed CA, so it cannot
+    verify these certs; skip verification for the reachability/scrape probes below, the same
+    way a basic health check (e.g. `curl -k`) would.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _urlopen_kwargs(url: str) -> dict[str, Any]:
+    """Return urlopen kwargs to skip TLS verification for https:// URLs."""
+    if url.startswith("https://"):
+        return {"context": _insecure_https_context()}
+    return {}
 
 
 @dataclass
@@ -60,7 +84,13 @@ class PrometheusScrapeValidator(BaseValidator):
             for unit in self.relation.units
             if (addr := self.relation.data[unit].get("prometheus_scrape_unit_address", "").strip())
         )
-        targets, parse_errors = _extract_targets(scrape_jobs, unit_addresses=unit_addresses)
+        metadata = json.loads(self.databag["scrape_metadata"])
+        targets, parse_errors = _extract_targets(
+            scrape_jobs,
+            unit_addresses=unit_addresses,
+            remote_model=metadata.get("model"),
+            local_model=self.charm.model.name,
+        )
 
         # Report any target parsing errors
         if parse_errors:
@@ -214,8 +244,40 @@ def _host_for_url(host: str) -> str:
     return host
 
 
+def _qualify_cross_model_host(host: str, *, remote_model: str | None, local_model: str) -> str:
+    """Qualify a bare per-unit Kubernetes DNS host for cross-model (CMR) relations.
+
+    Charms commonly publish per-unit scrape targets as short pod-DNS names
+    (e.g. ``<unit>.<endpoints-service>``). Such names resolve via the pod's
+    default search domain, which only covers its own Kubernetes namespace.
+    When the scrape target's owning application lives in a different Juju
+    model than this charm (i.e. the relation crosses a cross-model offer),
+    that bare name is not resolvable and must be qualified with the remote
+    application's namespace, matching the CMR DNS convention already used
+    elsewhere in this codebase (see ``validators.cross_model_mesh``):
+    ``<host>.<model>.svc.cluster.local``.
+
+    IP addresses and hosts already qualified with the remote namespace
+    (``.<remote_model>`` or ``.<remote_model>.svc.cluster.local``) are
+    returned unchanged.
+    """
+    if not remote_model or remote_model == local_model:
+        return host
+    if host.endswith(".svc.cluster.local") or host.endswith(f".{remote_model}"):
+        return host
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return f"{host}.{remote_model}.svc.cluster.local"
+    return host
+
+
 def _extract_targets(
-    scrape_jobs: list[dict[str, Any]], unit_addresses: list[str] | None = None
+    scrape_jobs: list[dict[str, Any]],
+    unit_addresses: list[str] | None = None,
+    *,
+    local_model: str,
+    remote_model: str | None = None,
 ) -> tuple[list[_ScrapeTarget], list[str]]:
     """Return deduplicated scrape targets from all jobs and any parse errors.
 
@@ -225,6 +287,10 @@ def _extract_targets(
     When a target uses a wildcard bind-all host (``*`` or ``0.0.0.0``), it is expanded
     into one concrete target per entry in *unit_addresses*, using the per-unit
     ``prometheus_scrape_unit_address`` values from the relation databag.
+
+    Bare per-unit Kubernetes DNS hosts are qualified with the remote application's
+    namespace when *remote_model* differs from *local_model* (a cross-model relation);
+    see ``_qualify_cross_model_host``.
 
     Returns:
         tuple: (targets, parse_errors) where parse_errors is a list of error messages.
@@ -256,7 +322,10 @@ def _extract_targets(
                     else:
                         resolved_hosts = [host]
 
-                    for resolved_host in resolved_hosts:
+                    for unqualified_host in resolved_hosts:
+                        resolved_host = _qualify_cross_model_host(
+                            unqualified_host, remote_model=remote_model, local_model=local_model
+                        )
                         # Deduplicate on the full scrape URL
                         scrape_url = f"{effective_scheme}://{_host_for_url(resolved_host)}:{port}{metrics_path}"
                         if scrape_url in seen:
@@ -312,7 +381,7 @@ def _http_probe_check(targets: list[_ScrapeTarget]) -> ValidationCheck:
     for t in targets:
         url = f"{t.scheme}://{_host_for_url(t.host)}:{t.port}{t.metrics_path}"
         try:
-            with urlopen(url, timeout=5) as resp:  # nosec B310
+            with urlopen(url, timeout=5, **_urlopen_kwargs(url)) as resp:  # nosec B310
                 if resp.status != 200:
                     errors.append(f"{url}: HTTP {resp.status}")
         except Exception as exc:
@@ -344,7 +413,7 @@ def _scrape_and_parse_checks(targets: list[_ScrapeTarget]) -> list[ValidationChe
         url = f"{t.scheme}://{target_id}{t.metrics_path}"
         check_name = f"scrape[{target_id}]"
         try:
-            with urlopen(url, timeout=10) as resp:  # nosec B310
+            with urlopen(url, timeout=10, **_urlopen_kwargs(url)) as resp:  # nosec B310
                 body = resp.read().decode("utf-8", errors="replace")
             if resp.status != 200:
                 checks.append(
