@@ -1,9 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from unittest.mock import MagicMock
 
 import pytest
 from chaos_client import (
@@ -14,6 +16,7 @@ from chaos_client import (
     MetaChaosClient,
 )
 from juju import JujuModelHandle
+from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
@@ -31,6 +34,13 @@ class BackendStub(KubernetesBackend):
         crds: tuple[str, ...] = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org"),
         raise_on_delete: ApiException | None = None,
     ) -> None:
+        self.core_v1_api = MagicMock()
+        self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
+            items=[
+                k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="target-pod", annotations={"unit.juju.is/id": UNIT})),
+                k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="other-pod", annotations={"unit.juju.is/id": "postgresql/1"})),
+            ]
+        )
         self._crds = set(crds)
         self.crd_errors: dict[str, ApiException] = {}
         self.crd_reads: list[str] = []
@@ -266,7 +276,7 @@ class TestStressCpu:
         assert body["kind"] == "StressChaos"
         assert body["metadata"]["namespace"] == "test-model"
         assert body["metadata"]["name"].startswith("chaos-cpu-stress-postgresql-")
-        assert body["spec"]["selector"] == SELECTOR
+        assert body["spec"]["selector"] == {"pods": {"test-model": ["target-pod"]}}
         assert body["spec"]["stressors"] == {"cpu": {"workers": 2}}
         assert body["spec"]["duration"] == "30s"
         assert client._created == [("stresschaos", "test-model", body["metadata"]["name"])]
@@ -540,3 +550,38 @@ class TestCleanupIdentity:
         assert mesh._created == []
         assert mesh._scopes == {}
         assert mesh._uids == {}
+
+
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+@pytest.mark.parametrize("matches", [0, 1, 2])
+def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) -> None:
+    # GIVEN other units and stale Pods sharing the selected unit annotation
+    backend = BackendStub()
+    pods = backend.core_v1_api.list_namespaced_pod.return_value.items
+    target = pods.pop(0)
+
+    for phase in ("Succeeded", "Failed"):
+        stale = deepcopy(target)
+        stale.status = k8s.V1PodStatus(phase=phase)
+        pods.append(stale)
+    stale = deepcopy(target)
+    stale.metadata.deletion_timestamp = datetime.now(timezone.utc)
+    pods.append(stale)
+    pods.extend(deepcopy(target) for _ in range(matches))
+    mesh = ChaosMeshChaosClient(backend)
+
+    def run() -> None:
+        if operation == "stress_cpu":
+            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))
+        else:
+            mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=10))
+
+    # WHEN selecting a unit, THEN only its single live Pod can be stressed
+    if matches == 1:
+        run()
+        body = backend.custom_objects_api.create_calls[0]["body"]
+        assert body["spec"]["selector"] == {"pods": {"test-model": ["target-pod"]}}
+    else:
+        with pytest.raises(RuntimeError, match="Expected one live Pod"):
+            run()
+        assert backend.custom_objects_api.create_calls == []

@@ -31,15 +31,14 @@ def temporary_cpu_limit(
         raise RuntimeError(f"Container {container} is missing from {namespace}/{name}.")
 
     def patch(value: dict[str, Any], index: int, updated: dict[str, Any]) -> None:
-        api.patch_namespaced_stateful_set(
-            name=name,
+        kubernetes.patch_statefulset_template(
+            statefulset_name=name,
             namespace=namespace,
             body=[
                 {"op": "test", "path": "/metadata/uid", "value": uid},
                 {"op": "test", "path": "/metadata/resourceVersion", "value": value["metadata"]["resourceVersion"]},
                 {"op": "add", "path": f"/spec/template/spec/containers/{index}/resources", "value": updated},
             ],
-            _request_timeout=30,
         )
 
     original = read()

@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 from juju import JujuClient, JujuModelHandle
 from kubernetes.utils.quantity import parse_quantity  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient
 from kubernetes_client.cpu_limit import temporary_cpu_limit
 
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools, chaos_client_for_model
@@ -24,9 +25,10 @@ def test_live_cpu_stress_total(
     target_model_ref: JujuModelHandle,
     target_application: str,
     cpu_stress_timeout: timedelta,
+    kubernetes_client: KubernetesClient | None,
 ) -> None:
     backend = juju_client.backend
-    kubernetes = backend.get_kubernetes_client_for_model(target_model_ref)
+    kubernetes = kubernetes_client
     if kubernetes is None:
         pytest.skip("Total CPU stress requires Kubernetes.")
     tools = available_chaos_tools(kubernetes.backend)

@@ -21,7 +21,8 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     # GIVEN a single StatefulSet workload and recorded lifecycle operations
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
     backend = juju.backend
-    kubernetes = backend.get_kubernetes_client_for_model.return_value
+    kubernetes = MagicMock()
+    backend.get_kubernetes_client_for_model.side_effect = AssertionError("Use the fixture with extensions")
     pod = client.V1Pod(
         metadata=client.V1ObjectMeta(
             name="app-0",
@@ -91,7 +92,7 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     juju.wait_for_unit_health.side_effect = health
     # WHEN the test succeeds, fails, or skips during stress
     if failure is None:
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10))
+        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes)
         assert events == ["limit", "healthy", "stress", "unhealthy", "cleanup", "healthy", "restore"]
         juju.validate_model.assert_called_once()
     else:
@@ -99,7 +100,7 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
             pytest.skip.Exception if failure == "skip" else (TimeoutError if failure == "status" else RuntimeError)
         )
         with pytest.raises(expected):
-            module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10))
+            module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes)
         assert events[-2:] == ["cleanup", "restore"]
         juju.validate_model.assert_not_called()
 
@@ -111,7 +112,7 @@ def test_unsupported_environment_skips_before_mutation(monkeypatch: pytest.Monke
     juju.backend.get_kubernetes_client_for_model.return_value = target
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: set())
     with pytest.raises(pytest.skip.Exception):
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10))
+        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), target)
     if target is not None:
         target.get_charm_pods.assert_not_called()
     juju.idle_for_period.assert_not_called()

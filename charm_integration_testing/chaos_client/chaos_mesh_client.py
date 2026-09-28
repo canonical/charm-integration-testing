@@ -115,10 +115,26 @@ class ChaosMeshChaosClient(ChaosClient):
         stressors: dict[str, object],
         duration: timedelta,
     ) -> None:
+        if "stresschaos.chaos-mesh.org" in self._missing_crds:
+            raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
+        pods = self._backend.core_v1_api.list_namespaced_pod(
+            namespace=model.model,
+            label_selector=f"app.kubernetes.io/name={unit.split('/')[0]}",
+            _request_timeout=30,
+        )
+        matches = [
+            pod
+            for pod in pods.items
+            if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+            and pod.metadata.deletion_timestamp is None
+            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(f"Expected one live Pod for {model.model}/{unit}, found {len(matches)}.")
         application = unit.split("/")[0]
         spec: dict[str, object] = {
             "mode": "all",
-            "selector": self._selector(model.model, application),
+            "selector": {"pods": {model.model: [matches[0].metadata.name]}},
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }

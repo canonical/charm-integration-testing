@@ -16,6 +16,7 @@ from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
 from juju import JujuModelHandle
 from juju.backend import JujuExecOutput
+from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.fixtures import chaos_tools
@@ -46,6 +47,14 @@ class ClosingApiStub:
 
 class KubernetesStub(KubernetesBackend):
     def __init__(self) -> None:
+        self.core_v1_api = MagicMock()
+        self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
+            items=[
+                k8s.V1Pod(
+                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"})
+                )
+            ]
+        )
         self.api_client = ClosingApiStub()
         self.crds: set[str] = set()
         self.crd_reads: list[str] = []
