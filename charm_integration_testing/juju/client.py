@@ -78,6 +78,12 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
+    def wait_for_unit_health(self, model: JujuModelHandle, unit: str, healthy: bool, timeout: timedelta) -> None:
+        self.logger.info(
+            "Waiting for %s in %s to become %s.", unit, model.uri, "active/idle" if healthy else "non-active/idle"
+        )
+        self.backend.wait_for_unit_health(model, unit, healthy, timeout)
+
     def multi_model_idle_for_period(
         self,
         models: list[JujuModelHandle],

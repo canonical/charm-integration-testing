@@ -367,3 +367,14 @@ def bundle_applications_integrations_exist(status: jubilant.Status, bundle: str)
             return ok, state
 
     return True, JujuWaitState()
+
+
+def unit_has_health(status: jubilant.Status, unit: str, healthy: bool) -> tuple[bool, JujuWaitState]:
+    """Require a reported unit status; a missing unit is not a stress response."""
+    info = get_unit_info(status, unit) if unit.split("/")[0] in status.apps else None
+    if info is None:
+        return False, JujuWaitState(message=f"Waiting for {unit} to report status")
+    workload, agent = info.workload_status.current, info.juju_status.current
+    known = workload not in {"", "unknown"} and agent not in {"", "unknown", "lost"}
+    ready = known and ((workload == "active" and agent == "idle") == healthy)
+    return ready, JujuWaitState(message=f"{unit}: workload={workload}, agent={agent}; healthy={healthy}")

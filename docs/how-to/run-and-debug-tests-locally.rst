@@ -237,3 +237,18 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+
+Total CPU stress
+~~~~~~~~~~~~~~~~
+
+``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
+one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+
+It temporarily limits the workload container to one CPU, waits for rollout and
+active/idle, then starts four stress workers. The selected unit must leave
+active/idle and recover after stress cleanup, before the CPU limit is restored.
+The ``cpu_stress_timeout`` fixture defaults to ten minutes per phase. Original
+CPU requests and limits are restored even after failure or skip. A StatefulSet
+patch configures the limit; it does not replace a missing chaos tool.

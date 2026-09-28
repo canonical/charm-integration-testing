@@ -2,6 +2,8 @@
 # See LICENSE file for licensing details.
 
 
+from dataclasses import replace
+
 import jubilant
 import pytest
 from juju import JujuIntegrationApplication
@@ -18,6 +20,7 @@ from juju_jubilant.wait import (
     get_unit_state,
     integrations_are_removed,
     saas_is_removed,
+    unit_has_health,
     units_have_message,
 )
 
@@ -625,3 +628,29 @@ class TestWaitConditions:
         assert result is False
         assert wait.noncompliant_applications["ghost-app"] is None
         assert wait.noncompliant_applications["other-ghost"] is None
+
+
+@pytest.mark.parametrize(
+    "workload,agent,healthy,expected",
+    [
+        ("active", "idle", True, True),
+        ("blocked", "idle", False, True),
+        ("active", "idle", False, False),
+        ("active", "lost", False, False),
+        ("unknown", "idle", False, False),
+        ("blocked", "idle", True, False),
+    ],
+)
+def test_unit_health(
+    sample_database_webapp_status: jubilant.Status, workload: str, agent: str, healthy: bool, expected: bool
+) -> None:
+    status = sample_database_webapp_status
+    unit = next(iter(status.apps["database"].units))
+    info = status.apps["database"].units[unit]
+    status.apps["database"].units[unit] = replace(
+        info,
+        workload_status=replace(info.workload_status, current=workload),
+        juju_status=replace(info.juju_status, current=agent),
+    )
+    assert unit_has_health(status, unit, healthy)[0] is expected
+    assert unit_has_health(status, "database/999", healthy)[0] is False

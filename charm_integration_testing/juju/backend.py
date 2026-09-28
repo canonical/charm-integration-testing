@@ -233,6 +233,11 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wait_for_unit_health(self, model: JujuModelHandle, unit: str, healthy: bool, timeout: timedelta) -> None:
+        """Wait for a unit to enter or leave active/idle."""
+        raise NotImplementedError
+
+    @abstractmethod
     def juju_status_text(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
