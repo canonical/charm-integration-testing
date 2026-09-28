@@ -471,12 +471,14 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
         match would otherwise destroy.
         """
         self._require_requires_role()
-        # Check the same required fields _open_connection() validates, so an in-progress relation
-        # no-ops instead of raising. A narrower heuristic (e.g. "uris" alone) would let a relation
-        # missing the rest raise, turning it into a failed teardown.
+        # Incomplete credentials mean cleanup can't run: raise PersistenceNotApplicable so the
+        # runner records a skip (not a successful cleanup) and keeps the tracked state, rather than
+        # forgetting orphaned canary data.
         creds = self._resolve_credentials()
         if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
-            return
+            raise PersistenceNotApplicable(
+                "Relation credentials are incomplete; cleanup cannot remove canary data yet."
+            )
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:

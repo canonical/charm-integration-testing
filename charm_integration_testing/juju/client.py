@@ -127,6 +127,10 @@ class JujuClient:
         endpoint_2: JujuIntegrationApplication,
         model: JujuModelHandle,
     ) -> None:
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
+
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
@@ -360,18 +364,23 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
-        """Validate all applications in the model.
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+    ) -> None:
+        """Validate all applications in the model, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
             model: Juju model reference
-            level: Validation level ("simple" or "deep", default: "simple")
+            level: Validation level ("simple" or "deep"), or None to skip functional validation
+                entirely (e.g. when only running a persistence op).
 
         Raises:
-            JujuValidationError: If any validation checks fail.
+            JujuValidationError: If any validation or persistence checks fail.
         """
         # Collect applications for validators
         applications = self.backend.list_applications(model)
@@ -379,17 +388,23 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
-            # Phase 2: This will trigger Ops framework validation
-            # Phase 1: This is a no-op, just a placeholder
-            for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                results.setdefault(unit, []).extend(unit_results)
+            if level is not None:
+                # Phase 2: This will trigger Ops framework validation
+                # Phase 1: This is a no-op, just a placeholder
+                for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                    results.setdefault(unit, []).extend(unit_results)
 
-            # Call extensions (Phase 1 validation happens here)
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_validate(model, application, level).items():
+                # Call extensions (Phase 1 validation happens here)
+                for extension in self.extensions:
+                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                        results.setdefault(unit, []).extend(unit_results)
+
+            for extension, persistence_operation in persistence_operations:
+                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:
