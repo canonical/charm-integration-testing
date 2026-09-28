@@ -11,6 +11,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+from chaos_client import ResourceConstraintsClient
 from extensions import (
     ConfigureLivepatchServerExtension,
     IstioMeshExtension,
@@ -392,6 +393,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Path to the unified charm overrides directory used by bundle-builder-x.",
     )
     parser.addoption(
+        "--charm-resource-constraints",
+        type=str,
+        default="./static/charm-resource-constraints/",
+        help="Path to the per-charm chaos resource constraints directory (e.g. stress amounts).",
+    )
+    parser.addoption(
         "--juju-upgrade-target-version",
         type=str,
         default=None,
@@ -624,6 +631,26 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
+
+
+@pytest.fixture
+def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.Logger) -> ResourceConstraintsClient:
+    """Client for reading per-charm chaos resource constraints, tolerating a missing directory.
+
+    Unlike ``--charm-overrides``, an absent or unset ``--charm-resource-constraints`` directory is
+    not an error: it simply means no charm has customized its chaos parameters yet.
+    """
+    value = request.config.getoption("--charm-resource-constraints")
+    constraints_dir: Path | None = None
+    if value:
+        assert isinstance(value, str)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = Path(request.config.rootpath) / candidate
+        candidate = candidate.resolve()
+        if candidate.is_dir():
+            constraints_dir = candidate
+    return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
 
 
 @pytest.fixture
