@@ -16,7 +16,7 @@ from test_suite.fixtures.chaos_tools import ChaosTool
 MODEL = JujuModelHandle(controller="controller", model="model")
 
 
-@pytest.mark.parametrize("failure", [None, "stress", "status", "skip", "cleanup"])
+@pytest.mark.parametrize("failure", [None, "stress", "status", "skip", "cleanup", "diagnostics"])
 def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: str | None) -> None:
     # GIVEN a single StatefulSet workload and recorded lifecycle operations
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
@@ -55,6 +55,10 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     terminating.metadata.deletion_timestamp = datetime.now(timezone.utc)
     kubernetes.get_charm_pods.return_value = [completed, failed, terminating, pod]
     events: list[str] = []
+    snapshot = MagicMock()
+    if failure == "diagnostics":
+        snapshot.side_effect = [None, None, RuntimeError("diagnostic collection failed")]
+    monkeypatch.setattr(module, "log_cpu_stress_snapshot", snapshot)
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: {ChaosTool.LITMUS})
 
     @contextmanager
@@ -103,6 +107,7 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
             module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes)
         assert events[-2:] == ["cleanup", "restore"]
         juju.validate_model.assert_not_called()
+    assert snapshot.call_args.args[-1] == "before cleanup"
 
 
 @pytest.mark.parametrize("kubernetes", [False, True])
