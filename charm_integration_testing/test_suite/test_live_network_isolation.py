@@ -4,8 +4,9 @@
 from datetime import timedelta
 
 import pytest
-from chaos_client import ChaosClient
-from juju import JujuClient, JujuModelHandle, JujuWaitTimeoutError, is_agent_disconnected
+from chaos_client import MetaChaosClient
+from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClient
 
 from .scheduler.states import State
 
@@ -13,28 +14,27 @@ from .scheduler.states import State
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_live_network_isolation(
     juju_client: JujuClient,
-    chaos_client: ChaosClient | None,
+    require_chaos_tool: MetaChaosClient,
+    kubernetes_client: KubernetesClient | None,
     target_model_ref: JujuModelHandle,
     target_application: str,
 ) -> None:
-    if chaos_client is None:
-        pytest.skip("No ChaosClient for the target cloud (network isolation is Kubernetes-only).")
+    if kubernetes_client is None:
+        pytest.skip("Network isolation requires Kubernetes.")
 
     unit = f"{target_application}/0"
 
+    # Establish a healthy baseline so an existing failure cannot satisfy the test.
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15), strict_timeout=True)
     try:
-        chaos_client.isolate_network(model=target_model_ref.model, unit=unit)
-        try:
-            # Debounced against update-status blips; fails immediately if the Juju agent disconnects.
-            juju_client.unhealthy_for_period(target_application, model=target_model_ref, timeout=timedelta(minutes=10))
-        except JujuWaitTimeoutError as exc:
-            if is_agent_disconnected(exc.wait_state):
-                raise
-            # Still active at timeout; validators are the ground truth for workload health.
-            juju_client.validate_model(model=target_model_ref, level="deep")
+        require_chaos_tool.isolate_network(model=target_model_ref.model, unit=unit)
+        # Debounced against update-status blips; agent disconnection and timeout fail the test.
+        juju_client.unhealthy_for_period(
+            target_application, model=target_model_ref, timeout=timedelta(minutes=10), strict_timeout=True
+        )
     finally:
-        chaos_client.remove_network_isolation(model=target_model_ref.model, unit=unit)
+        require_chaos_tool.remove_network_isolation(model=target_model_ref.model, unit=unit)
 
     # Wait for self-recovery
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15), strict_timeout=True)
     juju_client.validate_model(model=target_model_ref, level="simple")

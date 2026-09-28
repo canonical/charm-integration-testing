@@ -12,7 +12,6 @@ from .backend import (
     JujuUnitState,
     JujuWaitState,
     JujuWaitTimeoutError,
-    is_agent_disconnected,
     warn_performance,
 )
 from .client import JujuClient, JujuValidationError
@@ -51,6 +50,5 @@ __all__ = [
     "JujuWaitState",
     "JujuWaitTimeoutError",
     "ParsedOfferUrl",
-    "is_agent_disconnected",
     "warn_performance",
 ]

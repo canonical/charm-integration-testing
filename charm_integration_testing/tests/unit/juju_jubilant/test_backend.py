@@ -1022,7 +1022,9 @@ class TestJubilantBackend:
                     count=3,
                 )
             assert stub.call_count == 1
-            assert exc_info.value.wait_state.message == "Juju agent disconnected"
+            agent = exc_info.value.wait_state.noncompliant_unit_agents["target/0"]
+            assert agent is not None
+            assert agent.status == "lost"
 
         def test_wait_unhealthy_never_triggers_when_healthy(self) -> None:
             # GIVEN a fully healthy unit (active workload, idle agent)

@@ -17,6 +17,11 @@ from juju import (
 )
 
 
+def is_agent_disconnected(wait_state: JujuWaitState) -> bool:
+    """True if any noncompliant unit agent is 'lost' (disconnected from the controller)."""
+    return any(state is not None and state.status == "lost" for state in wait_state.noncompliant_unit_agents.values())
+
+
 def _parse_bundle(
     bundle_path: str,
 ) -> tuple[list[str], list[tuple[JujuIntegrationApplication, JujuIntegrationApplication]]]:
@@ -204,11 +209,11 @@ def any_status_not_in(
         unit_statuses=unit_statuses,
         unit_agent_statuses=unit_agent_statuses,
     )
-    if is_compliant:
-        return False, dataclasses.replace(
-            wait_state, message=wait_state.message.replace("waiting for", "waiting to leave", 1)
-        )
-    return True, dataclasses.replace(wait_state, message=wait_state.message.replace("waiting for", "left", 1))
+    has_noncompliant_status = not is_compliant
+    transition = "left" if has_noncompliant_status else "waiting to leave"
+    message = wait_state.message.replace("waiting for", transition, 1)
+    updated_state = dataclasses.replace(wait_state, message=message)
+    return has_noncompliant_status, updated_state
 
 
 def applications_are_scaled(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:

@@ -31,7 +31,6 @@ from juju import (
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
-    is_agent_disconnected,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
@@ -51,6 +50,7 @@ from .wait import (
     applications_have_no_units,
     bundle_applications_integrations_exist,
     integrations_are_removed,
+    is_agent_disconnected,
     saas_is_removed,
     units_have_message,
 )
@@ -296,10 +296,7 @@ class JubilantBackend(JujuCmdBackend):
     ) -> None:
         def agent_disconnected(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
             _, wait_state = any_status_not_in(status, application, unit_agent_statuses={"idle"})
-            disconnected = is_agent_disconnected(wait_state)
-            if disconnected:
-                wait_state = dataclasses.replace(wait_state, message="Juju agent disconnected")
-            return disconnected, wait_state
+            return is_agent_disconnected(wait_state), wait_state
 
         def left_active(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
             if application not in status.apps:
