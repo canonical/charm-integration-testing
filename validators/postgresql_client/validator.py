@@ -1,6 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
+import re
 import time
 import urllib.parse
 import uuid
@@ -8,14 +10,85 @@ import uuid
 import psycopg2
 
 from validators.base import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
 )
 
+# Table name prefix for persistence-validator canary tables. Kept as a module constant so
+# cleanup() (which has no per-call state to work from) can discover every canary table it may
+# have created by pattern rather than by identifier.
+_CANARY_TABLE_PREFIX = "validator_canary_"
 
-class PostgreSQLClientValidator(BaseValidator):
+# prepare() masks its identifier to 63 bits, so a genuine canary identifier never exceeds this
+# value. cleanup()'s discovery regex only checks a candidate table name's *shape* (prefix + 20
+# digits); this bound lets it also reject an out-of-range look-alike with the right shape that
+# prepare() couldn't have produced.
+_MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+
+
+def _quote_identifier(name: str) -> str:
+    """Safely quote a SQL identifier for interpolation into a query string.
+
+    Doubling embedded double-quotes is the standard, connection-independent way to escape a
+    Postgres identifier (unlike string literals, quoted identifiers do not process backslash
+    escapes). Used instead of ``psycopg2.extensions.quote_ident``, which requires a live
+    connection/cursor instance and so cannot be unit-tested against a stub.
+    """
+    return '"' + name.replace('"', '""') + '"'
+
+
+class _PostgreSQLConnectionMixin:
+    """Shared credential-resolution and connection helpers for postgresql_client validators.
+
+    Both ``PostgreSQLClientValidator`` (health probe) and ``PostgreSQLClientPersistenceValidator``
+    (durability probe) need to resolve the same relation credentials and open the same kind of
+    psycopg2 connection, so that logic lives here once instead of being duplicated.
+    """
+
+    def _resolve_credentials(self) -> dict[str, str]:
+        """Resolve credentials from the relation databag or Juju secrets."""
+        return {
+            **self.resolve_secret("secret-user", "username", "password", "uris"),  # type: ignore[attr-defined]
+            **self.resolve_secret("secret-tls", "tls", "tls-ca"),  # type: ignore[attr-defined]
+        }
+
+    def _connect(self, uri: str) -> "psycopg2.extensions.connection":
+        """Open a psycopg2 connection using a PostgreSQL URI."""
+        return psycopg2.connect(dsn=uri, connect_timeout=5)
+
+    def _safe_uri_string(self, uri: str) -> str:
+        parsed = urllib.parse.urlsplit(uri)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        safe_target = f"{host}{port}{parsed.path or ''}"
+        return safe_target
+
+    def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
+        """Verify the database in the URI matches the `database` field in the databag."""
+        try:
+            parsed = urllib.parse.urlparse(uri)
+            uri_db = urllib.parse.unquote(parsed.path.lstrip("/"))
+        except Exception as exc:
+            return ValidationCheck(name="database_consistency", passed=False, message=f"Could not parse URI: {exc}")
+        if uri_db == expected_db:
+            return ValidationCheck(
+                name="database_consistency",
+                passed=True,
+                message=f"URI database '{uri_db}' matches databag 'database' field.",
+            )
+        return ValidationCheck(
+            name="database_consistency",
+            passed=False,
+            message=f"URI database '{uri_db}' does not match databag 'database' field '{expected_db}'.",
+        )
+
+
+class PostgreSQLClientValidator(_PostgreSQLConnectionMixin, BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role != "requires":
             return self._skipped_result_due_to_role(level, self.role)
@@ -110,10 +183,8 @@ class PostgreSQLClientValidator(BaseValidator):
             return self._make_result(level="deep", checks=checks)
 
         # --- 5. Connect ---
-        # Latency is timed from here, not from the top of the function, so that
-        # Juju secret/relation-data resolution (steps 1-4) - which can be slow for
-        # cross-model relations independent of the database itself - is not counted
-        # against the database round-trip budget below.
+        # Latency is timed from here, not from the top, so slow Juju secret/relation-data
+        # resolution (steps 1-4) isn't counted against the database round-trip budget below.
         start_time = time.monotonic()
         try:
             conn = self._connect(uri)
@@ -233,25 +304,6 @@ class PostgreSQLClientValidator(BaseValidator):
 
         return self._make_result(level="deep", checks=checks)
 
-    def _check_database_consistency(self, uri: str, expected_db: str) -> ValidationCheck:
-        """Verify the database in the URI matches the `database` field in the databag."""
-        try:
-            parsed = urllib.parse.urlparse(uri)
-            uri_db = urllib.parse.unquote(parsed.path.lstrip("/"))
-        except Exception as exc:
-            return ValidationCheck(name="database_consistency", passed=False, message=f"Could not parse URI: {exc}")
-        if uri_db == expected_db:
-            return ValidationCheck(
-                name="database_consistency",
-                passed=True,
-                message=f"URI database '{uri_db}' matches databag 'database' field.",
-            )
-        return ValidationCheck(
-            name="database_consistency",
-            passed=False,
-            message=f"URI database '{uri_db}' does not match databag 'database' field '{expected_db}'.",
-        )
-
     def _check_relation_exists(self, level: ValidationLevel) -> ValidationResult | None:
         """Return an ERROR result if the remote app is absent, else None."""
         if not self.relation_exists():
@@ -261,13 +313,6 @@ class PostgreSQLClientValidator(BaseValidator):
                 error=f"No remote application on relation '{self.endpoint}'.",
             )
         return None
-
-    def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve credentials from the relation databag or Juju secrets."""
-        return {
-            **self.resolve_secret("secret-user", "username", "password", "uris"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
-        }
 
     def _check_extensions(self, cur: "psycopg2.extensions.cursor") -> ValidationCheck | None:
         """Verify declared extensions are installed. Returns None when field is absent."""
@@ -287,13 +332,280 @@ class PostgreSQLClientValidator(BaseValidator):
             message="OK" if not missing else f"Missing: {', '.join(missing)}",
         )
 
-    def _connect(self, uri: str) -> "psycopg2.extensions.connection":
-        """Open a psycopg2 connection using a PostgreSQL URI."""
-        return psycopg2.connect(dsn=uri, connect_timeout=5)
 
-    def _safe_uri_string(self, uri: str) -> str:
-        parsed = urllib.parse.urlsplit(uri)
-        host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        safe_target = f"{host}{port}{parsed.path or ''}"
-        return safe_target
+class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersistenceValidator):
+    """Reference persistence validator implementation (see SQ103).
+
+    Each validator instance owns a dedicated canary table named
+    ``validator_canary_{scope_token}_{identifier}``, where ``scope_token`` is a fixed-width hash of
+    this model's UUID, relation ID and unit name (see ``_canary_table_prefix``) and ``identifier``
+    is a fixed-width, zero-padded value chosen by ``prepare()`` and carried forward by the caller
+    (the test harness) as ``PersistenceState.id``. Both components have a fixed length so
+    ``cleanup()`` can validate the *exact* shape of a candidate table name before dropping it.
+    Every row also carries a random, unguessable ``token`` generated by ``prepare()`` and carried
+    forward as ``PersistenceState.token``, so ``checkpoint()`` can detect data loss (or a table
+    silently recreated from scratch) by counting only rows tagged with that token, rather than
+    trusting a plain ``count(*)`` that a coincidentally-sized but unrelated table could satisfy.
+    The token must be random rather than derived from ``identifier``/``ref``: those are
+    reproducible, so a backend that lost the canary data and recreated it from scratch (resetting
+    the ``SERIAL`` sequence, for example) would reproduce the same value and pass falsely. ``ref``
+    tracks how many tagged rows are expected so far.
+
+    Persistence only applies to the requirer side of the relation (the side holding credentials to
+    connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
+    ``PostgreSQLClientValidator.validate()`` performs for the functional probe.
+    """
+
+    def prepare(self) -> PersistenceState:
+        self._require_requires_role()
+        # Masked to 63 bits (rather than the full 128-bit uuid4().int) so the canary table name -
+        # which also carries a fixed-width scope token - stays within PostgreSQL's 63-byte
+        # identifier limit, while still leaving far more entropy than a test run could collide on.
+        identifier = uuid.uuid4().int & _MAX_CANARY_IDENTIFIER
+        table = self._canary_table_name(identifier)
+        # Random, unguessable per-run token written to every canary row and matched on by
+        # checkpoint(). It must not be derivable from `identifier`/`ref`: those are reproducible,
+        # so a backend that lost the canary data and recreated the table from scratch (resetting
+        # the SERIAL sequence) would reproduce the same value and pass falsely.
+        token = uuid.uuid4().hex
+        conn = self._open_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - table name is UUID-derived, not user input
+                cur.execute(
+                    f"CREATE TABLE {table} (id SERIAL PRIMARY KEY, marker TEXT NOT NULL, checkpoint_ref BIGINT NOT NULL, written_at TIMESTAMPTZ)"
+                )  # nosec B608
+                # checkpoint_ref=1 tracks that this row was written at prepare() time (ref=1)
+                cur.execute(
+                    f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, now())",  # nosec B608
+                    (token, 1),
+                )
+        finally:
+            conn.close()
+        return PersistenceState(id=identifier, ref=1, token=token)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        self._require_requires_role()
+        if expected.ref < 1:
+            # prepare() always returns ref=1 and checkpoint() only ever advances it, so a
+            # restored/malformed PersistenceState with ref <= 0 can't have come from a real prior
+            # run. Without this check, an empty or partially recreated table (actual == 0) could
+            # satisfy `actual == expected.ref` for ref=0 and report a false PASS.
+            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
+        table_name = self._canary_table_name(expected.id)
+        marker = expected.token
+        conn = self._open_connection()
+        qualified_table: str | None = None
+        try:
+            with conn.cursor() as cur:
+                # CREATE TABLE in prepare() is unqualified, so it resolves through search_path at
+                # creation time - which may not match current_schema() here if search_path changed
+                # since. Resolve the table's actual schema via information_schema rather than
+                # assuming current_schema(), so this always addresses the same table prepare() made.
+                schema = self._resolve_table_schema(cur, table_name)
+                if schema is None:
+                    matching = 0
+                else:
+                    qualified_table = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
+                    # Require id = checkpoint_ref, not just a matching row count: SERIAL ids are
+                    # assigned once and never reused, so a row deleted and replaced by a look-alike
+                    # (same token, same checkpoint_ref) gets a fresh, out-of-sequence id - it fails
+                    # this check even though a bare COUNT(*)/token match would not have caught it.
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {qualified_table} WHERE marker = %s "  # nosec B608
+                        f"AND id = checkpoint_ref AND checkpoint_ref BETWEEN 1 AND %s",
+                        (marker, expected.ref),
+                    )
+                    row = cur.fetchone()
+                    matching = int(row[0]) if row else 0
+
+                passed = matching == expected.ref
+                # Only write the next canary row when this checkpoint passed: ValidatorRunner only
+                # carries the advanced PersistenceState forward on a PASS result, so writing here
+                # unconditionally would grow `actual` past what the harness will ever compare
+                # against again, masking the mismatch behind permanent drift.
+                if passed and qualified_table is not None:
+                    next_ref = expected.ref + 1
+                    cur.execute(
+                        f"INSERT INTO {qualified_table} (marker, checkpoint_ref, written_at) "  # nosec B608
+                        f"VALUES (%s, %s, now())",
+                        (marker, next_ref),
+                    )
+        finally:
+            conn.close()
+
+        check = ValidationCheck(
+            name="row_count",
+            passed=passed,
+            message=(
+                f"Found expected {matching} marked row(s) in '{table_name}'."
+                if passed
+                else (
+                    f"Expected {expected.ref} marked row(s) with matching identity in '{table_name}', "
+                    f"found {matching}. Data may have been lost, or the table was recreated without "
+                    "the original canary rows."
+                )
+            ),
+        )
+        result = self._make_result(level="deep", checks=[check])
+        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token) if passed else expected
+        return result, new_state
+
+    def cleanup(self) -> None:
+        """Drop every canary table this validator instance (or a prior instance of it) created.
+
+        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so every
+        table matching this instance's canary name pattern is discovered via ``information_schema``
+        and dropped, rather than dropping one table by identifier. This also mops up a table left
+        behind by an interrupted run (e.g. a crash between ``prepare()`` and the next ``cleanup()``).
+
+        Discovery is scoped to a model+relation+unit namespace (see ``_canary_table_prefix``) so
+        concurrent relations sharing a database/schema can't drop each other's tables. It does not
+        sweep up a stray table from a relation removed and re-added under a new ID - an accepted
+        trade-off, since a fresh ``prepare()`` for the new ID starts its own table anyway.
+
+        The ``information_schema`` query only narrows candidates by *prefix* (a SQL ``LIKE`` can't
+        cheaply assert an exact suffix shape), so every candidate is re-checked against
+        ``_canary_table_regex()`` and ``_MAX_CANARY_IDENTIFIER`` before being dropped. This rejects
+        a same-prefixed but unrelated table (e.g. a hand-created ``..._backup``) that a bare prefix
+        match would otherwise destroy.
+        """
+        self._require_requires_role()
+        # Check the same required fields _open_connection() validates, so an in-progress relation
+        # no-ops instead of raising. A narrower heuristic (e.g. "uris" alone) would let a relation
+        # missing the rest raise, turning it into a failed teardown.
+        creds = self._resolve_credentials()
+        if not self.validate_schema(["uris", "database", "username", "password"], creds).passed:
+            return
+        conn = self._open_connection()
+        try:
+            with conn.cursor() as cur:
+                # Escape LIKE metacharacters in the prefix: `_` and `%` are wildcards in a LIKE
+                # pattern, and the relation-scoped prefix contains underscores, so without escaping
+                # this could match unrelated tables (e.g. `validatorXcanaryY123_456`).
+                prefix = self._canary_table_prefix()
+                escaped_prefix = prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%")
+                # CREATE TABLE is unqualified, so it resolves through search_path into the first
+                # writable schema (maybe not current_schema()). Search all schemas to avoid leaving
+                # canary tables behind; restrict to base tables so a same-prefixed view/foreign
+                # table can't make DROP TABLE fail and abort the rest of cleanup.
+                cur.execute(
+                    "SELECT table_schema, table_name FROM information_schema.tables "
+                    "WHERE table_type = 'BASE TABLE' "
+                    "AND table_name LIKE %s ESCAPE '\\'",
+                    (f"{escaped_prefix}%",),
+                )
+                tables = [(row[0], row[1]) for row in cur.fetchall()]
+            name_regex = self._canary_table_regex()
+            for schema, table in tables:
+                match = name_regex.fullmatch(table)
+                if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
+                    continue
+                quoted_table = f"{_quote_identifier(schema)}.{_quote_identifier(table)}"
+                with conn.cursor() as cur:
+                    cur.execute(f"DROP TABLE IF EXISTS {quoted_table}")  # nosec B608 - identifier is safely quoted
+        finally:
+            conn.close()
+
+    def _require_requires_role(self) -> None:
+        if self.role != "requires":
+            raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
+
+    def _open_connection(self) -> "psycopg2.extensions.connection":
+        creds = self._resolve_credentials()
+        data = self.databag | creds
+        # Unlike the functional validator's validate()/deep(), these methods have no ValidationCheck
+        # to report a schema failure through, so a missing/blank "uris" is raised rather than passed
+        # to psycopg2 as an empty dsn: libpq treats dsn="" as "use local/default connection
+        # parameters", silently creating/checking a canary against an unintended database.
+        schema_check = self.validate_schema(["uris", "database", "username", "password"], creds)
+        if not schema_check.passed:
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
+        uri = data["uris"].split(",")[0].strip()
+        if not uri:
+            # validate_schema() only sees the raw "uris" string, so a non-blank value that is
+            # still unusable once split/stripped (e.g. a leading comma) passes that check but would
+            # otherwise reach _connect() as dsn="", which libpq silently treats as "use
+            # local/default connection parameters".
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'uris' is blank")
+        # Mirrors the database/URI consistency check _validate_simple()/_validate_deep() perform
+        # before connecting: without it, a relation advertising uris=".../other_db" alongside a
+        # stale "database" field would silently write and verify canary data against the wrong
+        # database.
+        db_check = self._check_database_consistency(uri, data["database"])
+        if not db_check.passed:
+            raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {db_check.message}")
+        conn = self._connect(uri)
+        conn.autocommit = True
+        return conn
+
+    def _canary_table_prefix(self) -> str:
+        """Prefix scoped to this model, relation and unit, so cleanup discovery can't cross boundaries.
+
+        ``self.relation_id`` is stable for the lifetime of a given relation, but relation IDs are
+        assigned independently per model and can collide numerically across two different models
+        relating to the same backend. The unit name is also part of the scope: the runner runs
+        persistence validators on *every* unit of the application, so two units share both
+        ``model.uuid`` and ``relation_id`` while owning separate canary tables (see ``cleanup()``).
+        All three are folded into a single fixed-width ``scope_token`` - the first 16 hex characters
+        (64 bits) of a SHA-256 hash of ``f"{model_uuid}:{relation_id}:{unit_name}"`` - so the name
+        stays within PostgreSQL's 63-byte identifier limit regardless of how large ``relation_id``
+        gets, and ``cleanup()`` can validate its exact shape via ``_canary_table_regex()``.
+        """
+        scope_token = self._canary_scope_token()
+        return f"{_CANARY_TABLE_PREFIX}{scope_token}_"
+
+    def _canary_scope_token(self) -> str:
+        unit_name = self.charm.model.unit.name
+        digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
+        return hashlib.sha256(digest_input).hexdigest()[:16]
+
+    def _canary_table_regex(self) -> "re.Pattern[str]":
+        """Exact-shape match for this relation's canary tables: prefix + fixed-width digits.
+
+        Used by ``cleanup()`` to reject a table that merely shares the discovery prefix (e.g. a
+        hand-created ``..._backup``) but doesn't match the fixed-width zero-padded identifier
+        suffix ``_canary_table_name()`` always produces. Matching this shape alone isn't sufficient
+        - see ``cleanup()``, which also checks the captured ``identifier`` against
+        ``_MAX_CANARY_IDENTIFIER``.
+        """
+        return re.compile(re.escape(self._canary_table_prefix()) + r"(?P<identifier>[0-9]{20})")
+
+    def _canary_table_name(self, identifier: int) -> str:
+        # Zero-padded to a fixed 20 digits (prepare() masks identifiers to 63 bits, so never more
+        # than 19) so every canary name has the same shape, which _canary_table_regex() relies on.
+        # checkpoint() passes back an identifier from a possibly restored/malformed state, so
+        # range-check it here too rather than letting PostgreSQL truncate or reject the name.
+        if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(
+                f"canary identifier {identifier} is out of range " f"(expected 0..{_MAX_CANARY_IDENTIFIER})"
+            )
+        return f"{self._canary_table_prefix()}{identifier:020d}"
+
+    def _resolve_table_schema(self, cur: "psycopg2.extensions.cursor", table_name: str) -> str | None:
+        """Resolve the schema this validator's canary table currently lives in.
+
+        ``CREATE TABLE`` in ``prepare()`` is unqualified, so PostgreSQL resolves it through
+        ``search_path`` at creation time. Rather than re-deriving that via ``pg_table_is_visible()``
+        - which depends on the *current* connection's ``search_path`` and can disagree with
+        prepare()'s if the path changed in between - look the table up by its exact name across
+        every schema, independent of visibility. ``table_name`` is derived from a random,
+        effectively-unique per-run identifier (see ``_canary_table_name``), so in the common case
+        exactly one table matches, unambiguously identifying our canary regardless of search_path
+        drift. Only if more than one schema contains a same-named table (vanishingly unlikely) is
+        there genuine ambiguity: fall back to ``pg_table_is_visible()`` to pick whichever match the
+        *current* connection's unqualified name resolution would address.
+        """
+        cur.execute(
+            "SELECT n.nspname, pg_catalog.pg_table_is_visible(c.oid) FROM pg_catalog.pg_class c "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = %s AND c.relkind = 'r'",
+            (table_name,),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        if len(rows) == 1:
+            return str(rows[0][0])
+        visible = [schema for schema, is_visible in rows if is_visible]
+        return visible[0] if visible else str(rows[0][0])

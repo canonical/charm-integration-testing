@@ -2674,6 +2674,27 @@ type = "directory"
 url = "validators/base"
 
 [[package]]
+name = "validators-catalogue"
+version = "0.1.0"
+description = "Validator for catalogue interface"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+validators-base = "*"
+validators-test-utils = {version = "*", optional = true}
+
+[package.extras]
+dev = ["validators-test-utils"]
+
+[package.source]
+type = "directory"
+url = "validators/catalogue"
+
+[[package]]
 name = "validators-certificate-transfer"
 version = "0.1.0"
 description = "Validator for certificate_transfer interface"
@@ -3224,6 +3245,7 @@ pydantic = ">=2.0.0"
 validators-alertmanager-dispatch = "*"
 validators-azure-storage = "*"
 validators-base = "*"
+validators-catalogue = "*"
 validators-certificate-transfer = "*"
 validators-config-server = "*"
 validators-cross-model-mesh = "*"
@@ -3591,4 +3613,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "0922f58ae483aa3197d4a97ba5da71a0945cd0151ddef5b8b92714a1f9b8474c"
+content-hash = "647bea82072dc805060791d171bd9b3adc9286a3a259d973ac4d0c1b3e92207f"
