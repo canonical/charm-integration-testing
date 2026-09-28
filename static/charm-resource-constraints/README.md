@@ -1,7 +1,8 @@
 # Charm resource constraints
 
 Per-charm chaos test parameters (e.g. how much memory or CPU a stress
-experiment should apply), read by `ResourceConstraintsClient`
+experiment should apply, and for how long), read by
+`ResourceConstraintsClient`
 (`charm_integration_testing/chaos_client/resource_constraints.py`).
 
 This is a separate mechanism from `static/charm-overrides/`, which drives
@@ -23,20 +24,11 @@ constraints:
   - criteria:
       - track: "14"
         ubuntu_version: "22.04"
-    stress_memory_workers: 2
-    stress_memory_size_mb: 2048
-    duration_seconds: 60
+    memory_exhaustion_workers: 2
+    memory_exhaustion_size_mb: 2048
+    memory_exhaustion_duration_seconds: 60
+    memory_moderate_pressure_size_mb: 256
   - criteria:
       - track: "16"
-    stress_memory_size_mb: 4096
+    memory_exhaustion_size_mb: 4096
 ```
-
-### Supported fields
-
-- `stress_cpu_workers`
-- `stress_memory_workers`
-- `stress_memory_size_mb`
-- `fill_disk_size_mb`
-- `io_latency_delay_ms`
-- `io_latency_percent`
-- `duration_seconds`

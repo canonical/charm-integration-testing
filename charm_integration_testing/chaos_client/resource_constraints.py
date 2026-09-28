@@ -14,16 +14,42 @@ from bundle_builder_x.overrides import CharmOverridesCriteria
 
 
 class CharmResourceConstraints(BaseModel):
-    """One chaos-parameter block, applied when its ``criteria`` match the deployed version."""
+    """One chaos-parameter block, applied when its ``criteria`` match the deployed version.
+
+    Fields are grouped by chaos scenario, not by ``ChaosClient`` method, because a charm may need
+    different values for the "moderate pressure" and "total exhaustion" variant of the same
+    underlying stress operation. Only scenarios backed by an implemented ``ChaosClient`` operation
+    are represented here; disk I/O saturation has no field yet because no client implements it, and
+    network isolation has none because ``isolate_network`` takes no tunable parameters.
+    """
 
     criteria: list[CharmOverridesCriteria] = Field(default_factory=list)
-    stress_cpu_workers: PositiveInt | None = None
-    stress_memory_workers: PositiveInt | None = None
-    stress_memory_size_mb: PositiveInt | None = None
-    fill_disk_size_mb: PositiveInt | None = None
-    io_latency_delay_ms: PositiveInt | None = None
-    io_latency_percent: int | None = None
-    duration_seconds: PositiveInt | None = None
+
+    # CPU total exhaustion (backed by ChaosClient.stress_cpu)
+    cpu_exhaustion_workers: PositiveInt | None = None
+    cpu_exhaustion_duration_seconds: PositiveInt | None = None
+
+    # CPU moderate pressure (backed by ChaosClient.stress_cpu)
+    cpu_moderate_pressure_workers: PositiveInt | None = None
+    cpu_moderate_pressure_duration_seconds: PositiveInt | None = None
+
+    # Memory total exhaustion (backed by ChaosClient.stress_memory)
+    memory_exhaustion_workers: PositiveInt | None = None
+    memory_exhaustion_size_mb: PositiveInt | None = None
+    memory_exhaustion_duration_seconds: PositiveInt | None = None
+
+    # Memory moderate pressure (backed by ChaosClient.stress_memory)
+    memory_moderate_pressure_workers: PositiveInt | None = None
+    memory_moderate_pressure_size_mb: PositiveInt | None = None
+    memory_moderate_pressure_duration_seconds: PositiveInt | None = None
+
+    # Disk fill (backed by ChaosClient.fill_disk)
+    disk_fill_size_mb: PositiveInt | None = None
+
+    # Disk I/O latency (backed by ChaosClient.io_latency)
+    disk_io_latency_delay_ms: PositiveInt | None = None
+    disk_io_latency_percent: int | None = None
+    disk_io_latency_duration_seconds: PositiveInt | None = None
 
     def meets(self, channel: CharmChannel, ubuntu_version: str) -> bool:
         return all(criterion.meets(channel, ubuntu_version) for criterion in self.criteria)
