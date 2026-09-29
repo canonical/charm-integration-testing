@@ -12,7 +12,10 @@ from .scheduler.states import State
 
 @pytest.mark.state(requires=State.DEPLOYED)
 def test_scale_in_and_scale_out_charm(
-    juju_client: JujuClient, target_model_ref: JujuModelHandle, target_application: str
+    juju_client: JujuClient,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
+    target_application: str,
 ) -> None:
     # Get units
     num_units = juju_client.num_units(target_application, model=target_model_ref)
@@ -26,8 +29,12 @@ def test_scale_in_and_scale_out_charm(
     # Rescale application
     juju_client.scale_application(target_application, num_units, model=target_model_ref)
 
-    # Wait for return to idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Wait for return to idle
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations. For a CMR the persistence validator lives on the
+    # neighbor's requirer units, so validate there too.
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="simple")
