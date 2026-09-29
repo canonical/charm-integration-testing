@@ -3005,17 +3005,3 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
-
-
-@pytest.mark.parametrize("healthy", [True, False])
-def test_unit_health_wait_is_bounded(monkeypatch: pytest.MonkeyPatch, healthy: bool) -> None:
-    calls: list[tuple[JujuModelHandle, timedelta, bool]] = []
-
-    def wait(
-        self: JubilantBackend, model: JujuModelHandle, ready: object, *, timeout: timedelta, strict_timeout: bool
-    ) -> None:
-        calls.append((model, timeout, strict_timeout))
-
-    monkeypatch.setattr(JubilantBackend, "wait", wait)
-    JubilantBackend().wait_for_unit_health(TEST_MODEL, "app/0", healthy, timedelta(seconds=20))
-    assert calls == [(TEST_MODEL, timedelta(seconds=20), True)]

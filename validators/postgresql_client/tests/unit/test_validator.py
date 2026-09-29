@@ -1027,8 +1027,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         validator = _make_persistence_validator({})
 
         with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
-            # WHEN
-            validator.cleanup()
+            # WHEN / THEN
+            with pytest.raises(PersistenceNotApplicable):
+                validator.cleanup()
 
         # THEN no connection was attempted
         mock_connect.assert_not_called()
@@ -1040,8 +1041,9 @@ class TestPostgreSQLClientPersistenceValidatorCleanup:
         validator = _make_persistence_validator({"uris": "postgresql://x/y"})
 
         with patch("validators.postgresql_client.validator.psycopg2.connect") as mock_connect:
-            # WHEN
-            validator.cleanup()
+            # WHEN / THEN
+            with pytest.raises(PersistenceNotApplicable):
+                validator.cleanup()
 
-        # THEN no connection was attempted and no exception was raised
+        # THEN no connection was attempted
         mock_connect.assert_not_called()

@@ -12,17 +12,14 @@ from kubernetes_client.cpu_limit import temporary_cpu_limit
 
 
 @pytest.mark.parametrize("saved", [{}, {"limits": {"cpu": "2", "memory": "1Gi"}, "requests": {"cpu": "1500m"}}])
-@pytest.mark.parametrize("failure", [None, "body", "patch", "replacement", "concurrent", "memory", "hook"])
+@pytest.mark.parametrize("failure", [None, "body", "patch", "replacement", "concurrent", "memory"])
 def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: str | None) -> None:
     # GIVEN a StatefulSet with optional pre-existing CPU and memory resources
     events: list[str] = []
 
     class Extension(KubernetesExtension):
         def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-            assert (namespace, statefulset_name) == ("model", "app")
-            events.append("hook")
-            if failure == "hook" and events.count("hook") == 1:
-                raise RuntimeError("hook failed")
+            raise AssertionError("CPU resource patches must not invoke restart hooks")
 
     kubernetes = KubernetesClient(backend=MagicMock(), extensions=[Extension()])
     kubernetes.wait_for_statefulset_restart = MagicMock(side_effect=lambda *a, **kw: events.append("wait"))
@@ -50,7 +47,7 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
 
     def exercise() -> None:
         with temporary_cpu_limit(kubernetes, "model", "app", "uid", "workload", 60):
-            assert events == ["patch", "hook", "wait"]
+            assert events == ["patch", "wait"]
             resources = value["spec"]["template"]["spec"]["containers"][0]["resources"]
             assert resources["limits"]["cpu"] == "1"
             if failure == "replacement":
@@ -66,7 +63,7 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
     if failure in (None, "memory"):
         exercise()
     else:
-        error = RuntimeError if failure in ("replacement", "concurrent", "hook") else TimeoutError
+        error = RuntimeError if failure in ("replacement", "concurrent") else TimeoutError
         with pytest.raises(error):
             exercise()
     if failure in ("replacement", "concurrent"):
@@ -79,4 +76,4 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
     assert value["spec"]["template"]["spec"]["containers"][0]["resources"] == saved
     assert patches == 2
 
-    assert events[-3:] == ["patch", "hook", "wait"]
+    assert events[-2:] == ["patch", "wait"]

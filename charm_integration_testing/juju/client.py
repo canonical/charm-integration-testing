@@ -78,12 +78,6 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
-    def wait_for_unit_health(self, model: JujuModelHandle, unit: str, healthy: bool, timeout: timedelta) -> None:
-        self.logger.info(
-            "Waiting for %s in %s to become %s.", unit, model.uri, "active/idle" if healthy else "non-active/idle"
-        )
-        self.backend.wait_for_unit_health(model, unit, healthy, timeout)
-
     def multi_model_idle_for_period(
         self,
         models: list[JujuModelHandle],
@@ -133,6 +127,10 @@ class JujuClient:
         endpoint_2: JujuIntegrationApplication,
         model: JujuModelHandle,
     ) -> None:
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
+
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
@@ -367,20 +365,25 @@ class JujuClient:
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
     def validate_model(
-        self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+        *,
+        applications: list[str] | None = None,
     ) -> None:
-        """Validate selected applications, or all applications in the model.
+        """Validate selected or all applications, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
             model: Juju model reference
-            level: Validation level ("simple" or "deep", default: "simple")
+            level: Validation level ("simple" or "deep"), or None to skip functional validation
+                entirely (e.g. when only running a persistence op).
             applications: Application names to validate; None selects all applications.
 
         Raises:
-            JujuValidationError: If any validation checks fail.
+            JujuValidationError: If any validation or persistence checks fail.
         """
         # Collect applications for validators
         if applications is None:
@@ -389,17 +392,23 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
-            # Phase 2: This will trigger Ops framework validation
-            # Phase 1: This is a no-op, just a placeholder
-            for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                results.setdefault(unit, []).extend(unit_results)
+            if level is not None:
+                # Phase 2: This will trigger Ops framework validation
+                # Phase 1: This is a no-op, just a placeholder
+                for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                    results.setdefault(unit, []).extend(unit_results)
 
-            # Call extensions (Phase 1 validation happens here)
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_validate(model, application, level).items():
+                # Call extensions (Phase 1 validation happens here)
+                for extension in self.extensions:
+                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                        results.setdefault(unit, []).extend(unit_results)
+
+            for extension, persistence_operation in persistence_operations:
+                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:

@@ -316,15 +316,16 @@ class KubernetesClient:
             )
             raise
 
+        for extension in self.extensions:
+            extension.post_restart_statefulset(namespace, statefulset_name)
+
     def patch_statefulset_template(
         self, namespace: str, statefulset_name: str, body: dict[str, Any] | list[dict[str, Any]]
     ) -> None:
-        """Patch a Pod template and run restart hooks before waiting for readiness."""
+        """Patch a Pod template without invoking explicit restart hooks."""
         self.backend.apps_v1_api.patch_namespaced_stateful_set(
             name=statefulset_name, namespace=namespace, body=body, _request_timeout=30
         )
-        for extension in self.extensions:
-            extension.post_restart_statefulset(namespace, statefulset_name)
 
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
         """

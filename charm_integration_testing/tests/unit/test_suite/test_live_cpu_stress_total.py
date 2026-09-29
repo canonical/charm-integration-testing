@@ -149,7 +149,6 @@ def test_cleanup_and_recovery_order(
         assert events[-1] == "restore"
         if failure not in {"validation", "neighbor_validation"}:
             juju.validate_model.assert_not_called()
-    juju.wait_for_unit_health.assert_not_called()
 
 
 @pytest.mark.parametrize("kubernetes", [False, True])

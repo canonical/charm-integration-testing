@@ -79,9 +79,6 @@ class NullJujuBackend(JujuBackend):
     def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
-    def wait_for_unit_health(self, model: JujuModelHandle, unit: str, healthy: bool, timeout: timedelta) -> None:
-        raise NotImplementedError
-
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
