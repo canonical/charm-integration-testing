@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
@@ -256,15 +257,32 @@ def register_preexisting_resources(
         )
 
 
-@pytest.fixture
-def juju_client(
+@pytest.fixture(scope="session")
+def persistence_extension(
+    validators_path: Path | None,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    uv_file: Path | None,
+) -> ValidatorInjectorExtension:
+    """Session-scoped validator injector, and the owner of the canary persistence state.
+
+    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    so the state it holds is the single source of truth. The persistence op is auto-decided from
+    that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
+    (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
+    applications or integrations are torn down. It also re-keys itself on model migration, so
+    tests never touch the state directly.
+    """
+    return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
+
+
+def _build_juju_client(
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -280,10 +298,85 @@ def juju_client(
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
+
+
+@pytest.fixture
+def juju_client(
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
+) -> JujuClient:
+    return _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_persistence_state_for_resumed_run(
+    request: pytest.FixtureRequest,
+    persistence_extension: ValidatorInjectorExtension,
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    target_model_ref: JujuModelHandle,
+    is_cmr_test: bool,
+    neighbor_model_ref: JujuModelHandle | None,
+    register_preexisting_resources: None,
+) -> None:
+    """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
+
+    The state is normally populated by ``test_deploy`` calling ``prepare()``. When a run resumes
+    directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy`` never runs this
+    session), it would otherwise stay empty: disruptive tests' "checkpoint" calls would then pass
+    no refs at all, which the runner treats as trivially successful, silently skipping persistence
+    validation for the whole run.
+
+    To avoid that silent gap, re-run "prepare" against the already-deployed target application as
+    soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
+    can run from it calls ``prepare()`` itself. Resuming into any other post-deploy state is not
+    handled here (the application topology at those states isn't guaranteed), so persistence
+    validation is skipped for those runs with a loud warning rather than a silent one.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
+        # test_deploy will run this session (or there's no model yet to seed against).
+        return
+
+    if current_state == State.NEIGHBOR_ONLY:
+        # Handled by whichever test transitions out of this state (see the docstring above) -
+        # no seeding and no warning needed.
+        return
+
+    if current_state != State.DEPLOYED:
+        warnings.warn(
+            f"Resuming at --current-state={current_state.value} does not seed persistence state; "
+            "data persistence validation will be skipped for this run since test_deploy did not "
+            "run and no seeding is implemented for this resume point.",
+            UserWarning,
+        )
+        return
+
+    client = _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+    models = [target_model_ref]
+    if is_cmr_test and neighbor_model_ref is not None:
+        models.append(neighbor_model_ref)
+    # prepare() writes through relation credentials, which can race hooks still settling when
+    # resuming with --current-state=deployed. test_deploy always waits for the model(s) to go idle
+    # first - match that here.
+    client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+    for model_ref in models:
+        client.validate_model(model=model_ref, level=None)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -474,7 +567,7 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def validators_path() -> Path | None:
     file_path_env = os.environ.get("VALIDATORS_PATH")
     if not file_path_env:
@@ -661,7 +754,7 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def uv_file() -> Path | None:
     file_path = os.environ.get("UV_FILE")
     if file_path:
@@ -669,7 +762,7 @@ def uv_file() -> Path | None:
     return Path(file_path) if file_path else None
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def ubuntu_pro_token() -> str | None:
     token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:
