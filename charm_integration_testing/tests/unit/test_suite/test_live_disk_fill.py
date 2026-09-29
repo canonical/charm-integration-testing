@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,6 +50,30 @@ def test_disk_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatch) ->
     if failure in {"baseline", "df", "fill", "observe", "cleanup"}:
         assert "recovery" not in events
         juju.validate_model.assert_not_called()
+
+
+def test_file_remaining_after_cleanup_fails_before_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    # GIVEN successful allocation and cleanup calls, but the fill file remains
+    juju, backend, chaos = MagicMock(), MagicMock(), MagicMock()
+
+    def execute(model: JujuModelHandle, unit: str, command: str) -> SimpleNamespace:
+        if command.startswith("test ! -e ./"):
+            chaos.cleanup.assert_called_once()
+            return SimpleNamespace(return_code=1)
+        return SimpleNamespace(return_code=0, stdout="header\n/dev/test 200000 10000 100000 5% /", stderr="")
+
+    backend.exec_unit.side_effect = execute
+    monkeypatch.setattr("test_suite.test_live_disk_fill.sleep", lambda seconds: None)
+
+    # WHEN removal verification fails, THEN recovery and validation cannot succeed
+    with pytest.raises(AssertionError, match="was not removed from target/0 during cleanup"):
+        run_disk_fill(juju, backend, chaos, MODEL, "target", None)
+
+    path = chaos.fill_disk.call_args.kwargs["path"]
+    chaos.cleanup.assert_called_once_with(model=MODEL, unit="target/0", path=path)
+    backend.exec_unit.assert_called_with(MODEL, "target/0", f"test ! -e ./{path}")
+    assert juju.multi_model_idle_for_period.call_count == 1  # Baseline only
+    juju.validate_model.assert_not_called()
 
 
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
