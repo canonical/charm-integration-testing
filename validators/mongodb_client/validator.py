@@ -445,7 +445,14 @@ class MongoDBClientPersistenceValidator(_MongoDBConnectionMixin, BasePersistence
             # otherwise reach MongoClient() with a blank host.
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: first entry in 'endpoints' is blank")
         client = self._build_mongodb_client(creds)
-        return client, client[self.databag["database"]]
+        try:
+            return client, client[self.databag["database"]]
+        except Exception:
+            # client[...] can raise (e.g. an invalid database name containing "$" or a NUL) before
+            # the caller ever reaches its own try/finally cleanup scope - clean up here so a bad
+            # database value doesn't leak the client connection or its temporary CA file.
+            self._cleanup_client(client)
+            raise
 
     def _canary_collection_prefix(self) -> str:
         """Prefix scoped to this model, relation and unit, so cleanup discovery can't cross boundaries.

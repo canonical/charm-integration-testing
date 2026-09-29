@@ -193,12 +193,16 @@ class PersistenceMongoClientStub:
     """Minimal connection stub for persistence tests; database_stub is returned by __getitem__()."""
 
     database_stub: PersistenceDatabaseStub = field(default_factory=PersistenceDatabaseStub)
+    getitem_error: Exception | None = None
+    close_called: bool = False
 
     def __getitem__(self, name: str) -> PersistenceDatabaseStub:
+        if self.getitem_error:
+            raise self.getitem_error
         return self.database_stub
 
     def close(self) -> None:
-        pass
+        self.close_called = True
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +641,25 @@ class TestMongoDBClientPersistenceValidatorCheckpoint:
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
                 validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=-1))
+
+
+class TestMongoDBClientPersistenceValidatorOpenDatabase:
+    def test_cleans_up_client_and_ca_file_when_database_selection_raises(self) -> None:
+        # GIVEN an invalid database name that pymongo rejects only once selected (client[...]),
+        # not up front by validate_schema()/MongoClient() construction
+        databag = {**VALID_DATABAG, "tls-ca": "fake-ca-content"}
+        validator = _make_persistence_validator(databag)
+        client = PersistenceMongoClientStub(getitem_error=ValueError("invalid database name"))
+
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=client):
+            # WHEN
+            with pytest.raises(ValueError, match="invalid database name"):
+                validator._open_database()
+
+        # THEN the client and its temporary CA file are cleaned up rather than leaked, even though
+        # the failure happens before the caller's own try/finally scope is entered
+        assert client.close_called
+        assert validator.ca_file_path is None
 
 
 class TestMongoDBClientPersistenceValidatorCleanup:
