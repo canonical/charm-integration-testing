@@ -34,6 +34,7 @@ class CpuStressProbe:
         self.unit = unit
         self.container = container
         self.stop = Event()
+        self.previous_kernel: dict[str, Any] | None = None
 
     def _run(self, args: list[str], input_text: str | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(args, input=input_text, text=True, capture_output=True, timeout=8, check=False)
@@ -113,10 +114,43 @@ class CpuStressProbe:
             return {"unit": self.unit, "present": False}
         return {"unit": self.unit, "workload": unit.get("workload-status"), "agent": unit.get("juju-status")}
 
+    def _kernel(self) -> dict[str, Any]:
+        script = Path(__file__).with_name("temporary_cpu_snapshot.py").read_text()
+        result = self._kubectl(
+            ["exec", "-i", self.pod, "-c", self.container, "--", "timeout", "6s", "python3", "-"], script
+        )
+        if result.returncode:
+            self.previous_kernel = None
+            raise RuntimeError("CPU kernel probe unavailable (exec, Python or procfs access)")
+        current: dict[str, Any] = json.loads(result.stdout)
+        previous = self.previous_kernel
+        self.previous_kernel = current if current.get("available") else None
+        if previous and current.get("available") and previous["identity"] == current["identity"]:
+            elapsed = current["monotonic_seconds"] - previous["monotonic_seconds"]
+            delta = {
+                key: value - previous["cpu_stat"][key]
+                for key, value in current["cpu_stat"].items()
+                if key in previous["cpu_stat"]
+            }
+            if elapsed > 0 and all(value >= 0 for value in delta.values()):
+                current["interval_seconds"] = round(elapsed, 3)
+                current["cpu_stat_delta"] = delta
+                if "usage_usec" in delta:
+                    current["average_used_cores"] = round(delta["usage_usec"] / elapsed / 1_000_000, 4)
+                if delta.get("nr_periods", 0) > 0 and "nr_throttled" in delta:
+                    current["throttled_period_fraction"] = round(delta["nr_throttled"] / delta["nr_periods"], 4)
+                current["pressure_total_usec_delta"] = {
+                    key: values["total"] - previous["cpu_pressure"][key]["total"]
+                    for key, values in current["cpu_pressure"].items()
+                    if key in previous["cpu_pressure"]
+                }
+        return current
+
     def sample(self, phase: str) -> None:
         readers: list[tuple[str, Callable[[], Any]]] = [
             ("SQL", self._sql),
             ("CPU", self._metrics),
+            ("CPU kernel/workers", self._kernel),
             ("Juju", self._status),
         ]
         for label, read in readers:
@@ -147,8 +181,8 @@ class CpuStressProbe:
         finally:
             self.stop.set()
             if started:
-                # Three sequential commands, each bounded at eight seconds.
-                worker.join(timeout=30)
+                # Four sequential commands, each bounded at eight seconds.
+                worker.join(timeout=40)
                 if worker.is_alive():
                     LOGGER.warning("SQT-905 PROBE observer did not stop within its expected bound")
 

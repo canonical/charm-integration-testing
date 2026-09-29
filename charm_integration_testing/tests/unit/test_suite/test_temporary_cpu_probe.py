@@ -42,9 +42,12 @@ def test_probe_failure_does_not_skip_cpu_or_status_or_leak_output(
     status = MagicMock(return_value={"workload": {"current": "active"}, "agent": {"current": "idle"}})
     monkeypatch.setattr(probe, "_metrics", metrics)
     monkeypatch.setattr(probe, "_status", status)
+    kernel = MagicMock(return_value={"available": False})
+    monkeypatch.setattr(probe, "_kernel", kernel)
     probe.sample("during stress attempt")
     metrics.assert_called_once()
     status.assert_called_once()
+    kernel.assert_called_once()
     assert "TimeoutExpired" in caplog.text
     assert "secret command" not in caplog.text
 
@@ -82,7 +85,7 @@ def test_worker_stops_on_test_failure(monkeypatch: pytest.MonkeyPatch, probe: mo
         with probe.during_stress():
             raise TimeoutError("original failure")
     assert probe.stop.is_set()
-    worker.join.assert_called_once_with(timeout=30)
+    worker.join.assert_called_once_with(timeout=40)
 
 
 def test_after_cleanup_observations_do_not_claim_cleanup_succeeded(
@@ -116,3 +119,51 @@ def test_periodic_observer_samples_until_stopped(monkeypatch: pytest.MonkeyPatch
 def test_sql_nonzero_exit_is_not_success(monkeypatch: pytest.MonkeyPatch, probe: module.CpuStressProbe) -> None:
     monkeypatch.setattr(probe, "_kubectl", MagicMock(return_value=subprocess.CompletedProcess([], 1, "1\n", "")))
     assert probe._sql()["query_ok"] is False
+
+
+def test_kernel_counters_use_elapsed_time_and_reset_on_replacement(
+    monkeypatch: pytest.MonkeyPatch, probe: module.CpuStressProbe
+) -> None:
+    def payload(identity: str, timestamp: int, usage: int, periods: int, throttled: int) -> str:
+        return json.dumps(
+            {
+                "available": True,
+                "identity": [identity],
+                "monotonic_seconds": timestamp,
+                "cpu_stat": {"usage_usec": usage, "nr_periods": periods, "nr_throttled": throttled},
+                "cpu_pressure": {"some": {"total": timestamp * 100}},
+            }
+        )
+
+    run = MagicMock(
+        side_effect=[
+            subprocess.CompletedProcess([], 0, payload("original", 10, 1_000_000, 100, 10), ""),
+            subprocess.CompletedProcess([], 0, payload("original", 20, 9_000_000, 200, 90), ""),
+            subprocess.CompletedProcess([], 0, payload("replacement", 30, 12_000_000, 300, 100), ""),
+            subprocess.CompletedProcess([], 1, "secret", "secret"),
+        ]
+    )
+    monkeypatch.setattr(probe, "_kubectl", run)
+    assert "cpu_stat_delta" not in probe._kernel()
+    second = probe._kernel()
+    assert second["average_used_cores"] == 0.8
+    assert second["throttled_period_fraction"] == 0.8
+    assert second["pressure_total_usec_delta"] == {"some": 1000}
+    assert "cpu_stat_delta" not in probe._kernel()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        probe._kernel()
+    assert probe.previous_kernel is None
+    assert run.call_args.args[0][-4:] == ["timeout", "6s", "python3", "-"]
+
+
+@pytest.mark.parametrize("elapsed,usage", [(0, 10), (10, -1)])
+def test_kernel_does_not_report_invalid_counter_deltas(
+    monkeypatch: pytest.MonkeyPatch, probe: module.CpuStressProbe, elapsed: int, usage: int
+) -> None:
+    previous = {"available": True, "identity": [1], "monotonic_seconds": 10, "cpu_stat": {"usage_usec": 20}}
+    probe.previous_kernel = previous
+    current = {**previous, "monotonic_seconds": 10 + elapsed, "cpu_stat": {"usage_usec": 20 + usage}}
+    monkeypatch.setattr(
+        probe, "_kubectl", MagicMock(return_value=subprocess.CompletedProcess([], 0, json.dumps(current)))
+    )
+    assert "average_used_cores" not in probe._kernel()
