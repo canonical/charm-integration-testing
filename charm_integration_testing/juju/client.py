@@ -38,9 +38,6 @@ class JujuClient:
     logger: logging.Logger
     extensions: list[JujuExtension]
 
-    # Long enough to debounce transient update-status blips without masking a real degradation.
-    DEFAULT_UNHEALTHY_DEBOUNCE_COUNT = 130
-
     def __init__(
         self,
         backend: JujuBackend,
@@ -80,19 +77,6 @@ class JujuClient:
     ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
-
-    def unhealthy_for_period(
-        self,
-        application: str,
-        model: JujuModelHandle,
-        timeout: timedelta | None = None,
-        count: int = DEFAULT_UNHEALTHY_DEBOUNCE_COUNT,
-        strict_timeout: bool = False,
-    ) -> None:
-        self.logger.info(f"{self._waiting_timeout_log(timeout)} for '{application}' to become unhealthy.")
-        self.backend.wait_unhealthy(
-            model=model, application=application, timeout=timeout, count=count, strict_timeout=strict_timeout
-        )
 
     def multi_model_idle_for_period(
         self,
@@ -143,6 +127,10 @@ class JujuClient:
         endpoint_2: JujuIntegrationApplication,
         model: JujuModelHandle,
     ) -> None:
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
+
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
@@ -290,6 +278,14 @@ class JujuClient:
         )
         self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
 
+    def remove_saas(self, alias: str, *, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing SAAS proxy (if any) named {alias!r}.")
+        self.backend.remove_saas(model, alias)
+
+    def wait_for_removal_of_saas(self, alias: str, *, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of SAAS proxy {alias!r}.")
+        self.backend.wait_for_removal_of_saas(model, alias, timeout)
+
     def wait_for_removal_of_units(
         self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
@@ -323,6 +319,10 @@ class JujuClient:
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         self.logger.info("Getting list of consumed offers.")
         return self.backend.list_consumed_offers(model)
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        self.logger.info(f"Resolving application behind consumed offer '{offer.url}'.")
+        return self.backend.resolve_consumed_offer_application(offer)
 
     def application_revision(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
@@ -364,18 +364,23 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
-        """Validate all applications in the model.
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+    ) -> None:
+        """Validate all applications in the model, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
             model: Juju model reference
-            level: Validation level ("simple" or "deep", default: "simple")
+            level: Validation level ("simple" or "deep"), or None to skip functional validation
+                entirely (e.g. when only running a persistence op).
 
         Raises:
-            JujuValidationError: If any validation checks fail.
+            JujuValidationError: If any validation or persistence checks fail.
         """
         # Collect applications for validators
         applications = self.backend.list_applications(model)
@@ -383,17 +388,23 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
-            # Phase 2: This will trigger Ops framework validation
-            # Phase 1: This is a no-op, just a placeholder
-            for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                results.setdefault(unit, []).extend(unit_results)
+            if level is not None:
+                # Phase 2: This will trigger Ops framework validation
+                # Phase 1: This is a no-op, just a placeholder
+                for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                    results.setdefault(unit, []).extend(unit_results)
 
-            # Call extensions (Phase 1 validation happens here)
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_validate(model, application, level).items():
+                # Call extensions (Phase 1 validation happens here)
+                for extension in self.extensions:
+                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                        results.setdefault(unit, []).extend(unit_results)
+
+            for extension, persistence_operation in persistence_operations:
+                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:

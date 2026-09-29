@@ -6,7 +6,7 @@ from enum import Enum
 from functools import total_ordering
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_serializer, model_validator
 
 from .constraints_dsl import AnyExpr
 from .juju_version import JujuVersion
@@ -143,6 +143,9 @@ class CharmEndpoint(BaseModel):
     scope: EndpointScope | None = Field(default=None)
     cyclic: bool = Field(default=False)
     features: frozenset[str] = Field(default_factory=frozenset)
+    # Whether the remove-and-restore test may tear down this endpoint's integration. Charmhub has
+    # no native concept of this today, so it is always override-sourced (see CharmEndpointOverrides).
+    removable: bool = Field(default=True)
 
 
 class CharmEndpointProxy(BaseModel):
@@ -171,6 +174,8 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
+    ha_units: PositiveInt = 3
+    scale_down: bool = True
     # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
     # overrides win when present; otherwise this falls back to the charm's own metadata
     # (a non-empty `containers` block means "kubernetes", its absence means "machine").

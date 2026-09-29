@@ -31,7 +31,6 @@ from juju import (
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
-    is_agent_disconnected,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
@@ -44,13 +43,13 @@ from .client import JubilantClient
 from .structures import JujuExecTask
 from .wait import (
     all_statuses_are_in,
-    any_status_not_in,
     application_is_on_revision,
     applications_are_removed,
     applications_are_scaled,
     applications_have_no_units,
     bundle_applications_integrations_exist,
     integrations_are_removed,
+    saas_is_removed,
     units_have_message,
 )
 
@@ -102,12 +101,21 @@ class TransientModelUnavailabilityError(jubilant.CLIError):
 
 
 def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: JujuModelHandle) -> bool:
-    """Detect CLIErrors that mean "model temporarily unreachable due to migration"."""
+    """Detect CLIErrors that mean "model temporarily unreachable due to migration".
+
+    Juju's wording for this varies by subsystem; new variants are added here as
+    they're discovered (see #874, #931).
+    """
     err_msg = error.stderr.lower()
     # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
     controller_matches = model.controller.lower() in err_msg
     is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
-    is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
+    is_migrating = (
+        "has been migrated to controller" in err_msg
+        or "migration in progress" in err_msg
+        # e.stderr: 'ERROR model cache: model "<uuid>" did not appear in cache timeout\n'
+        or "did not appear in cache timeout" in err_msg
+    )
     return is_missing or is_migrating
 
 
@@ -276,35 +284,6 @@ class JubilantBackend(JujuCmdBackend):
             strict_timeout=strict_timeout,
         )
 
-    def wait_unhealthy(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-        count: int | None,
-        strict_timeout: bool = False,
-    ) -> None:
-        def agent_disconnected(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            _, wait_state = any_status_not_in(status, application, unit_agent_statuses={"idle"})
-            disconnected = is_agent_disconnected(wait_state)
-            if disconnected:
-                wait_state = dataclasses.replace(wait_state, message="Juju agent disconnected")
-            return disconnected, wait_state
-
-        def left_active(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            if application not in status.apps:
-                return False, JujuWaitState(message=f"waiting for application '{application}' to exist")
-            return any_status_not_in(status, application, unit_statuses={"active"})
-
-        self.wait(
-            model,
-            left_active,
-            error=agent_disconnected,
-            timeout=timeout,
-            successes=count,
-            strict_timeout=strict_timeout,
-        )
-
     def wait_idle_multi_model(
         self,
         models: list[JujuModelHandle],
@@ -367,6 +346,13 @@ class JubilantBackend(JujuCmdBackend):
         timeout: timedelta | None,
     ) -> None:
         self.wait(model, lambda status: integrations_are_removed(status, (endpoint_1, endpoint_2)), timeout=timeout)
+
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        if alias in self.status(model).app_endpoints:
+            self.client.model(model).cli("remove-saas", alias)
+
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        self.wait(model, lambda status: saas_is_removed(status, alias), timeout=timeout)
 
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
@@ -486,6 +472,7 @@ class JubilantBackend(JujuCmdBackend):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
@@ -493,6 +480,7 @@ class JubilantBackend(JujuCmdBackend):
             config=config,
             trust=trust,
             force=force,
+            channel=channel,
         )
 
     def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
@@ -595,19 +583,48 @@ class JubilantBackend(JujuCmdBackend):
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         return {
-            app_name: JujuApplicationInfo(
-                charm=app_info.charm,
-                revision=app_info.charm_rev,
-                channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
-            )
+            app_name: self._application_info_from_status(app_info)
             for app_name, app_info in self.status(model).apps.items()
         }
+
+    @staticmethod
+    def _application_info_from_status(app_info: jubilant.statustypes.AppStatus) -> JujuApplicationInfo:
+        return JujuApplicationInfo(
+            charm=app_info.charm,
+            revision=app_info.charm_rev,
+            channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+            base=app_info.base.channel if app_info.base else None,
+        )
 
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         return {
             offer: JujuConsumedOfferInfo(url=info.url, endpoints=frozenset(info.endpoints.keys()))
             for offer, info in self.status(model).app_endpoints.items()
         }
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        parsed_url = offer.parse_url()
+        if parsed_url is None:
+            return None
+        # The offering model may belong to a different owner than the model that consumed the
+        # offer, so address it with the owner parsed from the URL rather than relying on the
+        # currently authenticated user matching.
+        offering_model = parsed_url.model
+
+        try:
+            offering_status = self.status(offering_model)
+        except jubilant.CLIError:
+            # The offering controller/model may not be reachable from here (e.g. a different,
+            # unregistered controller), or may no longer exist.
+            return None
+
+        offer_status = offering_status.offers.get(parsed_url.offer_name)
+        if offer_status is None:
+            return None
+        app_info = offering_status.apps.get(offer_status.app)
+        if app_info is None:
+            return None
+        return self._application_info_from_status(app_info)
 
     def list_offers(self, model: JujuModelHandle) -> set[str]:
         result = self.client.model(model).cli("offers", "--format", "json")
@@ -775,6 +792,13 @@ class JubilantBackend(JujuCmdBackend):
             return None
         return self.get_kubernetes_client(model_info.cloud)
 
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Resolve the model's current cloud independently of its controller's cloud."""
+        model_info = self.client.model(model).show_model()
+        if model_info.type != "kubernetes":
+            return None
+        return self.get_kubernetes_client(model_info.cloud)
+
     def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller
         controller_model = JujuModelHandle(controller=controller_name, model="controller")
@@ -789,7 +813,7 @@ class JubilantBackend(JujuCmdBackend):
             controller_k8s_namespace = f"controller-{controller_name}"
             k8s.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
             k8s.wait_for_statefulset_restart(
-                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=600
             )
 
     def kill_controller(self, controller: str) -> None:

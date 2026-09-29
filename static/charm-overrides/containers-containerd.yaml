@@ -1,0 +1,6 @@
+---
+# containers-containerd: stale duplicate publish of containerd (same charmed-k8s source),
+# unpublished since 2022-01-31, single "latest" track
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

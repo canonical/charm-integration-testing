@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-import dataclasses
 from typing import Iterator
 
 import jubilant
@@ -190,27 +189,6 @@ def all_statuses_are_in(
     )
 
 
-def any_status_not_in(
-    status: jubilant.Status,
-    *application_args: str,
-    application_statuses: set[str] | None = None,
-    unit_statuses: set[str] | None = None,
-    unit_agent_statuses: set[str] | None = None,
-) -> tuple[bool, JujuWaitState]:
-    is_compliant, wait_state = all_statuses_are_in(
-        status,
-        *application_args,
-        application_statuses=application_statuses,
-        unit_statuses=unit_statuses,
-        unit_agent_statuses=unit_agent_statuses,
-    )
-    if is_compliant:
-        return False, dataclasses.replace(
-            wait_state, message=wait_state.message.replace("waiting for", "waiting to leave", 1)
-        )
-    return True, dataclasses.replace(wait_state, message=wait_state.message.replace("waiting for", "left", 1))
-
-
 def applications_are_scaled(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
     # Check applications have reached desired scale
     # See https://github.com/juju/juju/blob/add3443726e40faebaba0103289c6660251fa1eb/cmd/juju/status/formatted.go#L239
@@ -300,6 +278,15 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
         message="waiting for application removal",
         noncompliant_applications=noncompliant_applications,
     )
+
+
+def saas_is_removed(status: jubilant.Status, alias: str) -> tuple[bool, JujuWaitState]:
+    if alias in status.app_endpoints:
+        return False, JujuWaitState(
+            message=f"waiting for removal of SAAS proxy {alias!r}",
+            noncompliant_applications={alias: None},
+        )
+    return True, JujuWaitState(message=f"waiting for removal of SAAS proxy {alias!r}")
 
 
 def integrations_are_removed(

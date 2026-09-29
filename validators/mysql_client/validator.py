@@ -81,7 +81,6 @@ class MySQLClientValidator(BaseValidator):
 
     def _validate_deep(self) -> ValidationResult:
         """L2: Read/write capability with canary table (create, write, read-verify, cleanup)."""
-        start_time = time.monotonic()
         timeout_secs = 10
         checks: list[ValidationCheck] = []
 
@@ -101,6 +100,11 @@ class MySQLClientValidator(BaseValidator):
             return self._make_result(level="deep", checks=checks)
 
         # --- 4. Connect ---
+        # Latency is timed from here, not from the top of the function, so that
+        # Juju secret/relation-data resolution (steps 1-3) - which can be slow for
+        # cross-model relations independent of the database itself - is not counted
+        # against the database round-trip budget below.
+        start_time = time.monotonic()
         data = self.databag | creds
         try:
             conn = self._connect(data)

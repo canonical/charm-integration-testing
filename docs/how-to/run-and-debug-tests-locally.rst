@@ -40,8 +40,6 @@ Optional environment variables
 
 The following environment variables are optional and only needed when testing specific charms that require them:
 
-``MINIO_CLIENT_FILE``:
-  Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
 ``UV_FILE``:
   Path to a pre-downloaded ``uv`` binary. Will be downloaded automatically if not provided. Used when injecting validators onto units to create the Python virtualenv.
 ``UBUNTU_PRO_TOKEN``:
@@ -85,6 +83,60 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
    juju add-model ${MODEL_NAME} \
      --config "logging-config=DEBUG" \
      --config="update-status-hook-interval=2m"
+
+Chaos tools
+~~~~~~~~~~~
+
+Install Litmus or Chaos Mesh on the Kubernetes cluster for CPU and memory
+pressure. Disk I/O latency requires Chaos Mesh. On PS6 staging and PS7, the
+infrastructure repositories manage the shared ``litmus-core`` Helm release.
+See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
+and chart versions.
+
+Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
+cloud, replacing hyphens in the cloud name with underscores. For example:
+
+.. code:: bash
+
+   export KUBECONFIG_local_k8s=/path/to/kubeconfig
+
+The combined tool report runs once per session, when a test first requests
+``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
+the report checks each configured Kubernetes cloud once. Detection does not
+run automatically for unrelated tests. Installation checks run again for
+each client request. Litmus requires its three CRDs and a ready ``litmus``
+Deployment in ``litmus-system``.
+
+For Litmus experiments, the Kubernetes credentials must allow creation and
+cleanup of experiment resources, ServiceAccounts, Roles and RoleBindings in
+the test model namespace, including granting the runner's required permissions.
+
+Tests select a supporting tool automatically for each experiment. When both
+tools are available, Litmus handles CPU and memory pressure and Chaos Mesh
+handles Disk I/O latency. Chaos Mesh also handles CPU and memory pressure
+when Litmus is unavailable. Disk fill and Kubernetes network isolation do
+not require either tool. Native disk fill supports machine and Kubernetes models.
+Native CPU and memory commands are not used as fallback for external pressure.
+
+Chaos Mesh support is checked per experiment. CPU and memory pressure require
+the ``stresschaos.chaos-mesh.org`` CRD, while Disk I/O latency requires
+``iochaos.chaos-mesh.org``. Either CRD enables its corresponding experiments.
+The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
+
+Only unsupported operations permit fallback. Tests skip when no available
+implementation supports the requested experiment. Each test uses separate
+clients with cleanup at teardown, including after failure or skip.
+API, execution and cleanup errors fail the test. Cleanup retains resources for manual
+investigation when their recorded creation identifier cannot be verified.
+
+Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Cleanup allows graceful termination and requires reversion evidence for observed
+injections before deleting results and permissions; otherwise, it reports an
+error and retains them for investigation.
+
+Shared resources remain managed by the infrastructure repositories. Use
+approved disposable workloads for experiments; the shared operator and
+privileged helpers do not provide isolation between tenants.
 
 Install the repository dependencies
 -----------------------------------
@@ -185,3 +237,40 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Network isolation recovery
+--------------------------
+
+``test_live_network_isolation`` requires Kubernetes and applies an ingress-only
+``NetworkPolicy`` to all Pods of the target application. It leaves egress unrestricted
+and retains the policy for ten minutes after the API accepts it. This interval
+does not prove when the network plugin started enforcing the policy.
+
+All bundle models must be active/idle before isolation. Remaining active/idle
+during isolation is valid. After policy removal, all bundle models must return
+to active/idle within fifteen minutes, without a test-driven restart. Deep
+validators then run for every application in the target and neighbor models,
+including consumer-side validators. Missing or skipped validators provide no
+functional coverage; the status check alone only verifies Juju state recovery.
+Policy creation, cleanup, recovery and validation errors fail the test.
+
+The temporary connection probes have been removed. This test does not independently
+measure packet blocking or continuously verify agent connectivity during the
+observation interval. Network enforcement must be supported by the cluster.
+
+Disk fill recovery
+------------------
+
+``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
+and machine models. It allocates 98 percent of the available space reported by
+``df`` in the execution working directory, using a unique file per test. This
+is not a guarantee of 98 percent total file system usage or of filling the
+application's data volume. Per-charm resource settings are not consumed yet.
+
+All bundle models must be active/idle before allocation. The file remains for
+ten minutes; no unhealthy status transition is required. Cleanup removes the
+file, then all bundle models must recover to active/idle within fifteen minutes
+without a test-driven restart. Available deep validators run on all applications
+in both target and neighbor models. Missing validators leave functional coverage
+unverified. Allocation, file checks, cleanup, recovery and validation errors fail
+the test.

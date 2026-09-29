@@ -3,12 +3,48 @@
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from bundle_builder_x.charm import CharmChannel
-from bundle_builder_x.overrides import OverridesClient
+from bundle_builder_x.overrides import CharmOverridesCriteria, OverridesClient
 
 
 def _ch(track: str, risk: str = "stable") -> CharmChannel:
     return CharmChannel(track=track, risk=risk, branch="")
+
+
+class TestCharmOverridesCriteriaUbuntuVersion:
+    def test_criteria_with_no_ubuntu_version_matches_any_base(self) -> None:
+        criteria = CharmOverridesCriteria(track="latest")
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="24.04") is True
+
+    def test_criteria_with_ubuntu_version_matches_only_that_base(self) -> None:
+        criteria = CharmOverridesCriteria(ubuntu_version="16.04")
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is False
+        assert criteria.meets(_ch("latest"), ubuntu_version="24.04") is False
+
+    def test_track_and_ubuntu_version_are_and_ed(self) -> None:
+        criteria = CharmOverridesCriteria(track="1.32", ubuntu_version="16.04")
+        assert criteria.meets(_ch("1.32"), ubuntu_version="16.04") is True
+        # Track matches but base doesn't.
+        assert criteria.meets(_ch("1.32"), ubuntu_version="22.04") is False
+        # Base matches but track doesn't.
+        assert criteria.meets(_ch("1.31"), ubuntu_version="16.04") is False
+
+    def test_ubuntu_version_threaded_through_any_of(self) -> None:
+        criteria = CharmOverridesCriteria(
+            any_of=[
+                CharmOverridesCriteria(ubuntu_version="16.04"),
+                CharmOverridesCriteria(ubuntu_version="18.04"),
+            ]
+        )
+        assert criteria.meets(_ch("latest"), ubuntu_version="16.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="18.04") is True
+        assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is False
 
 
 class TestResourceTrackingOverrides:
@@ -28,8 +64,8 @@ class TestResourceTrackingOverrides:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN the skip applies to track 14 but not to track 16
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14")) == frozenset({"pvc"})
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("16")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14"), "22.04") == frozenset({"pvc"})
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("16"), "22.04") == frozenset()
 
     def test_missing_section_yields_no_skips(self, tmp_path: Path) -> None:
         # GIVEN an override file with no resource_tracking section
@@ -37,14 +73,76 @@ class TestResourceTrackingOverrides:
         client = OverridesClient(overrides=tmp_path)
 
         # THEN no skips are reported
-        assert client.get_charm_resource_tracking_skips("mysql-k8s", _ch("8")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("mysql-k8s", _ch("8"), "22.04") == frozenset()
 
     def test_no_overrides_directory_yields_no_skips(self) -> None:
         # GIVEN a client without an overrides directory
         client = OverridesClient()
 
         # THEN no skips are reported
-        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14")) == frozenset()
+        assert client.get_charm_resource_tracking_skips("postgresql-k8s", _ch("14"), "22.04") == frozenset()
+
+
+class TestHaOverrides:
+    def test_missing_values_use_ha_defaults(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text("overrides: []\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8"), "22.04") == 3
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8"), "22.04") is True
+
+    def test_values_are_scoped_to_matching_version(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text(
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '8.0'\n"
+            "        ubuntu_version: '22.04'\n"
+            "    ha_units: 5\n"
+            "    scale_down: false\n",
+            encoding="utf-8",
+        )
+        client = OverridesClient(overrides=tmp_path)
+
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "22.04") == 5
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8.0"), "22.04") is False
+        assert client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "24.04") == 3
+        assert client.get_charm_scale_down("mysql-k8s", _ch("8.0"), "24.04") is True
+
+    def test_ha_units_must_be_positive(self, tmp_path: Path) -> None:
+        (tmp_path / "mysql-k8s.yaml").write_text("overrides:\n  - ha_units: 0\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        with pytest.raises(ValidationError):
+            client.get_charm_ha_units("mysql-k8s", _ch("8.0"), "22.04")
+
+
+class TestGetCharmEndpointRemovable:
+    def test_endpoint_marked_non_removable(self, tmp_path: Path) -> None:
+        # GIVEN an override file that marks a requires endpoint non-removable
+        (tmp_path / "mongodb-k8s.yaml").write_text(
+            "overrides:\n" "  - requires:\n" "      sharding:\n" "        removable: false\n",
+            encoding="utf-8",
+        )
+        client = OverridesClient(overrides=tmp_path)
+
+        # THEN that endpoint is reported non-removable, and other endpoints are unaffected
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding", "22.04") is False
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "config-server", "22.04") is True
+
+    def test_missing_override_defaults_to_removable(self, tmp_path: Path) -> None:
+        # GIVEN an override file with no removable declarations
+        (tmp_path / "mysql-k8s.yaml").write_text("overrides: []\n", encoding="utf-8")
+        client = OverridesClient(overrides=tmp_path)
+
+        # THEN the endpoint defaults to removable
+        assert client.get_charm_endpoint_removable("mysql-k8s", _ch("8"), "database", "22.04") is True
+
+    def test_no_overrides_directory_defaults_to_removable(self) -> None:
+        # GIVEN a client without an overrides directory
+        client = OverridesClient()
+
+        # THEN the endpoint defaults to removable
+        assert client.get_charm_endpoint_removable("mongodb-k8s", _ch("6"), "sharding", "22.04") is True
 
 
 class TestGetCharmPriority:

@@ -11,6 +11,15 @@ overrides:
         optional: true
       metrics-endpoint:
         optional: true
+    configs:
+      # _update_ingress_method() in charm.py only wires IngressPerAppRequirer when
+      # this equals "ingress"; default wires require_nginx_route() instead.
+      ingress-interface: [ingress, null]
     constraints:
       # Mutually exclusive, and one database connection must be present
       - len(endpoint[database-legacy]) + len(endpoint[database]) == 1
+      # ingress and nginx-route are mutually exclusive: only one method is ever
+      # configured by _update_ingress_method(), see charm.py.
+      - not (bool(endpoint[ingress]) and bool(endpoint[nginx-route]))
+      - bool(endpoint[ingress]) => config[ingress-interface] == "ingress"
+      - bool(endpoint[nginx-route]) => config[ingress-interface] != "ingress"

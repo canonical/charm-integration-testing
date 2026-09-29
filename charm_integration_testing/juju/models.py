@@ -3,6 +3,9 @@
 
 from dataclasses import dataclass, field
 from functools import total_ordering
+from typing import TypeVar
+
+from .handles import JujuModelHandle
 
 _RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
@@ -51,6 +54,8 @@ class JujuApplicationInfo:
     charm: str
     revision: int
     channel: CharmChannel | None = None
+    # Ubuntu base the application is deployed on (e.g. "22.04"), when known.
+    base: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,78 @@ class JujuIntegration:
 
 
 @dataclass(frozen=True)
+class ParsedOfferUrl:
+    """The parts of a consumed offer's URL (``controller:user/model.offer-name``).
+
+    ``model`` carries the owner parsed from the URL, so callers can address the offering model
+    directly via ``model.uri``.
+    """
+
+    model: JujuModelHandle
+    offer_name: str
+
+
+@dataclass(frozen=True)
 class JujuConsumedOfferInfo:
     url: str
     endpoints: frozenset[str] = field(default_factory=frozenset)
+
+    def parse_url(self) -> ParsedOfferUrl | None:
+        """Parse ``url`` (``controller:user/model.offer-name``) into its constituent parts.
+
+        Returns None if the URL doesn't match the expected shape.
+        """
+        if ":" not in self.url:
+            return None
+        controller, rest = self.url.split(":", 1)
+        if "/" not in rest:
+            return None
+        owner, model_and_offer = rest.split("/", 1)
+        if "." not in model_and_offer:
+            return None
+        model, offer_name = model_and_offer.rsplit(".", 1)
+        if not controller or not owner or not model or not offer_name:
+            return None
+        return ParsedOfferUrl(
+            model=JujuModelHandle(controller=controller, model=model, owner=owner), offer_name=offer_name
+        )
+
+
+@dataclass(frozen=True)
+class PersistenceKey:
+    """Identifies a single relation's persistence-tracking slot.
+
+    Keyed by (controller, model, unit, relation_id) rather than just relation_id, since
+    relation_id is only unique within a model and this framework may track multiple models
+    (and controllers, e.g. during cross-model or migration tests) at once.
+    """
+
+    controller: str
+    model: str
+    unit: str
+    relation_id: int
+
+
+_PersistenceStateT = TypeVar("_PersistenceStateT")
+
+
+def rekey_persistence_state_controller(
+    persistence_state: dict["PersistenceKey", _PersistenceStateT], model: str, old_controller: str, new_controller: str
+) -> None:
+    """Rewrite tracked persistence keys for *model* after it migrates to a new controller.
+
+    Model migration changes a model's controller without changing its units or relation ids, so
+    the (controller, model, unit, relation_id) tracking key would otherwise stop matching after a
+    migration. Mutates *persistence_state* in place.
+
+    Generic over the tracked state's value type (rather than importing ``validators.base``'s
+    ``PersistenceState``) since this function only rewrites keys and never inspects a value,
+    keeping this data-model module free of a dependency on the validator package.
+    """
+    if old_controller == new_controller:
+        # Rewriting a key to itself would pop the entry after assigning it back, dropping it.
+        return
+    for key in [key for key in persistence_state if key.controller == old_controller and key.model == model]:
+        persistence_state[
+            PersistenceKey(controller=new_controller, model=model, unit=key.unit, relation_id=key.relation_id)
+        ] = persistence_state.pop(key)

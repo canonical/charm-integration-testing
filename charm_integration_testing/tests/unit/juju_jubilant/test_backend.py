@@ -13,6 +13,7 @@ import pytest
 import yaml
 from juju import (
     CharmChannel,
+    JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuIntegrationApplication,
     JujuModelHandle,
@@ -20,9 +21,10 @@ from juju import (
     JujuWaitTimeoutError,
 )
 from juju.version import JujuVersion
-from juju_jubilant.backend import JubilantBackend
+from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
+from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -146,9 +148,153 @@ class JubilantCliStub:
     results: dict[tuple[str, ...], str] = field(default_factory=dict)
     executions: list[tuple[str, ...]] = field(default_factory=list)
 
-    def cli(self, *args: str) -> str:
+    def cli(self, *args: str, **kwargs: Any) -> str:
         self.executions.append(tuple(args))
         return self.results.get(tuple(args), "")
+
+
+@dataclass
+class ModelInfoStub:
+    type: str
+    cloud: str
+
+
+class ShowModelStub:
+    def __init__(self, info: ModelInfoStub, error: Exception | None = None) -> None:
+        self.info = info
+        self.error = error
+
+    def show_model(self) -> ModelInfoStub:
+        if self.error is not None:
+            raise self.error
+        return self.info
+
+
+class ModelLookupClientStub(JubilantClient):
+    def __init__(self, models: dict[str, ShowModelStub]) -> None:
+        self.models = models
+        self.lookups: list[str] = []
+
+    def model(self, model: JujuModelHandle | None) -> Any:
+        assert model is not None
+        self.lookups.append(model.uri)
+        return self.models[model.uri]
+
+
+class UnusedKubernetesBackend(KubernetesBackend):
+    def __init__(self) -> None:
+        pass
+
+
+class TestModelKubernetesClient:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        controller_type: str
+        controller_cloud: str
+
+    test_cases = [
+        Params(label="machine-controller", controller_type="iaas", controller_cloud="machine-cloud"),
+        Params(label="different-k8s-cloud", controller_type="kubernetes", controller_cloud="controller-cloud"),
+    ]
+
+    @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
+    def test_uses_workload_cloud(self, params: Params) -> None:
+        # GIVEN a Kubernetes model on a different cloud from its controller
+        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
+        client = ModelLookupClientStub(
+            {
+                TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workload-cloud")),
+                controller.uri: ShowModelStub(
+                    ModelInfoStub(type=params.controller_type, cloud=params.controller_cloud)
+                ),
+            }
+        )
+        backend = JubilantBackend(client=client)
+        kubernetes = KubernetesClient(UnusedKubernetesBackend())
+        backend._kubernetes_clients["workload-cloud"] = kubernetes
+
+        # WHEN resolving the workload model
+        result = backend.get_kubernetes_client_for_model(TEST_MODEL)
+
+        # THEN only the workload model's cloud is used
+        assert result is kubernetes
+        assert client.lookups == [TEST_MODEL.uri]
+
+    def test_preserves_model_owner(self) -> None:
+        # GIVEN a model owned by a different user
+        model = JujuModelHandle(controller="shared", model="litmus", owner="other-user")
+        client = ModelLookupClientStub({model.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="litmus"))})
+        backend = JubilantBackend(client=client)
+        kubernetes = KubernetesClient(UnusedKubernetesBackend())
+        backend._kubernetes_clients["litmus"] = kubernetes
+
+        # WHEN resolving its client, THEN the owner-qualified model is queried
+        assert backend.get_kubernetes_client_for_model(model) is kubernetes
+        assert client.lookups == ["shared:other-user/litmus"]
+
+    def test_machine_model_returns_none(self) -> None:
+        # GIVEN a machine model without any kubeconfig
+        client = ModelLookupClientStub({TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines"))})
+        backend = JubilantBackend(client=client)
+
+        # WHEN resolving the model, THEN no Kubernetes client is needed
+        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is None
+        assert backend._kubernetes_clients == {}
+
+    def test_missing_kubeconfig_raises(self) -> None:
+        # GIVEN a Kubernetes model whose cloud has no kubeconfig
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="missing"))}
+        )
+        backend = JubilantBackend(client=client)
+
+        # WHEN resolving the model, THEN configuration failure is not treated as a machine model
+        with pytest.raises(RuntimeError, match="No kubeconfig configured for cloud 'missing'"):
+            backend.get_kubernetes_client_for_model(TEST_MODEL)
+
+    def test_model_lookup_error_propagates(self) -> None:
+        # GIVEN an inaccessible model
+        error = RuntimeError("Model lookup failed")
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workloads"), error=error)}
+        )
+        backend = JubilantBackend(client=client)
+
+        # WHEN resolving the model, THEN the original error propagates
+        with pytest.raises(RuntimeError) as exc_info:
+            backend.get_kubernetes_client_for_model(TEST_MODEL)
+        assert exc_info.value is error
+
+    def test_rechecks_model_cloud(self) -> None:
+        # GIVEN a model with a previously resolved cloud
+        model = ShowModelStub(ModelInfoStub(type="kubernetes", cloud="first"))
+        client = ModelLookupClientStub({TEST_MODEL.uri: model})
+        backend = JubilantBackend(client=client)
+        first = KubernetesClient(UnusedKubernetesBackend())
+        second = KubernetesClient(UnusedKubernetesBackend())
+        backend._kubernetes_clients.update(first=first, second=second)
+        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is first
+
+        # WHEN its cloud changes, THEN the next resolution uses the current model data
+        model.info = ModelInfoStub(type="kubernetes", cloud="second")
+        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is second
+        assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
+
+    def test_controller_resolver_still_uses_controller_model(self) -> None:
+        # GIVEN a machine controller hosting a Kubernetes workload model
+        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
+        client = ModelLookupClientStub(
+            {
+                controller.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines")),
+                TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workloads")),
+            }
+        )
+        backend = JubilantBackend(client=client)
+
+        # WHEN using the existing controller API, THEN its meaning is unchanged
+        assert backend.get_kubernetes_client_for_controller(TEST_MODEL.controller) is None
+        assert client.lookups == [controller.uri]
 
 
 class TestJubilantClient:
@@ -290,6 +436,10 @@ class ModelExistsStub:
             machines={},
             apps={},
         )
+
+    def cli(self, *args: str, **kwargs: Any) -> str:
+        # For tests that also call migrate_model() on this stub
+        return ""
 
 
 class TestJubilantBackend:
@@ -810,122 +960,6 @@ class TestJubilantBackend:
                     count=3,
                 )
 
-    class TestWaitUnhealthy:
-        def test_wait_unhealthy(self) -> None:
-            # GIVEN a unit whose workload is already non-active
-            stub = StatusStub(
-                application_statuses={"target": "blocked"},
-                unit_workload_statuses={"target/0": "blocked"},
-                unit_juju_statuses={"target/0": "idle"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-
-            # WHEN
-            backend.wait_unhealthy(
-                JujuModelHandle(controller="test-controller", model="test-model"),
-                "target",
-                timedelta(seconds=10),
-                count=3,
-            )
-
-            # THEN status was polled 3 consecutive times before returning
-            assert stub.call_count == 3
-
-        def test_wait_unhealthy_does_not_fail_fast_on_agent_executing(self) -> None:
-            # GIVEN the workload is non-active and the unit agent is executing a hook, not disconnected
-            stub = StatusStub(
-                application_statuses={"target": "blocked"},
-                unit_workload_statuses={"target/0": "blocked"},
-                unit_juju_statuses={"target/0": "executing"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-
-            # WHEN
-            backend.wait_unhealthy(
-                JujuModelHandle(controller="test-controller", model="test-model"),
-                "target",
-                timedelta(seconds=10),
-                count=3,
-            )
-
-            # THEN it debounces normally instead of failing fast; 'executing' is not a disconnect
-            assert stub.call_count == 3
-
-        def test_wait_unhealthy_raises_immediately_on_agent_disconnect(self) -> None:
-            # GIVEN the workload is still active, but the unit agent has already left idle
-            stub = StatusStub(
-                application_statuses={"target": "active"},
-                unit_workload_statuses={"target/0": "active"},
-                unit_juju_statuses={"target/0": "lost"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-
-            # WHEN / THEN it raises on the very first poll, without waiting for any debounce
-            with pytest.raises(JujuWaitTimeoutError) as exc_info:
-                backend.wait_unhealthy(
-                    JujuModelHandle(controller="test-controller", model="test-model"),
-                    "target",
-                    timedelta(seconds=10),
-                    count=3,
-                )
-            assert stub.call_count == 1
-            assert exc_info.value.wait_state.message == "Juju agent disconnected"
-
-        def test_wait_unhealthy_never_triggers_when_healthy(self) -> None:
-            # GIVEN a fully healthy unit (active workload, idle agent)
-            stub = StatusStub(
-                application_statuses={"target": "active"},
-                unit_workload_statuses={"target/0": "active"},
-                unit_juju_statuses={"target/0": "idle"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-
-            t0 = datetime(2025, 1, 1, 0, 0, 0)
-            # WHEN wait_unhealthy is called with datetime mocked to jump past the timeout
-            # THEN it times out because the workload never leaves 'active'
-            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
-                mock_dt.now.side_effect = [
-                    t0,  # start
-                    t0,  # iteration_start, loop 1 — within timeout
-                    t0,  # elapsed, loop 1
-                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
-                ]
-                with pytest.raises(JujuWaitTimeoutError):
-                    backend.wait_unhealthy(
-                        JujuModelHandle(controller="test-controller", model="test-model"),
-                        "target",
-                        timedelta(milliseconds=100),
-                        count=3,
-                    )
-
-        def test_wait_unhealthy_waits_when_application_does_not_exist_yet(self) -> None:
-            # GIVEN a status with no 'target' application at all
-            stub = StatusStub()
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-
-            t0 = datetime(2025, 1, 1, 0, 0, 0)
-            # WHEN wait_unhealthy is called with datetime mocked to jump past the timeout
-            # THEN it times out waiting for the app to exist, not succeed instantly
-            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
-                mock_dt.now.side_effect = [
-                    t0,  # start
-                    t0,  # iteration_start, loop 1 — within timeout
-                    t0,  # elapsed, loop 1
-                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
-                ]
-                with pytest.raises(JujuWaitTimeoutError):
-                    backend.wait_unhealthy(
-                        JujuModelHandle(controller="test-controller", model="test-model"),
-                        "target",
-                        timedelta(milliseconds=100),
-                        count=3,
-                    )
-
     class TestWaitApplicationSettled:
         def test_application_settled(self) -> None:
             # GIVEN
@@ -1050,6 +1084,97 @@ class TestJubilantBackend:
                 backend.wait_for_removal_of_integration(
                     TEST_MODEL, endpoint_1, endpoint_2, timeout=timedelta(milliseconds=100)
                 )
+
+    class TestRemoveSaas:
+        class Client(JubilantClientStub):
+            def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
+                self.app_endpoint_names = app_endpoint_names
+                self.cli_calls: list[tuple[str, ...]] = []
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    name: jubilant.statustypes.RemoteAppStatus(
+                        url=f"neighbor-controller:admin/neighbor-model.{name}",
+                        endpoints={"database": jubilant.statustypes.RemoteEndpoint(interface="db", role="provider")},
+                    )
+                    for name in self.app_endpoint_names
+                }
+
+            def cli(self, *args: str, **kwargs: Any) -> str:
+                self.cli_calls.append(args)
+                return ""
+
+        def test_removes_saas_proxy_when_present(self) -> None:
+            # GIVEN a SAAS proxy exists for the given alias
+            client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.remove_saas(TEST_MODEL, "neighbor-offer")
+
+            # THEN remove-saas was called for that alias
+            assert client.cli_calls == [("remove-saas", "neighbor-offer")]
+
+        def test_no_op_when_alias_is_not_a_saas_proxy(self) -> None:
+            # GIVEN no SAAS proxy exists for the given alias (e.g. same-model integration)
+            client = self.Client(app_endpoint_names=frozenset())
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.remove_saas(TEST_MODEL, "database")
+
+            # THEN no CLI call was made
+            assert client.cli_calls == []
+
+    class TestWaitForRemovalOfSaas:
+        class Client(JubilantClientStub):
+            def __init__(self, app_endpoint_names: frozenset[str] = frozenset()) -> None:
+                self.app_endpoint_names = app_endpoint_names
+                super().__init__(client=self)
+
+            def status(self) -> Any:
+                return self
+
+            @property
+            def app_endpoints(self) -> dict[str, jubilant.statustypes.RemoteAppStatus]:
+                return {
+                    name: jubilant.statustypes.RemoteAppStatus(
+                        url=f"neighbor-controller:admin/neighbor-model.{name}",
+                        endpoints={"database": jubilant.statustypes.RemoteEndpoint(interface="db", role="provider")},
+                    )
+                    for name in self.app_endpoint_names
+                }
+
+        def test_returns_immediately_when_saas_already_removed(self) -> None:
+            # GIVEN the SAAS proxy has already fully disappeared from status
+            client = self.Client(app_endpoint_names=frozenset())
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN no timeout is raised
+            backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
+
+        def test_times_out_when_saas_still_present(self) -> None:
+            # GIVEN the SAAS proxy for the alias being waited on is still present
+            client = self.Client(app_endpoint_names=frozenset({"neighbor-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN waiting on that exact alias times out
+            with pytest.raises(JujuWaitTimeoutError) as excinfo:
+                backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
+            assert "neighbor-offer" in excinfo.value.wait_state.noncompliant_applications
+
+        def test_ignores_unrelated_saas_proxies(self) -> None:
+            # GIVEN a different SAAS proxy is still present, but not the one being waited on
+            client = self.Client(app_endpoint_names=frozenset({"some-other-offer"}))
+            backend = JubilantBackend(client)
+
+            # WHEN / THEN no timeout is raised for the unrelated alias
+            backend.wait_for_removal_of_saas(TEST_MODEL, "neighbor-offer", timeout=timedelta(milliseconds=100))
 
     class TestWaitForRemovalOfUnits:
         def test_removal_of_units(self) -> None:
@@ -1471,6 +1596,7 @@ class TestJubilantBackend:
                 config: Any = None,
                 trust: bool = False,
                 force: bool = False,
+                channel: str | None = None,
             ) -> None:
                 self.charm = charm
                 self.app = app
@@ -1985,6 +2111,55 @@ class TestJubilantBackend:
             assert app_info.revision == 1
             assert app_info.channel == CharmChannel(track="1.0", risk="stable", branch="")
 
+        def test_with_base(self) -> None:
+            # GIVEN
+            class ModelStatusWithBase:
+                def __init__(self) -> None:
+                    self.apps = {
+                        "my-app": jubilant.statustypes.AppStatus(
+                            charm="my-charm",
+                            charm_origin="charmhub",
+                            charm_name="my-charm",
+                            charm_rev=1,
+                            exposed=False,
+                            base=jubilant.statustypes.FormattedBase(name="ubuntu", channel="22.04"),
+                        )
+                    }
+
+            class StatusStubClientWithBase:
+                def status(self) -> ModelStatusWithBase:
+                    return ModelStatusWithBase()
+
+            class ModelStubWithBase:
+                def __init__(self) -> None:
+                    self.client = StatusStubClientWithBase()
+
+                def status(self) -> ModelStatusWithBase:
+                    return self.client.status()
+
+            client = JubilantClientStub(client=ModelStubWithBase())
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications(TEST_MODEL)
+
+            # THEN
+            assert len(applications) == 1
+            app_info = applications["my-app"]
+            assert app_info.charm == "my-charm"
+            assert app_info.revision == 1
+            assert app_info.base == "22.04"
+
+        def test_without_base(self) -> None:
+            # GIVEN a status where jubilant did not resolve a base (e.g. app still settling)
+            client = JubilantClientStub(client=self.ModelStub(client=self.StatusStubClient()))
+
+            # WHEN
+            applications = JubilantBackend(client).list_applications(TEST_MODEL)
+
+            # THEN base is None rather than silently propagating a stale/wrong value
+            app_info = applications["my-app"]
+            assert app_info.base is None
+
     class TestListConsumedOffers:
         class Client(JubilantClientStub):
             def __init__(self) -> None:
@@ -2018,6 +2193,121 @@ class TestJubilantBackend:
                     endpoints=frozenset(["database"]),
                 )
             }
+
+    class TestResolveConsumedOfferApplication:
+        class OfferingStatusStub:
+            def __init__(self, offers: dict[str, jubilant.statustypes.OfferStatus], apps: dict[str, Any]) -> None:
+                self.offers = offers
+                self.apps = apps
+
+        class RecordingClient(JubilantClientStub):
+            """Records every model requested via ``model()``, so tests can assert the owner-
+            qualified model reference used to query the offering model's status."""
+
+            def __init__(
+                self,
+                status: "TestJubilantBackend.TestResolveConsumedOfferApplication.OfferingStatusStub | None" = None,
+                cli_error: jubilant.CLIError | None = None,
+            ) -> None:
+                super().__init__(client=self)
+                self.requested_models: list[JujuModelHandle] = []
+                # The exact URI string JubilantClient.model() would hand to jubilant.Juju(model=...),
+                # since JujuModelHandle equality intentionally ignores owner (it's addressing-only,
+                # not part of a model's identity), so asserting on the handle alone wouldn't catch a
+                # regression that dropped the owner from the actual CLI-facing address.
+                self.requested_uris: list[str] = []
+                self._status = status
+                self._cli_error = cli_error
+
+            def model(self, model: JujuModelHandle | None) -> Any:
+                assert model is not None
+                self.requested_models.append(model)
+                self.requested_uris.append(model.uri)
+                return self
+
+            def status(self) -> Any:
+                if self._cli_error is not None:
+                    raise self._cli_error
+                return self._status
+
+        OFFER = JujuConsumedOfferInfo(
+            url="other-controller:admin/other-model.postgresql-k8s", endpoints=frozenset({"database"})
+        )
+
+        def test_resolves_application_via_owner_qualified_offering_model_status(self) -> None:
+            # GIVEN a consumed offer whose offering model reports the backing application
+            offering_status = self.OfferingStatusStub(
+                offers={
+                    "postgresql-k8s": jubilant.statustypes.OfferStatus(
+                        app="postgresql-k8s", endpoints={}, charm="ch:amd64/postgresql-k8s-495"
+                    )
+                },
+                apps={
+                    "postgresql-k8s": jubilant.statustypes.AppStatus(
+                        charm="postgresql-k8s",
+                        charm_origin="charmhub",
+                        charm_name="postgresql-k8s",
+                        charm_rev=495,
+                        exposed=False,
+                    )
+                },
+            )
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN resolving the application behind the offer
+            result = JubilantBackend(client).resolve_consumed_offer_application(self.OFFER)
+
+            # THEN the resolved application matches the offering model's status
+            assert result == JujuApplicationInfo(charm="postgresql-k8s", revision=495)
+            # AND the offering model was queried qualified with its owner (not just the bare model
+            # name), since the offering model's owner may differ from the current user
+            assert client.requested_models == [
+                JujuModelHandle(controller="other-controller", model="other-model", owner="admin")
+            ]
+            # AND the actual address handed to the Juju CLI includes the owner (JujuModelHandle
+            # equality intentionally ignores owner, so this checks the real addressing behavior)
+            assert client.requested_uris == ["other-controller:admin/other-model"]
+
+        def test_returns_none_for_unparseable_offer_url(self) -> None:
+            # GIVEN a consumed offer with a malformed URL
+            offer = JujuConsumedOfferInfo(url="not-a-valid-url", endpoints=frozenset({"database"}))
+            client = self.RecordingClient()
+
+            # WHEN/THEN resolution fails gracefully, without ever querying a model
+            assert JubilantBackend(client).resolve_consumed_offer_application(offer) is None
+            assert client.requested_models == []
+
+        def test_returns_none_when_offer_missing_from_offering_status(self) -> None:
+            # GIVEN the offering model's status no longer lists the offer (e.g. it was removed)
+            offering_status = self.OfferingStatusStub(offers={}, apps={})
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN/THEN resolution fails gracefully
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
+
+        def test_returns_none_when_offering_application_missing_from_offering_status(self) -> None:
+            # GIVEN the offer references an application no longer present in the offering model
+            offering_status = self.OfferingStatusStub(
+                offers={
+                    "postgresql-k8s": jubilant.statustypes.OfferStatus(
+                        app="postgresql-k8s", endpoints={}, charm="ch:amd64/postgresql-k8s-495"
+                    )
+                },
+                apps={},
+            )
+            client = self.RecordingClient(status=offering_status)
+
+            # WHEN/THEN resolution fails gracefully
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
+
+        def test_returns_none_when_offering_model_unreachable(self) -> None:
+            # GIVEN the offering controller/model can't be reached
+            client = self.RecordingClient(
+                cli_error=jubilant.CLIError(returncode=1, cmd=["juju", "status"], output="", stderr="ERROR timeout")
+            )
+
+            # WHEN/THEN resolution fails gracefully rather than propagating the CLI error
+            assert JubilantBackend(client).resolve_consumed_offer_application(self.OFFER) is None
 
     class TestListIntegrations:
         class CliStub:
@@ -2664,3 +2954,54 @@ class TestJubilantBackendCreateOffer:
         # THEN the CLIError is re-raised
         with pytest.raises(jubilant.CLIError):
             backend.create_offer(MY_MODEL, "myapp", ["endpoint1"], "my-offer")
+
+
+class TestMigrationTolerance:
+    """Tests for status()'s string-matched tolerance of known post-migration transient
+    errors (see #874, #931). New Juju wording variants are added to the match list in
+    `_is_transient_model_unavailability_error` as they're discovered."""
+
+    def test_status_tolerates_migrated_to_controller_error(self) -> None:
+        stub = ModelExistsStub(
+            error_stderr='ERROR Model "my-model" has been migrated to controller "dst-ctrl".\n',
+            max_errors=1,
+        )
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(JujuModelHandle(controller="src-ctrl", model="my-model"))
+
+    def test_status_tolerates_migration_in_progress_error(self) -> None:
+        stub = ModelExistsStub(error_stderr="ERROR model migration in progress\n", max_errors=1)
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(JujuModelHandle(controller="src-ctrl", model="my-model"))
+
+    def test_status_tolerates_model_cache_timeout_error(self) -> None:
+        # GIVEN status() raises the "model cache" variant (see #931)
+        stub = ModelExistsStub(
+            error_stderr='ERROR model cache: model "<uuid>" did not appear in cache timeout\n',
+            max_errors=1,
+        )
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+        model = JujuModelHandle(controller="dst-ctrl", model="my-model")
+
+        # WHEN/THEN status() converts it to TransientModelUnavailabilityError
+        with pytest.raises(TransientModelUnavailabilityError):
+            backend.status(model)
+
+        # AND wait_for_model_to_exist retries on that and succeeds
+        with patch("juju_jubilant.backend.time.sleep"):
+            backend.wait_for_model_to_exist(model, timeout=timedelta(seconds=10))
+        assert stub.call_count == 2  # direct call + wait_for_model_to_exist
+
+    def test_status_does_not_tolerate_unrecognized_cli_error(self) -> None:
+        # GIVEN status() raises an error that doesn't match any known transient pattern
+        stub = ModelExistsStub(error_stderr="ERROR something unrelated\n", max_errors=1)
+        backend = JubilantBackend(JubilantClientStub(client=stub))
+
+        # WHEN/THEN the unrecognized CLIError propagates unconverted
+        with pytest.raises(jubilant.CLIError) as exc_info:
+            backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
+        assert not isinstance(exc_info.value, TransientModelUnavailabilityError)

@@ -1,5 +1,7 @@
 ---
+# jenkins doesn't support a base newer than 20.04, so it is considered obsolete
 overrides:
-  - provides:
+  - assumes: [unsupported-obsolete]
+    provides:
       nrpe-external-master:
         optional: true

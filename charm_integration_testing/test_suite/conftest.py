@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -6,25 +6,32 @@ import json
 import logging
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
-from chaos_client import ChaosClient, KubernetesChaosClient, NativeChaosClient
+from chaos_client import ResourceConstraintsClient
 from extensions import (
     ConfigureLivepatchServerExtension,
+    IstioMeshExtension,
     LegoExtension,
+    MetacontrollerExtension,
+    MysqlDatabaseReplicationExtension,
+    MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
-    S3IntegratorMinIOBackendExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
 from juju import (
+    JujuApplicationInfo,
     JujuBackend,
     JujuClient,
+    JujuConsumedOfferInfo,
+    JujuIntegrationApplication,
     JujuValidationError,
     JujuVersion,
     JujuWaitTimeoutError,
@@ -53,9 +60,12 @@ from bundle_builder_x import (
     ArchitectureMismatchError,
     AssumesMismatchError,
     BaseMismatchError,
+    BundleBuilder,
     BundleDiagnostic,
+    CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
+    OverridesClient,
     PeerChannelMismatchDiagnostic,
     PlatformMismatchError,
     ReleaseUnavailableError,
@@ -73,6 +83,7 @@ pytest_plugins = [
     "test_suite.scheduler.plugin",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
+    "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
 ]
 
@@ -169,20 +180,6 @@ def kubernetes_client(
 
 
 @pytest.fixture(scope="session")
-def chaos_client(kubernetes_client: KubernetesClient | None) -> ChaosClient | None:
-    """ChaosClient for the target cloud, or None for machine clouds (network isolation is k8s-only)."""
-    if kubernetes_client is None:
-        return None
-    return KubernetesChaosClient(backend=kubernetes_client.backend)
-
-
-@pytest.fixture(scope="session")
-def native_chaos_client(juju_backend: JujuBackend) -> NativeChaosClient:
-    """ChaosClient that injects via `juju exec`; works on both K8s and machine clouds."""
-    return NativeChaosClient(juju_backend)
-
-
-@pytest.fixture(scope="session")
 def log_dir(request: pytest.FixtureRequest) -> Path | None:
     """Session-scoped log directory for resource registry output.
 
@@ -261,33 +258,126 @@ def register_preexisting_resources(
         )
 
 
-@pytest.fixture
-def juju_client(
+@pytest.fixture(scope="session")
+def persistence_extension(
+    validators_path: Path | None,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    uv_file: Path | None,
+) -> ValidatorInjectorExtension:
+    """Session-scoped validator injector, and the owner of the canary persistence state.
+
+    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    so the state it holds is the single source of truth. The persistence op is auto-decided from
+    that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
+    (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
+    applications or integrations are torn down. It also re-keys itself on model migration, so
+    tests never touch the state directly.
+    """
+    return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
+
+
+def _build_juju_client(
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
-    minio_client_file: Path | None,
-    minio_server_file: Path | None,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
+            IstioMeshExtension(juju_backend, logger),
             LegoExtension(juju_backend, logger),
+            MetacontrollerExtension(juju_backend, logger),
+            MysqlDatabaseReplicationExtension(juju_backend, logger),
+            MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file, minio_server_file),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
+
+
+@pytest.fixture
+def juju_client(
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
+) -> JujuClient:
+    return _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_persistence_state_for_resumed_run(
+    request: pytest.FixtureRequest,
+    persistence_extension: ValidatorInjectorExtension,
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    target_model_ref: JujuModelHandle,
+    is_cmr_test: bool,
+    neighbor_model_ref: JujuModelHandle | None,
+    register_preexisting_resources: None,
+) -> None:
+    """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
+
+    The state is normally populated by ``test_deploy`` calling ``prepare()``. When a run resumes
+    directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy`` never runs this
+    session), it would otherwise stay empty: disruptive tests' "checkpoint" calls would then pass
+    no refs at all, which the runner treats as trivially successful, silently skipping persistence
+    validation for the whole run.
+
+    To avoid that silent gap, re-run "prepare" against the already-deployed target application as
+    soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
+    can run from it calls ``prepare()`` itself. Resuming into any other post-deploy state is not
+    handled here (the application topology at those states isn't guaranteed), so persistence
+    validation is skipped for those runs with a loud warning rather than a silent one.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
+        # test_deploy will run this session (or there's no model yet to seed against).
+        return
+
+    if current_state == State.NEIGHBOR_ONLY:
+        # Handled by whichever test transitions out of this state (see the docstring above) -
+        # no seeding and no warning needed.
+        return
+
+    if current_state != State.DEPLOYED:
+        warnings.warn(
+            f"Resuming at --current-state={current_state.value} does not seed persistence state; "
+            "data persistence validation will be skipped for this run since test_deploy did not "
+            "run and no seeding is implemented for this resume point.",
+            UserWarning,
+        )
+        return
+
+    client = _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+    models = [target_model_ref]
+    if is_cmr_test and neighbor_model_ref is not None:
+        models.append(neighbor_model_ref)
+    # prepare() writes through relation credentials, which can race hooks still settling when
+    # resuming with --current-state=deployed. test_deploy always waits for the model(s) to go idle
+    # first - match that here.
+    client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+    for model_ref in models:
+        client.validate_model(model=model_ref, level=None)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -396,6 +486,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Path to the unified charm overrides directory used by bundle-builder-x.",
     )
     parser.addoption(
+        "--charm-resource-constraints",
+        type=str,
+        default="./static/charm-resource-constraints/",
+        help="Path to the per-charm chaos resource constraints directory (e.g. stress amounts).",
+    )
+    parser.addoption(
         "--juju-upgrade-target-version",
         type=str,
         default=None,
@@ -478,7 +574,7 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def validators_path() -> Path | None:
     file_path_env = os.environ.get("VALIDATORS_PATH")
     if not file_path_env:
@@ -625,6 +721,44 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture
+def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
+    """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
+    return OverridesClient(overrides=charm_overrides, logger=logger)
+
+
+@pytest.fixture
+def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.Logger) -> ResourceConstraintsClient:
+    """Client for reading per-charm chaos resource constraints, tolerating a missing directory.
+
+    Unlike ``--charm-overrides``, an absent or unset ``--charm-resource-constraints`` directory is
+    not an error: it simply means no charm has customized its chaos parameters yet.
+    """
+    value = request.config.getoption("--charm-resource-constraints")
+    constraints_dir: Path | None = None
+    if value:
+        assert isinstance(value, str)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = Path(request.config.rootpath) / candidate
+        candidate = candidate.resolve()
+        if candidate.is_dir():
+            constraints_dir = candidate
+    return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
+
+
+@pytest.fixture
+def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
+    """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
+    return CharmhubClient(logger=logger, overrides_client=overrides_client)
+
+
+@pytest.fixture
+def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
+    """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
+    return BundleBuilder(charmhub_client=charmhub_client, logger=logger)
+
+
+@pytest.fixture
 def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> str:
     """Platform for the neighbor model in CMR tests. Falls back to --target-platform."""
     value = request.config.getoption("--neighbor-platform")
@@ -647,23 +781,7 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
-def minio_client_file() -> Path | None:
-    file_path = os.environ.get("MINIO_CLIENT_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
-def minio_server_file() -> Path | None:
-    file_path = os.environ.get("MINIO_SERVER_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def uv_file() -> Path | None:
     file_path = os.environ.get("UV_FILE")
     if file_path:
@@ -671,7 +789,7 @@ def uv_file() -> Path | None:
     return Path(file_path) if file_path else None
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def ubuntu_pro_token() -> str | None:
     token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:
@@ -814,6 +932,41 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
+def _integration_endpoint_str(
+    juju_client: JujuClient,
+    side: JujuIntegrationApplication,
+    applications: dict[str, JujuApplicationInfo],
+    consumed_offers: dict[str, JujuConsumedOfferInfo],
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None],
+) -> str:
+    """Render one side of an integration as ``<charm>:<endpoint>``, normalized for matching.
+
+    Local applications are identified by charm name. Remote SAAS entries backed by a consumed
+    offer are resolved to the actual charm behind the offer (via a status check against the
+    offering model), so cross-model integrations are recorded identically to same-model ones.
+    The offer URL itself is never used for this: it embeds the offering controller/model names,
+    which are randomly generated per test run and would make the recorded value useless for
+    matching across runs. If the offering model can't be resolved (e.g. unreachable controller),
+    fall back to the offer's local alias, which -- unlike the URL -- is stable across runs.
+
+    ``resolved_offer_applications`` caches resolutions by offer alias across calls for the same
+    model, so each consumed offer is only resolved (i.e. status-queried) at most once per
+    recording pass, even if it's referenced by multiple integrations or by both integration sides.
+    """
+    if side.application in applications:
+        return f"{applications[side.application].charm}:{side.endpoint}"
+    if side.application in consumed_offers:
+        if side.application not in resolved_offer_applications:
+            resolved_offer_applications[side.application] = juju_client.resolve_consumed_offer_application(
+                consumed_offers[side.application]
+            )
+        offer_application = resolved_offer_applications[side.application]
+        if offer_application is not None:
+            return f"{offer_application.charm}:{side.endpoint}"
+        return f"offer:{side.application}:{side.endpoint}"
+    raise KeyError(f"'{side.application}' is neither a known application nor a consumed offer")
+
+
 def record_charm_info_execution_metadata_instantaneous(
     juju_client: JujuClient, model: JujuModelHandle, execution_metadata: Callable[[str, str], None]
 ) -> None:
@@ -832,30 +985,21 @@ def record_charm_info_execution_metadata_instantaneous(
             # Risk is always present in a valid channel string
             execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
-    consumed_offers = juju_client.list_consumed_offers(model=model).keys()
+    consumed_offers = juju_client.list_consumed_offers(model=model)
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None] = {}
 
-    # Get all integrations and record them
+    # Get all integrations (including CMRs) and record them.
+    # Only integrations actually reported by ``list_integrations`` are recorded, so
+    # consumed offers that aren't integrated with anything are naturally excluded.
     for integration in juju_client.list_integrations(model=model):
-        # Skip cross-model integrations where one side is a remote SAAS entry
-        # TODO: record CMRs in a future iteration
-        if integration.provider.application not in applications or integration.requirer.application not in applications:
-            continue
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        try:
-            integration_str = (
-                f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
-                f"{integration.interface}/"
-                f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
-            )
-            execution_metadata("integration", integration_str)
-        except KeyError as err:
-            if consumed_offers.isdisjoint({integration.provider.application, integration.requirer.application}):
-                raise KeyError("neither app nor consumed offer") from err
-
-            # FIXME(@motjuste): not recording execution metadata for consumed offers
-            #   either use the URL which does not have charm info,
-            #   or do a second status-check for offering model to get that info,
-            #   AND, only do it for **actually** integrated offers
+        provider_str = _integration_endpoint_str(
+            juju_client, integration.provider, applications, consumed_offers, resolved_offer_applications
+        )
+        requirer_str = _integration_endpoint_str(
+            juju_client, integration.requirer, applications, consumed_offers, resolved_offer_applications
+        )
+        execution_metadata("integration", f"{provider_str}/{integration.interface}/{requirer_str}")
 
 
 @pytest.fixture
@@ -1056,6 +1200,7 @@ def record_failure_execution_metadata(
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
                     continue
+                execution_metadata("failure:charm", application.charm)
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
                     f"application:{application.status}:{normalize_string(application.message)}",
@@ -1063,6 +1208,7 @@ def record_failure_execution_metadata(
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
+                execution_metadata("failure:charm", unit.charm)
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
@@ -1070,6 +1216,7 @@ def record_failure_execution_metadata(
             for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
                 if unit_agent is None:
                     continue
+                execution_metadata("failure:charm", unit_agent.charm)
                 execution_metadata(
                     f"failure:charm:{unit_agent.charm}:status",
                     f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",

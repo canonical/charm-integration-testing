@@ -1,0 +1,8 @@
+---
+# Source: https://github.com/canonical/istio-ingress-k8s-operator
+listed: true
+platforms: [kubernetes]
+overrides:
+  - provides:
+      gateway-metadata:
+        optional: true  # charmcraft.yaml declares GatewayMetadataProvider as an optional integration

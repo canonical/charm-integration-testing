@@ -12,7 +12,6 @@ from .backend import (
     JujuUnitState,
     JujuWaitState,
     JujuWaitTimeoutError,
-    is_agent_disconnected,
     warn_performance,
 )
 from .client import JujuClient, JujuValidationError
@@ -24,6 +23,9 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    ParsedOfferUrl,
+    PersistenceKey,
+    rekey_persistence_state_controller,
 )
 from .version import JujuVersion
 
@@ -49,6 +51,8 @@ __all__ = [
     "JujuVersion",
     "JujuWaitState",
     "JujuWaitTimeoutError",
-    "is_agent_disconnected",
+    "ParsedOfferUrl",
+    "PersistenceKey",
+    "rekey_persistence_state_controller",
     "warn_performance",
 ]

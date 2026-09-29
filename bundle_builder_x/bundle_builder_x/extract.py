@@ -7,7 +7,20 @@ import z3  # type: ignore[import-untyped]
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
 from .charm import EndpointType
-from .domain import Domain, ModelRef
+from .domain import Domain, DomainApplicationIntegration, DomainCharmIntegration, ModelRef
+
+
+def _active_charm_integration_for_app_int(
+    app_int: DomainApplicationIntegration, domain: Domain, model: z3.ModelRef
+) -> DomainCharmIntegration | None:
+    """Return the ``DomainCharmIntegration`` currently backing ``app_int``, if any.
+
+    ``None`` for external CMRs, or if none of its candidates are active in this solution.
+    """
+    for idx, mapping_var in app_int.charm_integration_ids.items():
+        if model.evaluate(mapping_var, model_completion=True):
+            return domain.charm_integrations[idx]
+    return None
 
 
 def _extract_single_model(
@@ -166,24 +179,34 @@ def _extract_single_model(
         remote_model_ref = remote_ep.model
         if remote_model_ref is None:
             continue  # shouldn't happen, but defensive
-        # For REQUIRES: synthesize the saas URL pointing at the remote (providing) model.
-        # For PROVIDES: always None; the mirror pass synthesizes the URL when creating
-        # the REQUIRES entry.
+
+        # Resolve offer name/URL via the shared-offer resolver when backed by a
+        # DomainCharmIntegration; otherwise fall back to the external-CMR default.
+        backing_integration = _active_charm_integration_for_app_int(app_int, domain, model)
+        resolved_offer_name: str
+        if backing_integration is not None:
+            resolved_offer_name = domain.integration_offer_name(backing_integration, model)
+            resolved_url = domain.integration_offer_url(backing_integration, model)
+        else:
+            resolved_offer_name = app_int.offer_name or f"{remote_ep.application}-offer"
+            resolved_url = app_int.url
+
+        # For REQUIRES: synthesize the saas url unless one was already resolved/user-declared.
         url: str | None
         if charm_ep.type == EndpointType.REQUIRES:
-            if app_int.url is not None:
-                url = app_int.url
+            if resolved_url is not None:
+                url = resolved_url
             else:
                 remote_mc = domain.models.get(remote_model_ref)
                 url = (
-                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{app_int.offer_name}"
+                    f"{remote_mc.ref.controller}:{remote_mc.admin}/{remote_model_ref.name}.{resolved_offer_name}"
                     if remote_mc is not None
                     and remote_mc.ref.controller is not None
                     and remote_model_ref.name is not None
                     else None
                 )
         else:
-            url = None
+            url = resolved_url
         cross_model_integrations.append(
             CrossModelIntegration(
                 local=ApplicationEndpoint(
@@ -194,7 +217,7 @@ def _extract_single_model(
                 remote_model=remote_model_ref.key,
                 remote_application=remote_ep.application,
                 remote_endpoint=remote_ep.endpoint,
-                offer_name=app_int.offer_name,
+                offer_name=resolved_offer_name,
                 url=url,
             )
         )
@@ -222,8 +245,9 @@ def _mirror_cmr_entries(
 ) -> None:
     """Add mirrored CMR entries to the remote bundle for all CMRs with ``from_role``.
 
-    For PROVIDES→REQUIRES mirrors: synthesizes the saas URL from the source bundle's
-    controller/admin/model.
+    For PROVIDES→REQUIRES mirrors: reuses the source (PROVIDES-side) entry's resolved URL
+    if one was preserved (e.g. a user-declared URL), otherwise synthesizes the saas URL from
+    the source bundle's controller/admin/model.
     For REQUIRES→PROVIDES mirrors: URL is always None (PROVIDES entries are never exported).
     """
     for model_ref, bundle in list(bundles.items()):
@@ -249,7 +273,7 @@ def _mirror_cmr_entries(
             if remote_bundle.applications.get(cmr.remote_application) is None:
                 continue
             if to_role == EndpointType.REQUIRES:
-                url = (
+                url = cmr.url or (
                     f"{bundle.controller}:{bundle.admin}/{model_ref.name}.{cmr.offer_name}"
                     if bundle.controller is not None and model_ref.name is not None
                     else None
@@ -326,7 +350,7 @@ def extract_solution(
             continue
 
         interface = domain.integration_interface(integration)
-        offer_name = domain.integration_offer_name(integration)
+        offer_name = domain.integration_offer_name(integration, z3_model)
 
         logger.info(
             f"Discovered CMR: {prov_model_ref.key}.{prov_app}:{integration.provides_endpoint} "
@@ -334,11 +358,12 @@ def extract_solution(
             f"(interface: {interface})"
         )
 
-        # Synthesize URL for discovered CMRs (REQUIRES side only)
-        url: str | None = None
-        prov_mc = domain.models.get(prov_model_ref)
-        if prov_mc is not None and prov_mc.ref.controller is not None:
-            url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
+        # Reuse a user-declared CMR's URL sharing this offer, if any; otherwise synthesize one.
+        url = domain.integration_offer_url(integration, z3_model)
+        if url is None:
+            prov_mc = domain.models.get(prov_model_ref)
+            if prov_mc is not None and prov_mc.ref.controller is not None:
+                url = f"{prov_mc.ref.controller}:{prov_mc.admin}/{prov_mc.ref.name}.{offer_name}"
 
         # Add REQUIRES side to the requiring model's bundle
         if req_model_ref in bundles:
@@ -376,4 +401,55 @@ def extract_solution(
     _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.REQUIRES, to_role=EndpointType.PROVIDES)
     _mirror_cmr_entries(bundles, bundles_by_key, from_role=EndpointType.PROVIDES, to_role=EndpointType.REQUIRES)
 
+    _validate_resolved_cmr_offer_consistency(bundles)
+
     return Solution(bundles=list(bundles.values()))
+
+
+def _validate_resolved_cmr_offer_consistency(bundles: dict[ModelRef, Bundle]) -> None:
+    """Reject any two resolved CMRs whose url/offer_name disagree, or whose offer_name
+    collides across two distinct provider applications.
+
+    ``spec.py``'s check runs pre-solve and can't see offer names synthesized later by
+    ``domain.integration_offer_name()``, which can collide across different provider
+    instances sharing the same charm/endpoint/interface. Re-check post-solve, once every
+    CMR has a concrete resolved offer_name/url.
+    """
+    for model_ref, bundle in bundles.items():
+        seen_urls: dict[str, str] = {}
+        seen_offer_names: dict[str, str] = {}
+        seen_offer_owners: dict[str, str] = {}
+        for cmr in bundle.cross_model_integrations:
+            if cmr.local_role == EndpointType.PROVIDES:
+                # Two different provider applications synthesizing the same offer_name is a
+                # collision distinct from the url/offer_name-disagreement case below: same
+                # model, same offer_name, same (derived) url -- everything "agrees" from the
+                # requirer's point of view, yet Juju can't have two offers share a name in one
+                # model, and this provides side would silently keep only one.
+                prior_owner = seen_offer_owners.get(cmr.offer_name)
+                if prior_owner is not None and prior_owner != cmr.local.application:
+                    raise ValueError(
+                        f"Model '{model_ref.key}': applications {prior_owner!r} and "
+                        f"{cmr.local.application!r} both synthesize offer_name "
+                        f"{cmr.offer_name!r}; distinct provider applications cannot share a "
+                        "Juju offer name"
+                    )
+                seen_offer_owners[cmr.offer_name] = cmr.local.application
+            if cmr.local_role != EndpointType.REQUIRES or cmr.url is None:
+                continue
+            prior_offer_name = seen_urls.get(cmr.url)
+            if prior_offer_name is not None and prior_offer_name != cmr.offer_name:
+                raise ValueError(
+                    f"Model '{model_ref.key}': resolved cross-model integrations to url "
+                    f"{cmr.url!r} disagreeing offer_name ({prior_offer_name!r} vs. "
+                    f"{cmr.offer_name!r})"
+                )
+            prior_url = seen_offer_names.get(cmr.offer_name)
+            if prior_url is not None and prior_url != cmr.url:
+                raise ValueError(
+                    f"Model '{model_ref.key}': resolved cross-model integrations named "
+                    f"offer_name {cmr.offer_name!r} disagreeing url ({prior_url!r} vs. "
+                    f"{cmr.url!r})"
+                )
+            seen_urls[cmr.url] = cmr.offer_name
+            seen_offer_names[cmr.offer_name] = cmr.url

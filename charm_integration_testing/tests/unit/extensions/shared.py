@@ -73,16 +73,6 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def wait_unhealthy(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-        count: int | None,
-        strict_timeout: bool = False,
-    ) -> None:
-        raise NotImplementedError
-
     def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
@@ -145,6 +135,12 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        raise NotImplementedError
+
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
     ) -> None:
@@ -182,6 +178,7 @@ class NullJujuBackend(JujuBackend):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -333,9 +330,12 @@ class JujuStub(NullJujuBackend):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
-        self.deployed.append((_model_key(model), charm, application))  # Ignoring config, trust, force for simplicity
+        self.deployed.append(
+            (_model_key(model), charm, application)
+        )  # Ignoring config, trust, force, channel for simplicity
 
     def configure_application(self, model: "JujuModelHandle", application: str, values: dict[str, Any]) -> None:
         """Mock configuring an application (captures call for verification)"""

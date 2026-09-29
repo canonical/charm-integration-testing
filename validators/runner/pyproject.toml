@@ -24,10 +24,12 @@ dependencies = [
     "validators-object-storage",
     "validators-prometheus-scrape",
     "validators-kafka-client",
+    "validators-etcd-client",
     "validators-opensearch-client",
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
+    "validators-catalogue",
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
     "validators-parca-store",
@@ -38,9 +40,14 @@ dependencies = [
     "validators-grafana-datasource",
     "validators-ingress",
     "validators-ingress-auth",
+    "validators-istio-ingress-route",
     "validators-prometheus-remote-write",
+    "validators-alertmanager-dispatch",
     "validators-certificate-transfer",
+    "validators-trino-client",
+    "validators-trino-catalog",
     "validators-cross-model-mesh",
+    "validators-saml",
 ]
 
 [build-system]

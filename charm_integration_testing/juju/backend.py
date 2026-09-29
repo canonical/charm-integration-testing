@@ -88,11 +88,6 @@ class JujuWaitState:
     noncompliant_unit_agents: dict[str, JujuUnitAgentState | None] = field(default_factory=dict)
 
 
-def is_agent_disconnected(wait_state: JujuWaitState) -> bool:
-    """True if any noncompliant unit agent is 'lost' (disconnected from the controller)."""
-    return any(state is not None and state.status == "lost" for state in wait_state.noncompliant_unit_agents.values())
-
-
 class JujuWaitTimeoutError(TimeoutError):
     wait_state: JujuWaitState
 
@@ -163,6 +158,15 @@ class JujuBackend(ABC):
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         raise NotImplementedError
 
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        """Resolve the application backing a consumed offer.
+
+        Returns None if the offer's URL can't be parsed, or if the offering application can no
+        longer be resolved (e.g. unreachable controller, removed offer). Backends that can't
+        cheaply resolve this may leave this unimplemented and rely on the default.
+        """
+        return None
+
     @abstractmethod
     def list_offers(self, model: JujuModelHandle) -> set[str]:
         """Return the names of all offers defined in *model*."""
@@ -214,21 +218,6 @@ class JujuBackend(ABC):
         count: int | None,
         strict_timeout: bool = False,
     ) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def wait_unhealthy(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-        count: int | None,
-        strict_timeout: bool = False,
-    ) -> None:
-        """Wait for *application*'s unit workload status to leave 'active' for *count* consecutive checks.
-
-        Raises immediately if any unit agent disconnects.
-        """
         raise NotImplementedError
 
     @abstractmethod
@@ -299,6 +288,30 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        """Actively remove the SAAS proxy named *alias* from *model*, if present.
+
+        Once a CMR offer's underlying application is destroyed, Juju doesn't automatically clean
+        up the consuming model's SAAS proxy for it: ``juju status`` keeps listing it (eventually as
+        "dead"/"terminated") indefinitely, which blocks re-consuming the same offer alias with
+        "exists but is terminating". Explicitly removing the proxy (``juju remove-saas``) frees the
+        alias immediately, rather than waiting on a status change that may never happen on its own.
+        A no-op if *alias* isn't a SAAS proxy in this model.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        """Wait until the SAAS proxy named *alias* no longer appears in ``model``.
+
+        ``remove_saas`` only issues the removal command; the controller's teardown of the underlying
+        remote entity is asynchronous. Without waiting for it to converge, a later re-consumption of
+        the same alias can race with the still-in-progress removal.
+        See https://github.com/canonical/charm-integration-testing/issues/1045.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def wait_for_removal_of_units(
         self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
     ) -> None:
@@ -349,6 +362,7 @@ class JujuBackend(ABC):
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -446,3 +460,10 @@ class JujuBackend(ABC):
         controller cloud configuration.
         """
         raise NotImplementedError
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Return a client for the model's Kubernetes cloud, or None for a machine model.
+
+        Unsupported backends raise rather than infer the cloud from the controller.
+        """
+        raise NotImplementedError("Model-aware Kubernetes client resolution is not supported by this backend.")
