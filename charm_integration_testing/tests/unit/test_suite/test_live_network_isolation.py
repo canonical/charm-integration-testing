@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from unittest.mock import MagicMock
 
 import pytest
 from chaos_client import ChaosCleanupError, MetaChaosClient
@@ -88,9 +89,17 @@ class JujuSpy(JujuClient):
 @pytest.mark.parametrize(
     "failure", [None, "baseline", "create", "timeout", "agent-disconnected", "cleanup", "recovery", "validation"]
 )
-def test_isolation_lifecycle(failure: str | None) -> None:
+def test_isolation_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     # GIVEN a real MetaChaosClient and network adapter backed by an in-memory API
     events: list[str] = []
+    probe = MagicMock()
+    monkeypatch.setattr("test_suite.test_live_network_isolation.NetworkIsolationProbe", lambda *args: probe)
+
+    def after_removal(succeeded: bool) -> None:
+        assert events[-1] == "cleanup"
+        assert succeeded == (failure != "cleanup")
+
+    probe.after_removal.side_effect = after_removal
     api = NetworkApi(events, failure)
     backend = Backend(api)
     chaos = MetaChaosClient([NetworkIsolationClient(backend)])
@@ -100,14 +109,14 @@ def test_isolation_lifecycle(failure: str | None) -> None:
 
     # WHEN the integration test runs, THEN errors cannot turn into a successful validation
     if failure is None:
-        run_isolation(juju, chaos, KubernetesClient(backend), MODEL, "target")
+        run_isolation(juju, chaos, KubernetesClient(backend), MODEL, "target", {}, "cloud")
         assert events == ["baseline", "isolate", "unhealthy", "cleanup", "recovery", "validate"]
     else:
         error_type = (
             ChaosCleanupError if failure == "cleanup" else (RuntimeError if failure == "validation" else TimeoutError)
         )
         with pytest.raises(error_type):
-            run_isolation(juju, chaos, KubernetesClient(backend), MODEL, "target")
+            run_isolation(juju, chaos, KubernetesClient(backend), MODEL, "target", {}, "cloud")
         if failure in {"baseline", "create", "timeout", "agent-disconnected", "cleanup"}:
             assert "recovery" not in events
             assert "validate" not in events
@@ -122,6 +131,10 @@ def test_isolation_lifecycle(failure: str | None) -> None:
     assert not api.policies
     if failure == "baseline":
         assert not api.create_calls
+        probe.prepare.assert_not_called()
+    else:
+        probe.cleanup.assert_called_once()
+        probe.after_removal.assert_called_once()
 
 
 def test_non_kubernetes_skips_before_mutation() -> None:
@@ -130,6 +143,6 @@ def test_non_kubernetes_skips_before_mutation() -> None:
     api = NetworkApi(events, None)
     chaos = MetaChaosClient([NetworkIsolationClient(Backend(api))])
     with pytest.raises(pytest.skip.Exception, match="requires Kubernetes"):
-        run_isolation(JujuSpy(events, None), chaos, None, MODEL, "target")
+        run_isolation(JujuSpy(events, None), chaos, None, MODEL, "target", {}, "cloud")
     assert events == []
     assert not api.policies
