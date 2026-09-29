@@ -15,6 +15,7 @@ def test_pod_deletion(
     _is_running_on_kubernetes: None,
     kubernetes_client: KubernetesClient | None,
     target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
 ) -> None:
     if kubernetes_client is None:
@@ -46,8 +47,12 @@ def test_pod_deletion(
         timeout=timedelta(minutes=15),
     )
 
-    # Wait for return to idle
-    juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+    models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=target_model_ref, level="simple")
+    # Wait for return to idle
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations. For a CMR the persistence validator lives on the
+    # neighbor's requirer units, so validate there too.
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="simple")
