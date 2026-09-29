@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
@@ -20,6 +21,54 @@ from kubernetes_client import KubernetesBackend
 
 MODEL = JujuModelHandle(controller="controller", model="model")
 UNIT = "postgresql/0"
+
+
+def test_memory_diagnostics_preserve_reversion_failure(
+    context: "ClientContext", caplog: pytest.LogCaptureFixture
+) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=10))
+    context.auto_revert = False
+    context.backend.core_v1_api.read_namespaced_pod.side_effect = ApiException(status=503)
+    with caplog.at_level(logging.INFO), pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "stress reversion" in str(error.value.errors[0])
+    assert "[before cleanup]" in caplog.text
+    assert "[before child deletion]" in caplog.text
+    assert "[cleanup failed]" in caplog.text
+    assert "target Pod unavailable" in caplog.text
+    assert context.results
+    context.setups[0].cleanup.assert_not_called()
+
+
+def test_memory_diagnostics_capture_logs_before_deletion(
+    context: "ClientContext", caplog: pytest.LogCaptureFixture
+) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=10))
+    context.children = [target_pod(name="helper")]
+    context.children[0].metadata.uid = "helper-uid"
+    context.backend.core_v1_api.delete_namespaced_pod.side_effect = lambda **kwargs: context.children.clear()
+    context.backend.core_v1_api.read_namespaced_pod.return_value = target_pod()
+
+    def read_log(**kwargs: Any) -> str:
+        assert context.children
+        return "helper diagnostic output"
+
+    context.backend.core_v1_api.read_namespaced_pod_log.side_effect = read_log
+    with caplog.at_level(logging.INFO):
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "helper diagnostic output" in caplog.text
+    assert not context.children
+    context.setups[0].cleanup.assert_called_once()
+
+
+def test_cpu_cleanup_does_not_collect_memory_diagnostics(context: "ClientContext") -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    chaos.cleanup(MODEL, UNIT, "")
+    context.backend.core_v1_api.read_namespaced_pod.assert_not_called()
+    context.backend.core_v1_api.read_namespaced_pod_log.assert_not_called()
 
 
 class BackendStub(KubernetesBackend):

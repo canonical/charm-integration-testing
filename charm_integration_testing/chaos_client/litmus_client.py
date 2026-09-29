@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from time import monotonic, sleep
@@ -40,6 +41,7 @@ class _ExperimentRun:
     engine_requested: bool = False
     uid: str | None = None
     cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
+    diagnose_memory: bool = False
 
 
 class LitmusChaosClient(ChaosClient):
@@ -117,10 +119,12 @@ class LitmusChaosClient(ChaosClient):
             if engine.scope != (model.uri, unit):
                 continue
             try:
+                self._diagnose_cleanup(engine, "before cleanup")
                 deadline = self._clock() + self._cleanup_timeout
                 self._cleanup_engine(engine, deadline)
                 self._wait(engine.setup.cleanup, deadline, engine.name)
             except Exception as error:
+                self._diagnose_cleanup(engine, "cleanup failed")
                 errors.append(error)
             else:
                 self._created.remove(engine)
@@ -179,6 +183,7 @@ class LitmusChaosClient(ChaosClient):
         name = f"cit-{uuid4().hex[:16]}"
         setup = LitmusSetup(self._backend, model.model, name, self._owner)
         engine = _ExperimentRun((model.uri, unit), model.model, name, setup, pod)
+        engine.diagnose_memory = experiment == "pod-memory-hog"
         body = {
             "apiVersion": f"{_GROUP}/{_VERSION}",
             "kind": "ChaosEngine",
@@ -316,6 +321,9 @@ class LitmusChaosClient(ChaosClient):
             self._wait(lambda: self._stopped(engine), deadline, engine.name)
         if engine.uid is None:
             return
+        diagnostic_start = self._clock()
+        self._diagnose_cleanup(engine, "before child deletion")
+        deadline += self._clock() - diagnostic_start
         self._remove_children(engine)
         self._wait(lambda: self._children_removed(engine), deadline, engine.name)
         if observation_error is not None:
@@ -326,6 +334,77 @@ class LitmusChaosClient(ChaosClient):
         if self._read_engine(engine) is not None:
             self._delete_custom("chaosengines", engine.namespace, engine.name, engine.uid)
             self._wait(lambda: self._read_engine(engine) is None, deadline, engine.name)
+
+    def _diagnose_cleanup(self, engine: _ExperimentRun, stage: str) -> None:
+        # Temporary SQT-904 diagnostics; remove after investigating OOM cleanup.
+        if not engine.diagnose_memory or engine.uid is None:
+            return
+        logger = logging.getLogger(__name__)
+
+        def collect(label: str, read: Callable[[], Any]) -> Any:
+            try:
+                value = read()
+                summary = value
+                if label == "helper Pod statuses":
+                    summary = [
+                        {
+                            "name": pod.metadata.name,
+                            "uid": pod.metadata.uid,
+                            "status": pod.status.to_dict() if pod.status else None,
+                        }
+                        for pod in value.items
+                    ]
+                logger.info("SQT-904 DIAGNOSTIC [%s] engine=%s %s: %s", stage, engine.name, label, summary)
+                return value
+            except Exception as error:
+                logger.warning("SQT-904 DIAGNOSTIC [%s] %s unavailable: %s", stage, label, error)
+                return None
+
+        def engine_status() -> Any:
+            current = self._read_engine(engine)
+            return None if current is None else {"uid": current["metadata"].get("uid"), "status": current.get("status")}
+
+        collect("ChaosEngine", engine_status)
+        collect(
+            "ChaosResults",
+            lambda: [
+                {
+                    "name": result.get("metadata", {}).get("name"),
+                    "target_annotation": (result.get("metadata", {}).get("annotations") or {}).get(f"pod/{engine.pod}"),
+                    "status": result.get("status"),
+                }
+                for result in self._results(engine)
+            ],
+        )
+        core = self._backend.core_v1_api
+
+        def target_status() -> Any:
+            pod = core.read_namespaced_pod(name=engine.pod, namespace=engine.namespace, _request_timeout=(3, 5))
+            return {"uid": pod.metadata.uid, "status": pod.status.to_dict() if pod.status else None}
+
+        collect("target Pod", target_status)
+        pods = collect(
+            "helper Pod statuses",
+            lambda: core.list_namespaced_pod(
+                namespace=engine.namespace, label_selector=f"chaosUID={engine.uid}", _request_timeout=(3, 5)
+            ),
+        )
+        if pods is None:
+            return
+        for pod in pods.items[:8]:
+            for container in (pod.spec.init_containers or []) + pod.spec.containers:
+                collect(
+                    f"helper log {pod.metadata.name}/{container.name}",
+                    lambda: core.read_namespaced_pod_log(
+                        name=pod.metadata.name,
+                        namespace=engine.namespace,
+                        container=container.name,
+                        tail_lines=80,
+                        limit_bytes=8192,
+                        timestamps=True,
+                        _request_timeout=(3, 5),
+                    ),
+                )
 
     def _request_stop(self, engine: _ExperimentRun) -> bool:
         # Operator status writes can race with our stop patch. Read the latest
