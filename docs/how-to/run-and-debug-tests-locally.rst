@@ -237,3 +237,25 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Total memory stress
+-------------------
+
+``test_live_memory_stress_total`` requires Kubernetes and Litmus or Chaos Mesh
+with the ``StressChaos`` resource; otherwise it skips. It applies a ``1Gi``
+workload container limit through a StatefulSet rollout, then requests memory
+stress on one unit. The default is one worker, ``2048`` MB and ``600`` seconds
+of observation after confirmed injection.
+
+Per-charm settings override ``memory_exhaustion_workers``,
+``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` using
+the deployed charm's channel and Ubuntu base. The ``memory_limit`` fixture is
+separate. The requested size must be at least the limit; unknown channel or base
+metadata fails the test. Requested memory is not proof of continuous saturation.
+
+All bundle models must be active/idle before stress. No unhealthy status or
+out-of-memory restart is required. After cleanup, all models must recover within
+fifteen minutes and pass available deep validators while the limit remains in
+place. Missing validators leave functional coverage unverified. Original memory
+settings are restored after validation, and also on failure. Cleanup errors fail the
+test; resource patches do not invoke explicit restart extension hooks.

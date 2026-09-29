@@ -1,0 +1,176 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+from datetime import timedelta
+from time import sleep
+from typing import Callable
+
+import pytest
+from chaos_client import MetaChaosClient, ResourceConstraintsClient
+from juju import JujuClient, JujuModelHandle
+from kubernetes.utils.quantity import parse_quantity  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient
+from kubernetes_client.memory_limit import temporary_memory_limit
+
+from bundle_builder_x.charm import CharmChannel
+
+from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
+from .scheduler.states import State
+
+
+@pytest.fixture
+def memory_limit() -> str:
+    """Temporary workload container limit, independent of chaos parameters."""
+    return "1Gi"
+
+
+@pytest.fixture
+def memory_recovery_timeout() -> timedelta:
+    """Maximum wait for all bundle units to recover after stress cleanup."""
+    return timedelta(minutes=15)
+
+
+@pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
+def test_live_memory_stress_total(
+    juju_client: JujuClient,
+    chaos_tool_for_model: Callable[[JujuModelHandle], MetaChaosClient],
+    target_model_ref: JujuModelHandle,
+    target_application: str,
+    memory_limit: str,
+    resource_constraints_client: ResourceConstraintsClient,
+    memory_recovery_timeout: timedelta,
+    kubernetes_client: KubernetesClient | None,
+    neighbor_model_ref: JujuModelHandle | None,
+) -> None:
+    backend = juju_client.backend
+    kubernetes = kubernetes_client
+    if kubernetes is None:
+        pytest.skip("Total memory stress requires Kubernetes.")
+    tools = available_chaos_tools(kubernetes.backend)
+    if not tools:
+        pytest.skip("Total memory stress requires Litmus or Chaos Mesh.")
+    if ChaosTool.LITMUS not in tools and not kubernetes.backend.crd_exists("stresschaos.chaos-mesh.org"):
+        pytest.skip("Chaos Mesh memory stress requires the StressChaos CRD.")
+
+    info = backend.list_applications(target_model_ref)[target_application]
+    if info.channel is None or info.base is None:
+        pytest.fail("Deployed charm channel and Ubuntu base are required to resolve memory settings.")
+    settings = resource_constraints_client.get_charm_resource_constraints(
+        info.charm, CharmChannel.model_validate(str(info.channel)), info.base
+    )
+    workers = settings.memory_exhaustion_workers or 1
+    size_mb = settings.memory_exhaustion_size_mb or 2048
+    memory_stress_duration = timedelta(seconds=settings.memory_exhaustion_duration_seconds or 600)
+    if memory_recovery_timeout.total_seconds() <= 0 or parse_quantity(memory_limit) <= 0:
+        raise ValueError("Memory limit and recovery timeout must be positive.")
+    # Require the size parameter to cover the limit, treating MB conservatively as decimal.
+    if size_mb * 1_000_000 < parse_quantity(memory_limit):
+        raise ValueError("Total memory stress size must be at least the container memory limit.")
+    juju_client.logger.info(
+        "Memory stress settings: limit=%s, workers=%s, size_mb=%s, duration=%s",
+        memory_limit,
+        workers,
+        size_mb,
+        memory_stress_duration,
+    )
+    models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
+    juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+
+    namespace = target_model_ref.model
+    pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
+    pods = [
+        pod
+        for pod in pods
+        if pod.metadata.deletion_timestamp is None
+        and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
+    ]
+    if not pods:
+        pytest.fail(f"No live Pods found for {namespace}/{target_application}.")
+    pod = sorted(pods, key=lambda item: item.metadata.name)[0]
+    unit = (pod.metadata.annotations or {}).get("unit.juju.is/id")
+    if not unit or unit.split("/")[0] != target_application:
+        pytest.fail("Target Pod has no matching Juju unit annotation.")
+    owners = [owner for owner in pod.metadata.owner_references or [] if owner.controller]
+    if len(owners) != 1 or owners[0].kind != "StatefulSet":
+        pytest.fail("Memory limit setup requires a StatefulSet-owned Juju Pod.")
+    containers = [
+        item.name
+        for item in pod.spec.containers
+        if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
+    ]
+    if len(containers) != 1:
+        pytest.fail(f"Expected one workload container, found {containers}.")
+    owner = owners[0]
+    chaos = chaos_tool_for_model(target_model_ref)
+    with temporary_memory_limit(
+        kubernetes,
+        namespace,
+        owner.name,
+        owner.uid,
+        containers[0],
+        int(memory_recovery_timeout.total_seconds()),
+        memory_limit,
+    ):
+        # Ignore rollout transitions: establish a healthy baseline before stress.
+        juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+        current_pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
+        targets = [
+            item
+            for item in current_pods
+            if (item.metadata.annotations or {}).get("unit.juju.is/id") == unit
+            and item.metadata.deletion_timestamp is None
+            and (item.status is None or item.status.phase not in {"Succeeded", "Failed"})
+        ]
+        if len(targets) != 1:
+            pytest.fail(f"Expected one Pod for {unit} after memory limit rollout.")
+        workload = next(item for item in targets[0].spec.containers if item.name == containers[0])
+        limit = (workload.resources.limits or {}).get("memory") if workload.resources else None
+        if limit is None or parse_quantity(limit) != parse_quantity(memory_limit):
+            pytest.fail(f"Memory limit was not applied to {unit}/{containers[0]}.")
+
+        def log_workload_state(stage: str) -> None:
+            # Read-only evidence; a diagnostic failure must not skip stress cleanup.
+            try:
+                observed = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
+                for item in observed:
+                    if (item.metadata.annotations or {}).get("unit.juju.is/id") != unit:
+                        continue
+                    statuses = item.status.container_statuses or [] if item.status else []
+                    details = [
+                        (
+                            state.name,
+                            state.restart_count,
+                            state.last_state.terminated.reason
+                            if state.last_state and state.last_state.terminated
+                            else None,
+                        )
+                        for state in statuses
+                        if state.name == containers[0]
+                    ]
+                    juju_client.logger.info(
+                        "Memory stress %s: unit=%s pod_uid=%s containers=%s", stage, unit, item.metadata.uid, details
+                    )
+            except Exception:
+                juju_client.logger.warning("Unable to collect memory stress workload state (%s).", stage, exc_info=True)
+
+        log_workload_state("after limit rollout")
+        try:
+            chaos.stress_memory(
+                target_model_ref,
+                unit,
+                workers=workers,
+                size_mb=size_mb,
+                duration=memory_stress_duration + timedelta(minutes=2),
+            )
+            # Surviving stress without a status change is valid. Keep the fault active
+            # for the observation period instead of waiting for an unhealthy status.
+            sleep(memory_stress_duration.total_seconds())
+        finally:
+            log_workload_state("before stress cleanup")
+            chaos.cleanup_all()
+        # Verify recovery while the memory limit remains in place, before its restore
+        # triggers a rollout that could otherwise conceal a failure to self-recover.
+        juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+        for model in models:
+            juju_client.validate_model(model=model, level="deep")
+    juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
