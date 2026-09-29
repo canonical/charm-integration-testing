@@ -246,9 +246,25 @@ Total CPU stress
 ``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
 one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
 
-It temporarily limits the workload container to one CPU, waits for rollout and
-active/idle, then starts four stress workers. The selected unit must leave
-active/idle and recover after stress cleanup, before the CPU limit is restored.
-The ``cpu_stress_timeout`` fixture defaults to ten minutes per phase. Original
-CPU requests and limits are restored even after failure or skip. A StatefulSet
-patch configures the limit; it does not replace a missing chaos tool.
+It temporarily limits the workload container to one CPU, waits for all bundle
+units to become active/idle, then starts four stress workers. Stress is held for
+``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
+required. After cleanup, all bundle units, including a cross-model neighbor,
+must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
+default). Available deep interface validators run for the target application and
+its test neighbor, including validators implemented on the consumer side,
+before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+When no validator applies, logs report the missing validation coverage; only
+status recovery is checked. Deployment validation supplies the initial baseline.
+Original CPU requests and limits are restored even after failure or skip.
+A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
+
+For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
+``data-integrator:postgresql``. The ``postgresql_client`` validator runs on
+data-integrator and checks database connectivity, a query, and a write/read cycle
+at the deep level. The integration-test workflow includes this combination with
+PostgreSQL revision 495, channel ``14/stable``, and base ``22.04``. For manual
+workflow runs, use those same values and the branch containing your changes.
+The existing ``certificates`` combination does not exercise this DB validator.
+Confirm validation results for the neighbor in the live logs; an empty or skipped
+validation result is not evidence of successful database recovery.

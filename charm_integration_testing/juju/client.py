@@ -366,8 +366,10 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
-        """Validate all applications in the model.
+    def validate_model(
+        self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
+    ) -> None:
+        """Validate selected applications, or all applications in the model.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
@@ -375,12 +377,14 @@ class JujuClient:
         Args:
             model: Juju model reference
             level: Validation level ("simple" or "deep", default: "simple")
+            applications: Application names to validate; None selects all applications.
 
         Raises:
             JujuValidationError: If any validation checks fail.
         """
         # Collect applications for validators
-        applications = self.backend.list_applications(model)
+        if applications is None:
+            applications = list(self.backend.list_applications(model))
         self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
 
         # Run validators on each application

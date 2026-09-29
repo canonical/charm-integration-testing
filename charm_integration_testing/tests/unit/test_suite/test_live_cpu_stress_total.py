@@ -16,8 +16,13 @@ from test_suite.fixtures.chaos_tools import ChaosTool
 MODEL = JujuModelHandle(controller="controller", model="model")
 
 
-@pytest.mark.parametrize("failure", [None, "stress", "status", "skip", "cleanup", "diagnostics"])
-def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: str | None) -> None:
+@pytest.mark.parametrize(
+    "failure", [None, "stress", "recovery", "skip", "cleanup", "hold", "validation", "neighbor_validation"]
+)
+@pytest.mark.parametrize("neighbor", [None, JujuModelHandle(controller="other", model="neighbor")])
+def test_cleanup_and_recovery_order(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None, neighbor: JujuModelHandle | None
+) -> None:
     # GIVEN a single StatefulSet workload and recorded lifecycle operations
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
     backend = juju.backend
@@ -55,18 +60,6 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     terminating.metadata.deletion_timestamp = datetime.now(timezone.utc)
     kubernetes.get_charm_pods.return_value = [completed, failed, terminating, pod]
     events: list[str] = []
-    probe = MagicMock()
-    monkeypatch.setattr(module, "CpuStressProbe", lambda *args: probe)
-
-    def after_cleanup(succeeded: bool) -> None:
-        assert events[-1] == "cleanup"
-        assert succeeded == (failure != "cleanup")
-
-    probe.after_cleanup.side_effect = after_cleanup
-    snapshot = MagicMock()
-    if failure == "diagnostics":
-        snapshot.side_effect = [None, None, RuntimeError("diagnostic collection failed")]
-    monkeypatch.setattr(module, "log_cpu_stress_snapshot", snapshot)
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: {ChaosTool.LITMUS})
 
     @contextmanager
@@ -93,31 +86,70 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
         if failure == "cleanup":
             raise RuntimeError("cleanup failed")
 
-    def health(model: JujuModelHandle, unit: str, healthy: bool, timeout: timedelta) -> None:
-        assert unit == "app/0"
-        events.append("healthy" if healthy else "unhealthy")
-        if failure == "status" and not healthy:
-            raise TimeoutError("no response")
+    def idle(**kwargs: object) -> None:
+        assert kwargs["models"] == ([MODEL, neighbor] if neighbor else [MODEL])
+        assert kwargs["timeout"] == timedelta(minutes=15)
+        assert kwargs["strict_timeout"] is True
+        events.append("idle")
+        if failure == "recovery" and events.count("idle") == 3:
+            raise TimeoutError("neighbor did not recover")
 
+    def hold(seconds: float) -> None:
+        assert seconds == 10
+        events.append("hold")
+        if failure == "hold":
+            raise RuntimeError("interrupted")
+
+    def validate(**kwargs: object) -> None:
+        is_neighbor = kwargs["applications"] == ["neighbor-app"]
+        assert kwargs == {
+            "model": (neighbor or MODEL) if is_neighbor else MODEL,
+            "level": "deep",
+            "applications": ["neighbor-app"] if is_neighbor else ["app"],
+        }
+        events.append("validate_neighbor" if is_neighbor else "validate")
+        if failure == ("neighbor_validation" if is_neighbor else "validation"):
+            raise RuntimeError("validator failed")
+
+    monkeypatch.setattr(module, "sleep", hold)
     chaos.stress_cpu.side_effect = stress
     chaos.cleanup_all.side_effect = cleanup
-    juju.wait_for_unit_health.side_effect = health
-    # WHEN the test succeeds, fails, or skips during stress
+    juju.multi_model_idle_for_period.side_effect = idle
+    juju.validate_model.side_effect = validate
+
+    def run() -> None:
+        module.test_live_cpu_stress_total(
+            juju, MODEL, "app", timedelta(seconds=10), timedelta(minutes=15), kubernetes, neighbor, "neighbor-app"
+        )
+
+    # WHEN the test succeeds, fails, or skips, THEN cleanup and resource restoration run.
     if failure is None:
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes, {}, "cloud")
-        assert events == ["limit", "healthy", "stress", "unhealthy", "cleanup", "healthy", "restore"]
-        juju.validate_model.assert_called_once()
+        run()
+        assert events == [
+            "idle",
+            "limit",
+            "idle",
+            "stress",
+            "hold",
+            "cleanup",
+            "idle",
+            "validate",
+            "validate_neighbor",
+            "restore",
+            "idle",
+        ]
+        chaos.stress_cpu.assert_called_once_with(MODEL, "app/0", workers=4, duration=timedelta(seconds=130))
     else:
         expected = (
-            pytest.skip.Exception if failure == "skip" else (TimeoutError if failure == "status" else RuntimeError)
+            pytest.skip.Exception if failure == "skip" else (TimeoutError if failure == "recovery" else RuntimeError)
         )
         with pytest.raises(expected):
-            module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes, {}, "cloud")
-        assert events[-2:] == ["cleanup", "restore"]
-        juju.validate_model.assert_not_called()
-    assert snapshot.call_args.args[-1] == "before cleanup"
-    probe.after_cleanup.assert_called_once()
-    probe.during_stress.return_value.__exit__.assert_called_once()
+            run()
+        assert "cleanup" in events
+        assert events[-1] == "restore"
+        if failure not in {"validation", "neighbor_validation"}:
+            juju.validate_model.assert_not_called()
+    juju.wait_for_unit_health.assert_not_called()
 
 
 @pytest.mark.parametrize("kubernetes", [False, True])
@@ -127,7 +159,9 @@ def test_unsupported_environment_skips_before_mutation(monkeypatch: pytest.Monke
     juju.backend.get_kubernetes_client_for_model.return_value = target
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: set())
     with pytest.raises(pytest.skip.Exception):
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), target, {}, "cloud")
+        module.test_live_cpu_stress_total(
+            juju, MODEL, "app", timedelta(seconds=10), timedelta(minutes=15), target, None, "neighbor-app"
+        )
     if target is not None:
         target.get_charm_pods.assert_not_called()
-    juju.idle_for_period.assert_not_called()
+    juju.multi_model_idle_for_period.assert_not_called()

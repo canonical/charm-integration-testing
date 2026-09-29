@@ -2,24 +2,28 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
-from pathlib import Path
+from time import sleep
 
 import pytest
 from juju import JujuClient, JujuModelHandle
 from kubernetes.utils.quantity import parse_quantity  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 from kubernetes_client.cpu_limit import temporary_cpu_limit
-from kubernetes_client.cpu_stress_diagnostics import log_cpu_stress_snapshot
 
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools, chaos_client_for_model
 from .scheduler.states import State
-from .temporary_cpu_probe import CpuStressProbe
 
 
 @pytest.fixture
-def cpu_stress_timeout() -> timedelta:
-    """Maximum wait for each stress response and recovery phase."""
+def cpu_stress_duration() -> timedelta:
+    """Time to keep CPU stress applied after injection is confirmed."""
     return timedelta(minutes=10)
+
+
+@pytest.fixture
+def cpu_recovery_timeout() -> timedelta:
+    """Maximum wait for all bundle units to recover after stress cleanup."""
+    return timedelta(minutes=15)
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
@@ -27,10 +31,11 @@ def test_live_cpu_stress_total(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     target_application: str,
-    cpu_stress_timeout: timedelta,
+    cpu_stress_duration: timedelta,
+    cpu_recovery_timeout: timedelta,
     kubernetes_client: KubernetesClient | None,
-    cloud_kubeconfigs: dict[str, Path],
-    target_cloud: str,
+    neighbor_model_ref: JujuModelHandle | None,
+    neighbor_application: str,
 ) -> None:
     backend = juju_client.backend
     kubernetes = kubernetes_client
@@ -41,6 +46,11 @@ def test_live_cpu_stress_total(
         pytest.skip("Total CPU stress requires Litmus or Chaos Mesh.")
     if ChaosTool.LITMUS not in tools and not kubernetes.backend.crd_exists("stresschaos.chaos-mesh.org"):
         pytest.skip("Chaos Mesh CPU stress requires the StressChaos CRD.")
+
+    if cpu_stress_duration.total_seconds() <= 0 or cpu_recovery_timeout.total_seconds() <= 0:
+        raise ValueError("CPU stress duration and recovery timeout must be positive.")
+    models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
+    juju_client.multi_model_idle_for_period(models=models, timeout=cpu_recovery_timeout, strict_timeout=True)
 
     namespace = target_model_ref.model
     pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
@@ -69,11 +79,10 @@ def test_live_cpu_stress_total(
     owner = owners[0]
     chaos = chaos_client_for_model(backend, target_model_ref)
     with temporary_cpu_limit(
-        kubernetes, namespace, owner.name, owner.uid, containers[0], int(cpu_stress_timeout.total_seconds())
+        kubernetes, namespace, owner.name, owner.uid, containers[0], int(cpu_recovery_timeout.total_seconds())
     ):
         # Ignore rollout transitions: establish a healthy baseline before stress.
-        juju_client.idle_for_period(model=target_model_ref, timeout=cpu_stress_timeout, strict_timeout=True)
-        juju_client.wait_for_unit_health(target_model_ref, unit, True, cpu_stress_timeout)
+        juju_client.multi_model_idle_for_period(models=models, timeout=cpu_recovery_timeout, strict_timeout=True)
         current_pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
         targets = [
             item
@@ -88,33 +97,20 @@ def test_live_cpu_stress_total(
         limit = (workload.resources.limits or {}).get("cpu") if workload.resources else None
         if limit is None or parse_quantity(limit) != 1:
             pytest.fail(f"CPU limit was not applied to {unit}/{containers[0]}.")
-        # TEMPORARY SQT-905: remove snapshots and helper after live diagnosis.
-        probe = CpuStressProbe(
-            cloud_kubeconfigs.get(target_cloud),
-            target_model_ref.uri,
-            namespace,
-            targets[0].metadata.name,
-            unit,
-            containers[0],
-        )
-        probe.sample("before stress")
-        log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "before stress")
         try:
-            with probe.during_stress():
-                chaos.stress_cpu(target_model_ref, unit, workers=4, duration=cpu_stress_timeout + timedelta(minutes=2))
-                log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "after injection")
-                juju_client.wait_for_unit_health(target_model_ref, unit, False, cpu_stress_timeout)
+            chaos.stress_cpu(target_model_ref, unit, workers=4, duration=cpu_stress_duration + timedelta(minutes=2))
+            # Surviving stress without a status change is valid. Keep the fault active
+            # for the observation period instead of waiting for an unhealthy status.
+            sleep(cpu_stress_duration.total_seconds())
         finally:
-            try:
-                log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "before cleanup")
-            finally:
-                cleanup_succeeded = False
-                try:
-                    chaos.cleanup_all()
-                    cleanup_succeeded = True
-                finally:
-                    probe.after_cleanup(cleanup_succeeded)
-        # Recovery must occur before restoring the CPU limit, without a rollout or restart.
-        juju_client.wait_for_unit_health(target_model_ref, unit, True, cpu_stress_timeout)
-    juju_client.idle_for_period(model=target_model_ref, timeout=cpu_stress_timeout, strict_timeout=True)
-    juju_client.validate_model(model=target_model_ref, level="simple")
+            chaos.cleanup_all()
+        # Verify recovery while the CPU limit remains in place, before its restore
+        # triggers a rollout that could otherwise conceal a failure to self-recover.
+        juju_client.multi_model_idle_for_period(models=models, timeout=cpu_recovery_timeout, strict_timeout=True)
+        juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
+        # Consumer-side validators exercise the target's provided interface (for
+        # example, postgresql_client runs on data-integrator, not PostgreSQL).
+        juju_client.validate_model(
+            model=neighbor_model_ref or target_model_ref, level="deep", applications=[neighbor_application]
+        )
+    juju_client.multi_model_idle_for_period(models=models, timeout=cpu_recovery_timeout, strict_timeout=True)
