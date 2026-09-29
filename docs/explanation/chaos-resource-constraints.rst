@@ -33,7 +33,7 @@ Components
   ``bundle_builder_x.overrides.CharmOverridesCriteria``. Only scenarios
   backed by an implemented ``ChaosClient`` operation have fields; disk I/O
   saturation has none yet (unimplemented), and network isolation has none
-  because ``isolate_network`` takes no tunable parameters.
+  because ``isolate_network`` takes no configurable parameters.
 
 **Client** (``chaos_client.resource_constraints.ResourceConstraintsClient``)
   Reads ``static/charm-resource-constraints/<charm-name>.yaml`` files, picks
@@ -68,4 +68,4 @@ Configuring the directory
 The directory is passed via ``--charm-resource-constraints`` (default
 ``./static/charm-resource-constraints/``). Unlike ``--charm-overrides``, a
 missing or unset directory is not an error -- it simply means no charm has
-customized its chaos parameters yet.
+customised its chaos parameters yet.

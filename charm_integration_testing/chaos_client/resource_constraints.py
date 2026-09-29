@@ -20,7 +20,7 @@ class CharmResourceConstraints(BaseModel):
     different values for the "moderate pressure" and "total exhaustion" variant of the same
     underlying stress operation. Only scenarios backed by an implemented ``ChaosClient`` operation
     are represented here; disk I/O saturation has no field yet because no client implements it, and
-    network isolation has none because ``isolate_network`` takes no tunable parameters.
+    network isolation has none because ``isolate_network`` takes no configurable parameters.
     """
 
     criteria: list[CharmOverridesCriteria] = Field(default_factory=list)
