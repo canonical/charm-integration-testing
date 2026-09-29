@@ -249,7 +249,11 @@ one workload container and a StatefulSet using ``RollingUpdate`` with partition 
 It temporarily limits the workload container to one CPU, waits for all bundle
 units to become active/idle, then starts four stress workers. Stress is held for
 ``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
-required. After cleanup, all bundle units, including a cross-model neighbor,
+required. Chaos Mesh waits up to one minute for the controller to confirm target
+selection and injection before the hold period starts. A startup timeout fails
+the test and still triggers cleanup. The requested experiment duration includes
+two extra minutes to allow for startup and polling.
+After cleanup, all bundle units, including a cross-model neighbor,
 must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
 default). Available deep interface validators run for the target application and
 its test neighbor, including validators implemented on the consumer side,

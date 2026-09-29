@@ -2,6 +2,8 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from time import monotonic, sleep
+from typing import Callable
 from uuid import uuid4
 
 from juju import JujuModelHandle
@@ -21,7 +23,21 @@ class ChaosMeshNotInstalledError(RuntimeError):
 
 
 class ChaosMeshChaosClient(ChaosClient):
-    def __init__(self, backend: KubernetesBackend):
+    def __init__(
+        self,
+        backend: KubernetesBackend,
+        *,
+        startup_timeout: timedelta = timedelta(minutes=1),
+        poll_interval: timedelta = timedelta(seconds=1),
+        clock: Callable[[], float] = monotonic,
+        pause: Callable[[float], None] = sleep,
+    ) -> None:
+        if min(startup_timeout.total_seconds(), poll_interval.total_seconds()) <= 0:
+            raise ValueError("Startup timeout and poll interval must be positive.")
+        self._startup_timeout = startup_timeout.total_seconds()
+        self._poll_interval = poll_interval.total_seconds()
+        self._clock = clock
+        self._pause = pause
         missing = missing_chaos_mesh_crds(backend)
         if len(missing) == len(CHAOS_MESH_CRDS):
             raise ChaosMeshNotInstalledError(
@@ -138,7 +154,51 @@ class ChaosMeshChaosClient(ChaosClient):
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("StressChaos", "stresschaos", model, unit, "", self._name(label, application), spec)
+        name = self._name(label, application)
+        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
+        self._wait_for_stress_injection(model.model, name)
+
+    def _wait_for_stress_injection(self, namespace: str, name: str) -> None:
+        """Wait for controller-confirmed injection, retaining failed runs for cleanup."""
+        deadline = self._clock() + self._startup_timeout
+        while (remaining := deadline - self._clock()) > 0:
+            current = self._backend.custom_objects_api.get_namespaced_custom_object(
+                group=_GROUP,
+                version=_VERSION,
+                namespace=namespace,
+                plural="stresschaos",
+                name=name,
+                _request_timeout=min(30, remaining),
+            )
+            metadata = current.get("metadata") or {}
+            if (
+                not self._uids.get(name)
+                or metadata.get("uid") != self._uids[name]
+                or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
+            ):
+                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during injection.")
+            status = current.get("status") or {}
+            experiment = status.get("experiment") or {}
+            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
+            if (
+                metadata.get("deletionTimestamp")
+                or experiment.get("desiredPhase") == "Stop"
+                or conditions.get("Paused") == "True"
+            ):
+                raise RuntimeError(f"StressChaos {namespace}/{name} stopped before injection was confirmed.")
+            if (
+                conditions.get("Selected") == "True"
+                and conditions.get("AllInjected") == "True"
+                and experiment.get("desiredPhase") == "Run"
+                and conditions.get("AllRecovered") != "True"
+            ):
+                if self._clock() < deadline:
+                    return
+                break
+            remaining = deadline - self._clock()
+            if remaining > 0:
+                self._pause(min(self._poll_interval, remaining))
+        raise TimeoutError(f"Timed out waiting for StressChaos {namespace}/{name} injection.")
 
     def _create(
         self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]

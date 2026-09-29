@@ -61,7 +61,7 @@ class KubernetesStub(KubernetesBackend):
         self.ready_deployments: set[tuple[str, str]] = set()
         self.reads: list[tuple[str, str]] = []
         self.error: ApiException | None = None
-        self.custom_objects_api = FakeCustomObjectsApi()
+        self.custom_objects_api = FakeCustomObjectsApi(inject_stress=True)
         self.networking_v1_api = FakeNetworkingV1Api()
 
     def crd_exists(self, name: str) -> bool:

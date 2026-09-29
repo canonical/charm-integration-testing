@@ -44,7 +44,7 @@ class BackendStub(KubernetesBackend):
         self._crds = set(crds)
         self.crd_errors: dict[str, ApiException] = {}
         self.crd_reads: list[str] = []
-        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete)
+        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete, inject_stress=True)
 
     def crd_exists(self, name: str) -> bool:
         self.crd_reads.append(name)
@@ -585,3 +585,88 @@ def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) 
         with pytest.raises(RuntimeError, match="Expected one live Pod"):
             run()
         assert backend.custom_objects_api.create_calls == []
+
+
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+def test_stress_waits_for_injection_before_returning(operation: str) -> None:
+    # GIVEN a controller that reports unselected/pending before it injects the fault
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.inject_stress = False
+    now = 0.0
+    sleeps: list[float] = []
+
+    def pause(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+        sleeps.append(seconds)
+        obj = next(iter(api.objects.values()))
+        obj["status"] = {
+            "conditions": [
+                {"type": "Selected", "status": "True" if len(sleeps) > 1 else "False"},
+                {"type": "AllInjected", "status": "True"},
+                {"type": "AllRecovered", "status": "False"},
+            ],
+            "experiment": {"desiredPhase": "Run"},
+        }
+
+    mesh = ChaosMeshChaosClient(backend, clock=lambda: now, pause=pause)
+    if operation == "stress_cpu":
+        mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+    else:
+        mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=12))
+    # THEN resource creation alone, or AllInjected without Selected, cannot start the hold period.
+    assert sleeps == [1.0, 1.0]
+    assert now == 2
+    mesh.cleanup(TEST_MODEL, UNIT, "")
+    assert not api.objects
+
+
+@pytest.mark.parametrize(
+    "state", ["pending", "recovered", "stopped", "paused", "replacement", "wrong-owner", "api-error"]
+)
+def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
+    # GIVEN a created resource whose injection cannot be confirmed
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.inject_stress = False
+    now = 0.0
+
+    def pause(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+        obj = next(iter(api.objects.values()))
+        if state == "stopped":
+            obj["status"] = {"experiment": {"desiredPhase": "Stop"}}
+        elif state == "paused":
+            obj["status"] = {"conditions": [{"type": "Paused", "status": "True"}]}
+        elif state == "recovered":
+            obj["status"] = {
+                "experiment": {"desiredPhase": "Run"},
+                "conditions": [{"type": key, "status": "True"} for key in ("Selected", "AllInjected", "AllRecovered")],
+            }
+        elif state == "replacement":
+            obj["metadata"]["uid"] = "replacement"
+        elif state == "wrong-owner":
+            obj["metadata"]["annotations"] = {}
+        elif state == "api-error":
+            api.raise_on_read = ApiException(status=403)
+
+    mesh = ChaosMeshChaosClient(backend, startup_timeout=timedelta(seconds=3), clock=lambda: now, pause=pause)
+    expected = (
+        TimeoutError if state in {"pending", "recovered"} else (ApiException if state == "api-error" else RuntimeError)
+    )
+    with pytest.raises(expected):
+        mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+    assert now <= 3
+    assert len(mesh._created) == 1
+    assert not api.delete_calls
+    api.raise_on_read = None
+    # THEN ordinary failures remain cleanable; replaced or unowned resources are protected.
+    if state in {"replacement", "wrong-owner"}:
+        with pytest.raises(RuntimeError):
+            mesh.cleanup(TEST_MODEL, UNIT, "")
+        assert not api.delete_calls
+    else:
+        mesh.cleanup(TEST_MODEL, UNIT, "")
+        assert not api.objects
