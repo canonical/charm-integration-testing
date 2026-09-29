@@ -48,7 +48,7 @@ class CharmResourceConstraints(BaseModel):
 
     # Disk I/O latency (backed by ChaosClient.io_latency)
     disk_io_latency_delay_ms: PositiveInt | None = None
-    disk_io_latency_percent: int | None = None
+    disk_io_latency_percent: int | None = Field(default=None, ge=0, le=100)
     disk_io_latency_duration_seconds: PositiveInt | None = None
 
     def meets(self, channel: CharmChannel, ubuntu_version: str) -> bool:
