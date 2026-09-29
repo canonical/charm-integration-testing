@@ -221,21 +221,6 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_unhealthy(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-        count: int | None,
-        strict_timeout: bool = False,
-    ) -> None:
-        """Wait for *application*'s unit workload status to leave 'active' for *count* consecutive checks.
-
-        Raises immediately if any unit agent disconnects.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
     def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
@@ -319,9 +304,9 @@ class JujuBackend(ABC):
     def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
         """Wait until the SAAS proxy named *alias* no longer appears in ``model``.
 
-        ``remove_saas`` only issues the removal command; the controller's teardown of the
-        underlying remote entity is asynchronous. Without waiting for it to actually converge,
-        a later re-consumption of the same alias can race with the still-in-progress removal.
+        ``remove_saas`` only issues the removal command; the controller's teardown of the underlying
+        remote entity is asynchronous. Without waiting for it to converge, a later re-consumption of
+        the same alias can race with the still-in-progress removal.
         See https://github.com/canonical/charm-integration-testing/issues/1045.
         """
         raise NotImplementedError

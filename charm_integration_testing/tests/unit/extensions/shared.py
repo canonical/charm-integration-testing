@@ -73,16 +73,6 @@ class NullJujuBackend(JujuBackend):
     ) -> None:
         raise NotImplementedError
 
-    def wait_unhealthy(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-        count: int | None,
-        strict_timeout: bool = False,
-    ) -> None:
-        raise NotImplementedError
-
     def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 

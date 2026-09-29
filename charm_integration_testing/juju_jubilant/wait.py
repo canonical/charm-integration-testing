@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-import dataclasses
 from typing import Iterator
 
 import jubilant
@@ -15,11 +14,6 @@ from juju import (
     JujuUnitState,
     JujuWaitState,
 )
-
-
-def is_agent_disconnected(wait_state: JujuWaitState) -> bool:
-    """True if any noncompliant unit agent is 'lost' (disconnected from the controller)."""
-    return any(state is not None and state.status == "lost" for state in wait_state.noncompliant_unit_agents.values())
 
 
 def _parse_bundle(
@@ -193,27 +187,6 @@ def all_statuses_are_in(
         noncompliant_units=noncompliant_units,
         noncompliant_unit_agents=noncompliant_unit_agents,
     )
-
-
-def any_status_not_in(
-    status: jubilant.Status,
-    *application_args: str,
-    application_statuses: set[str] | None = None,
-    unit_statuses: set[str] | None = None,
-    unit_agent_statuses: set[str] | None = None,
-) -> tuple[bool, JujuWaitState]:
-    is_compliant, wait_state = all_statuses_are_in(
-        status,
-        *application_args,
-        application_statuses=application_statuses,
-        unit_statuses=unit_statuses,
-        unit_agent_statuses=unit_agent_statuses,
-    )
-    has_noncompliant_status = not is_compliant
-    transition = "left" if has_noncompliant_status else "waiting to leave"
-    message = wait_state.message.replace("waiting for", transition, 1)
-    updated_state = dataclasses.replace(wait_state, message=message)
-    return has_noncompliant_status, updated_state
 
 
 def applications_are_scaled(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
