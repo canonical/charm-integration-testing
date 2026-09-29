@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from juju import JujuClient, JujuModelHandle
@@ -12,6 +13,7 @@ from kubernetes_client.cpu_stress_diagnostics import log_cpu_stress_snapshot
 
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools, chaos_client_for_model
 from .scheduler.states import State
+from .temporary_cpu_probe import CpuStressProbe
 
 
 @pytest.fixture
@@ -27,6 +29,8 @@ def test_live_cpu_stress_total(
     target_application: str,
     cpu_stress_timeout: timedelta,
     kubernetes_client: KubernetesClient | None,
+    cloud_kubeconfigs: dict[str, Path],
+    target_cloud: str,
 ) -> None:
     backend = juju_client.backend
     kubernetes = kubernetes_client
@@ -85,16 +89,31 @@ def test_live_cpu_stress_total(
         if limit is None or parse_quantity(limit) != 1:
             pytest.fail(f"CPU limit was not applied to {unit}/{containers[0]}.")
         # TEMPORARY SQT-905: remove snapshots and helper after live diagnosis.
+        probe = CpuStressProbe(
+            cloud_kubeconfigs.get(target_cloud),
+            target_model_ref.uri,
+            namespace,
+            targets[0].metadata.name,
+            unit,
+            containers[0],
+        )
+        probe.sample("before stress")
         log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "before stress")
         try:
-            chaos.stress_cpu(target_model_ref, unit, workers=4, duration=cpu_stress_timeout + timedelta(minutes=2))
-            log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "after injection")
-            juju_client.wait_for_unit_health(target_model_ref, unit, False, cpu_stress_timeout)
+            with probe.during_stress():
+                chaos.stress_cpu(target_model_ref, unit, workers=4, duration=cpu_stress_timeout + timedelta(minutes=2))
+                log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "after injection")
+                juju_client.wait_for_unit_health(target_model_ref, unit, False, cpu_stress_timeout)
         finally:
             try:
                 log_cpu_stress_snapshot(kubernetes.backend, namespace, targets[0].metadata.name, "before cleanup")
             finally:
-                chaos.cleanup_all()
+                cleanup_succeeded = False
+                try:
+                    chaos.cleanup_all()
+                    cleanup_succeeded = True
+                finally:
+                    probe.after_cleanup(cleanup_succeeded)
         # Recovery must occur before restoring the CPU limit, without a rollout or restart.
         juju_client.wait_for_unit_health(target_model_ref, unit, True, cpu_stress_timeout)
     juju_client.idle_for_period(model=target_model_ref, timeout=cpu_stress_timeout, strict_timeout=True)

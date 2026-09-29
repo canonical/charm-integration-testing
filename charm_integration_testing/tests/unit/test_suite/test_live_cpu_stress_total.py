@@ -55,6 +55,14 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     terminating.metadata.deletion_timestamp = datetime.now(timezone.utc)
     kubernetes.get_charm_pods.return_value = [completed, failed, terminating, pod]
     events: list[str] = []
+    probe = MagicMock()
+    monkeypatch.setattr(module, "CpuStressProbe", lambda *args: probe)
+
+    def after_cleanup(succeeded: bool) -> None:
+        assert events[-1] == "cleanup"
+        assert succeeded == (failure != "cleanup")
+
+    probe.after_cleanup.side_effect = after_cleanup
     snapshot = MagicMock()
     if failure == "diagnostics":
         snapshot.side_effect = [None, None, RuntimeError("diagnostic collection failed")]
@@ -96,7 +104,7 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
     juju.wait_for_unit_health.side_effect = health
     # WHEN the test succeeds, fails, or skips during stress
     if failure is None:
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes)
+        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes, {}, "cloud")
         assert events == ["limit", "healthy", "stress", "unhealthy", "cleanup", "healthy", "restore"]
         juju.validate_model.assert_called_once()
     else:
@@ -104,10 +112,12 @@ def test_cleanup_and_recovery_order(monkeypatch: pytest.MonkeyPatch, failure: st
             pytest.skip.Exception if failure == "skip" else (TimeoutError if failure == "status" else RuntimeError)
         )
         with pytest.raises(expected):
-            module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes)
+            module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), kubernetes, {}, "cloud")
         assert events[-2:] == ["cleanup", "restore"]
         juju.validate_model.assert_not_called()
     assert snapshot.call_args.args[-1] == "before cleanup"
+    probe.after_cleanup.assert_called_once()
+    probe.during_stress.return_value.__exit__.assert_called_once()
 
 
 @pytest.mark.parametrize("kubernetes", [False, True])
@@ -117,7 +127,7 @@ def test_unsupported_environment_skips_before_mutation(monkeypatch: pytest.Monke
     juju.backend.get_kubernetes_client_for_model.return_value = target
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: set())
     with pytest.raises(pytest.skip.Exception):
-        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), target)
+        module.test_live_cpu_stress_total(juju, MODEL, "app", timedelta(seconds=10), target, {}, "cloud")
     if target is not None:
         target.get_charm_pods.assert_not_called()
     juju.idle_for_period.assert_not_called()
