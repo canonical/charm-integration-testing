@@ -133,7 +133,7 @@ class TestGetCharmResourceConstraints:
 
 
 class TestCharmResourceConstraintsFile:
-    def test_rejects_unknown_top_level_keys_are_ignored_by_default(self) -> None:
+    def test_ignores_unknown_top_level_keys_by_default(self) -> None:
         # Pydantic ignores unknown fields unless configured otherwise; this test documents that.
         parsed = CharmResourceConstraintsFile(**{"constraints": [], "unexpected": "value"})
         assert parsed.constraints == []
