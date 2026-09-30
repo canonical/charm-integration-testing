@@ -159,18 +159,23 @@ class PersistenceIndexStub:
         return doc_id
 
 
-def _term_query_field_and_value(body: dict[str, Any] | None) -> tuple[str, Any] | None:
-    """Extract the (field, value) pair from a ``{"query": {"term": {field: value}}}`` body.
+def _term_query_filters(body: dict[str, Any] | None) -> list[tuple[str, Any]]:
+    """Extract (field, value) pairs a query body requires a document to match.
 
-    The validator always queries against a field's ".keyword" sub-field (e.g.
-    ``validator_marker.keyword``); the stub strips that suffix to match against the plain field
-    name documents are stored under, mirroring how OpenSearch's dynamic ".keyword" multi-field
-    reflects the same value as its parent field.
+    Handles both a single ``{"query": {"term": {field: value}}}`` clause and a
+    ``{"query": {"bool": {"filter": [{"term": {...}}, ...]}}}`` conjunction of them - the two shapes
+    the validator's count()/search() calls use. The stub strips any ".keyword" suffix to match
+    against the plain field name documents are stored under, mirroring how OpenSearch's dynamic
+    ".keyword" multi-field reflects the same value as its parent field.
     """
     if not body:
-        return None
-    field_name, value = next(iter(body["query"]["term"].items()))
-    return field_name.removesuffix(".keyword"), value
+        return []
+    query = body["query"]
+    if "term" in query:
+        clauses = [query["term"]]
+    else:
+        clauses = [clause["term"] for clause in query["bool"]["filter"]]
+    return [(field_name.removesuffix(".keyword"), value) for clause in clauses for field_name, value in clause.items()]
 
 
 @dataclass
@@ -200,11 +205,12 @@ class PersistenceOpenSearchClientStub:
             raise self.count_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        match = _term_query_field_and_value(body)
-        if match is None:
-            return {"count": len(self.indices[index].documents)}
-        field_name, value = match
-        matching = sum(1 for doc in self.indices[index].documents.values() if doc.get(field_name) == value)
+        filters = _term_query_filters(body)
+        matching = sum(
+            1
+            for doc in self.indices[index].documents.values()
+            if all(doc.get(field_name) == value for field_name, value in filters)
+        )
         return {"count": matching}
 
     def search(self, index: str, body: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -212,11 +218,11 @@ class PersistenceOpenSearchClientStub:
             raise self.search_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        match = _term_query_field_and_value(body)
+        filters = _term_query_filters(body)
         hits = [
             {"_id": doc_id, "_source": doc}
             for doc_id, doc in self.indices[index].documents.items()
-            if match is None or doc.get(match[0]) == match[1]
+            if all(doc.get(field_name) == value for field_name, value in filters)
         ]
         size = (body or {}).get("size")
         if size is not None:
@@ -718,6 +724,33 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert new_state.id == 42
         assert new_state.ref == 2
         assert len(client.indices["test-index"].documents) == 1
+
+    def test_fails_when_matching_token_belongs_to_a_different_scope(self) -> None:
+        # GIVEN the shared index has documents carrying this expected token, but tagged with a
+        # different relation/unit's validator_scope - e.g. a token collision, or a state that was
+        # somehow copied across relations. These must not count towards this scope's expected
+        # ref: doing so would let another scope's data produce a false PASS here.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(
+            client,
+            [
+                {"validator_scope": "other-scope", "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 1},
+                {"validator_scope": "other-scope", "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 2},
+            ],
+        )
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN a FAIL result is returned (0 documents found in this scope), not a false PASS
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "document_count")
+        assert not check.passed
+        assert new_state.ref == 2
+        # And the other scope's documents were left untouched, with no new document written
+        assert len(client.indices["test-index"].documents) == 2
 
     def test_fails_when_index_does_not_exist(self) -> None:
         # GIVEN the shared index does not exist yet (e.g. never granted / relation still forming)

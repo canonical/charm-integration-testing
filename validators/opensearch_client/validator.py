@@ -351,7 +351,7 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         try:
             index_name = self._target_index_name()
             scope = self._canary_scope_token()
-            matching = self._count_matching_documents(client, index_name, expected.token)
+            matching = self._count_matching_documents(client, index_name, scope, expected.token)
             passed = matching == expected.ref
             # Only write the next canary document when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
@@ -455,16 +455,30 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             request_timeout=_REQUEST_TIMEOUT,
         )
 
-    def _count_matching_documents(self, client: OpenSearch, index_name: str, token: str) -> int:
+    def _count_matching_documents(self, client: OpenSearch, index_name: str, scope: str, token: str) -> int:
         # Queried against the ".keyword" multi-field OpenSearch's default dynamic mapping creates
         # for string fields, not the plain field: the plain field is analyzed text, so a term query
         # against it can silently fail to match the whole token (e.g. if the standard analyzer were
         # to split on a character the token happens to contain) even though the document is
         # present - the ".keyword" sub-field is never analyzed, so it always matches exactly.
+        #
+        # Filters on both validator_scope and validator_marker, not just the marker: matching on
+        # the token alone would let another relation/unit's canary documents (or a coincidentally
+        # matching application document) satisfy this scope's expected count, producing a false
+        # PASS while the next canary document is written into this scope only.
         try:
             response = client.count(
                 index=index_name,
-                body={"query": {"term": {f"{_MARKER_FIELD}.keyword": token}}},
+                body={
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {"term": {f"{_SCOPE_FIELD}.keyword": scope}},
+                                {"term": {f"{_MARKER_FIELD}.keyword": token}},
+                            ]
+                        }
+                    }
+                },
                 request_timeout=_REQUEST_TIMEOUT,
             )
         except NotFoundError:
