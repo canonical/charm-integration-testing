@@ -218,6 +218,9 @@ class PersistenceOpenSearchClientStub:
             for doc_id, doc in self.indices[index].documents.items()
             if match is None or doc.get(match[0]) == match[1]
         ]
+        size = (body or {}).get("size")
+        if size is not None:
+            hits = hits[:size]
         return {"hits": {"hits": hits}}
 
     def delete(self, index: str, id: str, **kwargs: Any) -> None:
@@ -553,6 +556,19 @@ class TestOpenSearchClientPersistenceValidatorConnection:
         with pytest.raises(RuntimeError, match="endpoints"):
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
+    def test_prepare_raises_when_endpoints_parse_to_no_usable_hosts(self) -> None:
+        # GIVEN an "endpoints" value that is non-blank (so it passes validate_schema() and the
+        # raw-string check) but parses to zero usable hosts once split on commas - e.g. a bare
+        # comma. opensearch-py silently treats an empty host list as localhost:9200 rather than
+        # raising, which could otherwise make this connect to an unintended local service instead
+        # of the related OpenSearch cluster.
+        databag = {**PERSISTENCE_VALID_DATABAG, "endpoints": ", "}
+        validator = _make_persistence_validator(databag)
+
+        # WHEN / THEN
+        with pytest.raises(RuntimeError, match="no usable hosts"):
+            validator.prepare()
+
     def test_prepare_raises_when_credentials_missing(self) -> None:
         # GIVEN a databag missing username/password
         databag = {"endpoints": "10.0.0.1:9200", "index": "test-index"}
@@ -783,6 +799,30 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         # THEN
         assert doc_1 not in store.documents
         assert doc_2 not in store.documents
+
+    def test_deletes_all_documents_across_multiple_search_pages(self) -> None:
+        # GIVEN more scoped canary documents than fit in a single cleanup() search page - each
+        # `delete()` call uses refresh=true, so a deleted document must not reappear in the next
+        # page's search, and cleanup() must keep paging until no scoped hits remain instead of
+        # only ever clearing the first page.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        doc_ids = [
+            store.add({"validator_scope": TEST_SCOPE, "validator_marker": str(i), "validator_checkpoint_ref": 1})
+            for i in range(5)
+        ]
+
+        with (
+            patch("validators.opensearch_client.validator.OpenSearch", return_value=client),
+            patch("validators.opensearch_client.validator._CLEANUP_SEARCH_SIZE", 2),
+        ):
+            # WHEN
+            validator.cleanup()
+
+        # THEN every scoped document was removed, not just the first page's worth
+        for doc_id in doc_ids:
+            assert doc_id not in store.documents
 
     def test_is_a_noop_when_no_canary_documents_exist(self) -> None:
         # GIVEN no canary documents exist (index not yet created)

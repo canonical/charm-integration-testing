@@ -36,8 +36,9 @@ _MARKER_FIELD = "validator_marker"
 _SCOPE_FIELD = "validator_scope"
 _REF_FIELD = "validator_checkpoint_ref"
 
-# Page size for the cleanup() search that discovers this relation/unit's canary documents. Far
-# more than a test run could ever accumulate between prepare() and cleanup().
+# Page size for each cleanup() search page that discovers this relation/unit's canary documents.
+# _delete_matching_documents() pages through results (see its docstring), so this bounds memory per
+# page rather than the total number of documents cleanup() can remove.
 _CLEANUP_SEARCH_SIZE = 10_000
 
 
@@ -77,6 +78,14 @@ class _OpenSearchConnectionMixin:
                     hosts.append({"host": host, "port": 9200})
             else:
                 hosts.append({"host": ep, "port": 9200})
+
+        if not hosts:
+            # A non-blank but unusable "endpoints" value (e.g. ", " or a bare comma) would
+            # otherwise leave hosts empty; opensearch-py silently defaults an empty host list to
+            # localhost:9200 rather than raising, which could make this connect to an unintended
+            # local service instead of the related OpenSearch cluster.
+            endpoint = self.endpoint  # type: ignore[attr-defined]
+            raise RuntimeError(f"Cannot open a connection for {endpoint}: no usable hosts parsed from 'endpoints'.")
 
         ca_certs = self._write_ca_file(creds.get("tls-ca"))
         use_ssl = ca_certs is not None
@@ -470,22 +479,31 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         # count() in live testing. Searching for matching document ids and deleting each one
         # individually (an operation the granted credentials do permit - confirmed in live
         # testing) avoids that path entirely.
-        try:
-            response = client.search(
-                index=index_name,
-                body={"query": {"term": {f"{_SCOPE_FIELD}.keyword": scope}}, "size": _CLEANUP_SEARCH_SIZE},
-                request_timeout=_REQUEST_TIMEOUT,
-            )
-        except NotFoundError:
-            return
-        for hit in response.get("hits", {}).get("hits", []):
-            doc_id = hit.get("_id")
-            if not doc_id:
-                continue
+        #
+        # Loops in pages of `_CLEANUP_SEARCH_SIZE` rather than fetching once: each `delete()` call
+        # uses `refresh=true`, so a scoped document deleted in one page is no longer returned by the
+        # next page's search, meaning this always converges on zero remaining scoped hits instead of
+        # only ever clearing the first page.
+        while True:
             try:
-                client.delete(index=index_name, id=doc_id, refresh=True, request_timeout=_REQUEST_TIMEOUT)
+                response = client.search(
+                    index=index_name,
+                    body={"query": {"term": {f"{_SCOPE_FIELD}.keyword": scope}}, "size": _CLEANUP_SEARCH_SIZE},
+                    request_timeout=_REQUEST_TIMEOUT,
+                )
             except NotFoundError:
-                pass
+                return
+            hits = response.get("hits", {}).get("hits", [])
+            if not hits:
+                return
+            for hit in hits:
+                doc_id = hit.get("_id")
+                if not doc_id:
+                    continue
+                try:
+                    client.delete(index=index_name, id=doc_id, refresh=True, request_timeout=_REQUEST_TIMEOUT)
+                except NotFoundError:
+                    pass
 
     def _canary_scope_token(self) -> str:
         """Fixed-width hash scoping canary documents to this model, relation and unit.
