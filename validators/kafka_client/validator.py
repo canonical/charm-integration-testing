@@ -547,15 +547,25 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
             # expected.ref + 1)) == matching_refs`) so verification cost is bounded by the number
             # of real records `_read_canary_messages` actually read back, not by an untrusted,
             # schema-valid but arbitrarily large `expected.ref` from --refs.
-            matching_refs = sorted(
-                int(record["ref"])
-                for record in records
-                if isinstance(record, dict)
-                and record.get("token") == expected.token
-                and isinstance(record.get("ref"), int)
+            #
+            # Collect every same-token record first, then validate each `ref` is a real int
+            # (excluding bool, which is an int subclass) - filtering malformed refs out up front
+            # would let a same-token record with e.g. a string ref be silently ignored, rather than
+            # correctly failing a check whose contract is "verify the exact tagged message set".
+            same_token_records = [
+                record for record in records if isinstance(record, dict) and record.get("token") == expected.token
+            ]
+            refs_are_valid = all(
+                isinstance(record.get("ref"), int) and not isinstance(record.get("ref"), bool)
+                for record in same_token_records
             )
-            matching = len(matching_refs)
-            passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
+            if refs_are_valid:
+                matching_refs = sorted(record["ref"] for record in same_token_records)
+                matching = len(matching_refs)
+                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
+            else:
+                matching = len(same_token_records)
+                passed = False
 
             # Only write the next canary message when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here

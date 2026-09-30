@@ -3,6 +3,7 @@
 
 import json
 import os
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, cast
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from unittest.mock import patch
 import ops
 import pytest
 from kafka import TopicPartition  # type: ignore[import-untyped]
-from kafka.errors import UnknownTopicOrPartitionError  # type: ignore[import-untyped]
+from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
@@ -1002,6 +1003,35 @@ class TestKafkaClientPersistenceValidatorPrepare:
         assert validator._ca_file_path is None
         assert not os.path.exists(created_paths[0])
 
+    def test_prepare_is_idempotent_for_an_existing_topic(self) -> None:
+        # GIVEN a resumed run reuses the same UUID-derived identifier (e.g. a restored RNG seed):
+        # the second prepare() must hit the already-exists path and still return a usable state,
+        # not fail or silently corrupt the canary chain.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        producer = KafkaProducerStub()
+        fixed_uuid = uuid.uuid4()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+            patch("validators.kafka_client.validator.uuid.uuid4", return_value=fixed_uuid),
+        ):
+            # WHEN prepare() is called twice with the same underlying identifier
+            first = validator.prepare()
+            admin.create_error = TopicAlreadyExistsError()
+            second = validator.prepare()
+
+        # THEN both calls target the same topic, the second tolerates the already-exists error,
+        # and its returned state still checkpoints cleanly against what it actually wrote.
+        assert first.id == second.id
+        expected_topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{second.id:020d}"
+        consumer = PersistenceKafkaConsumerStub(records_by_topic={expected_topic: [_canary_record(second.token, 1)]})
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer):
+            with patch("validators.kafka_client.validator.KafkaProducer", return_value=producer):
+                result, _ = validator.checkpoint(second)
+        assert result.status == "PASS"
+
 
 class TestKafkaClientPersistenceValidatorCheckpoint:
     def test_passes_when_message_count_matches_expected_ref(self) -> None:
@@ -1229,6 +1259,47 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         assert result.status == "FAIL"
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
         assert producer.sent == []
+
+    def test_fails_when_a_same_token_record_has_a_malformed_ref(self) -> None:
+        # GIVEN the topic has the exact expected ref 1, plus an extra same-token record whose ref
+        # isn't a real int (e.g. a corrupted message): a filter-out-then-count approach would
+        # silently ignore the malformed record and still report PASS.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        malformed = ConsumerRecordStub(value=json.dumps({"token": TEST_TOKEN, "ref": "1"}).encode())
+        consumer = PersistenceKafkaConsumerStub(records_by_topic={topic: [_canary_record(TEST_TOKEN, 1), malformed]})
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN the malformed record correctly fails the check instead of being silently dropped
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=1)
+        assert producer.sent == []
+
+    def test_fails_when_a_same_token_record_has_a_bool_ref(self) -> None:
+        # GIVEN a same-token record whose ref is a bool: bool is an int subclass in Python, so a
+        # naive `isinstance(ref, int)` check alone would wrongly accept it as a valid ref.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        bool_ref = ConsumerRecordStub(value=json.dumps({"token": TEST_TOKEN, "ref": True}).encode())
+        consumer = PersistenceKafkaConsumerStub(records_by_topic={topic: [bool_ref]})
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN
+        assert result.status == "FAIL"
 
     def test_ignores_tombstone_records_with_a_null_value(self) -> None:
         # GIVEN the topic contains a tombstone (null-value) record alongside the canary messages -
