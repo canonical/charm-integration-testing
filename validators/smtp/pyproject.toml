@@ -2,36 +2,32 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-postgresql-client"
+name = "validators-smtp"
 version = "0.1.0"
-description = "Validator for postgresql_client interface"
+description = "Validator for the smtp interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "psycopg2-binary>=2.9.0",
     "validators-base",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "types-psycopg2>=2.9.21.20260422,<3"
+    "validators-test-utils",
 ]
 
 [project.entry-points."endpoint_validators"]
-postgresql_client = "validators.postgresql_client:PostgreSQLClientValidator"
-
-[project.entry-points."endpoint_persistence_validators"]
-postgresql_client = "validators.postgresql_client:PostgreSQLClientPersistenceValidator"
+smtp = "validators.smtp:SmtpValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.postgresql_client"]
+packages = ["validators.smtp"]
 
 [tool.setuptools.package-dir]
-"validators.postgresql_client" = "."
+"validators.smtp" = "."
