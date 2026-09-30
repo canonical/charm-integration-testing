@@ -138,6 +138,35 @@ Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and
 privileged helpers do not provide isolation between tenants.
 
+Moderate memory stress
+~~~~~~~~~~~~~~~~~~~~~~
+
+``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
+Mesh with ``StressChaos``. It skips when neither tool is available or when no
+simple interface validator passes for the tested target or neighbor endpoint.
+Persistence checks alone do not provide this functional coverage.
+
+Per-charm resource settings select ``memory_moderate_pressure_workers``,
+``memory_moderate_pressure_size_mb`` and
+``memory_moderate_pressure_duration_seconds`` using the deployed charm's
+channel and Ubuntu base. Defaults are one worker, 128 MB and 300 seconds.
+These are starting values to calibrate for each workload, not a guarantee
+of moderate pressure. The test does not change container memory limits.
+
+After confirmed injection, simple validators run repeatedly with a ten-second
+pause between rounds. Target and neighbor application and unit statuses are
+checked before and after each round; blocked workloads, workload or agent
+errors, missing baseline validation coverage and experiment failures fail the
+test. Remaining active/idle is valid. Early experiment completion is a failure,
+including after an out-of-memory restart. Checks are sampled: validator runtime
+extends the gap, and transient failures between samples may be missed.
+
+Cleanup runs even on failure. After stress removal, the bundle models must
+reach active/idle within fifteen minutes and pass simple validation again,
+without test-driven restarts. The experiment duration includes two extra minutes
+for startup and validation overhead; an experiment that ends before the final
+observation check fails. Failed cleanup is retried at test teardown.
+
 Install the repository dependencies
 -----------------------------------
 

@@ -324,3 +324,16 @@ def test_path_cleanup_preserves_stress_and_other_latency_paths() -> None:
         ("cleanup", (TEST_MODEL, UNIT, "/other")),
         ("cleanup", (TEST_MODEL, UNIT, "")),
     ]
+
+
+@pytest.mark.parametrize("allow_completed", [False, True])
+def test_check_stress_forwards_completion_policy_and_failure(allow_completed: bool) -> None:
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    client = MetaChaosClient([tool])
+    client.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+    tool.check_stress.assert_called_once_with(TEST_MODEL, UNIT, allow_completed=allow_completed)
+    tool.check_stress.side_effect = RuntimeError("experiment stopped")
+    with pytest.raises(RuntimeError, match="experiment stopped"):
+        client.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)

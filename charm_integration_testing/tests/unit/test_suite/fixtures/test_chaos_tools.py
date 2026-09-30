@@ -16,6 +16,7 @@ from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
 from juju import JujuModelHandle
 from juju.backend import JujuExecOutput
+from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.fixtures import chaos_tools
@@ -46,13 +47,28 @@ class ClosingApiStub:
 
 class KubernetesStub(KubernetesBackend):
     def __init__(self) -> None:
+        self.core_v1_api = MagicMock()
+        self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
+            items=[
+                k8s.V1Pod(
+                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"}),
+                    spec=k8s.V1PodSpec(
+                        containers=[
+                            k8s.V1Container(
+                                name="workload", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")]
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
         self.api_client = ClosingApiStub()
         self.crds: set[str] = set()
         self.crd_reads: list[str] = []
         self.ready_deployments: set[tuple[str, str]] = set()
         self.reads: list[tuple[str, str]] = []
         self.error: ApiException | None = None
-        self.custom_objects_api = FakeCustomObjectsApi()
+        self.custom_objects_api = FakeCustomObjectsApi(inject_stress=True)
         self.networking_v1_api = FakeNetworkingV1Api()
 
     def crd_exists(self, name: str) -> bool:
