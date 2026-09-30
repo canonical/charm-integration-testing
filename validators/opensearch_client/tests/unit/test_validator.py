@@ -13,6 +13,7 @@ from validators.base import PersistenceNotApplicable, PersistenceState
 from validators.opensearch_client.validator import (
     OpenSearchClientPersistenceValidator,
     OpenSearchClientValidator,
+    _exact_match_filter,
 )
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
@@ -159,23 +160,30 @@ class PersistenceIndexStub:
         return doc_id
 
 
-def _term_query_filters(body: dict[str, Any] | None) -> list[tuple[str, Any]]:
-    """Extract (field, value) pairs a query body requires a document to match.
+def _query_matches(clause: dict[str, Any], doc: dict[str, Any]) -> bool:
+    """Recursively evaluate a query clause against a document.
 
-    Handles both a single ``{"query": {"term": {field: value}}}`` clause and a
-    ``{"query": {"bool": {"filter": [{"term": {...}}, ...]}}}`` conjunction of them - the two shapes
-    the validator's count()/search() calls use. The stub strips any ".keyword" suffix to match
-    against the plain field name documents are stored under, mirroring how OpenSearch's dynamic
-    ".keyword" multi-field reflects the same value as its parent field.
+    Understands the shapes the validator's count()/search() calls use: a plain
+    ``{"term": {field: value}}``, a conjunction ``{"bool": {"filter": [...]}}``, and a disjunction
+    ``{"bool": {"should": [...], "minimum_should_match": 1}}`` (used by ``_exact_match_filter()`` to
+    match a field regardless of whether OpenSearch mapped it as ``keyword`` or analyzed ``text``
+    with a ``.keyword`` multi-field). Any ``.keyword`` suffix is stripped to match against the
+    plain field name documents are stored under, mirroring how OpenSearch's dynamic ".keyword"
+    multi-field reflects the same value as its parent field.
     """
+    if "term" in clause:
+        field_name, value = next(iter(clause["term"].items()))
+        return bool(doc.get(field_name.removesuffix(".keyword")) == value)
+    bool_clause = clause["bool"]
+    if "filter" in bool_clause:
+        return all(_query_matches(c, doc) for c in bool_clause["filter"])
+    return any(_query_matches(c, doc) for c in bool_clause["should"])
+
+
+def _matches_query(body: dict[str, Any] | None, doc: dict[str, Any]) -> bool:
     if not body:
-        return []
-    query = body["query"]
-    if "term" in query:
-        clauses = [query["term"]]
-    else:
-        clauses = [clause["term"] for clause in query["bool"]["filter"]]
-    return [(field_name.removesuffix(".keyword"), value) for clause in clauses for field_name, value in clause.items()]
+        return True
+    return _query_matches(body["query"], doc)
 
 
 @dataclass
@@ -205,12 +213,7 @@ class PersistenceOpenSearchClientStub:
             raise self.count_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        filters = _term_query_filters(body)
-        matching = sum(
-            1
-            for doc in self.indices[index].documents.values()
-            if all(doc.get(field_name) == value for field_name, value in filters)
-        )
+        matching = sum(1 for doc in self.indices[index].documents.values() if _matches_query(body, doc))
         return {"count": matching}
 
     def search(self, index: str, body: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -218,11 +221,10 @@ class PersistenceOpenSearchClientStub:
             raise self.search_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        filters = _term_query_filters(body)
         hits = [
             {"_id": doc_id, "_source": doc}
             for doc_id, doc in self.indices[index].documents.items()
-            if all(doc.get(field_name) == value for field_name, value in filters)
+            if _matches_query(body, doc)
         ]
         size = (body or {}).get("size")
         if size is not None:
@@ -516,6 +518,30 @@ PERSISTENCE_VALID_DATABAG: dict[str, str] = {
 TEST_SCOPE = "da7d88bc9ad4d4fd"
 
 
+def _canary_doc(scope: str, marker: str, ref: int) -> dict[str, Any]:
+    """Build a document matching what _write_canary_document() writes, for test seeding."""
+    return {
+        "validator_scope": scope,
+        "validator_marker": marker,
+        "validator_checkpoint_ref": ref,
+        "validator_kind": "opensearch_client_persistence_canary",
+    }
+
+
+class TestExactMatchFilter:
+    def test_matches_document_regardless_of_keyword_multi_field_mapping(self) -> None:
+        # GIVEN the granted credentials can't read the shared index's mapping (see the
+        # persistence validator's class docstring), so whether a field was dynamically mapped as
+        # plain "keyword" or as analyzed "text" with a ".keyword" multi-field is unknown.
+        clause = _exact_match_filter("validator_scope", TEST_SCOPE)
+
+        # THEN the clause matches a document whether the field is queried directly (as it would be
+        # if mapped "keyword") or via its ".keyword" multi-field (as it would be if mapped "text")
+        assert _query_matches(clause, {"validator_scope": TEST_SCOPE})
+        # And it does not match a document with a different value in that field
+        assert not _query_matches(clause, {"validator_scope": "some-other-value"})
+
+
 class TestOpenSearchClientPersistenceValidatorRole:
     @pytest.mark.parametrize("role", [RelationRoleStub.provides, RelationRoleStub.peer])
     def test_prepare_raises_not_applicable_for_non_requires_role(self, role: RelationRoleStub) -> None:
@@ -655,7 +681,7 @@ class TestOpenSearchClientPersistenceValidatorPrepare:
         # scope, and the application's own (unrelated) data
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         client = PersistenceOpenSearchClientStub()
-        other_scope_doc = {"validator_scope": "other-scope", "validator_marker": "x", "validator_checkpoint_ref": 1}
+        other_scope_doc = _canary_doc("other-scope", "x", 1)
         app_doc = {"some_app_field": "some_app_value"}
         client.indices.setdefault("test-index", PersistenceIndexStub()).add(other_scope_doc)
         client.indices["test-index"].add(app_doc)
@@ -683,8 +709,8 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         self._seed(
             client,
             [
-                {"validator_scope": TEST_SCOPE, "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 1},
-                {"validator_scope": TEST_SCOPE, "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 2},
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 1),
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 2),
             ],
         )
 
@@ -710,7 +736,7 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         client = PersistenceOpenSearchClientStub()
         self._seed(
             client,
-            [{"validator_scope": TEST_SCOPE, "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 1}],
+            [_canary_doc(TEST_SCOPE, TEST_TOKEN, 1)],
         )
 
         with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
@@ -735,8 +761,8 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         self._seed(
             client,
             [
-                {"validator_scope": "other-scope", "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 1},
-                {"validator_scope": "other-scope", "validator_marker": TEST_TOKEN, "validator_checkpoint_ref": 2},
+                _canary_doc("other-scope", TEST_TOKEN, 1),
+                _canary_doc("other-scope", TEST_TOKEN, 2),
             ],
         )
 
@@ -751,6 +777,27 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert new_state.ref == 2
         # And the other scope's documents were left untouched, with no new document written
         assert len(client.indices["test-index"].documents) == 2
+
+    def test_fails_when_matching_scope_and_marker_belong_to_a_non_canary_document(self) -> None:
+        # GIVEN an application document that happens to carry matching validator_scope and
+        # validator_marker field names/values, but lacks validator_kind - i.e. it is not actually
+        # a canary document this validator wrote, so it must not satisfy the expected count.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(
+            client,
+            [{"validator_scope": TEST_SCOPE, "validator_marker": TEST_TOKEN, "some_app_field": "some_app_value"}],
+        )
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN a FAIL result is returned (0 genuine canary documents found), not a false PASS
+        assert result.status == "FAIL"
+        check = next(c for c in result.checks if c.name == "document_count")
+        assert not check.passed
+        assert new_state.ref == 1
 
     def test_fails_when_index_does_not_exist(self) -> None:
         # GIVEN the shared index does not exist yet (e.g. never granted / relation still forming)
@@ -772,7 +819,7 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         client = PersistenceOpenSearchClientStub()
         self._seed(
             client,
-            [{"validator_scope": TEST_SCOPE, "validator_marker": "a-different-token", "validator_checkpoint_ref": 1}],
+            [_canary_doc(TEST_SCOPE, "a-different-token", 1)],
         )
 
         with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
@@ -822,8 +869,8 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         client = PersistenceOpenSearchClientStub()
         store = client.indices.setdefault("test-index", PersistenceIndexStub())
-        doc_1 = store.add({"validator_scope": TEST_SCOPE, "validator_marker": "a", "validator_checkpoint_ref": 1})
-        doc_2 = store.add({"validator_scope": TEST_SCOPE, "validator_marker": "b", "validator_checkpoint_ref": 2})
+        doc_1 = store.add(_canary_doc(TEST_SCOPE, "a", 1))
+        doc_2 = store.add(_canary_doc(TEST_SCOPE, "b", 2))
 
         with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
             # WHEN
@@ -841,10 +888,7 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         client = PersistenceOpenSearchClientStub()
         store = client.indices.setdefault("test-index", PersistenceIndexStub())
-        doc_ids = [
-            store.add({"validator_scope": TEST_SCOPE, "validator_marker": str(i), "validator_checkpoint_ref": 1})
-            for i in range(5)
-        ]
+        doc_ids = [store.add(_canary_doc(TEST_SCOPE, str(i), 1)) for i in range(5)]
 
         with (
             patch("validators.opensearch_client.validator.OpenSearch", return_value=client),
@@ -872,10 +916,8 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         client = PersistenceOpenSearchClientStub()
         store = client.indices.setdefault("test-index", PersistenceIndexStub())
-        store.add({"validator_scope": TEST_SCOPE, "validator_marker": "a", "validator_checkpoint_ref": 1})
-        other_scope_id = store.add(
-            {"validator_scope": "other-scope", "validator_marker": "x", "validator_checkpoint_ref": 1}
-        )
+        store.add(_canary_doc(TEST_SCOPE, "a", 1))
+        other_scope_id = store.add(_canary_doc("other-scope", "x", 1))
         app_doc_id = store.add({"some_app_field": "some_app_value"})
 
         with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
@@ -886,6 +928,25 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         assert other_scope_id in store.documents
         assert app_doc_id in store.documents
         assert not any(doc.get("validator_scope") == TEST_SCOPE for doc in store.documents.values())
+
+    def test_leaves_application_document_untouched_even_with_a_matching_scope_value(self) -> None:
+        # GIVEN an application document that happens to carry the same field name/value as this
+        # validator's validator_scope tag, but lacks validator_kind (i.e. it is not actually a
+        # canary document this validator wrote). Ownership must be established by validator_kind,
+        # not by validator_scope alone, or genuine application data could be deleted.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        lookalike_app_doc_id = store.add({"validator_scope": TEST_SCOPE, "some_app_field": "some_app_value"})
+        genuine_canary_id = store.add(_canary_doc(TEST_SCOPE, "a", 1))
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            validator.cleanup()
+
+        # THEN only the genuine, validator_kind-tagged canary document is gone
+        assert lookalike_app_doc_id in store.documents
+        assert genuine_canary_id not in store.documents
 
     def test_raises_not_applicable_when_credentials_incomplete(self) -> None:
         # GIVEN a databag with incomplete credentials (relation still being set up)

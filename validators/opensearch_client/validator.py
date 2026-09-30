@@ -35,11 +35,41 @@ _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _MARKER_FIELD = "validator_marker"
 _SCOPE_FIELD = "validator_scope"
 _REF_FIELD = "validator_checkpoint_ref"
+# Present (with this fixed value) on every canary document this validator writes, and required by
+# every count()/search() query alongside validator_scope/validator_marker. Without it, an
+# application document that happens to carry the same field name/value as validator_scope (however
+# unlikely) would otherwise be indistinguishable from validator-owned data and could be counted or
+# deleted by cleanup().
+_KIND_FIELD = "validator_kind"
+_KIND_VALUE = "opensearch_client_persistence_canary"
 
 # Page size for each cleanup() search page that discovers this relation/unit's canary documents.
 # _delete_matching_documents() pages through results (see its docstring), so this bounds memory per
 # page rather than the total number of documents cleanup() can remove.
 _CLEANUP_SEARCH_SIZE = 10_000
+
+
+def _exact_match_filter(field: str, value: str) -> dict[str, Any]:
+    """Build a query clause that exact-matches ``value`` in ``field``, independent of mapping.
+
+    The granted credentials can't read the shared, charm-granted index's mapping (see the
+    persistence validator's class docstring: ``indices:admin/mappings/get`` is forbidden), so
+    whether OpenSearch's dynamic mapping resolved ``field`` to a plain ``keyword`` type or to
+    analyzed ``text`` with a ``.keyword`` multi-field is unknown and could vary. Matching only
+    against ``field.keyword`` would return zero hits (and a false checkpoint FAIL / no-op cleanup)
+    if the field turned out to be mapped as plain ``keyword`` with no ``.keyword`` multi-field to
+    query. Matching this validator's own values (always plain hex strings, so never split
+    differently by an analyzer) against either shape covers both cases.
+    """
+    return {
+        "bool": {
+            "should": [
+                {"term": {field: value}},
+                {"term": {f"{field}.keyword": value}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
 
 
 class _OpenSearchConnectionMixin:
@@ -291,13 +321,18 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
       another relation/unit's canary documents sharing the same index, and from the target
       application's own data.
     - ``validator_marker``: a random, unguessable per-``prepare()`` token, matched via a
-      ``.keyword`` term query (see ``_count_matching_documents``) rather than a plain document
+      mapping-agnostic exact-match query (see ``_exact_match_filter``) rather than a plain document
       count. Matching only on ``validator_scope`` would let a backend that lost the canary data and
       then had a *different* prepare() run write fresh documents into the same index still satisfy
       a bare count - the token, unlike the scope, is never reused across a fresh prepare() call.
     - ``validator_checkpoint_ref``: the same monotonically increasing counter tracked in
       ``PersistenceState.ref``, stored for diagnostic purposes only (matching is always done via
       ``validator_marker``, not this field).
+    - ``validator_kind``: a fixed sentinel value present on every canary document. Required
+      alongside ``validator_scope``/``validator_marker`` by every count()/search() query, so an
+      application document that happens to carry the same field name/value as one of those (e.g.
+      ``validator_scope``, however unlikely) is never mistaken for validator-owned data and
+      counted or deleted.
 
     Persistence only applies to the requirer side of the relation (the side holding credentials to
     connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
@@ -450,22 +485,17 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
     ) -> None:
         client.index(
             index=index_name,
-            body={_SCOPE_FIELD: scope, _MARKER_FIELD: token, _REF_FIELD: checkpoint_ref},
+            body={
+                _SCOPE_FIELD: scope,
+                _MARKER_FIELD: token,
+                _REF_FIELD: checkpoint_ref,
+                _KIND_FIELD: _KIND_VALUE,
+            },
             refresh=True,
             request_timeout=_REQUEST_TIMEOUT,
         )
 
     def _count_matching_documents(self, client: OpenSearch, index_name: str, scope: str, token: str) -> int:
-        # Queried against the ".keyword" multi-field OpenSearch's default dynamic mapping creates
-        # for string fields, not the plain field: the plain field is analyzed text, so a term query
-        # against it can silently fail to match the whole token (e.g. if the standard analyzer were
-        # to split on a character the token happens to contain) even though the document is
-        # present - the ".keyword" sub-field is never analyzed, so it always matches exactly.
-        #
-        # Filters on both validator_scope and validator_marker, not just the marker: matching on
-        # the token alone would let another relation/unit's canary documents (or a coincidentally
-        # matching application document) satisfy this scope's expected count, producing a false
-        # PASS while the next canary document is written into this scope only.
         try:
             response = client.count(
                 index=index_name,
@@ -473,8 +503,9 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     "query": {
                         "bool": {
                             "filter": [
-                                {"term": {f"{_SCOPE_FIELD}.keyword": scope}},
-                                {"term": {f"{_MARKER_FIELD}.keyword": token}},
+                                _exact_match_filter(_SCOPE_FIELD, scope),
+                                _exact_match_filter(_MARKER_FIELD, token),
+                                _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
                             ]
                         }
                     }
@@ -498,11 +529,25 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         # uses `refresh=true`, so a scoped document deleted in one page is no longer returned by the
         # next page's search, meaning this always converges on zero remaining scoped hits instead of
         # only ever clearing the first page.
+        #
+        # Filters on validator_kind as well as validator_scope: this is the only thing that lets
+        # cleanup() tell a validator-owned document apart from an application document that happens
+        # to carry the same field name/value as validator_scope (see _KIND_FIELD's comment).
         while True:
             try:
                 response = client.search(
                     index=index_name,
-                    body={"query": {"term": {f"{_SCOPE_FIELD}.keyword": scope}}, "size": _CLEANUP_SEARCH_SIZE},
+                    body={
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    _exact_match_filter(_SCOPE_FIELD, scope),
+                                    _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
+                                ]
+                            }
+                        },
+                        "size": _CLEANUP_SEARCH_SIZE,
+                    },
                     request_timeout=_REQUEST_TIMEOUT,
                 )
             except NotFoundError:
