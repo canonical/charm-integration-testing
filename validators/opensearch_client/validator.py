@@ -40,8 +40,15 @@ _REF_FIELD = "validator_checkpoint_ref"
 # application document that happens to carry the same field name/value as validator_scope (however
 # unlikely) would otherwise be indistinguishable from validator-owned data and could be counted or
 # deleted by cleanup().
+#
+# Deliberately a single token with no underscores/hyphens/spaces: _exact_match_filter() falls back
+# to matching the plain (non-".keyword") field directly when a pre-existing index mapped it as
+# analyzed "text" with no ".keyword" multi-field. A standard analyzer splits on those separator
+# characters, so a multi-word value (e.g. containing "_") would be indexed as several terms and
+# could never satisfy a single `term` query for the whole string - silently matching zero
+# documents even though they exist.
 _KIND_FIELD = "validator_kind"
-_KIND_VALUE = "opensearch_client_persistence_canary"
+_KIND_VALUE = "opensearchclientpersistencecanary"
 
 # Page size for each cleanup() search page that discovers this relation/unit's canary documents.
 # _delete_matching_documents() pages through results (see its docstring), so this bounds memory per

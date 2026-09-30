@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, cast
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from opensearchpy.exceptions import NotFoundError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
 from validators.opensearch_client.validator import (
+    _KIND_VALUE,
     OpenSearchClientPersistenceValidator,
     OpenSearchClientValidator,
     _exact_match_filter,
@@ -524,7 +526,7 @@ def _canary_doc(scope: str, marker: str, ref: int) -> dict[str, Any]:
         "validator_scope": scope,
         "validator_marker": marker,
         "validator_checkpoint_ref": ref,
-        "validator_kind": "opensearch_client_persistence_canary",
+        "validator_kind": _KIND_VALUE,
     }
 
 
@@ -540,6 +542,16 @@ class TestExactMatchFilter:
         assert _query_matches(clause, {"validator_scope": TEST_SCOPE})
         # And it does not match a document with a different value in that field
         assert not _query_matches(clause, {"validator_scope": "some-other-value"})
+
+    def test_kind_sentinel_is_a_single_analyzer_safe_token(self) -> None:
+        # GIVEN a pre-existing index maps validator_kind as analyzed "text" with no ".keyword"
+        # multi-field. _exact_match_filter()'s plain-field clause is then the only one that can
+        # ever match, and a standard analyzer splits on separator characters (underscores,
+        # hyphens, whitespace) - a multi-word sentinel value would be indexed as several terms and
+        # could never satisfy a single `term` query for the whole string, silently matching zero
+        # documents even though they exist. The sentinel must therefore contain none of those
+        # characters.
+        assert re.fullmatch(r"[a-z0-9]+", _KIND_VALUE)
 
 
 class TestOpenSearchClientPersistenceValidatorRole:
