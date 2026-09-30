@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from time import monotonic, sleep
 from typing import Callable
 
@@ -18,11 +18,21 @@ from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
 
 
-def observe_memory_stress(chaos: MetaChaosClient, model: JujuModelHandle, unit: str, seconds: float) -> None:
-    """Check known experiment errors throughout the observation window."""
+def observe_memory_stress(
+    chaos: MetaChaosClient,
+    model: JujuModelHandle,
+    unit: str,
+    seconds: float,
+    *,
+    oom_detected: Callable[[], bool],
+) -> None:
+    """Observe until a new target OOM or the configured window ends."""
     deadline = monotonic() + seconds
     while True:
-        chaos.check_stress(model, unit)
+        exhausted = oom_detected()
+        chaos.check_stress(model, unit, allow_completed=exhausted)
+        if exhausted:
+            return
         remaining = deadline - monotonic()
         if remaining <= 0:
             return
@@ -84,8 +94,12 @@ def test_live_memory_stress_total(
         size_mb,
         memory_stress_duration,
     )
-    models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
-    juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+    models_to_validate = list(
+        dict.fromkeys(model for model in (target_model_ref, neighbor_model_ref) if model is not None)
+    )
+    juju_client.multi_model_idle_for_period(
+        models=models_to_validate, timeout=memory_recovery_timeout, strict_timeout=True
+    )
 
     namespace = target_model_ref.model
     pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
@@ -123,7 +137,9 @@ def test_live_memory_stress_total(
         memory_limit,
     ):
         # Ignore rollout transitions: establish a healthy baseline before stress.
-        juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+        juju_client.multi_model_idle_for_period(
+            models=models_to_validate, timeout=memory_recovery_timeout, strict_timeout=True
+        )
         current_pods = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
         targets = [
             item
@@ -138,6 +154,38 @@ def test_live_memory_stress_total(
         limit = (workload.resources.limits or {}).get("memory") if workload.resources else None
         if limit is None or parse_quantity(limit) != parse_quantity(memory_limit):
             pytest.fail(f"Memory limit was not applied to {unit}/{containers[0]}.")
+        baseline = targets[0]
+        baseline_statuses = baseline.status.container_statuses or [] if baseline.status else []
+        baseline_status = next((state for state in baseline_statuses if state.name == containers[0]), None)
+        if baseline_status is None or not baseline.metadata.uid:
+            pytest.fail("Workload container status and Pod UID are required before memory stress.")
+        baseline_uid = baseline.metadata.uid
+        baseline_restarts = baseline_status.restart_count
+
+        def oom_detected() -> bool:
+            observed = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
+            for item in observed:
+                if item.metadata.uid != baseline_uid or item.status is None:
+                    continue
+                for state in item.status.container_statuses or []:
+                    terminated = state.last_state.terminated if state.last_state else None
+                    if (
+                        state.name == containers[0]
+                        and state.restart_count > baseline_restarts
+                        and terminated is not None
+                        and terminated.reason == "OOMKilled"
+                        and terminated.exit_code == 137
+                        and terminated.finished_at is not None
+                        and terminated.finished_at >= injection_started
+                    ):
+                        juju_client.logger.info(
+                            "Memory exhaustion confirmed: unit=%s container=%s pod_uid=%s; verifying recovery.",
+                            unit,
+                            containers[0],
+                            baseline_uid,
+                        )
+                        return True
+            return False
 
         def log_workload_state(stage: str) -> None:
             # Read-only evidence; a diagnostic failure must not skip stress cleanup.
@@ -166,6 +214,7 @@ def test_live_memory_stress_total(
 
         log_workload_state("after limit rollout")
         observation_error: Exception | None = None
+        injection_started = datetime.now(timezone.utc)
         try:
             chaos.stress_memory(
                 target_model_ref,
@@ -174,9 +223,14 @@ def test_live_memory_stress_total(
                 size_mb=size_mb,
                 duration=memory_stress_duration + timedelta(minutes=2),
             )
-            # Surviving stress without a status change is valid. Keep the fault active
-            # for the observation period instead of waiting for an unhealthy status.
-            observe_memory_stress(chaos, target_model_ref, unit, memory_stress_duration.total_seconds())
+            # A new target OOM confirms exhaustion; otherwise observe for the full window.
+            observe_memory_stress(
+                chaos=chaos,
+                model=target_model_ref,
+                unit=unit,
+                seconds=memory_stress_duration.total_seconds(),
+                oom_detected=oom_detected,
+            )
         except Exception as error:
             observation_error = error
             raise
@@ -192,7 +246,11 @@ def test_live_memory_stress_total(
                 raise
         # Verify recovery while the memory limit remains in place, before its restore
         # triggers a rollout that could otherwise conceal a failure to self-recover.
-        juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
-        for model in models:
-            juju_client.validate_model(model=model, level="deep")
-    juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)
+        juju_client.multi_model_idle_for_period(
+            models=models_to_validate, timeout=memory_recovery_timeout, strict_timeout=True
+        )
+        for model_ref in models_to_validate:
+            juju_client.validate_model(model=model_ref, level="deep")
+    juju_client.multi_model_idle_for_period(
+        models=models_to_validate, timeout=memory_recovery_timeout, strict_timeout=True
+    )

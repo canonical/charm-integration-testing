@@ -13,8 +13,12 @@ class ChaosClient(ABC):
     Use NotImplementedError only for unsupported operations, before any side effects.
     """
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
-        """Report known experiment errors when supported; not proof of sustained stress."""
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Report known errors; allow completion only after independent fault confirmation.
+
+        This optional check is not proof of sustained stress. Allowing completion
+        must not suppress experiment errors or cleanup verification.
+        """
 
     @abstractmethod
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:

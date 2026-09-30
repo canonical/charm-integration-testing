@@ -2,9 +2,9 @@
 # See LICENSE file for licensing details.
 
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +20,17 @@ NEIGHBOR = JujuModelHandle(controller="other", model="neighbor")
 
 def pod() -> k8s.V1Pod:
     return k8s.V1Pod(
+        status=k8s.V1PodStatus(
+            container_statuses=[
+                k8s.V1ContainerStatus(
+                    name="workload",
+                    image="test",
+                    image_id="id",
+                    ready=True,
+                    restart_count=0,
+                )
+            ]
+        ),
         metadata=k8s.V1ObjectMeta(
             name="target-0",
             uid="after-rollout",
@@ -44,7 +55,22 @@ def pod() -> k8s.V1Pod:
 
 @pytest.mark.parametrize(
     "failure",
-    [None, "baseline", "stress", "hold", "cleanup", "recovery", "validation", "oom", "replaced", "hold-and-cleanup"],
+    [
+        None,
+        "baseline",
+        "stress",
+        "hold",
+        "cleanup",
+        "recovery",
+        "validation",
+        "oom",
+        "replaced",
+        "old-oom",
+        "other-container",
+        "other-exit",
+        "no-restart",
+        "hold-and-cleanup",
+    ],
 )
 @pytest.mark.parametrize("neighbor", [None, NEIGHBOR])
 def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,29 +105,39 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
         name = "baseline" if not events else "recovery" if "cleanup" in events else "limited_baseline"
         record(name)
 
-    def observe(seconds: float) -> None:
+    def observe(seconds: float, oom_detected: Callable[[], bool]) -> None:
         assert seconds == 600
         record("hold")
-        if failure == "oom":
+        if failure in {"oom", "replaced", "old-oom", "other-container", "other-exit", "no-restart"}:
             workload.status = k8s.V1PodStatus(
                 container_statuses=[
                     k8s.V1ContainerStatus(
-                        name="workload",
+                        name="other" if failure == "other-container" else "workload",
                         image="test",
                         image_id="id",
                         ready=True,
-                        restart_count=1,
+                        restart_count=0 if failure == "no-restart" else 1,
                         last_state=k8s.V1ContainerState(
-                            terminated=k8s.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")
+                            terminated=k8s.V1ContainerStateTerminated(
+                                exit_code=1 if failure == "other-exit" else 137,
+                                reason="OOMKilled",
+                                finished_at=datetime.now(timezone.utc)
+                                - (timedelta(days=1) if failure == "old-oom" else timedelta()),
+                            )
                         ),
                     )
                 ]
             )
         if failure == "replaced":
             workload.metadata.uid = "new-pod"
+        assert oom_detected() is (failure == "oom")
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
-    monkeypatch.setattr(module, "observe_memory_stress", lambda chaos, model, unit, seconds: observe(seconds))
+    monkeypatch.setattr(
+        module,
+        "observe_memory_stress",
+        lambda chaos, model, unit, seconds, *, oom_detected: observe(seconds, oom_detected),
+    )
     juju.multi_model_idle_for_period.side_effect = idle
     juju.validate_model.side_effect = lambda **kw: record("validation")
     chaos.stress_memory.side_effect = lambda *a, **kw: record("stress")
@@ -129,7 +165,7 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
         assert events[-1] == "restore"
         chaos.cleanup_all.assert_called_once()
         juju.validate_model.assert_not_called()
-    elif failure in {None, "oom", "replaced"}:
+    elif failure in {None, "oom", "replaced", "old-oom", "other-container", "other-exit", "no-restart"}:
         run()
         assert events[:7] == ["baseline", "limit", "limited_baseline", "stress", "hold", "cleanup", "recovery"]
         assert events[-2:] == ["restore", "recovery"]
@@ -153,7 +189,13 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
 @pytest.mark.parametrize("match", [True, False])
 def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, match: bool) -> None:
     (tmp_path / "postgresql-k8s.yaml").write_text(
-        "constraints:\n  - criteria:\n      - track: '14'\n        ubuntu_version: '22.04'\n    memory_exhaustion_workers: 2\n    memory_exhaustion_size_mb: 3072\n    memory_exhaustion_duration_seconds: 30\n"
+        "constraints:\n"
+        "  - criteria:\n"
+        "      - track: '14'\n"
+        "        ubuntu_version: '22.04'\n"
+        "    memory_exhaustion_workers: 2\n"
+        "    memory_exhaustion_size_mb: 3072\n"
+        "    memory_exhaustion_duration_seconds: 30\n"
     )
     juju, kubernetes, chaos = MagicMock(), MagicMock(), MagicMock()
     juju.backend.list_applications.return_value = {
@@ -170,7 +212,9 @@ def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.Mon
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
     hold = MagicMock()
-    monkeypatch.setattr(module, "observe_memory_stress", lambda chaos, model, unit, seconds: hold(seconds))
+    monkeypatch.setattr(
+        module, "observe_memory_stress", lambda chaos, model, unit, seconds, *, oom_detected: hold(seconds)
+    )
     module.test_live_memory_stress_total(
         juju,
         lambda _: chaos,
@@ -262,9 +306,26 @@ def test_observation_polls_and_stops_on_error(monkeypatch: pytest.MonkeyPatch, f
     if fail:
         chaos.check_stress.side_effect = [None, RuntimeError("injection failed")]
         with pytest.raises(RuntimeError, match="injection failed"):
-            module.observe_memory_stress(chaos, MODEL, "target/0", 25)
+            module.observe_memory_stress(chaos, MODEL, "target/0", 25, oom_detected=lambda: False)
         assert now == 10
     else:
-        module.observe_memory_stress(chaos, MODEL, "target/0", 25)
+        module.observe_memory_stress(chaos, MODEL, "target/0", 25, oom_detected=lambda: False)
         assert now == 25
         assert chaos.check_stress.call_count == 4
+
+
+@pytest.mark.parametrize("experiment_error", [False, True])
+def test_new_oom_ends_observation_without_suppressing_experiment_errors(
+    monkeypatch: pytest.MonkeyPatch, experiment_error: bool
+) -> None:
+    chaos = MagicMock()
+    pause = MagicMock()
+    monkeypatch.setattr(module, "sleep", pause)
+    if experiment_error:
+        chaos.check_stress.side_effect = RuntimeError("helper failed")
+        with pytest.raises(RuntimeError, match="helper failed"):
+            module.observe_memory_stress(chaos, MODEL, "target/0", 600, oom_detected=lambda: True)
+    else:
+        module.observe_memory_stress(chaos, MODEL, "target/0", 600, oom_detected=lambda: True)
+    chaos.check_stress.assert_called_once_with(MODEL, "target/0", allow_completed=True)
+    pause.assert_not_called()

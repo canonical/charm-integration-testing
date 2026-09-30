@@ -37,6 +37,7 @@ class _ExperimentRun:
     reverted: bool = False
     stop_requested: bool = False
     execution_error: RuntimeError | None = None
+    execution_error_reported: bool = False
     engine_requested: bool = False
     uid: str | None = None
     cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -90,7 +91,7 @@ class LitmusChaosClient(ChaosClient):
             duration,
         )
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Report execution errors from experiments registered for this unit."""
         for engine in self._created:
             if engine.scope != (model.uri, unit) or engine.uid is None:
@@ -99,7 +100,12 @@ class LitmusChaosClient(ChaosClient):
             self._diagnose_cleanup(engine, "observation")
             if engine.execution_error is not None:
                 self._diagnose_cleanup(engine, "experiment failed during observation")
+                engine.execution_error_reported = True
                 raise engine.execution_error
+            if allow_completed:
+                # The caller has independently confirmed the intended fault outcome.
+                # Execution errors above and cleanup/reversion checks still apply.
+                continue
             current = self._read_engine(engine)
             if (
                 current is None
@@ -115,6 +121,7 @@ class LitmusChaosClient(ChaosClient):
                     "the requested stress duration was not verified."
                 )
                 self._diagnose_cleanup(engine, "experiment ended early")
+                engine.execution_error_reported = True
                 raise engine.execution_error
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
@@ -155,7 +162,9 @@ class LitmusChaosClient(ChaosClient):
                 errors.append(error)
             else:
                 self._created.remove(engine)
-                if engine.execution_error is not None:
+                # Preserve failures first discovered during cleanup, without reporting
+                # an already raised experiment error as a second cleanup failure.
+                if engine.execution_error is not None and not engine.execution_error_reported:
                     errors.append(engine.execution_error)
         if errors:
             raise ChaosCleanupError(errors) from errors[0]
@@ -271,7 +280,7 @@ class LitmusChaosClient(ChaosClient):
         results = self._results(engine)
         for result in results:
             status = result.get("status", {}).get("experimentStatus", {})
-            if (
+            if engine.execution_error is None and (
                 status.get("verdict") in {"Fail", "Error"}
                 or status.get("phase") == "Error"
                 or status.get("errorOutput")
@@ -286,6 +295,7 @@ class LitmusChaosClient(ChaosClient):
         current = self._read_engine(engine)
         results = self._observe(engine)
         if engine.execution_error is not None:
+            engine.execution_error_reported = True
             raise engine.execution_error
         if current is None:
             raise RuntimeError(f"Litmus Engine {engine.name} disappeared before stress started.")

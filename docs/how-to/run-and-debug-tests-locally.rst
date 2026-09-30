@@ -245,11 +245,16 @@ Total memory stress
 with the ``StressChaos`` resource; otherwise it skips. It applies a ``1Gi``
 workload container limit through a StatefulSet rollout, then requests memory
 stress on one unit. The default is one worker, ``2048`` MB and ``600`` seconds
-of observation after confirmed injection.
+of observation after confirmed injection, ending earlier if a new out-of-memory termination
+is confirmed for the target workload container.
 
 During observation, Litmus results are checked every ten seconds, plus API call
-time. Experiment errors or early completion fail the test, even after an
-out-of-memory restart. The test does not automatically inject stress again.
+time. A new target out-of-memory termination permits early completion and starts cleanup and recovery
+validation. Evidence must match the original Pod identifier and workload container, with
+an increased restart count and an out-of-memory termination timestamp after injection began.
+Historical out-of-memory records and replacement Pods do not qualify. Experiment errors
+still fail the test, as does early completion without this evidence. The test
+does not automatically inject stress again.
 If a failed experiment has no reversion evidence after its child resources are
 removed, cleanup reports that failure immediately and remains registered for
 retry rather than waiting for another reversion timeout.
