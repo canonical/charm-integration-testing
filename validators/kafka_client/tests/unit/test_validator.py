@@ -1165,13 +1165,48 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         with pytest.raises(ValueError, match="out of range"):
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=-1))
 
-    def test_raises_when_expected_ref_exceeds_max(self) -> None:
-        # GIVEN a schema-valid but implausibly large ref, which would otherwise force
-        # range(1, expected.ref + 1) to allocate an unbounded amount of memory.
+    def test_large_expected_ref_fails_without_allocating_proportionally_to_it(self) -> None:
+        # GIVEN a schema-valid but implausibly large ref and only a handful of real records: the
+        # comparison must cost O(len(matching_refs)), not O(expected.ref), so an untrusted,
+        # oversized ref can't force an unbounded allocation/iteration before returning a result.
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{1:020d}"
+        consumer = PersistenceKafkaConsumerStub(records_by_topic={topic: [_canary_record(TEST_TOKEN, 1)]})
+        producer = KafkaProducerStub()
 
-        with pytest.raises(ValueError, match="out of range"):
-            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=10_000_001))
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=10**9))
+
+        # THEN it correctly reports data loss rather than raising or hanging
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=1, ref=10**9)
+        assert producer.sent == []
+
+    def test_checkpoint_chain_stays_valid_indefinitely(self) -> None:
+        # Regression test: an earlier fix capped expected.ref at a fixed upper bound to address the
+        # allocation concern above, but that made the state PASS just returned unusable on the very
+        # next checkpoint call once ref reached the cap - a real PASS chain must never dead-end like
+        # that. This runs several checkpoints back-to-back, each consuming the exact state the
+        # previous call returned, to confirm the chain keeps working.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{1:020d}"
+        state = PersistenceState(token=TEST_TOKEN, id=1, ref=1)
+
+        for next_ref in range(2, 6):
+            records = [_canary_record(TEST_TOKEN, ref) for ref in range(1, next_ref)]
+            consumer = PersistenceKafkaConsumerStub(records_by_topic={topic: records})
+            producer = KafkaProducerStub()
+            with (
+                patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+                patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+            ):
+                result, state = validator.checkpoint(state)
+            assert result.status == "PASS"
+            assert state == PersistenceState(token=TEST_TOKEN, id=1, ref=next_ref)
 
     def test_fails_when_topic_has_a_duplicate_ref_alongside_a_missing_one(self) -> None:
         # GIVEN a topic containing a duplicate ref (1 twice) instead of the missing ref 2: a bare

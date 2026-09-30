@@ -44,12 +44,6 @@ _CANARY_TOPIC_PREFIX = "validator_canary_"
 # prepare() couldn't have produced.
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 
-# checkpoint() only ever advances `ref` by 1 per call, so a real test run never needs more than a
-# handful of checkpoints. Bounding the accepted value here means an untrusted, schema-valid but
-# malformed `expected.ref` from --refs can't force an unbounded `range(1, expected.ref + 1)`
-# allocation before checkpoint() has a chance to return a result.
-_MAX_CANARY_REF = 10_000
-
 
 class _KafkaConnectionMixin:
     """Shared credential-resolution and client-construction helpers for kafka_client validators.
@@ -535,14 +529,12 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         # truncated/different identifier can't silently target the wrong topic.
         if not 0 <= expected.id <= _MAX_CANARY_IDENTIFIER:
             raise ValueError(f"expected.id {expected.id} is out of range (expected 0..{_MAX_CANARY_IDENTIFIER})")
-        if not 1 <= expected.ref <= _MAX_CANARY_REF:
+        if expected.ref < 1:
             # prepare() always returns ref=1 and checkpoint() only ever advances it by 1, so a
-            # restored/malformed PersistenceState outside this range can't have come from a real
-            # prior run. The lower bound also prevents an empty or partially recreated topic
-            # (actual == 0) from satisfying `actual == expected.ref` for ref=0 and reporting a
-            # false PASS; the upper bound keeps `range(1, expected.ref + 1)` below from allocating
-            # an unbounded amount of memory for an untrusted value.
-            raise ValueError(f"expected.ref {expected.ref} is out of range (expected 1..{_MAX_CANARY_REF})")
+            # restored/malformed PersistenceState with ref <= 0 can't have come from a real prior
+            # run. Without this check, an empty or partially recreated topic (actual == 0) could
+            # satisfy `actual == expected.ref` for ref=0 and report a false PASS.
+            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
         topic = self._canary_topic_name(expected.id)
         try:
             data = self._connection_data()
@@ -551,7 +543,10 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
             # matching count: a topic dropped and recreated from scratch could otherwise
             # coincidentally satisfy a bare count-only check, and deduplicating refs here (e.g. via
             # a set) would let a topic containing a duplicate ref alongside a missing one still
-            # equal expected_refs.
+            # equal expected_refs. Compared positionally (rather than via `list(range(1,
+            # expected.ref + 1)) == matching_refs`) so verification cost is bounded by the number
+            # of real records `_read_canary_messages` actually read back, not by an untrusted,
+            # schema-valid but arbitrarily large `expected.ref` from --refs.
             matching_refs = sorted(
                 int(record["ref"])
                 for record in records
@@ -559,9 +554,8 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
                 and record.get("token") == expected.token
                 and isinstance(record.get("ref"), int)
             )
-            expected_refs = list(range(1, expected.ref + 1))
             matching = len(matching_refs)
-            passed = matching_refs == expected_refs
+            passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
 
             # Only write the next canary message when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
