@@ -265,6 +265,38 @@ class KubernetesClient:
             delay=delay,
         )
 
+    def restart_pod(self, namespace: str, pod_name: str, uid: str, timeout: timedelta) -> None:
+        """Delete this Pod instance and wait for its replacement before running hooks."""
+        self.backend.core_v1_api.delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            body=K8sClient.V1DeleteOptions(preconditions=K8sClient.V1Preconditions(uid=uid)),
+            _request_timeout=30,
+        )
+        self.logger.info(f"Waiting for replacement of Pod {namespace}/{pod_name} ({uid}).")
+
+        def replacement_running() -> bool | None:
+            try:
+                pod = self.backend.core_v1_api.read_namespaced_pod(
+                    name=pod_name, namespace=namespace, _request_timeout=30
+                )
+            except ApiException as error:
+                if error.status == 404:
+                    return None
+                raise
+            if (
+                pod.metadata.uid
+                and pod.metadata.uid != uid
+                and pod.metadata.deletion_timestamp is None
+                and pod.status.phase == PodStatus.RUNNING.value
+            ):
+                return True
+            return None
+
+        self.wait(replacement_running, f"Pod {namespace}/{pod_name} was not replaced.", timeout=timeout)
+        for extension in self.extensions:
+            extension.post_delete_pod(namespace, pod_name)
+
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """
         Deletes the specified pod.

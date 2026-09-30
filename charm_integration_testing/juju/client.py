@@ -56,6 +56,14 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
+    def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
+        self.logger.info(f"Restarting a follower of {application}.")
+        unit = self.backend.restart_follower(model, application, timeout)
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+        self.logger.info(f"Restarted follower {unit}.")
+        return unit
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)

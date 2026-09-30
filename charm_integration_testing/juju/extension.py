@@ -16,6 +16,9 @@ class JujuExtension(ABC):
     def post_scale(self, model: JujuModelHandle) -> None:
         pass
 
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        pass
+
     def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
         pass
 
