@@ -95,10 +95,26 @@ class LitmusChaosClient(ChaosClient):
         for engine in self._created:
             if engine.scope != (model.uri, unit) or engine.uid is None:
                 continue
-            self._observe(engine)
+            results = self._observe(engine)
             self._diagnose_cleanup(engine, "observation")
             if engine.execution_error is not None:
                 self._diagnose_cleanup(engine, "experiment failed during observation")
+                raise engine.execution_error
+            current = self._read_engine(engine)
+            if (
+                current is None
+                or (current.get("status") or {}).get("engineStatus") in {"completed", "stopped"}
+                or any(
+                    (result.get("status") or {}).get("experimentStatus", {}).get("phase") in {"Completed", "Stopped"}
+                    or self._target_status(result, engine.pod) == "reverted"
+                    for result in results
+                )
+            ):
+                engine.execution_error = RuntimeError(
+                    f"Litmus experiment {engine.name} ended before the observation period completed; "
+                    "the requested stress duration was not verified."
+                )
+                self._diagnose_cleanup(engine, "experiment ended early")
                 raise engine.execution_error
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
@@ -341,6 +357,13 @@ class LitmusChaosClient(ChaosClient):
         self._wait(lambda: self._children_removed(engine), deadline, engine.name)
         if observation_error is not None:
             raise observation_error
+        if engine.execution_error is not None and not self._reverted(engine):
+            # An errored experiment may exit without writing 'reverted'. Keep the
+            # unresolved cleanup registered, but do not hide its cause behind a timeout.
+            raise RuntimeError(
+                f"Litmus stress reversion is unconfirmed for failed experiment {engine.name}; "
+                f"cleanup retained for retry. Original error: {engine.execution_error}"
+            ) from engine.execution_error
         self._wait(lambda: self._reverted(engine), deadline, engine.name, "stress reversion")
         self._remove_results(engine)
         self._wait(lambda: not self._results(engine), deadline, engine.name)

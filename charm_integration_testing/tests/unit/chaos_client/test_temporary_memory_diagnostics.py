@@ -164,3 +164,22 @@ def test_periodic_capture_keeps_logs_status_and_events_without_chaos_uid(
     calls = context.backend.core_v1_api.read_namespaced_pod_log.call_count
     chaos.check_stress(MODEL, UNIT)
     assert context.backend.core_v1_api.read_namespaced_pod_log.call_count == calls
+
+
+@pytest.mark.parametrize("experiments", [None, [{"experimentPod": "Yet to be launched"}]])
+def test_startup_placeholder_does_not_interrupt_diagnostics(
+    context: ClientContext, experiments: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    name = context.created[0]["metadata"]["name"]
+    context.engines[name]["status"]["experiments"] = experiments
+    context.backend.core_v1_api.read_namespaced_pod.return_value = target_pod()
+    with caplog.at_level(logging.INFO):
+        chaos._diagnose_cleanup(chaos._created[0], "before cleanup")
+    assert "snapshot incomplete" not in caplog.text
+    assert all(
+        call.kwargs["name"] != "Yet to be launched"
+        for call in context.backend.core_v1_api.read_namespaced_pod.call_args_list
+    )
+    context.backend.core_v1_api.list_namespaced_event.assert_called()

@@ -247,6 +247,13 @@ workload container limit through a StatefulSet rollout, then requests memory
 stress on one unit. The default is one worker, ``2048`` MB and ``600`` seconds
 of observation after confirmed injection.
 
+During observation, Litmus results are checked every ten seconds, plus API call
+time. Experiment errors or early completion fail the test, even after an
+out-of-memory restart. The test does not automatically inject stress again.
+If a failed experiment has no reversion evidence after its child resources are
+removed, cleanup reports that failure immediately and remains registered for
+retry rather than waiting for another reversion timeout.
+
 Per-charm settings override ``memory_exhaustion_workers``,
 ``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` using
 the deployed charm's channel and Ubuntu base. The ``memory_limit`` fixture is

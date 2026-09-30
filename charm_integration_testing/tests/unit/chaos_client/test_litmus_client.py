@@ -792,3 +792,49 @@ def test_check_stress_reports_error_before_cleanup(context: ClientContext) -> No
     with pytest.raises(ChaosCleanupError):
         meta.cleanup_all()
     assert not context.engines
+
+
+@pytest.mark.parametrize("end", ["engine", "result", "reverted", "missing"])
+def test_observation_rejects_early_completion(context: ClientContext, end: str) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    name = context.created[0]["metadata"]["name"]
+    if end == "engine":
+        context.engines[name]["status"]["engineStatus"] = "completed"
+    elif end == "result":
+        context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    elif end == "reverted":
+        context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    else:
+        del context.engines[name]
+    with pytest.raises(RuntimeError, match="requested stress duration was not verified"):
+        chaos.check_stress(MODEL, UNIT)
+    assert context.setups
+
+
+def test_failed_experiment_without_reversion_fails_cleanup_immediately_and_is_retryable(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.auto_revert = False
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"errorCode": "EXPERIMENT_ABORTED", "reason": "killed"},
+    }
+    for _ in range(2):
+        before = context.now
+        with pytest.raises(ChaosCleanupError) as error:
+            chaos.cleanup(MODEL, UNIT, "")
+        assert "reversion is unconfirmed" in str(error.value.errors[0])
+        assert "EXPERIMENT_ABORTED" in str(error.value.errors[0])
+        assert context.now == before
+        assert context.engines and context.results
+        context.setups[0].cleanup.assert_not_called()
+    # New explicit reversion evidence allows removal, but never erases the experiment failure.
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    with pytest.raises(ChaosCleanupError, match="cleanup operation"):
+        chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    chaos.cleanup(MODEL, UNIT, "")

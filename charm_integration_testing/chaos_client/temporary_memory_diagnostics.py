@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -118,7 +119,7 @@ def diagnose_cleanup(client: LitmusChaosClient, engine: _ExperimentRun, stage: s
             ):
                 selected[pod.metadata.name] = pod
         names: set[str] = set()
-        for experiment in (current or {}).get("status", {}).get("experiments", []):
+        for experiment in ((current or {}).get("status") or {}).get("experiments") or []:
             names.update(experiment.get(key) for key in ("experimentPod", "runner") if experiment.get(key))
         for result in results or []:
             error = (result.get("status") or {}).get("experimentStatus", {}).get("errorOutput") or {}
@@ -128,7 +129,7 @@ def diagnose_cleanup(client: LitmusChaosClient, engine: _ExperimentRun, stage: s
                     names.add(source)
             except (ValueError, TypeError, AttributeError):
                 pass
-        for name in sorted(names)[:12]:
+        for name in sorted(name for name in names if re.fullmatch(r"[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?", name))[:12]:
             if name not in selected:
                 pod = collect(
                     "named experiment Pod " + name,
