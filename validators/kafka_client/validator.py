@@ -1,18 +1,27 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
+import json
 import os
+import re
 import tempfile
 import time
 import uuid
 from typing import Any
 
-from kafka import KafkaConsumer, KafkaProducer  # type: ignore[import-untyped]
+from kafka import KafkaConsumer, KafkaProducer, TopicPartition  # type: ignore[import-untyped]
 from kafka.admin import KafkaAdminClient, NewTopic  # type: ignore[import-untyped]
-from kafka.errors import TopicAlreadyExistsError  # type: ignore[import-untyped]
+from kafka.errors import (  # type: ignore[import-untyped]
+    TopicAlreadyExistsError,
+    UnknownTopicOrPartitionError,
+)
 
 from validators.base import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
@@ -24,12 +33,186 @@ _SIMPLE_LATENCY_TARGET_S = 0.5
 _DEEP_LATENCY_TARGET_S = 10.0
 _CONSUME_TIMEOUT_S = 5.0
 
+# Topic name prefix for persistence-validator canary topics. Kept as a module constant so
+# cleanup() (which has no per-call state to work from) can discover every canary topic it may
+# have created by pattern rather than by identifier.
+_CANARY_TOPIC_PREFIX = "validator_canary_"
 
-class KafkaClientValidator(BaseValidator):
+# prepare() masks its identifier to 63 bits, so a genuine canary identifier never exceeds this
+# value. cleanup()'s discovery regex only checks a candidate topic name's *shape* (prefix + 20
+# digits); this bound lets it also reject an out-of-range look-alike with the right shape that
+# prepare() couldn't have produced.
+_MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+
+
+class _KafkaConnectionMixin:
+    """Shared credential-resolution and client-construction helpers for kafka_client validators.
+
+    Both ``KafkaClientValidator`` (health probe) and ``KafkaClientPersistenceValidator``
+    (durability probe) need to resolve the same relation credentials and build the same kind of
+    kafka-python clients, so that logic lives here once instead of being duplicated.
+    """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._ca_file_path: str | None = None
 
+    def _connection_databag(self) -> dict[str, str]:
+        """Return the databag holding kafka_client connection fields for the current role.
+
+        The interface is app scoped. On the requirer side, the connection fields
+        (endpoints, topic, credentials, ...) live on the remote provider app's
+        databag, which ``BaseValidator.databag`` already exposes (``relation.app``
+        is always the *other* application). On the provider side we publish those
+        same fields ourselves, so we must read our own app's databag instead.
+        """
+        if self.role == "provides":  # type: ignore[attr-defined]
+            if self.charm.app not in self.relation.data:  # type: ignore[attr-defined]
+                return {}
+            return dict(self.relation.data[self.charm.app])  # type: ignore[attr-defined]
+        return dict(self.databag)  # type: ignore[attr-defined]
+
+    def _resolve_credentials(self, data: dict[str, str]) -> dict[str, str]:
+        """Resolve credentials from the given databag or the Juju secrets it references."""
+        return {
+            **self.resolve_secret("secret-user", "username", "password", data=data),  # type: ignore[attr-defined]
+            **self.resolve_secret("secret-tls", "tls", "tls-ca", data=data),  # type: ignore[attr-defined]
+        }
+
+    def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:
+        """Build shared Kafka client kwargs, handling SASL and TLS configuration."""
+        bootstrap_servers = [e.strip() for e in data["endpoints"].split(",") if e.strip()]
+        kwargs: dict[str, Any] = {
+            "bootstrap_servers": bootstrap_servers,
+            "security_protocol": "PLAINTEXT",
+            "request_timeout_ms": _CLIENT_TIMEOUT_MS,
+            "connections_max_idle_ms": _CLIENT_IDLE_MS,
+        }
+
+        username = data.get("username", "")
+        password = data.get("password", "")
+        tls_raw = data.get("tls", "").lower()
+        tls_ca = data.get("tls-ca", "")
+        # The charm sets "disabled" when TLS is off; treat that as absent.
+        tls_enabled = tls_raw not in ("", "disabled")
+        tls_ca_pem = tls_ca if tls_ca not in ("", "disabled") else ""
+
+        has_sasl = bool(username and password)
+        has_tls = tls_enabled or bool(tls_ca_pem)
+
+        if has_tls and has_sasl:
+            kwargs["security_protocol"] = "SASL_SSL"
+        elif has_tls:
+            kwargs["security_protocol"] = "SSL"
+        elif has_sasl:
+            kwargs["security_protocol"] = "SASL_PLAINTEXT"
+
+        if has_sasl:
+            kwargs["sasl_mechanism"] = "SCRAM-SHA-512"
+            kwargs["sasl_plain_username"] = username
+            kwargs["sasl_plain_password"] = password
+
+        if tls_ca_pem:
+            self._create_temp_ca_file(tls_ca_pem)
+            kwargs["ssl_cafile"] = self._ca_file_path
+
+        return kwargs
+
+    def _build_consumer(
+        self,
+        data: dict[str, str],
+        group_id: str | None = None,
+        auto_offset_reset: str = "latest",
+    ) -> KafkaConsumer:
+        """Build a KafkaConsumer with appropriate security and offset settings."""
+        kwargs = self._build_kafka_client_kwargs(data)
+        # Fall back to prefixed group when no explicit group_id is given.
+        default_group = f"{data.get('consumer-group-prefix', '')}validator"
+        kwargs["group_id"] = group_id if group_id is not None else default_group
+        kwargs["auto_offset_reset"] = auto_offset_reset
+        kwargs["enable_auto_commit"] = False
+        kwargs["consumer_timeout_ms"] = _CLIENT_TIMEOUT_MS
+        return KafkaConsumer(**kwargs)
+
+    def _build_raw_consumer(self, data: dict[str, str]) -> KafkaConsumer:
+        """Build a standalone KafkaConsumer with no consumer group (manual partition assignment).
+
+        Used by the persistence validator, which reads canary messages via ``assign()``/``seek``
+        rather than ``subscribe()``, so it does not depend on a consumer group or the
+        ``consumer-group-prefix`` ACL grant the functional validator's canary round trip needs.
+        """
+        kwargs = self._build_kafka_client_kwargs(data)
+        kwargs["enable_auto_commit"] = False
+        kwargs["consumer_timeout_ms"] = _CLIENT_TIMEOUT_MS
+        return KafkaConsumer(**kwargs)
+
+    def _build_producer(self, data: dict[str, str]) -> KafkaProducer:
+        """Build a KafkaProducer with appropriate security settings."""
+        kwargs = self._build_kafka_client_kwargs(data)
+        return KafkaProducer(**kwargs)
+
+    def _build_admin_client(self, data: dict[str, str]) -> KafkaAdminClient:
+        """Build a KafkaAdminClient with appropriate security settings."""
+        return KafkaAdminClient(**self._build_kafka_client_kwargs(data))
+
+    def _ensure_topic_exists(self, data: dict[str, str], topic: str) -> None:
+        """Create the topic if it does not already exist.
+
+        kafka-k8s sets auto.create.topics.enable=false, so the topic must be
+        created explicitly. Errors are swallowed — if creation fails the produce
+        step will surface a meaningful error instead.
+        """
+        admin: KafkaAdminClient | None = None
+        try:
+            admin = self._build_admin_client(data)
+            admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
+        except TopicAlreadyExistsError:
+            pass
+        except Exception:  # nosec B110 - best-effort; produce step will catch real failures
+            pass
+        finally:
+            self._close_admin(admin)
+
+    def _create_temp_ca_file(self, ca_content: str) -> None:
+        """Write CA certificate content to a temporary PEM file."""
+        if self._ca_file_path:
+            return
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
+            ca_file.write(ca_content)
+            self._ca_file_path = ca_file.name
+
+    def _remove_temp_ca_file(self) -> None:
+        """Remove the temporary CA certificate file if it exists."""
+        if self._ca_file_path:
+            try:
+                os.remove(self._ca_file_path)
+            except OSError:
+                pass
+            self._ca_file_path = None
+
+    def _close_admin(self, admin: KafkaAdminClient | None) -> None:
+        if admin is not None:
+            try:
+                admin.close()
+            except Exception:  # nosec B110 - best-effort cleanup
+                pass
+
+    def _close_consumer(self, consumer: KafkaConsumer | None) -> None:
+        if consumer is not None:
+            try:
+                consumer.close()
+            except Exception:  # nosec B110 - best-effort cleanup
+                pass
+
+    def _close_producer(self, producer: KafkaProducer | None) -> None:
+        if producer is not None:
+            try:
+                producer.close(timeout=5)
+            except Exception:  # nosec B110 - best-effort cleanup
+                pass
+
+
+class KafkaClientValidator(_KafkaConnectionMixin, BaseValidator):
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         if self.role not in ("requires", "provides"):
             return self._skipped_result_due_to_role(level, self.role)
@@ -289,140 +472,252 @@ class KafkaClientValidator(BaseValidator):
             )
         return None
 
-    def _connection_databag(self) -> dict[str, str]:
-        """Return the databag holding kafka_client connection fields for the current role.
 
-        The interface is app scoped. On the requirer side, the connection fields
-        (endpoints, topic, credentials, ...) live on the remote provider app's
-        databag, which ``BaseValidator.databag`` already exposes (``relation.app``
-        is always the *other* application). On the provider side we publish those
-        same fields ourselves, so we must read our own app's databag instead.
+class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceValidator):
+    """Reference-style persistence validator for kafka_client, modeled on
+    ``PostgreSQLClientPersistenceValidator`` (see SQ103).
+
+    Each validator instance owns a dedicated canary topic named
+    ``validator_canary_{scope_token}_{identifier}``, where ``scope_token`` is a fixed-width hash of
+    this model's UUID, relation ID and unit name (see ``_canary_topic_prefix``) and ``identifier``
+    is a fixed-width, zero-padded value chosen by ``prepare()`` and carried forward by the caller
+    (the test harness) as ``PersistenceState.id``. Every canary message is a small JSON payload
+    carrying the random, unguessable ``token`` generated by ``prepare()`` (also carried forward as
+    ``PersistenceState.token``) and a ``ref`` counter, so ``checkpoint()`` can detect data loss (or
+    a topic silently recreated from scratch) by matching on ``token`` rather than trusting a bare
+    message count that a coincidentally-sized but unrelated topic could satisfy.
+
+    Persistence only applies to the requirer side of the relation (the side holding credentials to
+    connect out); the provider side raises ``PersistenceNotApplicable``, mirroring the role check
+    ``KafkaClientValidator.validate()`` performs for the functional probe.
+
+    Unlike PostgreSQL (where a granted database privilege lets the client create arbitrary
+    tables), Kafka ACLs granted by the provider are typically scoped to the single ``topic`` named
+    in the relation request. Creating and deleting a separate canary topic therefore requires the
+    relation's credentials to carry broader topic-management authority (e.g. the requirer charm
+    was related with ``extra-user-roles=admin``) - this is a deployment requirement for exercising
+    persistence, not something this validator can work around.
+    """
+
+    def prepare(self) -> PersistenceState:
+        self._require_requires_role()
+        # Masked to 63 bits so the canary topic name - which also carries a fixed-width scope
+        # token - stays well within Kafka's 249-character topic name limit, while still leaving
+        # far more entropy than a test run could collide on.
+        identifier = uuid.uuid4().int & _MAX_CANARY_IDENTIFIER
+        topic = self._canary_topic_name(identifier)
+        # Random, unguessable per-run token written to every canary message and matched on by
+        # checkpoint(). It must not be derivable from `identifier`/`ref`: those are reproducible,
+        # so a backend that lost the canary data and recreated the topic from scratch would
+        # reproduce the same value and pass falsely.
+        token = uuid.uuid4().hex
+        data = self._connection_data()
+        self._ensure_topic_exists(data, topic)
+        self._produce_canary_message(data, topic, token, 1)
+        return PersistenceState(id=identifier, ref=1, token=token)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        self._require_requires_role()
+        # expected comes from --refs, a (possibly restored/malformed) PersistenceState rather than
+        # a value prepare() just minted - validate it's in range before any read/write, so a
+        # truncated/different identifier can't silently target the wrong topic.
+        if not 0 <= expected.id <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(f"expected.id {expected.id} is out of range (expected 0..{_MAX_CANARY_IDENTIFIER})")
+        if expected.ref < 1:
+            # prepare() always returns ref=1 and checkpoint() only ever advances it, so a
+            # restored/malformed PersistenceState with ref <= 0 can't have come from a real prior
+            # run. Without this check, an empty or partially recreated topic (actual == 0) could
+            # satisfy `actual == expected.ref` for ref=0 and report a false PASS.
+            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
+        topic = self._canary_topic_name(expected.id)
+        data = self._connection_data()
+        records = self._read_canary_messages(data, topic)
+        # Require the exact set of refs 1..expected.ref tagged with our token, not just a matching
+        # count: a topic dropped and recreated from scratch could otherwise coincidentally satisfy
+        # a bare count-only check.
+        matching_refs = sorted(
+            {
+                int(record["ref"])
+                for record in records
+                if isinstance(record, dict)
+                and record.get("token") == expected.token
+                and isinstance(record.get("ref"), int)
+            }
+        )
+        expected_refs = list(range(1, expected.ref + 1))
+        matching = len(matching_refs)
+        passed = matching_refs == expected_refs
+
+        # Only write the next canary message when this checkpoint passed: ValidatorRunner only
+        # carries the advanced PersistenceState forward on a PASS result, so writing here
+        # unconditionally would grow `actual` past what the harness will ever compare against
+        # again, masking the mismatch behind permanent drift.
+        if passed:
+            self._produce_canary_message(data, topic, expected.token, expected.ref + 1)
+
+        check = ValidationCheck(
+            name="message_count",
+            passed=passed,
+            message=(
+                f"Found expected {matching} marked message(s) in topic '{topic}'."
+                if passed
+                else (
+                    f"Expected {expected.ref} marked message(s) with matching token in topic "
+                    f"'{topic}', found {matching}. Data may have been lost, or the topic was "
+                    "recreated without the original canary messages."
+                )
+            ),
+        )
+        result = self._make_result(level="deep", checks=[check])
+        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token) if passed else expected
+        return result, new_state
+
+    def cleanup(self) -> None:
+        """Delete every canary topic this validator instance (or a prior instance of it) created.
+
+        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so every
+        topic matching this instance's canary name pattern is discovered via ``list_topics()`` and
+        deleted, rather than dropping one topic by identifier. This also mops up a topic left
+        behind by an interrupted run (e.g. a crash between ``prepare()`` and the next ``cleanup()``).
+
+        Discovery is scoped to a model+relation+unit namespace (see ``_canary_topic_prefix``) so
+        concurrent relations sharing a cluster can't drop each other's topics. It does not sweep
+        up a stray topic from a relation removed and re-added under a new ID - an accepted
+        trade-off, since a fresh ``prepare()`` for the new ID starts its own topic anyway.
+
+        ``list_topics()`` only narrows candidates by name, so every candidate is re-checked against
+        ``_canary_topic_regex()`` and ``_MAX_CANARY_IDENTIFIER`` before being deleted. This rejects
+        a same-prefixed but unrelated topic that a bare prefix match would otherwise destroy.
         """
-        if self.role == "provides":
-            if self.charm.app not in self.relation.data:
-                return {}
-            return dict(self.relation.data[self.charm.app])
-        return self.databag
-
-    def _resolve_credentials(self, data: dict[str, str]) -> dict[str, str]:
-        """Resolve credentials from the given databag or the Juju secrets it references."""
-        return {
-            **self.resolve_secret("secret-user", "username", "password", data=data),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca", data=data),
-        }
-
-    def _build_kafka_client_kwargs(self, data: dict[str, str]) -> dict[str, Any]:
-        """Build shared Kafka client kwargs, handling SASL and TLS configuration."""
-        bootstrap_servers = [e.strip() for e in data["endpoints"].split(",") if e.strip()]
-        kwargs: dict[str, Any] = {
-            "bootstrap_servers": bootstrap_servers,
-            "security_protocol": "PLAINTEXT",
-            "request_timeout_ms": _CLIENT_TIMEOUT_MS,
-            "connections_max_idle_ms": _CLIENT_IDLE_MS,
-        }
-
-        username = data.get("username", "")
-        password = data.get("password", "")
-        tls_raw = data.get("tls", "").lower()
-        tls_ca = data.get("tls-ca", "")
-        # The charm sets "disabled" when TLS is off; treat that as absent.
-        tls_enabled = tls_raw not in ("", "disabled")
-        tls_ca_pem = tls_ca if tls_ca not in ("", "disabled") else ""
-
-        has_sasl = bool(username and password)
-        has_tls = tls_enabled or bool(tls_ca_pem)
-
-        if has_tls and has_sasl:
-            kwargs["security_protocol"] = "SASL_SSL"
-        elif has_tls:
-            kwargs["security_protocol"] = "SSL"
-        elif has_sasl:
-            kwargs["security_protocol"] = "SASL_PLAINTEXT"
-
-        if has_sasl:
-            kwargs["sasl_mechanism"] = "SCRAM-SHA-512"
-            kwargs["sasl_plain_username"] = username
-            kwargs["sasl_plain_password"] = password
-
-        if tls_ca_pem:
-            self._create_temp_ca_file(tls_ca_pem)
-            kwargs["ssl_cafile"] = self._ca_file_path
-
-        return kwargs
-
-    def _build_consumer(
-        self,
-        data: dict[str, str],
-        group_id: str | None = None,
-        auto_offset_reset: str = "latest",
-    ) -> KafkaConsumer:
-        """Build a KafkaConsumer with appropriate security and offset settings."""
-        kwargs = self._build_kafka_client_kwargs(data)
-        # Fall back to prefixed group when no explicit group_id is given.
-        default_group = f"{data.get('consumer-group-prefix', '')}validator"
-        kwargs["group_id"] = group_id if group_id is not None else default_group
-        kwargs["auto_offset_reset"] = auto_offset_reset
-        kwargs["enable_auto_commit"] = False
-        kwargs["consumer_timeout_ms"] = _CLIENT_TIMEOUT_MS
-        return KafkaConsumer(**kwargs)
-
-    def _build_producer(self, data: dict[str, str]) -> KafkaProducer:
-        """Build a KafkaProducer with appropriate security settings."""
-        kwargs = self._build_kafka_client_kwargs(data)
-        return KafkaProducer(**kwargs)
-
-    def _ensure_topic_exists(self, data: dict[str, str], topic: str) -> None:
-        """Create the topic if it does not already exist.
-
-        kafka-k8s sets auto.create.topics.enable=false, so the topic must be
-        created explicitly. Errors are swallowed — if creation fails the produce
-        step will surface a meaningful error instead.
-        """
+        self._require_requires_role()
+        # Incomplete credentials mean cleanup can't run: raise PersistenceNotApplicable so the
+        # runner records a skip (not a successful cleanup) and keeps the tracked state, rather than
+        # forgetting orphaned canary data.
+        creds = self._resolve_credentials(self.databag)
+        if not self.validate_schema(["endpoints", "username", "password"], creds).passed:
+            raise PersistenceNotApplicable(
+                "Relation credentials are incomplete; cleanup cannot remove canary data yet."
+            )
+        data = self.databag | creds
         admin: KafkaAdminClient | None = None
         try:
-            admin = KafkaAdminClient(**self._build_kafka_client_kwargs(data))
-            admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
-        except TopicAlreadyExistsError:
-            pass
-        except Exception:  # nosec B110 - best-effort; produce step will catch real failures
-            pass
+            admin = self._build_admin_client(data)
+            topic_names = admin.list_topics()
+            name_regex = self._canary_topic_regex()
+            to_delete = []
+            for name in topic_names:
+                match = name_regex.fullmatch(name)
+                if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
+                    continue
+                to_delete.append(name)
+            if to_delete:
+                try:
+                    admin.delete_topics(to_delete)
+                except UnknownTopicOrPartitionError:
+                    # Already gone (e.g. a concurrent cleanup, or manual removal) - not an error.
+                    pass
         finally:
             self._close_admin(admin)
 
-    def _create_temp_ca_file(self, ca_content: str) -> None:
-        """Write CA certificate content to a temporary PEM file."""
-        if self._ca_file_path:
-            return
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as ca_file:
-            ca_file.write(ca_content)
-            self._ca_file_path = ca_file.name
+    def _require_requires_role(self) -> None:
+        if self.role != "requires":
+            raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
 
-    def _remove_temp_ca_file(self) -> None:
-        """Remove the temporary CA certificate file if it exists."""
-        if self._ca_file_path:
-            try:
-                os.remove(self._ca_file_path)
-            except OSError:
-                pass
-            self._ca_file_path = None
+    def _connection_data(self) -> dict[str, str]:
+        """Resolve and validate the connection fields needed to build a Kafka client.
 
-    def _close_admin(self, admin: KafkaAdminClient | None) -> None:
-        if admin is not None:
-            try:
-                admin.close()
-            except Exception:  # nosec B110 - best-effort cleanup
-                pass
+        Unlike the functional validator's validate()/deep(), these methods have no ValidationCheck
+        to report a schema failure through, so a missing credential is raised rather than reaching
+        a kafka-python client constructor with incomplete kwargs.
+        """
+        creds = self._resolve_credentials(self.databag)
+        data = self.databag | creds
+        schema_check = self.validate_schema(["endpoints", "username", "password"], creds)
+        if not schema_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {schema_check.message}")
+        return data
 
-    def _close_consumer(self, consumer: KafkaConsumer | None) -> None:
-        if consumer is not None:
-            try:
-                consumer.close()
-            except Exception:  # nosec B110 - best-effort cleanup
-                pass
+    def _produce_canary_message(self, data: dict[str, str], topic: str, token: str, ref: int) -> None:
+        producer: KafkaProducer | None = None
+        try:
+            producer = self._build_producer(data)
+            value = json.dumps({"token": token, "ref": ref}).encode()
+            future = producer.send(topic, key=b"validator_canary", value=value)
+            producer.flush(timeout=5)
+            future.get(timeout=5)
+        finally:
+            self._close_producer(producer)
 
-    def _close_producer(self, producer: KafkaProducer | None) -> None:
-        if producer is not None:
+    def _read_canary_messages(self, data: dict[str, str], topic: str) -> list[dict[str, Any]]:
+        """Read every message currently in the canary topic's single partition.
+
+        Uses manual partition assignment (``assign()``/``seek_to_beginning()``) rather than
+        ``subscribe()`` with a consumer group, so reading does not depend on a consumer group or
+        the ``consumer-group-prefix`` ACL grant the functional validator's round trip needs.
+        """
+        consumer: KafkaConsumer | None = None
+        try:
+            consumer = self._build_raw_consumer(data)
+            topic_partition = TopicPartition(topic, 0)
+            consumer.assign([topic_partition])
             try:
-                producer.close(timeout=5)
-            except Exception:  # nosec B110 - best-effort cleanup
-                pass
+                end_offsets = consumer.end_offsets([topic_partition])
+            except UnknownTopicOrPartitionError:
+                return []
+            end_offset = end_offsets.get(topic_partition, 0)
+            if end_offset == 0:
+                return []
+            consumer.seek_to_beginning(topic_partition)
+            records: list[dict[str, Any]] = []
+            deadline = time.monotonic() + _CONSUME_TIMEOUT_S
+            while consumer.position(topic_partition) < end_offset and time.monotonic() < deadline:
+                batches = consumer.poll(timeout_ms=1000, max_records=200)
+                for messages in batches.values():
+                    for message in messages:
+                        try:
+                            records.append(json.loads(message.value.decode()))
+                        except (ValueError, UnicodeDecodeError):
+                            continue  # Not one of our canary messages; ignore.
+            return records
+        finally:
+            self._close_consumer(consumer)
+
+    def _canary_topic_prefix(self) -> str:
+        """Prefix scoped to this model, relation and unit, so cleanup discovery can't cross boundaries.
+
+        ``self.relation_id`` is stable for the lifetime of a given relation, but relation IDs are
+        assigned independently per model and can collide numerically across two different models
+        relating to the same cluster. The unit name is also part of the scope: the runner runs
+        persistence validators on *every* unit of the application, so two units share both
+        ``model.uuid`` and ``relation_id`` while owning separate canary topics (see ``cleanup()``).
+        All three are folded into a single fixed-width ``scope_token`` - the first 16 hex characters
+        (64 bits) of a SHA-256 hash of ``f"{model_uuid}:{relation_id}:{unit_name}"`` - so the name
+        stays well within Kafka's topic name limit and ``cleanup()`` can validate its exact shape
+        via ``_canary_topic_regex()``.
+        """
+        scope_token = self._canary_scope_token()
+        return f"{_CANARY_TOPIC_PREFIX}{scope_token}_"
+
+    def _canary_scope_token(self) -> str:
+        unit_name = self.charm.model.unit.name
+        digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
+        return hashlib.sha256(digest_input).hexdigest()[:16]
+
+    def _canary_topic_regex(self) -> "re.Pattern[str]":
+        """Exact-shape match for this relation's canary topics: prefix + fixed-width digits.
+
+        Used by ``cleanup()`` to reject a topic that merely shares the discovery prefix but
+        doesn't match the fixed-width zero-padded identifier suffix ``_canary_topic_name()``
+        always produces. Matching this shape alone isn't sufficient - see ``cleanup()``, which
+        also checks the captured ``identifier`` against ``_MAX_CANARY_IDENTIFIER``.
+        """
+        return re.compile(re.escape(self._canary_topic_prefix()) + r"(?P<identifier>[0-9]{20})")
+
+    def _canary_topic_name(self, identifier: int) -> str:
+        # Zero-padded to a fixed 20 digits (prepare() masks identifiers to 63 bits, so never more
+        # than 19) so every canary name has the same shape, which _canary_topic_regex() relies on.
+        # checkpoint() passes back an identifier from a possibly restored/malformed state, so
+        # range-check it here too rather than letting it silently address the wrong topic.
+        if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(f"canary identifier {identifier} is out of range (expected 0..{_MAX_CANARY_IDENTIFIER})")
+        return f"{self._canary_topic_prefix()}{identifier:020d}"
