@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, cast
 from unittest.mock import patch
@@ -972,6 +973,35 @@ class TestKafkaClientPersistenceValidatorPrepare:
         assert first.id != second.id
         assert first.token != second.token
 
+    def test_removes_temporary_ca_file_after_the_call(self) -> None:
+        # GIVEN TLS is configured, so _build_kafka_client_kwargs() writes the CA content to a temp
+        # PEM file that's reused across every client built within this call.
+        databag = {**PERSISTENCE_VALID_DATABAG, "tls": "enabled", "tls-ca": "FAKE-CA-CONTENT"}
+        validator = _make_persistence_validator(databag)
+        admin = PersistenceKafkaAdminClientStub()
+        producer = KafkaProducerStub()
+        created_paths: list[str] = []
+        original_create_ca_file = KafkaClientPersistenceValidator._create_temp_ca_file
+
+        def spy_create_ca_file(self: KafkaClientPersistenceValidator, ca_content: str) -> None:
+            original_create_ca_file(self, ca_content)
+            if self._ca_file_path:
+                created_paths.append(self._ca_file_path)
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+            patch.object(KafkaClientPersistenceValidator, "_create_temp_ca_file", spy_create_ca_file),
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN the CA file actually created on disk for this call is gone, and the cached path
+        # cleared - not left behind to leak credentials across future persistence runs.
+        assert created_paths
+        assert validator._ca_file_path is None
+        assert not os.path.exists(created_paths[0])
+
 
 class TestKafkaClientPersistenceValidatorCheckpoint:
     def test_passes_when_message_count_matches_expected_ref(self) -> None:
@@ -1134,6 +1164,58 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
 
         with pytest.raises(ValueError, match="out of range"):
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=-1))
+
+    def test_raises_when_expected_ref_exceeds_max(self) -> None:
+        # GIVEN a schema-valid but implausibly large ref, which would otherwise force
+        # range(1, expected.ref + 1) to allocate an unbounded amount of memory.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+
+        with pytest.raises(ValueError, match="out of range"):
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=10_000_001))
+
+    def test_fails_when_topic_has_a_duplicate_ref_alongside_a_missing_one(self) -> None:
+        # GIVEN a topic containing a duplicate ref (1 twice) instead of the missing ref 2: a bare
+        # count-only or deduplicated-set comparison would wrongly match expected_refs=[1, 2].
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={topic: [_canary_record(TEST_TOKEN, 1), _canary_record(TEST_TOKEN, 1)]}
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the duplicate is not mistaken for the missing ref 2
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+        assert producer.sent == []
+
+    def test_ignores_tombstone_records_with_a_null_value(self) -> None:
+        # GIVEN the topic contains a tombstone (null-value) record alongside the canary messages -
+        # message.value.decode() would otherwise raise AttributeError on the None value.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={
+                topic: [ConsumerRecordStub(value=None), _canary_record(TEST_TOKEN, 1)],
+            }
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, _ = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN the tombstone is ignored rather than raising, and the real canary message still passes
+        assert result.status == "PASS"
 
 
 class TestKafkaClientPersistenceValidatorCleanup:
