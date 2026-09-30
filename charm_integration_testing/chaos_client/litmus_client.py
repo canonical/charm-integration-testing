@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from time import monotonic, sleep
@@ -89,6 +88,16 @@ class LitmusChaosClient(ChaosClient):
             {"NUMBER_OF_WORKERS": str(workers), "MEMORY_CONSUMPTION": str(size_mb)},
             duration,
         )
+
+    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+        """Report execution errors from experiments registered for this unit."""
+        for engine in self._created:
+            if engine.scope != (model.uri, unit) or engine.uid is None:
+                continue
+            self._observe(engine)
+            if engine.execution_error is not None:
+                self._diagnose_cleanup(engine, "experiment failed during observation")
+                raise engine.execution_error
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
@@ -336,75 +345,10 @@ class LitmusChaosClient(ChaosClient):
             self._wait(lambda: self._read_engine(engine) is None, deadline, engine.name)
 
     def _diagnose_cleanup(self, engine: _ExperimentRun, stage: str) -> None:
-        # Temporary SQT-904 diagnostics; remove after investigating OOM cleanup.
-        if not engine.diagnose_memory or engine.uid is None:
-            return
-        logger = logging.getLogger(__name__)
+        # Temporary SQT-904 hook; remove with temporary_memory_diagnostics.py.
+        from .temporary_memory_diagnostics import diagnose_cleanup
 
-        def collect(label: str, read: Callable[[], Any]) -> Any:
-            try:
-                value = read()
-                summary = value
-                if label == "helper Pod statuses":
-                    summary = [
-                        {
-                            "name": pod.metadata.name,
-                            "uid": pod.metadata.uid,
-                            "status": pod.status.to_dict() if pod.status else None,
-                        }
-                        for pod in value.items
-                    ]
-                logger.info("SQT-904 DIAGNOSTIC [%s] engine=%s %s: %s", stage, engine.name, label, summary)
-                return value
-            except Exception as error:
-                logger.warning("SQT-904 DIAGNOSTIC [%s] %s unavailable: %s", stage, label, error)
-                return None
-
-        def engine_status() -> Any:
-            current = self._read_engine(engine)
-            return None if current is None else {"uid": current["metadata"].get("uid"), "status": current.get("status")}
-
-        collect("ChaosEngine", engine_status)
-        collect(
-            "ChaosResults",
-            lambda: [
-                {
-                    "name": result.get("metadata", {}).get("name"),
-                    "target_annotation": (result.get("metadata", {}).get("annotations") or {}).get(f"pod/{engine.pod}"),
-                    "status": result.get("status"),
-                }
-                for result in self._results(engine)
-            ],
-        )
-        core = self._backend.core_v1_api
-
-        def target_status() -> Any:
-            pod = core.read_namespaced_pod(name=engine.pod, namespace=engine.namespace, _request_timeout=(3, 5))
-            return {"uid": pod.metadata.uid, "status": pod.status.to_dict() if pod.status else None}
-
-        collect("target Pod", target_status)
-        pods = collect(
-            "helper Pod statuses",
-            lambda: core.list_namespaced_pod(
-                namespace=engine.namespace, label_selector=f"chaosUID={engine.uid}", _request_timeout=(3, 5)
-            ),
-        )
-        if pods is None:
-            return
-        for pod in pods.items[:8]:
-            for container in (pod.spec.init_containers or []) + pod.spec.containers:
-                collect(
-                    f"helper log {pod.metadata.name}/{container.name}",
-                    lambda: core.read_namespaced_pod_log(
-                        name=pod.metadata.name,
-                        namespace=engine.namespace,
-                        container=container.name,
-                        tail_lines=80,
-                        limit_bytes=8192,
-                        timestamps=True,
-                        _request_timeout=(3, 5),
-                    ),
-                )
+        diagnose_cleanup(self, engine, stage)
 
     def _request_stop(self, engine: _ExperimentRun) -> bool:
         # Operator status writes can race with our stop patch. Read the latest

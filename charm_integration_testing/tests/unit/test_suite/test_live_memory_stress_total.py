@@ -43,7 +43,8 @@ def pod() -> k8s.V1Pod:
 
 
 @pytest.mark.parametrize(
-    "failure", [None, "baseline", "stress", "hold", "cleanup", "recovery", "validation", "oom", "replaced"]
+    "failure",
+    [None, "baseline", "stress", "hold", "cleanup", "recovery", "validation", "oom", "replaced", "hold-and-cleanup"],
 )
 @pytest.mark.parametrize("neighbor", [None, NEIGHBOR])
 def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,6 +60,8 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
 
     def record(name: str) -> None:
         events.append(name)
+        if failure == "hold-and-cleanup" and name in {"hold", "cleanup"}:
+            raise RuntimeError(name)
         if failure == name:
             raise RuntimeError(name)
 
@@ -98,7 +101,7 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
             workload.metadata.uid = "new-pod"
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
-    monkeypatch.setattr(module, "sleep", observe)
+    monkeypatch.setattr(module, "observe_memory_stress", lambda chaos, model, unit, seconds: observe(seconds))
     juju.multi_model_idle_for_period.side_effect = idle
     juju.validate_model.side_effect = lambda **kw: record("validation")
     chaos.stress_memory.side_effect = lambda *a, **kw: record("stress")
@@ -117,7 +120,16 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
             neighbor,
         )
 
-    if failure in {None, "oom", "replaced"}:
+    if failure == "hold-and-cleanup":
+        with pytest.raises(RuntimeError, match="Memory stress failed") as error:
+            run()
+        assert "hold" in str(error.value)
+        assert "cleanup" in str(error.value)
+        assert str(error.value.__cause__) == "cleanup"
+        assert events[-1] == "restore"
+        chaos.cleanup_all.assert_called_once()
+        juju.validate_model.assert_not_called()
+    elif failure in {None, "oom", "replaced"}:
         run()
         assert events[:7] == ["baseline", "limit", "limited_baseline", "stress", "hold", "cleanup", "recovery"]
         assert events[-2:] == ["restore", "recovery"]
@@ -158,7 +170,7 @@ def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.Mon
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
     hold = MagicMock()
-    monkeypatch.setattr(module, "sleep", hold)
+    monkeypatch.setattr(module, "observe_memory_stress", lambda chaos, model, unit, seconds: hold(seconds))
     module.test_live_memory_stress_total(
         juju,
         lambda _: chaos,
@@ -234,3 +246,25 @@ def test_invalid_configuration_precedes_resource_mutation(problem: str, monkeypa
         )
     factory.assert_not_called()
     kubernetes.get_charm_pods.assert_not_called()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_observation_polls_and_stops_on_error(monkeypatch: pytest.MonkeyPatch, fail: bool) -> None:
+    now = 0.0
+    chaos = MagicMock()
+
+    def pause(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    monkeypatch.setattr(module, "monotonic", lambda: now)
+    monkeypatch.setattr(module, "sleep", pause)
+    if fail:
+        chaos.check_stress.side_effect = [None, RuntimeError("injection failed")]
+        with pytest.raises(RuntimeError, match="injection failed"):
+            module.observe_memory_stress(chaos, MODEL, "target/0", 25)
+        assert now == 10
+    else:
+        module.observe_memory_stress(chaos, MODEL, "target/0", 25)
+        assert now == 25
+        assert chaos.check_stress.call_count == 4

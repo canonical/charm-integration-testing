@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
-from time import sleep
+from time import monotonic, sleep
 from typing import Callable
 
 import pytest
@@ -16,6 +16,17 @@ from bundle_builder_x.charm import CharmChannel
 
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
+
+
+def observe_memory_stress(chaos: MetaChaosClient, model: JujuModelHandle, unit: str, seconds: float) -> None:
+    """Check known experiment errors throughout the observation window."""
+    deadline = monotonic() + seconds
+    while True:
+        chaos.check_stress(model, unit)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return
+        sleep(min(10, remaining))
 
 
 @pytest.fixture
@@ -154,6 +165,7 @@ def test_live_memory_stress_total(
                 juju_client.logger.warning("Unable to collect memory stress workload state (%s).", stage, exc_info=True)
 
         log_workload_state("after limit rollout")
+        observation_error: Exception | None = None
         try:
             chaos.stress_memory(
                 target_model_ref,
@@ -164,10 +176,20 @@ def test_live_memory_stress_total(
             )
             # Surviving stress without a status change is valid. Keep the fault active
             # for the observation period instead of waiting for an unhealthy status.
-            sleep(memory_stress_duration.total_seconds())
+            observe_memory_stress(chaos, target_model_ref, unit, memory_stress_duration.total_seconds())
+        except Exception as error:
+            observation_error = error
+            raise
         finally:
             log_workload_state("before stress cleanup")
-            chaos.cleanup_all()
+            try:
+                chaos.cleanup_all()
+            except Exception as cleanup_error:
+                if observation_error is not None:
+                    raise RuntimeError(
+                        f"Memory stress failed: {observation_error!r}; cleanup also failed: {cleanup_error!r}"
+                    ) from cleanup_error
+                raise
         # Verify recovery while the memory limit remains in place, before its restore
         # triggers a rollout that could otherwise conceal a failure to self-recover.
         juju_client.multi_model_idle_for_period(models=models, timeout=memory_recovery_timeout, strict_timeout=True)

@@ -102,6 +102,10 @@ class MetaChaosClient(ChaosClient):
     def remove_network_isolation(self, model: str, unit: str) -> None:
         self._cleanup(self._network_cleanups, (model, unit), "")
 
+    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+        for tool in self._tools:
+            tool.check_stress(model, unit)
+
     def cleanup_all(self) -> None:
         """Clean up all pending experiments, including network isolation."""
         errors: list[Exception] = []
