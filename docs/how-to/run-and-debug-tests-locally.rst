@@ -87,15 +87,11 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 Chaos tools
 ~~~~~~~~~~~
 
-Install Chaos Mesh on the Kubernetes cluster for CPU and memory pressure or
-Disk I/O latency experiments. On PS6 staging and PS7, the infrastructure
-repositories manage the shared ``litmus-core`` Helm release. See the
-``docs/how-to/install_litmus_core.rst`` guide in sqa-ops for installation
-steps and chart versions.
-
-Litmus is currently detected and reported only; its execution client is not
-implemented or included in experiment selection. Detection does not prepare
-experiment definitions or permissions.
+Install Litmus or Chaos Mesh on the Kubernetes cluster for CPU and memory
+pressure. Disk I/O latency requires Chaos Mesh. On PS6 staging and PS7, the
+infrastructure repositories manage the shared ``litmus-core`` Helm release.
+See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
+and chart versions.
 
 Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
 cloud, replacing hyphens in the cloud name with underscores. For example:
@@ -107,56 +103,36 @@ cloud, replacing hyphens in the cloud name with underscores. For example:
 The combined tool report runs once per session, when a test first requests
 ``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
 the report checks each configured Kubernetes cloud once. Detection does not
-run automatically for unrelated tests.
-Litmus requires its three CRDs and a ready ``litmus`` Deployment in
-``litmus-system``.
-The shared operator namespace is independent of the test model namespace.
-CIT detects this installation without deploying charms or configuring CMR.
+run automatically for unrelated tests. Installation checks run again for
+each client request. Litmus requires its three CRDs and a ready ``litmus``
+Deployment in ``litmus-system``.
 
-``require_chaos_tool`` returns a ``MetaChaosClient`` for the target model.
-``chaos_tool_for_model`` returns a callable that accepts a model and creates
-a separate client for that model. Tests request experiments directly; the
-client selects the first configured implementation that supports each
-operation. Installation checks run for each client request rather than
-reusing the session report.
+For Litmus experiments, the Kubernetes credentials must allow creation and
+cleanup of experiment resources, ServiceAccounts, Roles and RoleBindings in
+the test model namespace, including granting the runner's required permissions.
 
-For example, a test can request I/O latency without selecting a tool:
-
-.. code:: python
-
-   from datetime import timedelta
-
-   def test_io_latency(require_chaos_tool, target_model_ref):
-       require_chaos_tool.io_latency(
-           model=target_model_ref,
-           unit="postgresql/0",
-           volume_path="/data",
-           delay=timedelta(milliseconds=50),
-           percent=80,
-           duration=timedelta(seconds=30),
-       )
-
-Chaos Mesh handles CPU and memory pressure and Disk I/O latency. Native disk
-fill uses ``fallocate`` through Juju on machine and Kubernetes models.
-Kubernetes network isolation blocks ingress through a ``NetworkPolicy``.
-Disk fill and network isolation do not require Litmus or Chaos Mesh.
-The native CPU and memory commands are not used as fallback for external
-pressure experiments.
+Tests select a supporting tool automatically for each experiment. When both
+tools are available, Litmus handles CPU and memory pressure and Chaos Mesh
+handles Disk I/O latency. Chaos Mesh also handles CPU and memory pressure
+when Litmus is unavailable. Disk fill and Kubernetes network isolation do
+not require either tool. Native disk fill supports machine and Kubernetes models.
+Native CPU and memory commands are not used as fallback for external pressure.
 
 Chaos Mesh support is checked per experiment. CPU and memory pressure require
 the ``stresschaos.chaos-mesh.org`` CRD, while Disk I/O latency requires
 ``iochaos.chaos-mesh.org``. Either CRD enables its corresponding experiments.
-
-Only unsupported operations permit fallback. If no implementation supports
-the requested experiment, that test is skipped. API and execution errors
-are reported as failures. Pending experiments are cleaned up at test teardown,
-including after a failure or skip. Cleanup errors are reported as failures.
-Explicit ``cleanup(model, unit, path)`` calls remove disk fill or I/O latency
-resources for that path only. An empty path selects CPU and memory stress
-for the model and unit. ``cleanup_all()`` removes all pending experiments.
 The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
-Tests request an experiment through this client instead of checking a specific
-tool first. Unsupported experiments skip when requested.
+
+Only unsupported operations permit fallback. Tests skip when no available
+implementation supports the requested experiment. Each test uses separate
+clients with cleanup at teardown, including after failure or skip.
+API, execution and cleanup errors fail the test. Cleanup retains resources for manual
+investigation when their recorded creation identifier cannot be verified.
+
+Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Cleanup allows graceful termination and requires reversion evidence for observed
+injections before deleting results and permissions; otherwise, it reports an
+error and retains them for investigation.
 
 Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and
