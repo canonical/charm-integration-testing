@@ -108,7 +108,9 @@ class ClientContext:
     def pause(self, seconds: float) -> None:
         self.now += seconds
 
-    def list_pods(self, *, label_selector: str, **kwargs: Any) -> Any:
+    def list_pods(self, *, label_selector: str = "", **kwargs: Any) -> Any:
+        if not label_selector:
+            return client.V1PodList(items=self.pods + self.children)
         return client.V1PodList(items=self.children if label_selector.startswith("chaosUID=") else self.pods)
 
     def create(self, *, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:

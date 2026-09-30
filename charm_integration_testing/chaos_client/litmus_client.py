@@ -41,6 +41,7 @@ class _ExperimentRun:
     uid: str | None = None
     cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
     diagnose_memory: bool = False
+    diagnostic_last_sample: float | None = None
 
 
 class LitmusChaosClient(ChaosClient):
@@ -95,6 +96,7 @@ class LitmusChaosClient(ChaosClient):
             if engine.scope != (model.uri, unit) or engine.uid is None:
                 continue
             self._observe(engine)
+            self._diagnose_cleanup(engine, "observation")
             if engine.execution_error is not None:
                 self._diagnose_cleanup(engine, "experiment failed during observation")
                 raise engine.execution_error
@@ -207,7 +209,8 @@ class LitmusChaosClient(ChaosClient):
                 "terminationGracePeriodSeconds": TERMINATION_GRACE_SECONDS,
                 "annotationCheck": "false",
                 "chaosServiceAccount": name,
-                "jobCleanUpPolicy": "delete",
+                # Temporary: preserve failed memory helpers until diagnostics and our cleanup run.
+                "jobCleanUpPolicy": "retain" if engine.diagnose_memory else "delete",
                 "selectors": {"pods": [{"namespace": engine.namespace, "names": pod}]},
                 "experiments": [
                     {
@@ -263,6 +266,7 @@ class LitmusChaosClient(ChaosClient):
         return results
 
     def _started(self, engine: _ExperimentRun) -> bool:
+        self._diagnose_cleanup(engine, "startup")
         current = self._read_engine(engine)
         results = self._observe(engine)
         if engine.execution_error is not None:
