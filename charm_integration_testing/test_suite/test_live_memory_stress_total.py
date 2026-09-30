@@ -187,32 +187,6 @@ def test_live_memory_stress_total(
                         return True
             return False
 
-        def log_workload_state(stage: str) -> None:
-            # Read-only evidence; a diagnostic failure must not skip stress cleanup.
-            try:
-                observed = kubernetes.get_charm_pods(application_name=target_application, model=namespace)
-                for item in observed:
-                    if (item.metadata.annotations or {}).get("unit.juju.is/id") != unit:
-                        continue
-                    statuses = item.status.container_statuses or [] if item.status else []
-                    details = [
-                        (
-                            state.name,
-                            state.restart_count,
-                            state.last_state.terminated.reason
-                            if state.last_state and state.last_state.terminated
-                            else None,
-                        )
-                        for state in statuses
-                        if state.name == containers[0]
-                    ]
-                    juju_client.logger.info(
-                        "Memory stress %s: unit=%s pod_uid=%s containers=%s", stage, unit, item.metadata.uid, details
-                    )
-            except Exception:
-                juju_client.logger.warning("Unable to collect memory stress workload state (%s).", stage, exc_info=True)
-
-        log_workload_state("after limit rollout")
         observation_error: Exception | None = None
         injection_started = datetime.now(timezone.utc)
         try:
@@ -235,7 +209,6 @@ def test_live_memory_stress_total(
             observation_error = error
             raise
         finally:
-            log_workload_state("before stress cleanup")
             try:
                 chaos.cleanup_all()
             except Exception as cleanup_error:

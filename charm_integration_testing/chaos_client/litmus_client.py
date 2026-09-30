@@ -41,8 +41,6 @@ class _ExperimentRun:
     engine_requested: bool = False
     uid: str | None = None
     cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
-    diagnose_memory: bool = False
-    diagnostic_last_sample: float | None = None
 
 
 class LitmusChaosClient(ChaosClient):
@@ -97,9 +95,7 @@ class LitmusChaosClient(ChaosClient):
             if engine.scope != (model.uri, unit) or engine.uid is None:
                 continue
             results = self._observe(engine)
-            self._diagnose_cleanup(engine, "observation")
             if engine.execution_error is not None:
-                self._diagnose_cleanup(engine, "experiment failed during observation")
                 engine.execution_error_reported = True
                 raise engine.execution_error
             if allow_completed:
@@ -120,7 +116,6 @@ class LitmusChaosClient(ChaosClient):
                     f"Litmus experiment {engine.name} ended before the observation period completed; "
                     "the requested stress duration was not verified."
                 )
-                self._diagnose_cleanup(engine, "experiment ended early")
                 engine.execution_error_reported = True
                 raise engine.execution_error
 
@@ -153,12 +148,10 @@ class LitmusChaosClient(ChaosClient):
             if engine.scope != (model.uri, unit):
                 continue
             try:
-                self._diagnose_cleanup(engine, "before cleanup")
                 deadline = self._clock() + self._cleanup_timeout
                 self._cleanup_engine(engine, deadline)
                 self._wait(engine.setup.cleanup, deadline, engine.name)
             except Exception as error:
-                self._diagnose_cleanup(engine, "cleanup failed")
                 errors.append(error)
             else:
                 self._created.remove(engine)
@@ -219,7 +212,6 @@ class LitmusChaosClient(ChaosClient):
         name = f"cit-{uuid4().hex[:16]}"
         setup = LitmusSetup(self._backend, model.model, name, self._owner)
         engine = _ExperimentRun((model.uri, unit), model.model, name, setup, pod)
-        engine.diagnose_memory = experiment == "pod-memory-hog"
         body = {
             "apiVersion": f"{_GROUP}/{_VERSION}",
             "kind": "ChaosEngine",
@@ -234,8 +226,7 @@ class LitmusChaosClient(ChaosClient):
                 "terminationGracePeriodSeconds": TERMINATION_GRACE_SECONDS,
                 "annotationCheck": "false",
                 "chaosServiceAccount": name,
-                # Temporary: preserve failed memory helpers until diagnostics and our cleanup run.
-                "jobCleanUpPolicy": "retain" if engine.diagnose_memory else "delete",
+                "jobCleanUpPolicy": "delete",
                 "selectors": {"pods": [{"namespace": engine.namespace, "names": pod}]},
                 "experiments": [
                     {
@@ -291,7 +282,6 @@ class LitmusChaosClient(ChaosClient):
         return results
 
     def _started(self, engine: _ExperimentRun) -> bool:
-        self._diagnose_cleanup(engine, "startup")
         current = self._read_engine(engine)
         results = self._observe(engine)
         if engine.execution_error is not None:
@@ -360,9 +350,6 @@ class LitmusChaosClient(ChaosClient):
             self._wait(lambda: self._stopped(engine), deadline, engine.name)
         if engine.uid is None:
             return
-        diagnostic_start = self._clock()
-        self._diagnose_cleanup(engine, "before child deletion")
-        deadline += self._clock() - diagnostic_start
         self._remove_children(engine)
         self._wait(lambda: self._children_removed(engine), deadline, engine.name)
         if observation_error is not None:
@@ -380,12 +367,6 @@ class LitmusChaosClient(ChaosClient):
         if self._read_engine(engine) is not None:
             self._delete_custom("chaosengines", engine.namespace, engine.name, engine.uid)
             self._wait(lambda: self._read_engine(engine) is None, deadline, engine.name)
-
-    def _diagnose_cleanup(self, engine: _ExperimentRun, stage: str) -> None:
-        # Temporary SQT-904 hook; remove with temporary_memory_diagnostics.py.
-        from .temporary_memory_diagnostics import diagnose_cleanup
-
-        diagnose_cleanup(self, engine, stage)
 
     def _request_stop(self, engine: _ExperimentRun) -> bool:
         # Operator status writes can race with our stop patch. Read the latest

@@ -242,32 +242,21 @@ Total memory stress
 -------------------
 
 ``test_live_memory_stress_total`` requires Kubernetes and Litmus or Chaos Mesh
-with the ``StressChaos`` resource; otherwise it skips. It applies a ``1Gi``
-workload container limit through a StatefulSet rollout, then requests memory
-stress on one unit. The default is one worker, ``2048`` MB and ``600`` seconds
-of observation after confirmed injection, ending earlier if a new out-of-memory termination
-is confirmed for the target workload container.
+with the ``StressChaos`` resource; otherwise it skips. It temporarily applies a
+``1Gi`` workload memory limit and stresses one unit. Defaults are one worker,
+``2048`` MB and up to ``600`` seconds of observation after confirmed injection.
 
-During observation, Litmus results are checked every ten seconds, plus API call
-time. A new target out-of-memory termination permits early completion and starts cleanup and recovery
-validation. Evidence must match the original Pod identifier and workload container, with
-an increased restart count and an out-of-memory termination timestamp after injection began.
-Historical out-of-memory records and replacement Pods do not qualify. Experiment errors
-still fail the test, as does early completion without this evidence. The test
-does not automatically inject stress again.
-If a failed experiment has no reversion evidence after its child resources are
-removed, cleanup reports that failure immediately and remains registered for
-retry rather than waiting for another reversion timeout.
+Per-charm settings can override ``memory_exhaustion_workers``,
+``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds``.
+Override the ``memory_limit`` fixture separately; the requested stress size must
+be at least the limit.
 
-Per-charm settings override ``memory_exhaustion_workers``,
-``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` using
-the deployed charm's channel and Ubuntu base. The ``memory_limit`` fixture is
-separate. The requested size must be at least the limit; unknown channel or base
-metadata fails the test. Requested memory is not proof of continuous saturation.
+A newly confirmed out-of-memory termination in the target container ends
+observation early. A status change or restart is not required. Experiment errors,
+Litmus completion without this evidence before the observation period ends,
+and cleanup failures fail the test.
 
-All bundle models must be active/idle before stress. No unhealthy status or
-out-of-memory restart is required. After cleanup, all models must recover within
-fifteen minutes and pass available deep validators while the limit remains in
-place. Missing validators leave functional coverage unverified. Original memory
-settings are restored after validation, and also on failure. Cleanup errors fail the
-test; resource patches do not invoke explicit restart extension hooks.
+After cleanup, all bundle models must reach active/idle within fifteen minutes
+and pass available deep validators while the memory limit remains in place.
+Skipped or missing validators provide no functional coverage. Original memory
+settings are restored on success or failure, with a final idle check on success.
