@@ -176,7 +176,7 @@ def test_live_memory_stress_total(
                         and terminated.reason == "OOMKilled"
                         and terminated.exit_code == 137
                         and terminated.finished_at is not None
-                        and terminated.finished_at >= injection_started
+                        and terminated.finished_at >= injection_confirmed_at
                     ):
                         juju_client.logger.info(
                             "Memory exhaustion confirmed: unit=%s container=%s pod_uid=%s; verifying recovery.",
@@ -188,7 +188,6 @@ def test_live_memory_stress_total(
             return False
 
         observation_error: Exception | None = None
-        injection_started = datetime.now(timezone.utc)
         try:
             chaos.stress_memory(
                 target_model_ref,
@@ -197,6 +196,7 @@ def test_live_memory_stress_total(
                 size_mb=size_mb,
                 duration=memory_stress_duration + timedelta(minutes=2),
             )
+            injection_confirmed_at = datetime.now(timezone.utc)
             # A new target OOM confirms exhaustion; otherwise observe for the full window.
             observe_memory_stress(
                 chaos=chaos,

@@ -79,6 +79,54 @@ class ChaosMeshChaosClient(ChaosClient):
         }
         self._create("IOChaos", "iochaos", model, unit, volume_path, self._name("io-latency", application), spec)
 
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Validate tracked stress experiments during observation."""
+        for plural, namespace, name in self._created:
+            if plural != "stresschaos" or self._scopes[name] != (model.uri, unit, ""):
+                continue
+            current = self._backend.custom_objects_api.get_namespaced_custom_object(
+                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name, _request_timeout=30
+            )
+            metadata = current.get("metadata") or {}
+            annotations = metadata.get("annotations") or {}
+            if (
+                not self._uids.get(name)
+                or metadata.get("uid") != self._uids[name]
+                or annotations.get(_OWNER_ANNOTATION) != self._owner
+            ):
+                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during observation.")
+            status = current.get("status") or {}
+            experiment = status.get("experiment") or {}
+            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
+            records = experiment.get("containerRecords") or []
+            # Controller failures are recorded per container, not as a global Error phase.
+            failures = [
+                event for record in records for event in record.get("events") or [] if event.get("type") == "Failed"
+            ]
+            if failures:
+                raise RuntimeError(f"StressChaos {namespace}/{name} failed during observation: {failures}")
+            if (
+                metadata.get("deletionTimestamp")
+                or annotations.get("experiment.chaos-mesh.org/pause") == "true"
+                or conditions.get("Paused") == "True"
+            ):
+                raise RuntimeError(f"StressChaos {namespace}/{name} was interrupted during observation.")
+            if (
+                allow_completed
+                and experiment.get("desiredPhase") == "Stop"
+                and conditions.get("AllRecovered") == "True"
+                and all(record.get("phase") == "Not Injected" for record in records)
+            ):
+                continue
+            if not (
+                experiment.get("desiredPhase") == "Run"
+                and conditions.get("Selected") == "True"
+                and conditions.get("AllInjected") == "True"
+                and conditions.get("AllRecovered") == "False"
+                and all(record.get("phase") == "Injected" for record in records)
+            ):
+                raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active: {status}")
+
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         """Clean resources for the model, unit and path. An empty path selects stress."""
         for resource in reversed(tuple(self._created)):

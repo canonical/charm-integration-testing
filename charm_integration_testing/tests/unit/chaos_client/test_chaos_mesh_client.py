@@ -701,3 +701,110 @@ def test_memory_rejects_ambiguous_workload_containers() -> None:
     with pytest.raises(RuntimeError, match="one workload container"):
         ChaosMeshChaosClient(backend).stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
     assert not backend.custom_objects_api.create_calls
+
+
+class TestStressObservation:
+    @pytest.mark.parametrize("allow_completed", [False, True])
+    @pytest.mark.parametrize(
+        "state",
+        [
+            "running",
+            "completed",
+            "stopped",
+            "paused",
+            "pause-requested",
+            "deleting",
+            "lost-injection",
+            "record-not-injected",
+            "apply-failed",
+            "recover-failed",
+            "unknown",
+            "missing-status",
+            "null-status",
+            "wrong-owner",
+            "replacement",
+            "missing-uid",
+            "missing-resource",
+            "api-error",
+        ],
+    )
+    def test_status_changes_after_injection(self, state: str, allow_completed: bool) -> None:
+        # GIVEN an experiment whose initial injection succeeded
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        meta = MetaChaosClient([mesh])
+        meta.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
+        api = backend.custom_objects_api
+        resource = mesh._created[0]
+        obj = api.objects[resource]
+        conditions = obj["status"]["conditions"]
+        conditions.append({"type": "AllRecovered", "status": "False"})
+        record: dict[str, Any] = {"phase": "Injected", "events": []}
+        obj["status"]["experiment"]["containerRecords"] = [record]
+        if state in {"completed", "stopped", "recover-failed"}:
+            obj["status"]["experiment"]["desiredPhase"] = "Stop"
+            if state != "stopped":
+                conditions[-1]["status"] = "True"
+                record["phase"] = "Not Injected"
+        if state in {"apply-failed", "recover-failed"}:
+            record["events"] = [
+                {
+                    "type": "Failed",
+                    "operation": "Apply" if state == "apply-failed" else "Recover",
+                    "message": "daemon unavailable",
+                }
+            ]
+        elif state == "paused":
+            conditions.append({"type": "Paused", "status": "True"})
+        elif state == "pause-requested":
+            obj["metadata"]["annotations"]["experiment.chaos-mesh.org/pause"] = "true"
+        elif state == "deleting":
+            obj["metadata"]["deletionTimestamp"] = "2026-09-30T00:00:00Z"
+        elif state == "lost-injection":
+            conditions[1]["status"] = "False"
+        elif state == "record-not-injected":
+            record["phase"] = "Not Injected"
+        elif state == "unknown":
+            conditions[0]["status"] = "Unknown"
+        elif state == "missing-status":
+            del obj["status"]
+        elif state == "null-status":
+            obj["status"] = None
+        elif state == "wrong-owner":
+            obj["metadata"]["annotations"] = {}
+        elif state == "replacement":
+            obj["metadata"]["uid"] = "replacement"
+        elif state == "missing-uid":
+            mesh._uids.clear()
+        elif state == "missing-resource":
+            api.objects.clear()
+        elif state == "api-error":
+            api.raise_on_read = ApiException(status=503)
+
+        # WHEN observing, THEN only active or explicitly allowed completed runs pass
+        if state == "running" or (state == "completed" and allow_completed):
+            meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+        else:
+            expected = ApiException if state in {"missing-resource", "api-error"} else RuntimeError
+            with pytest.raises(expected):
+                meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+        assert mesh._created == [resource]
+        assert not api.delete_calls
+
+        # Failures do not lose the cleanup registration.
+        api.raise_on_read = None
+        if state not in {"wrong-owner", "replacement", "missing-uid"}:
+            meta.cleanup_all()
+            assert not mesh._created
+
+    @pytest.mark.parametrize("scope", ["unit", "controller", "io"])
+    def test_ignores_unrelated_experiments(self, scope: str) -> None:
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        if scope == "io":
+            mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=30))
+        else:
+            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+        backend.custom_objects_api.raise_on_read = ApiException(status=403)
+        model = JujuModelHandle(controller="other", model=TEST_MODEL.model) if scope == "controller" else TEST_MODEL
+        mesh.check_stress(model, "postgresql/1" if scope == "unit" else UNIT)

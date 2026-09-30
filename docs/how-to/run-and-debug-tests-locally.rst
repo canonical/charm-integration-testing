@@ -251,9 +251,10 @@ Per-charm settings can override ``memory_exhaustion_workers``,
 Override the ``memory_limit`` fixture separately; the requested stress size must
 be at least the limit.
 
-A newly confirmed out-of-memory termination in the target container ends
-observation early. A status change or restart is not required. Experiment errors,
-Litmus completion without this evidence before the observation period ends,
+A new out-of-memory termination in the target container, timestamped after
+injection is confirmed, ends observation early. A status change or restart is
+not required. Experiment errors,
+Experiment completion without this evidence before the observation period ends,
 and cleanup failures fail the test.
 
 After cleanup, all bundle models must reach active/idle within fifteen minutes

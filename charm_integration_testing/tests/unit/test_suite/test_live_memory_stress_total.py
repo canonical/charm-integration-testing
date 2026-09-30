@@ -66,6 +66,7 @@ def pod() -> k8s.V1Pod:
         "oom",
         "replaced",
         "old-oom",
+        "setup-oom",
         "other-container",
         "other-exit",
         "no-restart",
@@ -83,9 +84,16 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
     kubernetes.get_charm_pods.return_value = [workload]
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: {ChaosTool.LITMUS})
     events: list[str] = []
+    setup_started = datetime(2026, 9, 30, tzinfo=timezone.utc)
+    confirmed_at = setup_started + timedelta(seconds=30)
+    clock = MagicMock()
+    clock.now.return_value = setup_started
+    monkeypatch.setattr(module, "datetime", clock)
 
     def record(name: str) -> None:
         events.append(name)
+        if name == "stress":
+            clock.now.return_value = confirmed_at
         if failure == "hold-and-cleanup" and name in {"hold", "cleanup"}:
             raise RuntimeError(name)
         if failure == name:
@@ -108,7 +116,7 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
     def observe(seconds: float, oom_detected: Callable[[], bool]) -> None:
         assert seconds == 600
         record("hold")
-        if failure in {"oom", "replaced", "old-oom", "other-container", "other-exit", "no-restart"}:
+        if failure in {"oom", "replaced", "old-oom", "setup-oom", "other-container", "other-exit", "no-restart"}:
             workload.status = k8s.V1PodStatus(
                 container_statuses=[
                     k8s.V1ContainerStatus(
@@ -121,8 +129,13 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
                             terminated=k8s.V1ContainerStateTerminated(
                                 exit_code=1 if failure == "other-exit" else 137,
                                 reason="OOMKilled",
-                                finished_at=datetime.now(timezone.utc)
-                                - (timedelta(days=1) if failure == "old-oom" else timedelta()),
+                                finished_at=(
+                                    setup_started + timedelta(seconds=15)
+                                    if failure == "setup-oom"
+                                    else confirmed_at - timedelta(days=1)
+                                    if failure == "old-oom"
+                                    else confirmed_at + timedelta(seconds=1)
+                                ),
                             )
                         ),
                     )
@@ -165,7 +178,7 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
         assert events[-1] == "restore"
         chaos.cleanup_all.assert_called_once()
         juju.validate_model.assert_not_called()
-    elif failure in {None, "oom", "replaced", "old-oom", "other-container", "other-exit", "no-restart"}:
+    elif failure in {None, "oom", "replaced", "old-oom", "setup-oom", "other-container", "other-exit", "no-restart"}:
         run()
         assert events[:7] == ["baseline", "limit", "limited_baseline", "stress", "hold", "cleanup", "recovery"]
         assert events[-2:] == ["restore", "recovery"]
