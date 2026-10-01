@@ -161,16 +161,23 @@ class JubilantBackend(JujuCmdBackend):
 
         kubernetes = self.get_kubernetes_client_for_model(model)
         if kubernetes is not None:
+            application_pods = kubernetes.get_charm_pods(application, model.model)
             pods = [
-                pod
-                for pod in kubernetes.get_charm_pods(application, model.model)
-                if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit_name
+                pod for pod in application_pods if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit_name
             ]
             if len(pods) != 1 or not pods[0].metadata.uid or pods[0].metadata.deletion_timestamp is not None:
                 raise RuntimeError(f"Unable to identify a single live Pod for {unit_name}.")
             pod = pods[0]
             check_follower()
-            kubernetes.restart_pod(model.model, pod.metadata.name, pod.metadata.uid, timeout)
+            kubernetes.restart_pod(
+                model.model,
+                pod.metadata.name,
+                pod.metadata.uid,
+                timeout,
+                application=application,
+                unit=unit_name,
+                existing_uids={item.metadata.uid for item in application_pods if item.metadata.uid},
+            )
         else:
             machine = units[unit_name].machine
             if not machine:

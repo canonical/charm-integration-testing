@@ -15,8 +15,7 @@ def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch)
     def run(
         args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
     ) -> subprocess.CompletedProcess[str]:
-        assert args[:5] == ["juju", "ssh", "--model", MODEL.uri, "1"]
-        assert args[-1] == "cat /proc/sys/kernel/random/boot_id"
+        assert args == ["juju", "ssh", "--model", MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
         assert check and capture_output and text
         assert timeout == 7.5
         return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")

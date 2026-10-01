@@ -55,7 +55,20 @@ class KubernetesStub:
     def get_charm_pods(self, application: str, namespace: str) -> list[V1Pod]:
         return self.pods
 
-    def restart_pod(self, namespace: str, name: str, uid: str, timeout: timedelta) -> None:
+    def restart_pod(
+        self,
+        namespace: str,
+        name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: set[str],
+    ) -> None:
+        assert application == "target"
+        assert unit == "target/1"
+        assert existing_uids == {pod.metadata.uid for pod in self.pods}
         self.calls.append((namespace, name, uid, timeout))
 
 
@@ -92,6 +105,9 @@ class BackendStub(JubilantBackend):
 
 def test_restarts_only_follower_pod() -> None:
     kube = KubernetesStub()
+    kube.pods.append(
+        V1Pod(metadata=V1ObjectMeta(name="target-2", uid="sibling", annotations={"unit.juju.is/id": "target/2"}))
+    )
     backend = BackendStub(kube)
     assert backend.restart_follower(MODEL, "target", TIMEOUT) == "target/1"
     assert kube.calls == [("model", "target-1", "old", TIMEOUT)]

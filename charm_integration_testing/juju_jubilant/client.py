@@ -19,9 +19,6 @@ class JubilantClient:
             "--model",
             model.uri,
             machine,
-            "-oConnectTimeout=10",
-            "-oServerAliveInterval=5",
-            "-oServerAliveCountMax=2",
             command,
         ]
         try:
