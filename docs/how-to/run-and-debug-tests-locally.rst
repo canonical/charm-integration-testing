@@ -283,8 +283,8 @@ count. It selects a Juju non-leader and rechecks leadership before disruption;
 this does not identify the application's internal database leader.
 
 On Kubernetes it deletes the selected unit's Pod with a ``UID`` precondition and
-waits for a replacement with the same name and a new ``UID``. On machine models it
-reboots a dedicated machine and confirms that its boot ID changes. Shared
+waits for a replacement with the same Juju unit annotation and a new ``UID``.
+On machine models it reboots a dedicated machine and confirms that its boot ID changes. Shared
 machines, nested containers, subordinate charms and configurations without a
 follower are skipped. ``scale_down: false`` does not disable this test.
 Each SSH command has a process timeout within the reboot wait budget.

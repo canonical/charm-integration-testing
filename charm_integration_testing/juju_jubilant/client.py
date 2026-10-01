@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 
-import subprocess
+import subprocess  # nosec B404
 from datetime import timedelta
 
 import jubilant
@@ -22,7 +22,9 @@ class JubilantClient:
             command,
         ]
         try:
-            return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout).stdout
+            return subprocess.run(  # nosec B603
+                args, check=True, capture_output=True, text=True, timeout=timeout
+            ).stdout
         except subprocess.CalledProcessError as error:
             raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
 

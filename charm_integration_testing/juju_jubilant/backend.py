@@ -9,7 +9,7 @@ import pathlib
 import re
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
