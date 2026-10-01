@@ -9,6 +9,7 @@ import pathlib
 import re
 import shutil
 import stat
+import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
@@ -26,6 +27,7 @@ from juju import (
     JujuIntegration,
     JujuIntegrationApplication,
     JujuModelHandle,
+    JujuRestartNotSupportedError,
     JujuStatusPerformanceWarning,
     JujuTask,
     JujuVersion,
@@ -135,6 +137,92 @@ class JubilantBackend(JujuCmdBackend):
         self.client = client or JubilantClient()
         self._cloud_kubeconfigs: dict[str, pathlib.Path] = cloud_kubeconfigs or {}
         self._kubernetes_clients: dict[str, KubernetesClient] = {}
+
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        status = self.status(model)
+        units = status.apps[application].units
+        if sum(unit.leader for unit in units.values()) != 1:
+            raise RuntimeError(f"Expected exactly one Juju leader for {application}.")
+        followers = sorted(name for name, unit in units.items() if not unit.leader)
+        if not followers:
+            raise JujuRestartNotSupportedError(f"{application} has no follower to restart.")
+        unit_name = followers[0]
+
+        def check_follower() -> jubilant.Status:
+            current = self.status(model)
+            current_units = current.apps[application].units
+            if (
+                set(current_units) != set(units)
+                or sum(unit.leader for unit in current_units.values()) != 1
+                or current_units[unit_name].leader
+            ):
+                raise RuntimeError(f"Unit membership or leadership changed before restarting {unit_name}.")
+            return current
+
+        kubernetes = self.get_kubernetes_client_for_model(model)
+        if kubernetes is not None:
+            application_pods = kubernetes.get_charm_pods(application, model.model)
+            pods = [
+                pod for pod in application_pods if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit_name
+            ]
+            if len(pods) != 1 or not pods[0].metadata.uid or pods[0].metadata.deletion_timestamp is not None:
+                raise RuntimeError(f"Unable to identify a single live Pod for {unit_name}.")
+            pod = pods[0]
+            check_follower()
+            kubernetes.restart_pod(
+                model.model,
+                pod.metadata.name,
+                pod.metadata.uid,
+                timeout,
+                application=application,
+                unit=unit_name,
+                existing_uids={item.metadata.uid for item in application_pods if item.metadata.uid},
+            )
+        else:
+            machine = units[unit_name].machine
+            if not machine:
+                raise RuntimeError(f"No machine found for {unit_name}.")
+            if "/" in machine:
+                raise JujuRestartNotSupportedError(
+                    "Follower reboot requires a dedicated machine, not a nested container."
+                )
+
+            def check_placement(current: jubilant.Status) -> None:
+                if current.apps[application].units[unit_name].machine != machine:
+                    raise RuntimeError(f"Machine placement changed for {unit_name}.")
+                for app in current.apps.values():
+                    for name, unit in app.units.items():
+                        if name != unit_name and (unit.machine == machine or unit.machine.startswith(machine + "/")):
+                            raise JujuRestartNotSupportedError(f"Restarting {unit_name} would also restart {name}.")
+
+            check_placement(status)
+            deadline = time.monotonic() + timeout.total_seconds()
+
+            def ssh(command: str) -> str:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
+                return self.client.ssh(model, machine, command, timeout=min(30, remaining))
+
+            def boot_id() -> str:
+                value = ssh("cat /proc/sys/kernel/random/boot_id").strip()
+                if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
+                    raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
+                return value
+
+            original_boot = boot_id()
+            check_placement(check_follower())
+            ssh("sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot")
+            while time.monotonic() < deadline:
+                try:
+                    if boot_id() != original_boot:
+                        break
+                except (jubilant.CLIError, subprocess.TimeoutExpired):
+                    pass  # SSH can be unavailable while the machine reboots.
+                time.sleep(min(5, max(0, deadline - time.monotonic())))
+            else:
+                raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
+        return unit_name
 
     def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
         """Return a KubernetesClient for the given cloud, constructing and caching it on first use."""
