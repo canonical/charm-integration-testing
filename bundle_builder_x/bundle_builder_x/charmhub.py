@@ -277,6 +277,8 @@ class CharmhubClient:
             resources=self._get_charm_resources(charm_name, channel, metadata, ubuntu_version),
             assumes=self._get_charm_assumes(charm_name, metadata, channel, ubuntu_version),
             constraints=self._get_charm_constraints(charm_name, channel, ubuntu_version),
+            ha_units=self.overrides_client.get_charm_ha_units(charm_name, channel, ubuntu_version),
+            scale_down=self.overrides_client.get_charm_scale_down(charm_name, channel, ubuntu_version),
             platforms=self._get_charm_platforms(charm_name, channel, metadata, ubuntu_version),
         )
 

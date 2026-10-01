@@ -13,3 +13,4 @@ Contents
    charm-priorities
    wait-conditions
    resource-tracking
+   chaos-resource-constraints

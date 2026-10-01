@@ -29,6 +29,7 @@ dependencies = [
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
+    "validators-catalogue",
     "validators-livepatch-pro-airgapped-server",
     "validators-azure-storage",
     "validators-parca-store",
@@ -46,6 +47,8 @@ dependencies = [
     "validators-trino-client",
     "validators-trino-catalog",
     "validators-cross-model-mesh",
+    "validators-smtp",
+    "validators-saml",
 ]
 
 [build-system]

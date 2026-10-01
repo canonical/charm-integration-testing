@@ -6,7 +6,7 @@ from enum import Enum
 from functools import total_ordering
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_serializer, model_validator
 
 from .constraints_dsl import AnyExpr
 from .juju_version import JujuVersion
@@ -174,6 +174,8 @@ class Charm(BaseModel):
     resources: dict[str, list[CharmResourceValue]] = Field(default_factory=dict)
     assumes: CharmAssumesEntry = Field(default_factory=CharmAssumesEntry)
     constraints: list[AnyExpr] = Field(default_factory=list)
+    ha_units: PositiveInt = 3
+    scale_down: bool = True
     # Platforms (e.g. "machine", "kubernetes") this charm is known to support. Platform
     # overrides win when present; otherwise this falls back to the charm's own metadata
     # (a non-empty `containers` block means "kubernetes", its absence means "machine").

@@ -1,6 +1,28 @@
 ---
-# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+# Source: https://github.com/canonical/notebook-operators
 overrides:
+  - criteria:
+      - any_of:
+          - track: '1.11'
+          - track: latest
+            risk: edge
+            ubuntu_version: '24.04'
+    provides:
+      provide-cmr-mesh:
+        optional: true  # cross-model service-mesh helper; metadata.yaml limits it to CMR deployments
+      metrics-endpoint:
+        optional: true  # MetricsEndpointProvider is initialized independently of workload status
+      grafana-dashboard:
+        optional: true  # GrafanaDashboardProvider is initialized independently of workload status
+    requires:
+      gateway-metadata:
+        optional: true  # charm.py::_get_gateway_info defaults when no service-mesh relation exists
+      require-cmr-mesh:
+        optional: true  # cross-model service-mesh helper; metadata.yaml limits it to CMR deployments
+      service-mesh:
+        optional: true  # charm.py::_set_istio_configurations supports sidecar mode without the relation
+    constraints:
+      - 'bool(endpoint[service-mesh]) => bool(endpoint[gateway-metadata])'
   - provides:
       metrics-endpoint:
         optional: true
