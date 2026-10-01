@@ -622,6 +622,24 @@ class TestMongoDBClientPersistenceValidatorCheckpoint:
         assert result.status == "FAIL"
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=1)
 
+    def test_fails_fast_without_allocating_an_unbounded_range_for_a_huge_expected_ref(self) -> None:
+        # GIVEN a malformed/restored state with an enormous expected.ref (e.g. a corrupted --refs
+        # payload) and a collection with only a few real matching documents
+        validator = _make_persistence_validator(VALID_DATABAG)
+        client = PersistenceMongoClientStub()
+        collection_name = "validator_canary_da7d88bc9ad4d4fd_00000000000000000042"
+        collection = client.database_stub[collection_name]
+        collection.documents = [{"marker": TEST_TOKEN, "checkpoint_ref": 1}]
+        huge_ref = 10**9
+
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=client):
+            # WHEN/THEN this must return promptly rather than materializing a list of
+            # `huge_ref` elements to compare against
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=huge_ref))
+
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=huge_ref)
+
     def test_rejects_state_without_a_token(self) -> None:
         # GIVEN a state serialised before the token existed (or otherwise restored/malformed).
         # The base protocol rejects such a state at construction, so it can never reach checkpoint().

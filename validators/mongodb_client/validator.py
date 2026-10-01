@@ -368,7 +368,12 @@ class MongoDBClientPersistenceValidator(_MongoDBConnectionMixin, BasePersistence
             if refs_are_valid:
                 matching_refs = sorted(doc["checkpoint_ref"] for doc in same_token_docs)
                 matching = len(matching_refs)
-                passed = matching_refs == list(range(1, expected.ref + 1))
+                # Compared positionally rather than via `list(range(1, expected.ref + 1)) ==
+                # matching_refs`: expected.ref comes from an untrusted --refs payload, only checked
+                # above to be >= 1, so materializing a range up to it would let a malformed state
+                # with a very large ref exhaust memory. This keeps the cost bounded by the number
+                # of real documents matching_refs actually holds.
+                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
             else:
                 matching = len(same_token_docs)
                 passed = False
