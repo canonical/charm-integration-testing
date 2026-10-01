@@ -333,8 +333,10 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
       then had a *different* prepare() run write fresh documents into the same index still satisfy
       a bare count - the token, unlike the scope, is never reused across a fresh prepare() call.
     - ``validator_checkpoint_ref``: the same monotonically increasing counter tracked in
-      ``PersistenceState.ref``, stored for diagnostic purposes only (matching is always done via
-      ``validator_marker``, not this field).
+      ``PersistenceState.ref``. ``checkpoint()`` reads this back from every matching document
+      (not just their count) to require the exact multiset of refs ``1..expected.ref``, so an
+      index containing e.g. a duplicate ref alongside a missing one can't coincidentally satisfy
+      a count-only check.
     - ``validator_kind``: a fixed sentinel value present on every canary document. Required
       alongside ``validator_scope``/``validator_marker`` by every count()/search() query, so an
       application document that happens to carry the same field name/value as one of those (e.g.
@@ -393,8 +395,27 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         try:
             index_name = self._target_index_name()
             scope = self._canary_scope_token()
-            matching = self._count_matching_documents(client, index_name, scope, expected.token)
-            passed = matching == expected.ref
+            # Require the exact multiset of refs 1..expected.ref tagged with our scope/token/kind,
+            # not just a matching count: an index whose canary documents hold e.g. a duplicate ref
+            # alongside a missing one could otherwise coincidentally satisfy a bare
+            # `count() == expected.ref` check since the totals happen to match. Compared
+            # positionally (rather than via `list(range(1, expected.ref + 1)) == matching_refs`)
+            # so verification cost is bounded by the number of real documents actually found, not
+            # by an untrusted, schema-valid but arbitrarily large `expected.ref` from --refs.
+            #
+            # Collect every matching document's ref first, then validate each is a real int
+            # (excluding bool, which is an int subclass) - filtering malformed refs out up front
+            # would let a matching document with e.g. a string ref be silently ignored, rather than
+            # correctly failing a check whose contract is "verify the exact tagged document set".
+            matching_refs = self._collect_matching_refs(client, index_name, scope, expected.token)
+            refs_are_valid = all(isinstance(ref, int) and not isinstance(ref, bool) for ref in matching_refs)
+            if refs_are_valid:
+                sorted_refs = sorted(matching_refs)
+                matching = len(sorted_refs)
+                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(sorted_refs))
+            else:
+                matching = len(matching_refs)
+                passed = False
             # Only write the next canary document when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
             # unconditionally would grow `actual` past what the harness will ever compare against
@@ -502,26 +523,46 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             request_timeout=_REQUEST_TIMEOUT,
         )
 
-    def _count_matching_documents(self, client: OpenSearch, index_name: str, scope: str, token: str) -> int:
-        try:
-            response = client.count(
-                index=index_name,
-                body={
-                    "query": {
-                        "bool": {
-                            "filter": [
-                                _exact_match_filter(_SCOPE_FIELD, scope),
-                                _exact_match_filter(_MARKER_FIELD, token),
-                                _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
-                            ]
-                        }
+    def _collect_matching_refs(self, client: OpenSearch, index_name: str, scope: str, token: str) -> list[Any]:
+        """Return every ``validator_checkpoint_ref`` value for documents matching scope/token/kind.
+
+        Paginates via ``search_after`` (sorted by ``_id``) rather than a single
+        ``size=_CLEANUP_SEARCH_SIZE`` page: an interrupted run or repeated checkpoints could in
+        principle leave more than one page of same-token documents (e.g. after
+        a replay), and only inspecting the first page would silently under-count them. Returns raw
+        (possibly non-int) values rather than filtering them out, so a malformed ``_REF_FIELD``
+        (e.g. a string) is reported back to checkpoint() instead of being silently ignored.
+        """
+        refs: list[Any] = []
+        search_after: list[Any] | None = None
+        while True:
+            body: dict[str, Any] = {
+                "query": {
+                    "bool": {
+                        "filter": [
+                            _exact_match_filter(_SCOPE_FIELD, scope),
+                            _exact_match_filter(_MARKER_FIELD, token),
+                            _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
+                        ]
                     }
                 },
-                request_timeout=_REQUEST_TIMEOUT,
-            )
-        except NotFoundError:
-            return 0
-        return int(response.get("count", 0))
+                "size": _CLEANUP_SEARCH_SIZE,
+                "sort": [{"_id": "asc"}],
+            }
+            if search_after is not None:
+                body["search_after"] = search_after
+            try:
+                response = client.search(index=index_name, body=body, request_timeout=_REQUEST_TIMEOUT)
+            except NotFoundError:
+                return refs
+            hits = response.get("hits", {}).get("hits", [])
+            if not hits:
+                return refs
+            for hit in hits:
+                refs.append(hit.get("_source", {}).get(_REF_FIELD))
+            search_after = hits[-1].get("sort")
+            if search_after is None or len(hits) < _CLEANUP_SEARCH_SIZE:
+                return refs
 
     def _delete_matching_documents(self, client: OpenSearch, index_name: str, scope: str) -> None:
         # Deletes by individually resolved document _id rather than via the OpenSearch

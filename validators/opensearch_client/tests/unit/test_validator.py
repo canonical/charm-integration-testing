@@ -223,14 +223,19 @@ class PersistenceOpenSearchClientStub:
             raise self.search_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        hits = [
-            {"_id": doc_id, "_source": doc}
-            for doc_id, doc in self.indices[index].documents.items()
-            if _matches_query(body, doc)
-        ]
+        matching_ids = sorted(
+            doc_id for doc_id, doc in self.indices[index].documents.items() if _matches_query(body, doc)
+        )
+        search_after = (body or {}).get("search_after")
+        if search_after is not None:
+            matching_ids = [doc_id for doc_id in matching_ids if doc_id > search_after[0]]
         size = (body or {}).get("size")
         if size is not None:
-            hits = hits[:size]
+            matching_ids = matching_ids[:size]
+        hits = [
+            {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [doc_id]}
+            for doc_id in matching_ids
+        ]
         return {"hits": {"hits": hits}}
 
     def delete(self, index: str, id: str, **kwargs: Any) -> None:
@@ -762,6 +767,72 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert new_state.id == 42
         assert new_state.ref == 2
         assert len(client.indices["test-index"].documents) == 1
+
+    def test_fails_when_a_same_token_ref_is_duplicated_alongside_a_missing_one(self) -> None:
+        # GIVEN the index has 2 matching documents (same total count as expected), but they're a
+        # duplicate ref=1 and a missing ref=2, rather than the genuine [1, 2] sequence: a bare
+        # `count() == expected.ref` check would wrongly accept this.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(
+            client,
+            [
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 1),
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 1),
+            ],
+        )
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the duplicate is not mistaken for the missing ref 2
+        assert result.status == "FAIL"
+        assert new_state.ref == 2
+        assert len(client.indices["test-index"].documents) == 2
+
+    def test_fails_when_a_same_token_document_has_a_malformed_ref(self) -> None:
+        # GIVEN a same-token document whose validator_checkpoint_ref isn't a real int (e.g.
+        # corrupted data): filtering malformed refs out up front would let it be silently ignored.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(
+            client,
+            [
+                {
+                    "validator_scope": TEST_SCOPE,
+                    "validator_marker": TEST_TOKEN,
+                    "validator_checkpoint_ref": "1",
+                    "validator_kind": _KIND_VALUE,
+                }
+            ],
+        )
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN the malformed ref correctly fails the check instead of being silently dropped
+        assert result.status == "FAIL"
+        assert new_state.ref == 1
+
+    def test_reads_matching_refs_across_multiple_search_pages(self) -> None:
+        # GIVEN more matching documents than fit in a single search page: only inspecting the
+        # first page would under-count them and could report a false FAIL.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, ref) for ref in range(1, 6)])
+
+        with (
+            patch("validators.opensearch_client.validator.OpenSearch", return_value=client),
+            patch("validators.opensearch_client.validator._CLEANUP_SEARCH_SIZE", 2),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=5))
+
+        # THEN all 5 documents across 3 pages were found and verified
+        assert result.status == "PASS"
+        assert new_state.ref == 6
 
     def test_fails_when_matching_token_belongs_to_a_different_scope(self) -> None:
         # GIVEN the shared index has documents carrying this expected token, but tagged with a
