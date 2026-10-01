@@ -668,7 +668,11 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         try:
             producer = self._build_producer(data)
             value = json.dumps({"token": token, "ref": ref}).encode()
-            future = producer.send(topic, key=b"validator_canary", value=value)
+            # Key must be unique per (token, ref): a constant key would let a broker/topic
+            # configured with cleanup.policy=compact collapse every canary message down to just
+            # the latest one, silently discarding the earlier refs checkpoint() needs to verify.
+            key = f"{token}:{ref}".encode()
+            future = producer.send(topic, key=key, value=value)
             producer.flush(timeout=5)
             future.get(timeout=5)
         finally:

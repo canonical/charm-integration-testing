@@ -1036,6 +1036,25 @@ class TestKafkaClientPersistenceValidatorPrepare:
                 result, _ = validator.checkpoint(second)
         assert result.status == "PASS"
 
+    def test_canary_messages_use_a_unique_key_per_ref(self) -> None:
+        # GIVEN a topic that could be configured with cleanup.policy=compact: a constant message
+        # key would let compaction collapse every canary record down to just the latest one,
+        # silently discarding the earlier refs checkpoint() needs to verify.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            state = validator.prepare()
+
+        # THEN the key is not a constant literal and is unique to this (token, ref) pair
+        _, key, _ = producer.sent[0]
+        assert key == f"{state.token}:{state.ref}".encode()
+
 
 class TestKafkaClientPersistenceValidatorCheckpoint:
     def test_passes_when_message_count_matches_expected_ref(self) -> None:
@@ -1059,10 +1078,13 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         check = next(c for c in result.checks if c.name == "message_count")
         assert check.passed
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=3)
-        # A new message is still produced to continue the chain
+        # A new message is still produced to continue the chain, keyed uniquely per ref so
+        # topic compaction can't collapse it onto an earlier record (see
+        # test_canary_messages_use_a_unique_key_per_ref).
         assert len(producer.sent) == 1
-        _, _, value = producer.sent[0]
+        _, key, value = producer.sent[0]
         assert json.loads(value.decode()) == {"token": TEST_TOKEN, "ref": 3}  # type: ignore[union-attr]
+        assert key == f"{TEST_TOKEN}:3".encode()
 
     def test_fails_when_message_count_is_lower_than_expected(self) -> None:
         # GIVEN data loss: fewer matching messages than expected
