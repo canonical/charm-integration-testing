@@ -18,6 +18,9 @@ dependencies = [
 [project.entry-points."endpoint_validators"]
 mongodb_client = "validators.mongodb_client:MongoDBClientValidator"
 
+[project.entry-points."endpoint_persistence_validators"]
+mongodb_client = "validators.mongodb_client:MongoDBClientPersistenceValidator"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
