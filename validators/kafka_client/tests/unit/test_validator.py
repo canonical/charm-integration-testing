@@ -140,11 +140,15 @@ class KafkaAdminClientStub:
     """Minimal stand-in for kafka.admin.KafkaAdminClient."""
 
     create_error: Exception | None = None
+    broker_count: int = 1
 
     def create_topics(self, new_topics: list[Any]) -> dict[str, Any]:
         if self.create_error:
             raise self.create_error
         return {}
+
+    def describe_cluster(self) -> dict[str, Any]:
+        return {"brokers": [{"node_id": i} for i in range(self.broker_count)]}
 
     def close(self) -> None:
         pass
@@ -181,15 +185,24 @@ class PersistenceKafkaAdminClientStub:
     create_error: Exception | None = None
     list_error: Exception | None = None
     delete_error: Exception | None = None
+    broker_count: int = 1
+    describe_cluster_error: Exception | None = None
     deleted: list[list[str]] = field(default_factory=list, init=False, repr=False)
+    created_replication_factors: list[int] = field(default_factory=list, init=False, repr=False)
 
     def create_topics(self, new_topics: list[Any]) -> dict[str, Any]:
         if self.create_error:
             raise self.create_error
         for new_topic in new_topics:
+            self.created_replication_factors.append(new_topic.replication_factor)
             if new_topic.name not in self.topics:
                 self.topics.append(new_topic.name)
         return {}
+
+    def describe_cluster(self) -> dict[str, Any]:
+        if self.describe_cluster_error:
+            raise self.describe_cluster_error
+        return {"brokers": [{"node_id": i} for i in range(self.broker_count)]}
 
     def list_topics(self) -> list[str]:
         if self.list_error:
@@ -219,6 +232,10 @@ class PersistenceKafkaConsumerStub:
 
     records_by_topic: dict[str, list[ConsumerRecordStub]] = field(default_factory=dict)
     missing_topics: set[str] = field(default_factory=set)
+    # When True, poll() never advances position() past 0 - simulating a broker that stalls after
+    # delivering nothing (or only a partial prefix), so the read deadline is hit before
+    # end_offset is reached.
+    stall: bool = False
     assigned: list[TopicPartition] = field(default_factory=list, init=False, repr=False)
     _position: int = field(default=0, init=False, repr=False)
     _delivered: bool = field(default=False, init=False, repr=False)
@@ -239,6 +256,8 @@ class PersistenceKafkaConsumerStub:
         return self._position
 
     def poll(self, timeout_ms: int = 0, max_records: int | None = None) -> dict[TopicPartition, list[Any]]:
+        if self.stall:
+            return {}
         if self._delivered:
             return {}
         self._delivered = True
@@ -960,6 +979,61 @@ class TestKafkaClientPersistenceValidatorPrepare:
         payload = json.loads(value.decode())  # type: ignore[union-attr]
         assert payload == {"token": state.token, "ref": 1}
 
+    def test_creates_canary_topic_with_a_replication_factor_matching_the_live_broker_count(self) -> None:
+        # GIVEN a 3-broker cluster: hard-coding replication_factor=1 would mean a single broker
+        # loss can remove the canary topic's only replica even though the cluster itself (and the
+        # application's own topic) could tolerate it, producing a false persistence failure.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub(broker_count=3)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN the topic is created with a replication factor that uses the available brokers
+        assert admin.created_replication_factors == [3]
+
+    def test_caps_replication_factor_at_three_on_a_larger_cluster(self) -> None:
+        # GIVEN a cluster with more than 3 brokers: requesting an unnecessarily high replication
+        # factor isn't wrong, but 3 is the conventional production ceiling, so this asserts the
+        # validator doesn't over-request replicas for a canary topic.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub(broker_count=7)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN
+        assert admin.created_replication_factors == [3]
+
+    def test_falls_back_to_a_replication_factor_of_one_when_describe_cluster_fails(self) -> None:
+        # GIVEN describe_cluster() fails (e.g. the credentials lack cluster-describe authority):
+        # topic creation must still proceed with the safe single-broker default rather than
+        # raising and abandoning the whole prepare() call.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub(describe_cluster_error=Exception("not authorized"))
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            state = validator.prepare()
+
+        # THEN
+        assert isinstance(state, PersistenceState)
+        assert admin.created_replication_factors == [1]
+
     def test_generates_distinct_identifiers_across_calls(self) -> None:
         # GIVEN
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
@@ -1284,6 +1358,33 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         # THEN the duplicate is not mistaken for the missing ref 2
         assert result.status == "FAIL"
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+        assert producer.sent == []
+
+    def test_fails_when_the_read_deadline_is_hit_before_end_offset_is_reached(self) -> None:
+        # GIVEN a topic that actually contains the expected ref 1, but a stalled/slow broker that
+        # never delivers it before the read deadline: a naive "stop at the deadline and evaluate
+        # whatever was collected" approach would see 0 matching records and happen to fail here,
+        # but could instead produce a false PASS if a partial tagged prefix had already arrived.
+        # This asserts on the explicit, deliberate "incomplete read" signal rather than relying on
+        # that coincidence.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(records_by_topic={topic: [_canary_record(TEST_TOKEN, 1)]}, stall=True)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+            patch("validators.kafka_client.validator._CONSUME_TIMEOUT_S", 0.05),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN this is reported as an unverified FAIL, not a false PASS or a crash, and the state
+        # is not advanced so the next checkpoint retries from the same expected ref
+        assert result.status == "FAIL"
+        assert "Timed out" in result.checks[0].message
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=1)
         assert producer.sent == []
 
     def test_fails_when_a_same_token_record_has_a_malformed_ref(self) -> None:

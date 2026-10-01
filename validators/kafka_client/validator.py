@@ -155,6 +155,22 @@ class _KafkaConnectionMixin:
         """Build a KafkaAdminClient with appropriate security settings."""
         return KafkaAdminClient(**self._build_kafka_client_kwargs(data))
 
+    def _resolve_replication_factor(self, admin: KafkaAdminClient) -> int:
+        """Pick a replication factor compatible with the live cluster.
+
+        Hard-coding replication_factor=1 lets a single broker loss or scale-down remove the
+        only replica of this validator's canary topic even when the application's own topic is
+        replicated, producing a false persistence failure; clusters enforcing
+        min.insync.replicas can also reject the create outright. Mirror the live broker count
+        instead (capped at 3, a common production replication factor) so create_topics() never
+        requests more replicas than exist.
+        """
+        try:
+            broker_count = len(admin.describe_cluster()["brokers"])
+        except Exception:  # nosec B110 - best-effort; fall back to the safe single-broker default
+            return 1
+        return max(1, min(3, broker_count))
+
     def _ensure_topic_exists(self, data: dict[str, str], topic: str) -> None:
         """Create the topic if it does not already exist.
 
@@ -165,7 +181,8 @@ class _KafkaConnectionMixin:
         admin: KafkaAdminClient | None = None
         try:
             admin = self._build_admin_client(data)
-            admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
+            replication_factor = self._resolve_replication_factor(admin)
+            admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=replication_factor)])
         except TopicAlreadyExistsError:
             pass
         except Exception:  # nosec B110 - best-effort; produce step will catch real failures
@@ -539,6 +556,13 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         try:
             data = self._connection_data()
             records = self._read_canary_messages(data, topic)
+            # `None` means the consume deadline was hit before every message up to end_offset was
+            # read back - treat that as a definite, unverified FAIL rather than evaluating
+            # whatever partial record set happened to arrive, which could coincidentally satisfy
+            # the exact-ref-set check below and report a false PASS.
+            incomplete_read = records is None
+            if records is None:
+                records = []
             # Require the exact multiset of refs 1..expected.ref tagged with our token, not just a
             # matching count: a topic dropped and recreated from scratch could otherwise
             # coincidentally satisfy a bare count-only check, and deduplicating refs here (e.g. via
@@ -559,7 +583,10 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
                 isinstance(record.get("ref"), int) and not isinstance(record.get("ref"), bool)
                 for record in same_token_records
             )
-            if refs_are_valid:
+            if incomplete_read:
+                matching = len(same_token_records)
+                passed = False
+            elif refs_are_valid:
                 matching_refs = sorted(record["ref"] for record in same_token_records)
                 matching = len(matching_refs)
                 passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
@@ -585,9 +612,14 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
                 f"Found expected {matching} marked message(s) in topic '{topic}'."
                 if passed
                 else (
-                    f"Expected {expected.ref} marked message(s) with matching token in topic "
-                    f"'{topic}', found {matching}. Data may have been lost, or the topic was "
-                    "recreated without the original canary messages."
+                    f"Timed out reading topic '{topic}' before confirming every message was "
+                    "consumed; cannot verify the exact canary message set."
+                    if incomplete_read
+                    else (
+                        f"Expected {expected.ref} marked message(s) with matching token in topic "
+                        f"'{topic}', found {matching}. Data may have been lost, or the topic was "
+                        "recreated without the original canary messages."
+                    )
                 )
             ),
         )
@@ -678,12 +710,18 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         finally:
             self._close_producer(producer)
 
-    def _read_canary_messages(self, data: dict[str, str], topic: str) -> list[dict[str, Any]]:
+    def _read_canary_messages(self, data: dict[str, str], topic: str) -> list[dict[str, Any]] | None:
         """Read every message currently in the canary topic's single partition.
 
         Uses manual partition assignment (``assign()``/``seek_to_beginning()``) rather than
         ``subscribe()`` with a consumer group, so reading does not depend on a consumer group or
         the ``consumer-group-prefix`` ACL grant the functional validator's round trip needs.
+
+        Returns ``None`` (rather than whatever records were collected so far) if the consume
+        deadline is hit before ``position()`` reaches ``end_offset``: without this, a slow/stalled
+        broker that delivers only an expected tagged prefix before stalling would let checkpoint()
+        accept a partial read and report a false PASS, instead of correctly treating an unverified
+        tail of the topic as inconclusive.
         """
         consumer: KafkaConsumer | None = None
         try:
@@ -700,7 +738,9 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
             consumer.seek_to_beginning(topic_partition)
             records: list[dict[str, Any]] = []
             deadline = time.monotonic() + _CONSUME_TIMEOUT_S
-            while consumer.position(topic_partition) < end_offset and time.monotonic() < deadline:
+            while consumer.position(topic_partition) < end_offset:
+                if time.monotonic() >= deadline:
+                    return None
                 batches = consumer.poll(timeout_ms=1000, max_records=200)
                 for messages in batches.values():
                     for message in messages:
