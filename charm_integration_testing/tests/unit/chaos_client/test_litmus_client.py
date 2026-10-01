@@ -108,7 +108,9 @@ class ClientContext:
     def pause(self, seconds: float) -> None:
         self.now += seconds
 
-    def list_pods(self, *, label_selector: str, **kwargs: Any) -> Any:
+    def list_pods(self, *, label_selector: str = "", **kwargs: Any) -> Any:
+        if not label_selector:
+            return client.V1PodList(items=self.pods + self.children)
         return client.V1PodList(items=self.children if label_selector.startswith("chaosUID=") else self.pods)
 
     def create(self, *, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
@@ -655,6 +657,61 @@ def test_rejected_stop_does_not_suppress_later_execution_failure(context: Client
     context.setups[0].cleanup.assert_called_once()
 
 
+def test_stop_retries_operator_version_conflict(context: ClientContext) -> None:
+    # GIVEN an operator update between reading the Engine and sending its stop patch
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    versions: list[str] = []
+
+    def patch(*, name: str, body: dict[str, Any], **kwargs: Any) -> None:
+        versions.append(body["metadata"]["resourceVersion"])
+        if len(versions) == 1:
+            context.engines[name]["metadata"]["resourceVersion"] = "2"
+            raise ApiException(status=409)
+        context.stop(name=name, body=body)
+
+    api.patch_namespaced_custom_object.side_effect = patch
+    # WHEN cleanup runs, THEN it retries using the updated resourceVersion.
+    chaos.cleanup(MODEL, UNIT, "")
+    assert versions == ["1", "2"]
+    assert not context.engines
+    context.setups[0].cleanup.assert_called_once()
+
+
+def test_stop_conflict_retry_refuses_replaced_engine(context: ClientContext) -> None:
+    # GIVEN the original Engine is replaced during the failed patch
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+
+    def patch(*, name: str, **kwargs: Any) -> None:
+        context.engines[name]["metadata"]["uid"] = "replacement"
+        raise ApiException(status=409)
+
+    api.patch_namespaced_custom_object.side_effect = patch
+    # WHEN retrying, THEN the replacement is never patched or deleted.
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "was replaced" in str(error.value.errors[0])
+    api.patch_namespaced_custom_object.assert_called_once()
+    api.delete_namespaced_custom_object.assert_not_called()
+    context.setups[0].cleanup.assert_not_called()
+
+
+def test_persistent_stop_conflict_is_bounded(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    api.patch_namespaced_custom_object.side_effect = ApiException(status=409)
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert isinstance(error.value.errors[0], TimeoutError)
+    assert "stop request" in str(error.value.errors[0])
+    assert api.patch_namespaced_custom_object.call_count == 3
+    context.setups[0].cleanup.assert_not_called()
+
+
 @pytest.mark.parametrize("kind", ["jobs", "pods", "chaosresults"])
 @pytest.mark.parametrize("failure_status", [409, 503])
 def test_cleanup_retry_does_not_adopt_replacement_uid(context: ClientContext, kind: str, failure_status: int) -> None:
@@ -716,3 +773,128 @@ def test_terminal_pods_are_not_stress_targets(context: ClientContext, phase: str
         with pytest.raises(RuntimeError, match="Expected one live Pod"):
             chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
         assert not context.setups
+
+
+def test_check_stress_reports_error_before_cleanup(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    meta = MetaChaosClient([chaos])
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"reason": "helper exited"},
+    }
+    with pytest.raises(RuntimeError, match="helper exited"):
+        meta.check_stress(MODEL, UNIT)
+    assert context.engines
+    assert context.results
+    context.setups[0].cleanup.assert_not_called()
+    meta.cleanup_all()
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    assert not meta._cleanups
+
+
+@pytest.mark.parametrize("end", ["engine", "result", "reverted", "missing"])
+def test_observation_rejects_early_completion(context: ClientContext, end: str) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    name = context.created[0]["metadata"]["name"]
+    if end == "engine":
+        context.engines[name]["status"]["engineStatus"] = "completed"
+    elif end == "result":
+        context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    elif end == "reverted":
+        context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    else:
+        del context.engines[name]
+    with pytest.raises(RuntimeError, match="requested stress duration was not verified"):
+        chaos.check_stress(MODEL, UNIT)
+    assert context.setups
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_early_completion_preserves_original_error_and_retries_real_cleanup_failure(
+    context: ClientContext, cleanup_fails: bool
+) -> None:
+    meta = MetaChaosClient([context.chaos_client()])
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    cleanup_error = RuntimeError("permissions cleanup failed")
+    if cleanup_fails:
+        context.setups[0].cleanup.side_effect = cleanup_error
+
+    # Exercise the live test's observation/finally sequence with both real clients.
+    with pytest.raises(RuntimeError, match="requested stress duration was not verified"):
+        try:
+            meta.check_stress(MODEL, UNIT)
+        finally:
+            if cleanup_fails:
+                with pytest.raises(ChaosCleanupError) as error:
+                    meta.cleanup_all()
+                nested = error.value.errors[0]
+                assert isinstance(nested, ChaosCleanupError)
+                assert nested.errors == (cleanup_error,)
+                assert meta._cleanups
+            else:
+                meta.cleanup_all()
+
+    assert not context.engines
+    assert not context.results
+    if cleanup_fails:
+        context.setups[0].cleanup.side_effect = None
+        meta.cleanup_all()
+    assert not meta._cleanups
+    calls = context.setups[0].cleanup.call_count
+    meta.cleanup_all()
+    assert context.setups[0].cleanup.call_count == calls
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_confirmed_fault_allows_completion_but_not_experiment_errors(context: ClientContext, failed: bool) -> None:
+    meta = MetaChaosClient([context.chaos_client()])
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Completed",
+        "verdict": "Error" if failed else "Pass",
+    }
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    if failed:
+        with pytest.raises(RuntimeError, match="experiment .* failed"):
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+    else:
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+    meta.cleanup_all()
+    assert not context.engines
+    assert not context.results
+    assert not meta._cleanups
+
+
+def test_failed_experiment_without_reversion_fails_cleanup_immediately_and_is_retryable(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.auto_revert = False
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"errorCode": "EXPERIMENT_ABORTED", "reason": "killed"},
+    }
+    for _ in range(2):
+        before = context.now
+        with pytest.raises(ChaosCleanupError) as error:
+            chaos.cleanup(MODEL, UNIT, "")
+        assert "reversion is unconfirmed" in str(error.value.errors[0])
+        assert "EXPERIMENT_ABORTED" in str(error.value.errors[0])
+        assert context.now == before
+        assert context.engines and context.results
+        context.setups[0].cleanup.assert_not_called()
+    # New explicit reversion evidence allows removal, but never erases the experiment failure.
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    with pytest.raises(ChaosCleanupError, match="cleanup operation"):
+        chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    chaos.cleanup(MODEL, UNIT, "")
