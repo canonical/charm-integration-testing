@@ -526,10 +526,14 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
     def _collect_matching_refs(self, client: OpenSearch, index_name: str, scope: str, token: str) -> list[Any]:
         """Return every ``validator_checkpoint_ref`` value for documents matching scope/token/kind.
 
-        Paginates via ``search_after`` (sorted by ``_id``) rather than a single
-        ``size=_CLEANUP_SEARCH_SIZE`` page: an interrupted run or repeated checkpoints could in
-        principle leave more than one page of same-token documents (e.g. after
-        a replay), and only inspecting the first page would silently under-count them. Returns raw
+        Paginates via ``search_after`` rather than a single ``size=_CLEANUP_SEARCH_SIZE`` page: an
+        interrupted run or repeated checkpoints could in principle leave more than one page of
+        same-token documents (e.g. after a replay), and only inspecting the first page would
+        silently under-count them. Sorts by ``_doc`` (Lucene's internal, always-available document
+        order) rather than ``_id``: OpenSearch disables fielddata on the ``_id`` field by default,
+        so sorting on it raises ``illegal_argument_exception`` on a real cluster even though the
+        in-memory test stub would happily accept it - ``_doc`` needs no such opt-in and is the
+        documented choice for pagination that doesn't care about result ordering. Returns raw
         (possibly non-int) values rather than filtering them out, so a malformed ``_REF_FIELD``
         (e.g. a string) is reported back to checkpoint() instead of being silently ignored.
         """
@@ -547,7 +551,7 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     }
                 },
                 "size": _CLEANUP_SEARCH_SIZE,
-                "sort": [{"_id": "asc"}],
+                "sort": [{"_doc": "asc"}],
             }
             if search_after is not None:
                 body["search_after"] = search_after

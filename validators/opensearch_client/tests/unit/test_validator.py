@@ -223,18 +223,23 @@ class PersistenceOpenSearchClientStub:
             raise self.search_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        matching_ids = sorted(
-            doc_id for doc_id, doc in self.indices[index].documents.items() if _matches_query(body, doc)
-        )
+        # Sort key mirrors OpenSearch's "_doc" sort: the document's position in internal (here,
+        # insertion) order, not a value derived from "_id" - the validator must not rely on "_id"
+        # fielddata, which is disabled by default on a real cluster.
+        matches = [
+            (position, doc_id)
+            for position, (doc_id, doc) in enumerate(self.indices[index].documents.items())
+            if _matches_query(body, doc)
+        ]
         search_after = (body or {}).get("search_after")
         if search_after is not None:
-            matching_ids = [doc_id for doc_id in matching_ids if doc_id > search_after[0]]
+            matches = [(position, doc_id) for position, doc_id in matches if position > search_after[0]]
         size = (body or {}).get("size")
         if size is not None:
-            matching_ids = matching_ids[:size]
+            matches = matches[:size]
         hits = [
-            {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [doc_id]}
-            for doc_id in matching_ids
+            {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [position]}
+            for position, doc_id in matches
         ]
         return {"hits": {"hits": hits}}
 
