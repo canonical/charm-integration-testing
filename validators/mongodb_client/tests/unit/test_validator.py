@@ -158,6 +158,12 @@ class PersistenceCollectionStub:
         marker = query.get("marker")
         return sum(1 for d in self.documents if d.get("marker") == marker)
 
+    def find(self, query: dict[str, Any]) -> list[dict[str, Any]]:
+        if self.count_error:
+            raise self.count_error
+        marker = query.get("marker")
+        return [d for d in self.documents if d.get("marker") == marker]
+
 
 @dataclass
 class PersistenceDatabaseStub:
@@ -578,6 +584,43 @@ class TestMongoDBClientPersistenceValidatorCheckpoint:
         # THEN the recreated collection is detected as data loss, not a false PASS
         assert result.status == "FAIL"
         assert new_state == PersistenceState(token=TEST_TOKEN, id=99, ref=1)
+
+    def test_fails_when_a_same_token_ref_is_duplicated_alongside_a_missing_one(self) -> None:
+        # GIVEN a collection with the right document *count* for expected.ref, but where that
+        # count is reached via a duplicated ref (1) rather than the real, distinct refs (1..2)
+        validator = _make_persistence_validator(VALID_DATABAG)
+        client = PersistenceMongoClientStub()
+        collection_name = "validator_canary_da7d88bc9ad4d4fd_00000000000000000042"
+        collection = client.database_stub[collection_name]
+        collection.documents = [
+            {"marker": TEST_TOKEN, "checkpoint_ref": 1},
+            {"marker": TEST_TOKEN, "checkpoint_ref": 1},
+        ]
+
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN a bare count-only check would have falsely passed here (2 matching documents == 2
+        # expected); the exact-ref-set check must still fail since ref 2 is missing.
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+
+    def test_fails_when_a_same_token_ref_has_a_malformed_value(self) -> None:
+        # GIVEN a same-token document whose checkpoint_ref isn't a real int (e.g. corrupted data)
+        validator = _make_persistence_validator(VALID_DATABAG)
+        client = PersistenceMongoClientStub()
+        collection_name = "validator_canary_da7d88bc9ad4d4fd_00000000000000000042"
+        collection = client.database_stub[collection_name]
+        collection.documents = [{"marker": TEST_TOKEN, "checkpoint_ref": "1"}]
+
+        with patch("validators.mongodb_client.validator.MongoClient", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN the malformed ref is not silently ignored or allowed to coincidentally pass
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=1)
 
     def test_rejects_state_without_a_token(self) -> None:
         # GIVEN a state serialised before the token existed (or otherwise restored/malformed).

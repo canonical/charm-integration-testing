@@ -351,8 +351,27 @@ class MongoDBClientPersistenceValidator(_MongoDBConnectionMixin, BasePersistence
             # Filter on the random token written by prepare(), not a bare document count: a
             # collection dropped and recreated from scratch could otherwise coincidentally satisfy
             # a count-only check.
-            matching = col.count_documents({"marker": expected.token})
-            passed = matching == expected.ref
+            #
+            # Require the exact set of refs 1..expected.ref, not just a matching count: e.g. a
+            # duplicated ref alongside a missing one would otherwise still satisfy a bare
+            # `count_documents() == expected.ref` check since the totals happen to match.
+            #
+            # Validate each ref is a real int (excluding bool, which is an int subclass) before
+            # sorting/comparing - a same-token document with e.g. a missing or non-int
+            # `checkpoint_ref` must correctly fail this check rather than crash it or be silently
+            # skipped.
+            same_token_docs = list(col.find({"marker": expected.token}))
+            refs_are_valid = all(
+                isinstance(doc.get("checkpoint_ref"), int) and not isinstance(doc.get("checkpoint_ref"), bool)
+                for doc in same_token_docs
+            )
+            if refs_are_valid:
+                matching_refs = sorted(doc["checkpoint_ref"] for doc in same_token_docs)
+                matching = len(matching_refs)
+                passed = matching_refs == list(range(1, expected.ref + 1))
+            else:
+                matching = len(same_token_docs)
+                passed = False
             # Only write the next canary document when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
             # unconditionally would grow `actual` past what the harness will ever compare against
