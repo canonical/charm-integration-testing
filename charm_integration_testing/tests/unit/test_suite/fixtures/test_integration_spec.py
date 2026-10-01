@@ -30,11 +30,12 @@ class TestResolveDeployedCharmBase:
         charmhub_client = MagicMock()
 
         # WHEN resolving the deployed charm for that application
-        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={})
+        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={}, arch="amd64")
 
         # THEN the resolved base is threaded through as ubuntu_version
         charmhub_client.charm_from_store.assert_called_once()
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_version"] == "22.04"
+        assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_arch"] == "amd64"
 
     def test_passes_none_when_base_is_unknown(self) -> None:
         # GIVEN an application with no resolvable base
@@ -44,8 +45,9 @@ class TestResolveDeployedCharmBase:
         charmhub_client = MagicMock()
 
         # WHEN resolving the deployed charm for that application
-        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={})
+        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={}, arch="arm64")
 
         # THEN ubuntu_version is explicitly None rather than omitted
         charmhub_client.charm_from_store.assert_called_once()
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_version"] is None
+        assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_arch"] == "arm64"

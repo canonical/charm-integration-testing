@@ -100,6 +100,7 @@ class _FakeCharmhubClient(CharmhubClient):
         platform: str | None = None,
         charm_track: str | None = None,
         charm_risk: str | None = None,
+        charm_branch: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
     ) -> Charm:
