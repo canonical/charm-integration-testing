@@ -1,11 +1,8 @@
-# Known false positives from gitleaks' default "generic-api-key" rule.
-# Each entry is a gitleaks fingerprint (commit:file:rule:line), not a real secret -
-# see the PR discussion for the underlying analysis of why gitleaks flags it.
-
-# validators/etcd_client/validator.py: EtcdClientPersistenceValidator._build_ssl_credentials()
-# passes the gRPC SDK's own fixed TLS keyword arguments, populated from local variables holding
-# client cert and key material read from disk at runtime - no literal secret is embedded in
-# source. The "generic-api-key" rule's keyword+entropy heuristic matches on that argument list
-# text itself (a false positive introduced by a regex change between gitleaks v8.21.2 and
-# v8.30.1; the local variable names hold file contents, not secret values).
+# False positive: `private_key=key_bytes` is a keyword argument to
+# grpc.ssl_channel_credentials() where `key_bytes` is a variable holding the
+# client's TLS private key material already supplied via the relation
+# databag, not a hardcoded secret. The generic-api-key rule matches on the
+# `private_key=` keyword alone. This finding is on a commit from an open,
+# unmerged branch (SQT-928-etcd-persistence) that gitleaks' default `--all`
+# git-log scan picks up regardless of which branch/PR triggered the scan.
 d44a04b7cabfc8a0a002a4d172f210a420659297:validators/etcd_client/validator.py:generic-api-key:1388
