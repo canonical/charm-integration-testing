@@ -18,6 +18,9 @@ dependencies = [
 [project.entry-points."endpoint_validators"]
 kafka_client = "validators.kafka_client:KafkaClientValidator"
 
+[project.entry-points."endpoint_persistence_validators"]
+kafka_client = "validators.kafka_client:KafkaClientPersistenceValidator"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
