@@ -15,7 +15,11 @@ from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError  
 from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
-from validators.kafka_client.validator import KafkaClientPersistenceValidator, KafkaClientValidator
+from validators.kafka_client.validator import (
+    _MAX_CANARY_IDENTIFIER,
+    KafkaClientPersistenceValidator,
+    KafkaClientValidator,
+)
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -1371,7 +1375,7 @@ class TestKafkaClientPersistenceValidatorCleanup:
         # GIVEN a topic matching the fixed-width shape but with an identifier prepare() could
         # never have produced (i.e. bigger than _MAX_CANARY_IDENTIFIER)
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
-        out_of_range_name = f"validator_canary_{TEST_SCOPE_TOKEN}_{99999999999999999999:020d}"
+        out_of_range_name = f"validator_canary_{TEST_SCOPE_TOKEN}_{_MAX_CANARY_IDENTIFIER + 1:020d}"
         admin = PersistenceKafkaAdminClientStub(topics=[out_of_range_name])
 
         with patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin):
