@@ -483,6 +483,85 @@ class _EtcdConnectionMixin:
             return {}
         return dict(self.relation.data[self.charm.app])  # type: ignore[attr-defined]
 
+    def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
+        """Resolve this application's own published mtls-cert, secret-backed or plaintext."""
+        if uri := local_data.get("secret-mtls"):
+            content: dict[str, str] = self.charm.model.get_secret(id=uri).get_content()  # type: ignore[attr-defined]
+            return content.get("mtls-cert")
+        return local_data.get("mtls-cert")
+
+    def _parse_mtls_cert(self, mtls_cert_pem: str) -> tuple[ValidationCheck, x509.Certificate | None]:
+        """Parse the requirer's submitted client cert.
+
+        The field may be a bundle of [client_cert, signing_ca] PEM blocks
+        concatenated together; only the first (leaf) certificate is validated here.
+        """
+        return self._parse_mtls_cert_bytes(mtls_cert_pem.encode())
+
+    def _parse_mtls_cert_bytes(self, mtls_cert_pem: bytes) -> tuple[ValidationCheck, x509.Certificate | None]:
+        """Parse a submitted client cert given as raw bytes, without assuming they are UTF-8.
+
+        Accepting bytes here (rather than requiring a decoded ``str``) lets callers
+        report a malformed local cert file as a normal failed check instead of
+        letting ``UnicodeDecodeError`` escape validation.
+        """
+        first_pem = mtls_cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
+        try:
+            cert = x509.load_pem_x509_certificate(first_pem)
+        except ValueError as exc:
+            return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
+        return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert
+
+    def _check_identity_matches_published_cert(
+        self, loaded_cert_bytes: bytes, local_data: dict[str, str]
+    ) -> ValidationCheck:
+        """Verify the locally-provisioned client cert is the one actually published on this relation.
+
+        Without this check, ``ETCD_CLIENT_CERT_PATH_ENV``/``ETCD_CLIENT_KEY_PATH_ENV`` could
+        point at some other valid identity, and a PASS would validate that identity's ACLs
+        rather than this relation's.
+        """
+        published_pem = self._resolve_local_mtls_cert(local_data)
+        if not published_pem:
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="No mtls-cert published on this relation to compare against.",
+            )
+        loaded_check, loaded_cert = self._parse_mtls_cert_bytes(loaded_cert_bytes)
+        if loaded_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
+        published_check, published_cert = self._parse_mtls_cert(published_pem)
+        if published_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=published_check.message)
+        if loaded_cert.fingerprint(hashes.SHA256()) != published_cert.fingerprint(hashes.SHA256()):
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
+            )
+        return ValidationCheck(name="identity_match", passed=True, message="OK")
+
+    def _check_username_matches_cert_cn(self, cert_bytes: bytes, expected_username: str) -> ValidationCheck:
+        """Verify the client cert's leaf subject CN matches the provider's published "username".
+
+        The interface contract defines "username" as derived from the client certificate's
+        own common name, so this is a consistency check on the provider's own claim, not a
+        cryptographic identity check (that's ``_check_identity_matches_published_cert``).
+        """
+        cert_check, cert = self._parse_mtls_cert_bytes(cert_bytes)
+        if cert is None:
+            return ValidationCheck(name="username_matches_cert_cn", passed=False, message=cert_check.message)
+        cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        cn = str(cn_attrs[0].value) if cn_attrs else None
+        if cn != expected_username:
+            return ValidationCheck(
+                name="username_matches_cert_cn",
+                passed=False,
+                message=f"Client cert common name '{cn}' does not match the published username '{expected_username}'.",
+            )
+        return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
+
 
 class EtcdClientValidator(_EtcdConnectionMixin, BaseValidator):
     """Validator for the etcd_client interface.
@@ -797,62 +876,6 @@ class EtcdClientValidator(_EtcdConnectionMixin, BaseValidator):
         checks.extend(final_checks)
         return checks, time.monotonic() - target_start
 
-    def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
-        """Resolve this application's own published mtls-cert, secret-backed or plaintext."""
-        if uri := local_data.get("secret-mtls"):
-            return self.charm.model.get_secret(id=uri).get_content().get("mtls-cert")
-        return local_data.get("mtls-cert")
-
-    def _check_identity_matches_published_cert(
-        self, loaded_cert_bytes: bytes, local_data: dict[str, str]
-    ) -> ValidationCheck:
-        """Verify the locally-provisioned client cert is the one actually published on this relation.
-
-        Without this check, ``ETCD_CLIENT_CERT_PATH_ENV``/``ETCD_CLIENT_KEY_PATH_ENV`` could
-        point at some other valid identity, and a PASS would validate that identity's ACLs
-        rather than this relation's.
-        """
-        published_pem = self._resolve_local_mtls_cert(local_data)
-        if not published_pem:
-            return ValidationCheck(
-                name="identity_match",
-                passed=False,
-                message="No mtls-cert published on this relation to compare against.",
-            )
-        loaded_check, loaded_cert = self._parse_mtls_cert_bytes(loaded_cert_bytes)
-        if loaded_cert is None:
-            return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
-        published_check, published_cert = self._parse_mtls_cert(published_pem)
-        if published_cert is None:
-            return ValidationCheck(name="identity_match", passed=False, message=published_check.message)
-        if loaded_cert.fingerprint(hashes.SHA256()) != published_cert.fingerprint(hashes.SHA256()):
-            return ValidationCheck(
-                name="identity_match",
-                passed=False,
-                message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
-            )
-        return ValidationCheck(name="identity_match", passed=True, message="OK")
-
-    def _check_username_matches_cert_cn(self, cert_bytes: bytes, expected_username: str) -> ValidationCheck:
-        """Verify the client cert's leaf subject CN matches the provider's published "username".
-
-        The interface contract defines "username" as derived from the client certificate's
-        own common name, so this is a consistency check on the provider's own claim, not a
-        cryptographic identity check (that's ``_check_identity_matches_published_cert``).
-        """
-        cert_check, cert = self._parse_mtls_cert_bytes(cert_bytes)
-        if cert is None:
-            return ValidationCheck(name="username_matches_cert_cn", passed=False, message=cert_check.message)
-        cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-        cn = str(cn_attrs[0].value) if cn_attrs else None
-        if cn != expected_username:
-            return ValidationCheck(
-                name="username_matches_cert_cn",
-                passed=False,
-                message=f"Client cert common name '{cn}' does not match the published username '{expected_username}'.",
-            )
-        return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
-
     def _etcd_put(self, channel: grpc.Channel, key: str, value: str) -> ValidationCheck:
         request = _encode_bytes_field(1, key.encode()) + _encode_bytes_field(2, value.encode())
         call = channel.unary_unary(
@@ -1010,28 +1033,6 @@ class EtcdClientValidator(_EtcdConnectionMixin, BaseValidator):
         elapsed = time.monotonic() - start_time
         checks.append(self._check_latency(elapsed, _SIMPLE_LATENCY_TARGET_S))
         return self._make_result(level=level, checks=checks)
-
-    def _parse_mtls_cert(self, mtls_cert_pem: str) -> tuple[ValidationCheck, x509.Certificate | None]:
-        """Parse the requirer's submitted client cert.
-
-        The field may be a bundle of [client_cert, signing_ca] PEM blocks
-        concatenated together; only the first (leaf) certificate is validated here.
-        """
-        return self._parse_mtls_cert_bytes(mtls_cert_pem.encode())
-
-    def _parse_mtls_cert_bytes(self, mtls_cert_pem: bytes) -> tuple[ValidationCheck, x509.Certificate | None]:
-        """Parse a submitted client cert given as raw bytes, without assuming they are UTF-8.
-
-        Accepting bytes here (rather than requiring a decoded ``str``) lets callers
-        report a malformed local cert file as a normal failed check instead of
-        letting ``UnicodeDecodeError`` escape validation.
-        """
-        first_pem = mtls_cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
-        try:
-            cert = x509.load_pem_x509_certificate(first_pem)
-        except ValueError as exc:
-            return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
-        return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert
 
     def _check_not_expired(self, cert: x509.Certificate | None, check_name: str = "validity_period") -> ValidationCheck:
         if cert is None:
@@ -1199,16 +1200,22 @@ class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValida
         key_encoded = key.encode()
         token_encoded = token.encode()
 
-        def op(channel: grpc.Channel) -> None:
+        def delete_op(channel: grpc.Channel) -> None:
             # Delete any leftover key at this identifier first (e.g. prepare() re-run after a
             # crash, or the same identifier forced twice in a test) so the Put below always
             # creates the key fresh. This is what makes etcd's own per-key `version` counter
             # start at exactly 1 - matching the ref=1 this method always returns - rather than
-            # inheriting a leftover key's higher version.
+            # inheriting a leftover key's higher version. A DeleteRange is idempotent (deleting
+            # an already-deleted key is a safe no-op), so it's fine to retry across targets.
             _etcd_delete_range_raw(channel, key_encoded)
+
+        def put_op(channel: grpc.Channel) -> None:
             _etcd_put_raw(channel, key_encoded, token_encoded)
 
-        self._run_with_failover(targets, credentials, op)
+        self._run_with_failover(targets, credentials, delete_op)
+        # The Put is not idempotent (each one always increments etcd's `version` counter), so it
+        # must never be retried against another target - see _run_write_without_failover.
+        self._run_write_without_failover(targets, credentials, put_op)
         return PersistenceState(id=identifier, ref=1, token=token)
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
@@ -1262,7 +1269,10 @@ class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValida
             def write_op(channel: grpc.Channel) -> None:
                 _etcd_put_raw(channel, key_encoded, expected.token.encode())
 
-            self._run_with_failover(targets, credentials, write_op)
+            # Never retried across targets - see _run_write_without_failover: a Put is not
+            # idempotent, so retrying it after an ambiguous failure could double-increment
+            # etcd's real `version`, permanently drifting it out of sync with `expected.ref`.
+            self._run_write_without_failover(targets, credentials, write_op)
 
         check = ValidationCheck(
             name="key_version",
@@ -1380,6 +1390,18 @@ class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValida
                 key_bytes = fh.read()
         except OSError as exc:
             raise RuntimeError(f"Cannot connect for {self.endpoint}: could not read client identity: {exc}") from exc
+        # Mirrors EtcdClientValidator._check_read_write's identity checks: without these, a
+        # locally-provisioned cert/key pair pointed at by ETCD_CLIENT_CERT_PATH_ENV/
+        # ETCD_CLIENT_KEY_PATH_ENV could belong to an entirely different, unrelated identity,
+        # and prepare()/checkpoint()/cleanup() would silently operate against the wrong ACL
+        # scope while still reporting success.
+        local_data = self._local_databag()
+        identity_match_check = self._check_identity_matches_published_cert(cert_bytes, local_data)
+        if not identity_match_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {identity_match_check.message}")
+        username_check = self._check_username_matches_cert_cn(cert_bytes, data["username"])
+        if not username_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {username_check.message}")
         return targets, data["tls-ca"], cert_bytes, key_bytes
 
     def _build_ssl_credentials(self, ca_pem: str, cert_bytes: bytes, key_bytes: bytes) -> grpc.ChannelCredentials:
@@ -1412,6 +1434,35 @@ class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValida
                     continue
         detail = last_exc.details() if last_exc is not None else "no targets were available"
         raise RuntimeError(f"etcd operation failed against all {len(targets)} target(s) for {self.endpoint}: {detail}")
+
+    def _run_write_without_failover(
+        self, targets: list[str], credentials: grpc.ChannelCredentials, operation: Callable[[grpc.Channel], _OpResultT]
+    ) -> _OpResultT:
+        """Run a non-idempotent write *operation* against a single target, never retrying it.
+
+        Unlike ``_run_with_failover`` (safe for idempotent reads/deletes), a ``Put`` can
+        succeed on etcd's side even though its response never reaches the caller - e.g. the
+        connection drops right after the write is committed but before the ``grpc.RpcError``
+        is raised here. Retrying that same write against a *different* target would then apply
+        it a second time, incrementing etcd's real ``KeyValue.version`` twice even though
+        ``PersistenceState.ref`` only ever advances by one - a permanent, undetectable drift
+        between the two that would corrupt every later ``checkpoint()`` for this canary key.
+        So a write failure here is surfaced immediately as a ``RuntimeError`` instead of being
+        retried against another target: the caller must re-run ``prepare()`` to establish a
+        fresh baseline, since the write's outcome can't be disambiguated after the fact.
+        """
+        if not targets:
+            raise RuntimeError(f"etcd write failed for {self.endpoint}: no targets were available")
+        target = targets[0]
+        try:
+            with grpc.secure_channel(target, credentials) as channel:
+                return operation(channel)
+        except grpc.RpcError as exc:
+            raise RuntimeError(
+                f"etcd write against '{target}' for {self.endpoint} failed ambiguously ({exc.details()}): "
+                "the write may already have been committed despite this error, so it was not retried "
+                "against another target. Re-run prepare() to establish a fresh baseline before retrying."
+            ) from exc
 
     def _canary_scope_token(self) -> str:
         """Fixed-width token derived from the model UUID, relation_id *and* unit name.

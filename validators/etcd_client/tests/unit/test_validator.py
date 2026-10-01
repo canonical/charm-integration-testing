@@ -2457,6 +2457,190 @@ class TestEtcdClientPersistenceValidatorCleanup:
         assert out_of_range_key in keyspace
 
 
+class TestEtcdClientPersistenceValidatorIdentityVerification:
+    """Covers the identity checks _resolve_connection_material() shares with
+    EtcdClientValidator._check_read_write(): without them, a locally-provisioned cert/key pair
+    could belong to an entirely different identity than this relation actually published, and
+    prepare()/checkpoint()/cleanup() would silently operate against the wrong ACL scope.
+    """
+
+    def test_prepare_raises_when_loaded_cert_does_not_match_published_mtls_cert(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        # GIVEN the locally-provisioned cert/key pair belongs to a different identity than the
+        # one published on this application's own databag.
+        other_cert_pem, other_key_pem = _generate_cert("someone-else")
+        cert_path = os.path.join(tmp_path, "client.pem")
+        key_path = os.path.join(tmp_path, "client.key")
+        with open(cert_path, "w") as f:
+            f.write(other_cert_pem)
+        with open(key_path, "w") as f:
+            f.write(other_key_pem)
+        monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+        monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+        validator = _make_persistence_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.prepare()
+
+    def test_checkpoint_raises_when_loaded_cert_does_not_match_published_mtls_cert(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        other_cert_pem, other_key_pem = _generate_cert("someone-else")
+        cert_path = os.path.join(tmp_path, "client.pem")
+        key_path = os.path.join(tmp_path, "client.key")
+        with open(cert_path, "w") as f:
+            f.write(other_cert_pem)
+        with open(key_path, "w") as f:
+            f.write(other_key_pem)
+        monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+        monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+        validator = _make_persistence_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.checkpoint(PersistenceState(id=1, ref=1, token="t"))
+
+    def test_cleanup_raises_when_loaded_cert_does_not_match_published_mtls_cert(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        other_cert_pem, other_key_pem = _generate_cert("someone-else")
+        cert_path = os.path.join(tmp_path, "client.pem")
+        key_path = os.path.join(tmp_path, "client.key")
+        with open(cert_path, "w") as f:
+            f.write(other_cert_pem)
+        with open(key_path, "w") as f:
+            f.write(other_key_pem)
+        monkeypatch.setenv(ETCD_CLIENT_CERT_PATH_ENV, cert_path)
+        monkeypatch.setenv(ETCD_CLIENT_KEY_PATH_ENV, key_path)
+        validator = _make_persistence_validator(VALID_REQUIRER_DATABAG, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.cleanup()
+
+    def test_prepare_raises_when_cert_cn_does_not_match_published_username(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        # GIVEN the loaded cert matches the published mtls-cert (so identity_match passes), but
+        # the provider's published "username" doesn't match the cert's own common name.
+        _provision_client_identity(monkeypatch, tmp_path)
+        databag = {**VALID_REQUIRER_DATABAG, "username": "someone-else"}
+        local_databag = {"prefix": "myprefix-", "mtls-cert": VALID_CLIENT_CERT_PEM}
+        validator = _make_persistence_validator(databag, local_databag=local_databag)
+
+        with pytest.raises(RuntimeError, match="does not match"):
+            validator.prepare()
+
+
+class TestEtcdClientPersistenceValidatorWriteSafety:
+    """Covers that a write (Put) is never retried against another target after an ambiguous
+    failure, since etcd may have already committed it server-side even though the response
+    never reached the client - retrying would double-increment etcd's real `version` counter,
+    permanently drifting it out of sync with the validator's own tracked `ref`.
+    """
+
+    class _FakeRpcError(grpc.RpcError):
+        def details(self) -> str:
+            return "connection reset after commit"
+
+    def test_prepare_does_not_retry_put_against_another_target_after_ambiguous_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _provision_client_identity(monkeypatch, tmp_path)
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379,https://10.1.2.4:2379"}
+        validator = _make_persistence_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+        keyspace: dict[bytes, dict[str, Any]] = {}
+
+        # The first target's Put secretly succeeds (the write lands in `keyspace`) but still
+        # raises an RpcError, simulating a connection drop after commit but before the response
+        # reaches the caller. If the write were (incorrectly) retried against the second
+        # target, the key's version would end up at 2 instead of 1.
+        first_channel = _make_fake_keyspace_channel(keyspace)
+        real_first_unary_unary = first_channel.unary_unary.side_effect
+
+        def failing_put_unary_unary(
+            method: str, request_serializer: Any = None, response_deserializer: Any = None
+        ) -> Any:
+            real_call = real_first_unary_unary(method, request_serializer, response_deserializer)
+
+            def call(request: bytes, timeout: float = 0) -> bytes:
+                if method.endswith("/Put"):
+                    real_call(request, timeout)
+                    raise self._FakeRpcError()
+                return cast(bytes, real_call(request, timeout))
+
+            return call
+
+        first_channel.unary_unary.side_effect = failing_put_unary_unary
+        second_channel = _make_fake_keyspace_channel(keyspace)
+
+        def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+            return first_channel if target == "10.1.2.3:2379" else second_channel
+
+        with (
+            patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+            patch("validators.etcd_client.validator.grpc.secure_channel", side_effect=make_channel_for_target),
+        ):
+            with pytest.raises(RuntimeError, match="ambiguously"):
+                validator.prepare()
+
+        # The Put must not have been retried against the second target: exactly one key exists,
+        # still at version 1 (not 2), proving no double-write occurred.
+        assert len(keyspace) == 1
+        ((_, entry),) = keyspace.items()
+        assert entry["version"] == 1
+
+    def test_checkpoint_does_not_retry_put_against_another_target_after_ambiguous_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        _provision_client_identity(monkeypatch, tmp_path)
+        databag = {**VALID_REQUIRER_DATABAG, "uris": "https://10.1.2.3:2379,https://10.1.2.4:2379"}
+        validator = _make_persistence_validator(databag, local_databag=VALID_LOCAL_REQUIRER_DATABAG)
+        keyspace: dict[bytes, dict[str, Any]] = {}
+        stable_channel = _make_fake_keyspace_channel(keyspace)
+
+        with (
+            patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+            patch("validators.etcd_client.validator.grpc.secure_channel", return_value=stable_channel),
+        ):
+            prepared = validator.prepare()
+
+        # GIVEN the read-back for checkpoint() succeeds (version/token match, so passed=True),
+        # but the subsequent advancing Put secretly succeeds while still raising an RpcError.
+        first_channel = _make_fake_keyspace_channel(keyspace)
+        real_first_unary_unary = first_channel.unary_unary.side_effect
+
+        def failing_put_unary_unary(
+            method: str, request_serializer: Any = None, response_deserializer: Any = None
+        ) -> Any:
+            real_call = real_first_unary_unary(method, request_serializer, response_deserializer)
+
+            def call(request: bytes, timeout: float = 0) -> bytes:
+                if method.endswith("/Put"):
+                    real_call(request, timeout)
+                    raise self._FakeRpcError()
+                return cast(bytes, real_call(request, timeout))
+
+            return call
+
+        first_channel.unary_unary.side_effect = failing_put_unary_unary
+        second_channel = _make_fake_keyspace_channel(keyspace)
+
+        def make_channel_for_target(target: str, credentials: Any = None) -> MagicMock:
+            return first_channel if target == "10.1.2.3:2379" else second_channel
+
+        with (
+            patch("validators.etcd_client.validator.grpc.ssl_channel_credentials"),
+            patch("validators.etcd_client.validator.grpc.secure_channel", side_effect=make_channel_for_target),
+        ):
+            with pytest.raises(RuntimeError, match="ambiguously"):
+                validator.checkpoint(prepared)
+
+        # The advancing Put must not have been retried against the second target: version must
+        # still only have advanced by one (to 2), not twice (to 3).
+        ((_, entry),) = keyspace.items()
+        assert entry["version"] == 2
+
+
 class TestEtcdPrefixRangeEnd:
     def test_increments_last_non_ff_byte(self) -> None:
         assert _prefix_range_end(b"foo") == b"fop"
