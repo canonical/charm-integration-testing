@@ -14,7 +14,8 @@ from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraints
 from chaos_client.chaos_mesh_detection import CHAOS_MESH_CRDS
 from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
-from juju import JujuModelHandle
+from juju import CharmChannel as JujuCharmChannel
+from juju import JujuApplicationInfo, JujuModelHandle
 from juju.backend import JujuExecOutput
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
@@ -87,6 +88,18 @@ class JujuBackendStub(NullJujuBackend):
         if self.exec_error is not None:
             raise self.exec_error
         return JujuExecOutput(return_code=self.exec_return_code, stdout="", stderr="")
+
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
+        # Resolvable by default so chaos dispatch tests don't trip the chaos
+        # resource constraints lookup; override/replace in tests that need otherwise.
+        return {
+            "postgresql": JujuApplicationInfo(
+                charm="postgresql-k8s",
+                revision=1,
+                channel=JujuCharmChannel.parse("14/stable"),
+                base="22.04",
+            )
+        }
 
 
 RESOURCE_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
@@ -850,6 +863,18 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
             def get_kubernetes_client_for_model(self, model):
                 record("model lookup")
                 return KubernetesClient(BackendStub())
+
+            def list_applications(self, model):
+                from juju import CharmChannel, JujuApplicationInfo
+
+                return {
+                    "postgresql": JujuApplicationInfo(
+                        charm="postgresql-k8s",
+                        revision=1,
+                        channel=CharmChannel.parse("14/stable"),
+                        base="22.04",
+                    )
+                }
 
 
         @pytest.fixture(scope="session")

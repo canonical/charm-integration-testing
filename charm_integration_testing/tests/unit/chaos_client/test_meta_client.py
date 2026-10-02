@@ -10,6 +10,7 @@ from chaos_client import (
     ChaosCleanupError,
     ChaosClient,
     ChaosNotSupportedError,
+    ChaosResourceConstraintsError,
     CharmResourceConstraints,
     MetaChaosClient,
     ResourceConstraintsClient,
@@ -53,10 +54,6 @@ class ConstraintsClientStub(ResourceConstraintsClient):
         return self.constraint
 
 
-DEFAULT_BACKEND = BackendStub()
-DEFAULT_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
-
-
 def backend_with_application() -> BackendStub:
     return BackendStub(
         {
@@ -68,6 +65,13 @@ def backend_with_application() -> BackendStub:
             )
         }
     )
+
+
+# Resolvable metadata by default, so tests unrelated to constraint resolution itself
+# don't have to care about it: a lookup failure now raises instead of silently
+# applying no constraints (see ChaosResourceConstraintsError).
+DEFAULT_BACKEND = backend_with_application()
+DEFAULT_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
 
 
 class ClientStub(ChaosClient):
@@ -382,15 +386,14 @@ def test_path_cleanup_preserves_stress_and_other_latency_paths() -> None:
     ]
 
 
-def test_resolve_constraints_returns_defaults_when_application_is_missing() -> None:
+def test_resolve_constraints_raises_when_application_is_missing() -> None:
     # GIVEN no application matching the unit name
     client = MetaChaosClient([ClientStub(set())], BackendStub(), DEFAULT_CONSTRAINTS_CLIENT)
 
     # WHEN resolving constraints
-    resolved = client._resolve_constraints(TEST_MODEL, UNIT)
-
-    # THEN an all-default block is returned
-    assert resolved == CharmResourceConstraints()
+    # THEN the lookup failure is not swallowed into an unconstrained default
+    with pytest.raises(ChaosResourceConstraintsError, match="Incomplete application metadata"):
+        client._resolve_constraints(TEST_MODEL, UNIT)
 
 
 @pytest.mark.parametrize(
@@ -398,7 +401,7 @@ def test_resolve_constraints_returns_defaults_when_application_is_missing() -> N
     [(None, "22.04"), (JujuCharmChannel.parse("14/stable"), None)],
     ids=["missing-channel", "missing-base"],
 )
-def test_resolve_constraints_returns_defaults_without_complete_metadata(
+def test_resolve_constraints_raises_without_complete_metadata(
     channel: JujuCharmChannel | None, base: str | None
 ) -> None:
     # GIVEN the application exists but lacks channel or base metadata
@@ -415,25 +418,25 @@ def test_resolve_constraints_returns_defaults_without_complete_metadata(
     client = MetaChaosClient([ClientStub(set())], backend, DEFAULT_CONSTRAINTS_CLIENT)
 
     # WHEN resolving constraints
-    resolved = client._resolve_constraints(TEST_MODEL, UNIT)
+    # THEN the lookup failure is not swallowed into an unconstrained default
+    with pytest.raises(ChaosResourceConstraintsError, match="Incomplete application metadata"):
+        client._resolve_constraints(TEST_MODEL, UNIT)
 
-    # THEN the client falls back to defaults
-    assert resolved == CharmResourceConstraints()
 
-
-def test_resolve_constraints_returns_defaults_when_backend_listing_fails() -> None:
+def test_resolve_constraints_raises_when_backend_listing_fails() -> None:
     # GIVEN a backend that cannot list applications
+    backend_error = RuntimeError("list failed")
     client = MetaChaosClient(
         [ClientStub(set())],
-        BackendStub(error=RuntimeError("list failed")),
+        BackendStub(error=backend_error),
         DEFAULT_CONSTRAINTS_CLIENT,
     )
 
     # WHEN resolving constraints
-    resolved = client._resolve_constraints(TEST_MODEL, UNIT)
-
-    # THEN the failure is swallowed and defaults are returned
-    assert resolved == CharmResourceConstraints()
+    # THEN the failure propagates instead of being swallowed into an unconstrained default
+    with pytest.raises(ChaosResourceConstraintsError) as excinfo:
+        client._resolve_constraints(TEST_MODEL, UNIT)
+    assert excinfo.value.__cause__ is backend_error
 
 
 def test_resolve_constraints_uses_matching_application_metadata() -> None:
@@ -577,6 +580,23 @@ def test_stress_memory_rejects_unsupported_scenario() -> None:
         client.stress_memory(TEST_MODEL, UNIT, 2, 128, DURATION, scenario="exhaustionn")  # type: ignore[arg-type]
 
     # THEN no call reaches the underlying tool
+    assert tool.calls == []
+
+
+def test_stress_memory_does_not_run_when_constraints_lookup_fails() -> None:
+    # GIVEN a backend that cannot resolve the unit's application metadata
+    tool = ClientStub({"stress_memory"})
+    client = MetaChaosClient(
+        [tool],
+        BackendStub(error=RuntimeError("list failed")),
+        DEFAULT_CONSTRAINTS_CLIENT,
+    )
+
+    # WHEN stressing memory
+    # THEN the experiment is never dispatched: a failed lookup must not silently
+    # run with the caller's (possibly charm-inappropriate) values
+    with pytest.raises(ChaosResourceConstraintsError):
+        client.stress_memory(TEST_MODEL, UNIT, 2, 128, DURATION)
     assert tool.calls == []
 
 

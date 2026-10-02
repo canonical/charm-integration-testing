@@ -14,7 +14,7 @@ from chaos_client import (
     MetaChaosClient,
     ResourceConstraintsClient,
 )
-from juju import JujuApplicationInfo, JujuModelHandle
+from juju import CharmChannel, JujuApplicationInfo, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
@@ -64,7 +64,14 @@ class FailedCreateApi(FakeCustomObjectsApi):
 
 class JujuBackendStub(NullJujuBackend):
     def list_applications(self, model: object) -> dict[str, JujuApplicationInfo]:
-        return {}
+        return {
+            "postgresql": JujuApplicationInfo(
+                charm="postgresql-k8s",
+                revision=1,
+                channel=CharmChannel.parse("14/stable"),
+                base="22.04",
+            )
+        }
 
 
 class TestCreationFailureCleanup:

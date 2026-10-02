@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Callable, Literal, NoReturn
@@ -12,8 +11,6 @@ from bundle_builder_x import CharmChannel
 
 from .backend import ChaosClient
 from .resource_constraints import CharmResourceConstraints, ResourceConstraintsClient
-
-logger = logging.getLogger(__name__)
 
 
 class ChaosNotSupportedError(NotImplementedError):
@@ -30,6 +27,15 @@ class ChaosCleanupError(RuntimeError):
     def __init__(self, errors: list[Exception]) -> None:
         self.errors = tuple(errors)
         super().__init__(f"{len(errors)} chaos cleanup operation(s) failed.")
+
+
+class ChaosResourceConstraintsError(RuntimeError):
+    """Raised when a unit's chaos resource constraints cannot be resolved.
+
+    Failing loudly here is deliberate: silently falling back to an all-default
+    (unconstrained) block would let a charm's configured per-charm limits be
+    bypassed whenever its metadata is temporarily unavailable.
+    """
 
 
 @dataclass(frozen=True)
@@ -178,23 +184,19 @@ class MetaChaosClient(ChaosClient):
     def _resolve_constraints(self, model: JujuModelHandle, unit: str) -> CharmResourceConstraints:
         try:
             applications = self._backend.list_applications(model)
-        except Exception:
-            logger.warning(
-                "Could not list applications for model '%s' while resolving chaos resource constraints.",
-                model.uri,
-                exc_info=True,
-            )
-            return CharmResourceConstraints()
+        except Exception as error:
+            raise ChaosResourceConstraintsError(
+                f"Could not list applications for model '{model.uri}' while resolving chaos resource "
+                f"constraints for unit '{unit}'."
+            ) from error
 
         application_name = unit.split("/", 1)[0]
         info = applications.get(application_name)
         if info is None or info.channel is None or info.base is None:
-            logger.debug(
-                "No chaos resource constraints metadata for %s in model '%s'.",
-                unit,
-                model.uri,
+            raise ChaosResourceConstraintsError(
+                f"Incomplete application metadata for unit '{unit}' in model '{model.uri}': "
+                "cannot resolve chaos resource constraints without a known charm, channel and base."
             )
-            return CharmResourceConstraints()
 
         channel = CharmChannel.model_validate(str(info.channel))
         return self._resource_constraints_client.get_charm_resource_constraints(info.charm, channel, info.base)
