@@ -8,18 +8,33 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from chaos_client import ChaosCleanupError, MetaChaosClient
+from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraintsClient
 from chaos_client import litmus_client as module
 from chaos_client.litmus_client import LitmusChaosClient, LitmusNotInstalledError
 from chaos_client.litmus_detection import LITMUS_CRDS
 from chaos_client.litmus_setup import LitmusSetup
-from juju import JujuModelHandle
+from juju import CharmChannel as JujuCharmChannel
+from juju import JujuApplicationInfo, JujuModelHandle
 from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
+from ..extensions.shared import JujuStub
+
 MODEL = JujuModelHandle(controller="controller", model="model")
 UNIT = "postgresql/0"
+
+
+class JujuBackendStub(JujuStub):
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
+        return {
+            "postgresql": JujuApplicationInfo(
+                charm="postgresql-k8s",
+                revision=1,
+                channel=JujuCharmChannel.parse("14/stable"),
+                base="22.04",
+            )
+        }
 
 
 class BackendStub(KubernetesBackend):
@@ -277,7 +292,7 @@ def test_preparation_failure_is_cleaned_through_meta_client(context: ClientConte
     # GIVEN a failure after setup may have created some resources
     failure = ApiException(status=403)
     context.prepare_error = failure
-    meta = MetaChaosClient([context.chaos_client()])
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
 
     # WHEN executing and tearing down
     with pytest.raises(ApiException) as exc_info:
@@ -299,7 +314,7 @@ def test_failed_engine_post_retains_unverified_identity(context: ClientContext, 
     context.create_error = failure
     context.create_resource = created
     chaos = context.chaos_client()
-    meta = MetaChaosClient([chaos])
+    meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
 
     # WHEN execution fails and teardown runs
     with pytest.raises(TimeoutError) as exc_info:
@@ -333,7 +348,7 @@ def test_engine_conflict_still_cleans_prepared_resources(context: ClientContext)
     # GIVEN a rejected Engine creation after successful preparation
     context.create_error = ApiException(status=409)
     context.create_resource = False
-    meta = MetaChaosClient([context.chaos_client()])
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
 
     # WHEN execution fails and teardown runs
     with pytest.raises(ApiException):

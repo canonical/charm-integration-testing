@@ -34,6 +34,15 @@ class ChaosMeshChaosClient(ChaosClient):
         self._scopes: dict[str, tuple[str, str, str]] = {}
         self._created: list[tuple[str, str, str]] = []  # (plural, namespace, name)
 
+    def supports(self, operation: str) -> bool:
+        match operation:
+            case "stress_cpu" | "stress_memory":
+                return CHAOS_MESH_CRDS[0] not in self._missing_crds
+            case "io_latency":
+                return CHAOS_MESH_CRDS[1] not in self._missing_crds
+            case _:
+                return False
+
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
         self._create_stress_chaos(model, unit, "cpu-stress", {"cpu": {"workers": workers}}, duration)
 

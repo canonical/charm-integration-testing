@@ -3,7 +3,9 @@
 Per-charm chaos test parameters (e.g. how much memory or CPU a stress
 experiment should apply, and for how long), read by
 `ResourceConstraintsClient`
-(`charm_integration_testing/chaos_client/resource_constraints.py`).
+(`charm_integration_testing/chaos_client/resource_constraints.py`) and
+applied automatically by `MetaChaosClient` before it dispatches a chaos
+experiment to the underlying implementation.
 
 This is a separate mechanism from `static/charm-overrides/`, which drives
 bundle construction (endpoints, configs, resources, constraints). Resource
@@ -60,3 +62,35 @@ exhaustion" variant of the same underlying stress operation.
 Disk I/O saturation and network isolation have no fields: no `ChaosClient`
 implementation exists yet for I/O saturation, and `isolate_network` takes no
 configurable parameters to override.
+
+## How experiments consume these fields
+
+`MetaChaosClient` resolves the deployed unit's charm, channel and Ubuntu base
+from Juju, loads the first matching block from
+`static/charm-resource-constraints/<charm>.yaml`, and merges any configured
+fields over the values the test passed explicitly.
+
+For `stress_cpu()` and `stress_memory()`, the keyword-only `scenario`
+parameter selects which field set is checked:
+
+- `scenario="exhaustion"` uses the `*_exhaustion_*` fields
+- `scenario="moderate_pressure"` uses the `*_moderate_pressure_*` fields
+
+`fill_disk()` and `io_latency()` have only one constraint block each, so they
+do not take a `scenario` parameter.
+
+```python
+from datetime import timedelta
+
+require_chaos_tool.stress_memory(
+    model,
+    unit,
+    workers=1,
+    size_mb=512,
+    duration=timedelta(minutes=2),
+    scenario="moderate_pressure",
+)
+```
+
+If the file is absent, no block matches, or a field is left unset, the caller's
+original argument is used unchanged.

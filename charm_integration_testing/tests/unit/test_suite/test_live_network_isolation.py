@@ -4,14 +4,15 @@
 from datetime import timedelta
 
 import pytest
-from chaos_client import ChaosCleanupError, MetaChaosClient
+from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraintsClient
 from chaos_client.adapters import NetworkIsolationClient
-from juju import JujuClient, JujuModelHandle, JujuWaitState, JujuWaitTimeoutError
+from juju import JujuApplicationInfo, JujuClient, JujuModelHandle, JujuWaitState, JujuWaitTimeoutError
 from kubernetes.client import V1DeleteOptions, V1NetworkPolicy  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.test_live_network_isolation import test_live_network_isolation as run_isolation
 
 from ..chaos_client.shared import FakeNetworkingV1Api
+from ..extensions.shared import NullJujuBackend
 
 MODEL = JujuModelHandle(controller="controller", model="model")
 
@@ -36,6 +37,11 @@ class NetworkApi(FakeNetworkingV1Api):
 class Backend(KubernetesBackend):
     def __init__(self, api: NetworkApi) -> None:
         self.networking_v1_api = api
+
+
+class JujuBackendStub(NullJujuBackend):
+    def list_applications(self, model: object) -> dict[str, JujuApplicationInfo]:
+        return {}
 
 
 class JujuSpy(JujuClient):
@@ -84,7 +90,7 @@ def test_isolation_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("test_suite.test_live_network_isolation.sleep", observe)
     api = NetworkApi(events, failure)
     backend = Backend(api)
-    chaos = MetaChaosClient([NetworkIsolationClient(backend)])
+    chaos = MetaChaosClient([NetworkIsolationClient(backend)], JujuBackendStub(), ResourceConstraintsClient())
     juju = JujuSpy(events, failure)
     if failure == "cleanup":
         api.raise_on_delete = RuntimeError("delete failed")
@@ -130,7 +136,7 @@ def test_non_kubernetes_skips_before_mutation() -> None:
     # GIVEN a machine environment, WHEN called, THEN skip without any health checks or policies
     events: list[str] = []
     api = NetworkApi(events, None)
-    chaos = MetaChaosClient([NetworkIsolationClient(Backend(api))])
+    chaos = MetaChaosClient([NetworkIsolationClient(Backend(api))], JujuBackendStub(), ResourceConstraintsClient())
     with pytest.raises(pytest.skip.Exception, match="requires Kubernetes"):
         run_isolation(
             JujuSpy(events, None), chaos, None, MODEL, "target", None, timedelta(minutes=10), timedelta(minutes=15)
