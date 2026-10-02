@@ -504,6 +504,19 @@ def test_stress_cpu_without_matching_constraints_preserves_caller_values() -> No
     assert tool.calls == [("stress_cpu", (TEST_MODEL, UNIT, 2, DURATION))]
 
 
+def test_stress_cpu_rejects_unsupported_scenario() -> None:
+    # GIVEN a client with no matching constraints
+    tool = ClientStub({"stress_cpu"})
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+
+    # WHEN stressing CPU with an unrecognized scenario
+    with pytest.raises(ValueError, match="Unsupported CPU stress scenario"):
+        client.stress_cpu(TEST_MODEL, UNIT, 2, DURATION, scenario="exhaustionn")  # type: ignore[arg-type]
+
+    # THEN no call reaches the underlying tool
+    assert tool.calls == []
+
+
 def test_stress_memory_exhaustion_uses_constraint_overrides() -> None:
     # GIVEN an exhaustion constraint overriding all memory values
     tool = ClientStub({"stress_memory"})
@@ -552,6 +565,19 @@ def test_stress_memory_without_matching_constraints_preserves_caller_values() ->
 
     # THEN the original values are preserved
     assert tool.calls == [("stress_memory", (TEST_MODEL, UNIT, 2, 128, DURATION))]
+
+
+def test_stress_memory_rejects_unsupported_scenario() -> None:
+    # GIVEN a client with no matching constraints
+    tool = ClientStub({"stress_memory"})
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+
+    # WHEN stressing memory with an unrecognized scenario
+    with pytest.raises(ValueError, match="Unsupported memory stress scenario"):
+        client.stress_memory(TEST_MODEL, UNIT, 2, 128, DURATION, scenario="exhaustionn")  # type: ignore[arg-type]
+
+    # THEN no call reaches the underlying tool
+    assert tool.calls == []
 
 
 def test_fill_disk_uses_constraint_override() -> None:

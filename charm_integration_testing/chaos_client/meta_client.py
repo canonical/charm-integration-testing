@@ -80,12 +80,15 @@ class MetaChaosClient(ChaosClient):
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
     ) -> None:
         constraints = self._resolve_constraints(model, unit)
-        if scenario == "moderate_pressure":
-            merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
-            merged_duration = self._merged_duration(constraints.cpu_moderate_pressure_duration_seconds, duration)
-        else:
-            merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
-            merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
+        match scenario:
+            case "exhaustion":
+                merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
+                merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
+            case "moderate_pressure":
+                merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
+                merged_duration = self._merged_duration(constraints.cpu_moderate_pressure_duration_seconds, duration)
+            case _:
+                raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
         self._dispatch(
             "stress_cpu",
             lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration),
@@ -104,14 +107,17 @@ class MetaChaosClient(ChaosClient):
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
     ) -> None:
         constraints = self._resolve_constraints(model, unit)
-        if scenario == "moderate_pressure":
-            merged_workers = self._merged_int(constraints.memory_moderate_pressure_workers, workers)
-            merged_size_mb = self._merged_int(constraints.memory_moderate_pressure_size_mb, size_mb)
-            merged_duration = self._merged_duration(constraints.memory_moderate_pressure_duration_seconds, duration)
-        else:
-            merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
-            merged_size_mb = self._merged_int(constraints.memory_exhaustion_size_mb, size_mb)
-            merged_duration = self._merged_duration(constraints.memory_exhaustion_duration_seconds, duration)
+        match scenario:
+            case "exhaustion":
+                merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
+                merged_size_mb = self._merged_int(constraints.memory_exhaustion_size_mb, size_mb)
+                merged_duration = self._merged_duration(constraints.memory_exhaustion_duration_seconds, duration)
+            case "moderate_pressure":
+                merged_workers = self._merged_int(constraints.memory_moderate_pressure_workers, workers)
+                merged_size_mb = self._merged_int(constraints.memory_moderate_pressure_size_mb, size_mb)
+                merged_duration = self._merged_duration(constraints.memory_moderate_pressure_duration_seconds, duration)
+            case _:
+                raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
         self._dispatch(
             "stress_memory",
             lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, merged_duration),
