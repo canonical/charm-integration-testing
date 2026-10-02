@@ -66,6 +66,9 @@ class MetaChaosClient(ChaosClient):
         self._cleanups: list[_CleanupAction] = []
         self._network_cleanups: list[_CleanupAction] = []
 
+    def supports(self, operation: str) -> bool:
+        return any(tool.supports(operation) for tool in self._tools)
+
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
             merged_size_mb = self._merged_int(constraints.disk_fill_size_mb, size_mb)
@@ -249,11 +252,12 @@ class MetaChaosClient(ChaosClient):
     ) -> None:
         """Resolve constraints only once a configured client could actually run the experiment.
 
-        With no tools configured at all, the experiment is unsupported regardless of
-        constraints, so resolving them first would risk surfacing a resource-constraints
-        failure instead of the expected unsupported-experiment outcome.
+        Checking ``ChaosClient.supports`` first (a side-effect-free, static capability
+        check) avoids resolving constraints when no configured tool can run this
+        operation at all, so an unsupported experiment is reported via on_unsupported
+        instead of surfacing an unrelated resource-constraints lookup failure.
         """
-        if not self._tools:
+        if not self.supports(operation):
             self._on_unsupported(operation)
             return
         invoke = build_invoke(self._resolve_constraints(model, unit))

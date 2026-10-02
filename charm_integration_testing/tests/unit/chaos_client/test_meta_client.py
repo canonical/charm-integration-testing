@@ -80,6 +80,9 @@ class ClientStub(ChaosClient):
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.errors: dict[str, BaseException] = {}
 
+    def supports(self, operation: str) -> bool:
+        return operation in self.supported
+
     def _call(self, operation: str, *args: object) -> None:
         self.calls.append((operation, args))
         if operation in self.errors:
@@ -195,6 +198,23 @@ def test_reports_unsupported_experiment_without_resolving_constraints(params: Pa
     # WHEN requesting the experiment
     # THEN the experiment is reported as unsupported rather than surfacing a resource
     # constraints failure: with no client to run it, constraints are never resolved.
+    with pytest.raises(ChaosNotSupportedError, match=params.operation):
+        params.invoke(client)
+
+
+@pytest.mark.parametrize("params", EXPERIMENTS, ids=lambda params: params.operation)
+def test_reports_unsupported_experiment_with_non_supporting_tool_present(params: Params) -> None:
+    # GIVEN a configured tool that never supports this operation (e.g. a disk-fill-only
+    # client, always present in the real fixture) and a backend that cannot resolve
+    # chaos resource constraints
+    other_operation = next(p.operation for p in EXPERIMENTS if p.operation != params.operation)
+    tool = ClientStub({other_operation})
+    client = MetaChaosClient([tool], BackendStub(error=RuntimeError("list failed")), DEFAULT_CONSTRAINTS_CLIENT)
+
+    # WHEN requesting the experiment
+    # THEN the experiment is reported as unsupported rather than surfacing a resource
+    # constraints failure: a non-empty tool list must not trigger constraint resolution
+    # unless a configured tool actually supports this operation.
     with pytest.raises(ChaosNotSupportedError, match=params.operation):
         params.invoke(client)
 
