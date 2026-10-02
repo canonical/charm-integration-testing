@@ -2,38 +2,32 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-etcd-client"
+name = "validators-smtp"
 version = "0.1.0"
-description = "Validator for etcd_client interface"
+description = "Validator for the smtp interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "cryptography>=42.0.0",
-    "grpcio>=1.60.0",
     "validators-base",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "types-grpcio>=1.83.0.20260730,<2",
     "validators-test-utils",
 ]
 
 [project.entry-points."endpoint_validators"]
-etcd_client = "validators.etcd_client:EtcdClientValidator"
-
-[project.entry-points."endpoint_persistence_validators"]
-etcd_client = "validators.etcd_client:EtcdClientPersistenceValidator"
+smtp = "validators.smtp:SmtpValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.etcd_client"]
+packages = ["validators.smtp"]
 
 [tool.setuptools.package-dir]
-"validators.etcd_client" = "."
+"validators.smtp" = "."
