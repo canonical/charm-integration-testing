@@ -1,9 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from unittest.mock import MagicMock
 
 import pytest
 from chaos_client import (
@@ -14,6 +16,7 @@ from chaos_client import (
     MetaChaosClient,
 )
 from juju import JujuModelHandle
+from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
@@ -31,10 +34,26 @@ class BackendStub(KubernetesBackend):
         crds: tuple[str, ...] = ("stresschaos.chaos-mesh.org", "iochaos.chaos-mesh.org"),
         raise_on_delete: ApiException | None = None,
     ) -> None:
+        self.core_v1_api = MagicMock()
+        self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
+            items=[
+                k8s.V1Pod(
+                    metadata=k8s.V1ObjectMeta(name="target-pod", annotations={"unit.juju.is/id": UNIT}),
+                    spec=k8s.V1PodSpec(
+                        containers=[
+                            k8s.V1Container(
+                                name="workload", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")]
+                            )
+                        ]
+                    ),
+                ),
+                k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="other-pod", annotations={"unit.juju.is/id": "postgresql/1"})),
+            ]
+        )
         self._crds = set(crds)
         self.crd_errors: dict[str, ApiException] = {}
         self.crd_reads: list[str] = []
-        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete)
+        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete, inject_stress=True)
 
     def crd_exists(self, name: str) -> bool:
         self.crd_reads.append(name)
@@ -266,7 +285,7 @@ class TestStressCpu:
         assert body["kind"] == "StressChaos"
         assert body["metadata"]["namespace"] == "test-model"
         assert body["metadata"]["name"].startswith("chaos-cpu-stress-postgresql-")
-        assert body["spec"]["selector"] == SELECTOR
+        assert body["spec"]["selector"] == {"pods": {"test-model": ["target-pod"]}}
         assert body["spec"]["stressors"] == {"cpu": {"workers": 2}}
         assert body["spec"]["duration"] == "30s"
         assert client._created == [("stresschaos", "test-model", body["metadata"]["name"])]
@@ -540,3 +559,252 @@ class TestCleanupIdentity:
         assert mesh._created == []
         assert mesh._scopes == {}
         assert mesh._uids == {}
+
+
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+@pytest.mark.parametrize("matches", [0, 1, 2])
+def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) -> None:
+    # GIVEN other units and stale Pods sharing the selected unit annotation
+    backend = BackendStub()
+    pods = backend.core_v1_api.list_namespaced_pod.return_value.items
+    target = pods.pop(0)
+
+    for phase in ("Succeeded", "Failed"):
+        stale = deepcopy(target)
+        stale.status = k8s.V1PodStatus(phase=phase)
+        pods.append(stale)
+    stale = deepcopy(target)
+    stale.metadata.deletion_timestamp = datetime.now(timezone.utc)
+    pods.append(stale)
+    pods.extend(deepcopy(target) for _ in range(matches))
+    mesh = ChaosMeshChaosClient(backend)
+
+    def run() -> None:
+        if operation == "stress_cpu":
+            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))
+        else:
+            mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=10))
+
+    # WHEN selecting a unit, THEN only its single live Pod can be stressed
+    if matches == 1:
+        run()
+        body = backend.custom_objects_api.create_calls[0]["body"]
+        assert body["spec"]["selector"] == {"pods": {"test-model": ["target-pod"]}}
+    else:
+        with pytest.raises(RuntimeError, match="Expected one live Pod"):
+            run()
+        assert backend.custom_objects_api.create_calls == []
+
+
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+def test_stress_waits_for_injection_before_returning(operation: str) -> None:
+    # GIVEN a controller that reports unselected/pending before it injects the fault
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.inject_stress = False
+    now = 0.0
+    sleeps: list[float] = []
+
+    def pause(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+        sleeps.append(seconds)
+        obj = next(iter(api.objects.values()))
+        obj["status"] = {
+            "conditions": [
+                {"type": "Selected", "status": "True" if len(sleeps) > 1 else "False"},
+                {"type": "AllInjected", "status": "True"},
+                {"type": "AllRecovered", "status": "False"},
+            ],
+            "experiment": {"desiredPhase": "Run"},
+        }
+
+    mesh = ChaosMeshChaosClient(backend, clock=lambda: now, pause=pause)
+    if operation == "stress_cpu":
+        mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+    else:
+        mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=12))
+    # THEN resource creation alone, or AllInjected without Selected, cannot start the hold period.
+    assert sleeps == [1.0, 1.0]
+    assert now == 2
+    mesh.cleanup(TEST_MODEL, UNIT, "")
+    assert not api.objects
+
+
+@pytest.mark.parametrize(
+    "state", ["pending", "recovered", "stopped", "paused", "replacement", "wrong-owner", "api-error"]
+)
+def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
+    # GIVEN a created resource whose injection cannot be confirmed
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.inject_stress = False
+    now = 0.0
+
+    def pause(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+        obj = next(iter(api.objects.values()))
+        if state == "stopped":
+            obj["status"] = {"experiment": {"desiredPhase": "Stop"}}
+        elif state == "paused":
+            obj["status"] = {"conditions": [{"type": "Paused", "status": "True"}]}
+        elif state == "recovered":
+            obj["status"] = {
+                "experiment": {"desiredPhase": "Run"},
+                "conditions": [{"type": key, "status": "True"} for key in ("Selected", "AllInjected", "AllRecovered")],
+            }
+        elif state == "replacement":
+            obj["metadata"]["uid"] = "replacement"
+        elif state == "wrong-owner":
+            obj["metadata"]["annotations"] = {}
+        elif state == "api-error":
+            api.raise_on_read = ApiException(status=403)
+
+    mesh = ChaosMeshChaosClient(backend, startup_timeout=timedelta(seconds=3), clock=lambda: now, pause=pause)
+    expected = (
+        TimeoutError if state in {"pending", "recovered"} else (ApiException if state == "api-error" else RuntimeError)
+    )
+    with pytest.raises(expected):
+        mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+    assert now <= 3
+    assert len(mesh._created) == 1
+    assert not api.delete_calls
+    api.raise_on_read = None
+    # THEN ordinary failures remain cleanable; replaced or unowned resources are protected.
+    if state in {"replacement", "wrong-owner"}:
+        with pytest.raises(RuntimeError):
+            mesh.cleanup(TEST_MODEL, UNIT, "")
+        assert not api.delete_calls
+    else:
+        mesh.cleanup(TEST_MODEL, UNIT, "")
+        assert not api.objects
+
+
+def test_memory_targets_workload_container_only() -> None:
+    backend = BackendStub()
+    target = backend.core_v1_api.list_namespaced_pod.return_value.items[0]
+    target.spec.containers.append(k8s.V1Container(name="charm"))
+    chaos = ChaosMeshChaosClient(backend)
+    chaos.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
+    body = backend.custom_objects_api.create_calls[-1]["body"]
+    assert body["spec"]["containerNames"] == ["workload"]
+    assert body["spec"]["selector"] == {"pods": {TEST_MODEL.model: ["target-pod"]}}
+
+
+def test_memory_rejects_ambiguous_workload_containers() -> None:
+    backend = BackendStub()
+    target = backend.core_v1_api.list_namespaced_pod.return_value.items[0]
+    target.spec.containers.append(
+        k8s.V1Container(name="second", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="second")])
+    )
+    with pytest.raises(RuntimeError, match="one workload container"):
+        ChaosMeshChaosClient(backend).stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
+    assert not backend.custom_objects_api.create_calls
+
+
+class TestStressObservation:
+    @pytest.mark.parametrize("allow_completed", [False, True])
+    @pytest.mark.parametrize(
+        "state",
+        [
+            "running",
+            "completed",
+            "stopped",
+            "paused",
+            "pause-requested",
+            "deleting",
+            "lost-injection",
+            "record-not-injected",
+            "apply-failed",
+            "recover-failed",
+            "unknown",
+            "missing-status",
+            "null-status",
+            "wrong-owner",
+            "replacement",
+            "missing-uid",
+            "missing-resource",
+            "api-error",
+        ],
+    )
+    def test_status_changes_after_injection(self, state: str, allow_completed: bool) -> None:
+        # GIVEN an experiment whose initial injection succeeded
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        meta = MetaChaosClient([mesh])
+        meta.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
+        api = backend.custom_objects_api
+        resource = mesh._created[0]
+        obj = api.objects[resource]
+        conditions = obj["status"]["conditions"]
+        conditions.append({"type": "AllRecovered", "status": "False"})
+        record: dict[str, Any] = {"phase": "Injected", "events": []}
+        obj["status"]["experiment"]["containerRecords"] = [record]
+        if state in {"completed", "stopped", "recover-failed"}:
+            obj["status"]["experiment"]["desiredPhase"] = "Stop"
+            if state != "stopped":
+                conditions[-1]["status"] = "True"
+                record["phase"] = "Not Injected"
+        if state in {"apply-failed", "recover-failed"}:
+            record["events"] = [
+                {
+                    "type": "Failed",
+                    "operation": "Apply" if state == "apply-failed" else "Recover",
+                    "message": "daemon unavailable",
+                }
+            ]
+        elif state == "paused":
+            conditions.append({"type": "Paused", "status": "True"})
+        elif state == "pause-requested":
+            obj["metadata"]["annotations"]["experiment.chaos-mesh.org/pause"] = "true"
+        elif state == "deleting":
+            obj["metadata"]["deletionTimestamp"] = "2026-09-30T00:00:00Z"
+        elif state == "lost-injection":
+            conditions[1]["status"] = "False"
+        elif state == "record-not-injected":
+            record["phase"] = "Not Injected"
+        elif state == "unknown":
+            conditions[0]["status"] = "Unknown"
+        elif state == "missing-status":
+            del obj["status"]
+        elif state == "null-status":
+            obj["status"] = None
+        elif state == "wrong-owner":
+            obj["metadata"]["annotations"] = {}
+        elif state == "replacement":
+            obj["metadata"]["uid"] = "replacement"
+        elif state == "missing-uid":
+            mesh._uids.clear()
+        elif state == "missing-resource":
+            api.objects.clear()
+        elif state == "api-error":
+            api.raise_on_read = ApiException(status=503)
+
+        # WHEN observing, THEN only active or explicitly allowed completed runs pass
+        if state == "running" or (state == "completed" and allow_completed):
+            meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+        else:
+            expected = ApiException if state in {"missing-resource", "api-error"} else RuntimeError
+            with pytest.raises(expected):
+                meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+        assert mesh._created == [resource]
+        assert not api.delete_calls
+
+        # Failures do not lose the cleanup registration.
+        api.raise_on_read = None
+        if state not in {"wrong-owner", "replacement", "missing-uid"}:
+            meta.cleanup_all()
+            assert not mesh._created
+
+    @pytest.mark.parametrize("scope", ["unit", "controller", "io"])
+    def test_ignores_unrelated_experiments(self, scope: str) -> None:
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        if scope == "io":
+            mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=30))
+        else:
+            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+        backend.custom_objects_api.raise_on_read = ApiException(status=403)
+        model = JujuModelHandle(controller="other", model=TEST_MODEL.model) if scope == "controller" else TEST_MODEL
+        mesh.check_stress(model, "postgresql/1" if scope == "unit" else UNIT)
