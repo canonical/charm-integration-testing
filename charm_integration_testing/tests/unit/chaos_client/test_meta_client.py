@@ -187,6 +187,18 @@ def test_reports_unsupported_experiment(params: Params, empty: bool) -> None:
     assert all(operation == params.operation for operation, _ in tool.calls)
 
 
+@pytest.mark.parametrize("params", EXPERIMENTS, ids=lambda params: params.operation)
+def test_reports_unsupported_experiment_without_resolving_constraints(params: Params) -> None:
+    # GIVEN no configured client and a backend that cannot resolve chaos resource constraints
+    client = MetaChaosClient([], BackendStub(error=RuntimeError("list failed")), DEFAULT_CONSTRAINTS_CLIENT)
+
+    # WHEN requesting the experiment
+    # THEN the experiment is reported as unsupported rather than surfacing a resource
+    # constraints failure: with no client to run it, constraints are never resolved.
+    with pytest.raises(ChaosNotSupportedError, match=params.operation):
+        params.invoke(client)
+
+
 def test_selects_a_client_for_each_experiment() -> None:
     # GIVEN a stress-only client followed by one supporting both experiments
     stress_only = ClientStub({"stress_cpu"})

@@ -67,11 +67,15 @@ class MetaChaosClient(ChaosClient):
         self._network_cleanups: list[_CleanupAction] = []
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
-        constraints = self._resolve_constraints(model, unit)
-        merged_size_mb = self._merged_int(constraints.disk_fill_size_mb, size_mb)
-        self._dispatch(
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+            merged_size_mb = self._merged_int(constraints.disk_fill_size_mb, size_mb)
+            return lambda tool: tool.fill_disk(model, unit, path, merged_size_mb)
+
+        self._dispatch_constrained(
             "fill_disk",
-            lambda tool: tool.fill_disk(model, unit, path, merged_size_mb),
+            model,
+            unit,
+            build_invoke,
             lambda tool: self._experiment_cleanup(tool, model, unit, path),
             self._cleanups,
         )
@@ -85,19 +89,25 @@ class MetaChaosClient(ChaosClient):
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
     ) -> None:
-        constraints = self._resolve_constraints(model, unit)
-        match scenario:
-            case "exhaustion":
-                merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
-                merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
-            case "moderate_pressure":
-                merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
-                merged_duration = self._merged_duration(constraints.cpu_moderate_pressure_duration_seconds, duration)
-            case _:
-                raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
-        self._dispatch(
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+            match scenario:
+                case "exhaustion":
+                    merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
+                    merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
+                case "moderate_pressure":
+                    merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
+                    merged_duration = self._merged_duration(
+                        constraints.cpu_moderate_pressure_duration_seconds, duration
+                    )
+                case _:
+                    raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
+            return lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration)
+
+        self._dispatch_constrained(
             "stress_cpu",
-            lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration),
+            model,
+            unit,
+            build_invoke,
             lambda tool: self._experiment_cleanup(tool, model, unit),
             self._cleanups,
         )
@@ -112,21 +122,27 @@ class MetaChaosClient(ChaosClient):
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
     ) -> None:
-        constraints = self._resolve_constraints(model, unit)
-        match scenario:
-            case "exhaustion":
-                merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
-                merged_size_mb = self._merged_int(constraints.memory_exhaustion_size_mb, size_mb)
-                merged_duration = self._merged_duration(constraints.memory_exhaustion_duration_seconds, duration)
-            case "moderate_pressure":
-                merged_workers = self._merged_int(constraints.memory_moderate_pressure_workers, workers)
-                merged_size_mb = self._merged_int(constraints.memory_moderate_pressure_size_mb, size_mb)
-                merged_duration = self._merged_duration(constraints.memory_moderate_pressure_duration_seconds, duration)
-            case _:
-                raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
-        self._dispatch(
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+            match scenario:
+                case "exhaustion":
+                    merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
+                    merged_size_mb = self._merged_int(constraints.memory_exhaustion_size_mb, size_mb)
+                    merged_duration = self._merged_duration(constraints.memory_exhaustion_duration_seconds, duration)
+                case "moderate_pressure":
+                    merged_workers = self._merged_int(constraints.memory_moderate_pressure_workers, workers)
+                    merged_size_mb = self._merged_int(constraints.memory_moderate_pressure_size_mb, size_mb)
+                    merged_duration = self._merged_duration(
+                        constraints.memory_moderate_pressure_duration_seconds, duration
+                    )
+                case _:
+                    raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
+            return lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, merged_duration)
+
+        self._dispatch_constrained(
             "stress_memory",
-            lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, merged_duration),
+            model,
+            unit,
+            build_invoke,
             lambda tool: self._experiment_cleanup(tool, model, unit),
             self._cleanups,
         )
@@ -140,13 +156,17 @@ class MetaChaosClient(ChaosClient):
         percent: int,
         duration: timedelta,
     ) -> None:
-        constraints = self._resolve_constraints(model, unit)
-        merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
-        merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
-        merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
-        self._dispatch(
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+            merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
+            merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
+            merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
+            return lambda tool: tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+
+        self._dispatch_constrained(
             "io_latency",
-            lambda tool: tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration),
+            model,
+            unit,
+            build_invoke,
             lambda tool: self._experiment_cleanup(tool, model, unit, volume_path),
             self._cleanups,
         )
@@ -217,6 +237,27 @@ class MetaChaosClient(ChaosClient):
         if unit == "milliseconds":
             return timedelta(milliseconds=constraint_seconds_or_ms)
         return timedelta(seconds=constraint_seconds_or_ms)
+
+    def _dispatch_constrained(
+        self,
+        operation: str,
+        model: JujuModelHandle,
+        unit: str,
+        build_invoke: Callable[[CharmResourceConstraints], Callable[[ChaosClient], None]],
+        cleanup: Callable[[ChaosClient], _CleanupAction],
+        pending: list[_CleanupAction],
+    ) -> None:
+        """Resolve constraints only once a configured client could actually run the experiment.
+
+        With no tools configured at all, the experiment is unsupported regardless of
+        constraints, so resolving them first would risk surfacing a resource-constraints
+        failure instead of the expected unsupported-experiment outcome.
+        """
+        if not self._tools:
+            self._on_unsupported(operation)
+            return
+        invoke = build_invoke(self._resolve_constraints(model, unit))
+        self._dispatch(operation, invoke, cleanup, pending)
 
     def _dispatch(
         self,
