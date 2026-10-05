@@ -25,6 +25,9 @@ dev = [
 [project.entry-points."endpoint_validators"]
 etcd_client = "validators.etcd_client:EtcdClientValidator"
 
+[project.entry-points."endpoint_persistence_validators"]
+etcd_client = "validators.etcd_client:EtcdClientPersistenceValidator"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

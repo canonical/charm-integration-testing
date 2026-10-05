@@ -42,6 +42,12 @@ Components
   directory is configured -- so it is always safe to call, even for charms
   with no override on file.
 
+**Runtime wiring** (``chaos_client.MetaChaosClient``)
+  Resolves the deployed unit's charm metadata from Juju just before dispatching
+  ``fill_disk``, ``stress_cpu``, ``stress_memory`` or ``io_latency``. Any
+  configured constraint values are merged over the explicit arguments the test
+  passed, while unset fields leave the caller's original values unchanged.
+
 File format
 -----------
 
@@ -61,6 +67,37 @@ File format
 
 See ``static/charm-resource-constraints/README.md`` for the full list of
 supported scenarios and fields.
+
+Applying constraints at runtime
+-------------------------------
+
+Chaos tests keep calling ``MetaChaosClient`` the same way they do today. For
+the stress helpers only, the keyword-only ``scenario`` argument selects which
+constraint block to consult:
+
+- ``scenario="exhaustion"`` checks the ``*_exhaustion_*`` fields
+- ``scenario="moderate_pressure"`` checks the
+  ``*_moderate_pressure_*`` fields
+
+``fill_disk`` and ``io_latency`` do not take ``scenario``, because each has
+only one constraint field set.
+
+.. code-block:: python
+
+   from datetime import timedelta
+
+   require_chaos_tool.stress_memory(
+       model,
+       unit,
+       workers=1,
+       size_mb=512,
+       duration=timedelta(minutes=2),
+       scenario="moderate_pressure",
+   )
+
+If the charm has no file, no matching block, or only partially sets the chosen
+scenario's fields, the remaining values continue to come from the test's
+explicit arguments.
 
 Configuring the directory
 --------------------------
