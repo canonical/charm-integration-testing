@@ -11,6 +11,8 @@ from kubernetes.client import V1DeleteOptions, V1NetworkPolicy  # type: ignore[i
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from test_suite.test_live_network_isolation import test_live_network_isolation as run_isolation
 
+from validators.base import ValidationResult
+
 from ..chaos_client.shared import FakeNetworkingV1Api
 from ..extensions.shared import NullJujuBackend
 
@@ -67,12 +69,13 @@ class JujuSpy(JujuClient):
         if self.failure == phase:
             raise self.error
 
-    def validate_model(self, model: JujuModelHandle, level: str | None = "simple") -> None:
+    def validate_model(self, model: JujuModelHandle, level: str | None = "simple") -> dict[str, list[ValidationResult]]:
         assert model == MODEL
         assert level == "deep"
         self.events.append("validate")
         if self.failure == "validation":
             raise RuntimeError("validation failed")
+        return {}
 
 
 @pytest.mark.parametrize("failure", [None, "baseline", "create", "observation", "cleanup", "recovery", "validation"])

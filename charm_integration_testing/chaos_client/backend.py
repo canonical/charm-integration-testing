@@ -28,7 +28,11 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
+    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> timedelta | None:
+        raise NotImplementedError
+
+    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+        """Raise if tracked stress is not active; unsupported clients may omit this method."""
         raise NotImplementedError
 
     @abstractmethod

@@ -28,7 +28,7 @@ from test_suite.fixtures.chaos_tools import (
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
-from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api
+from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api, FakeWorkloadPodsApi
 from ...extensions.shared import NullJujuBackend
 
 pytest_plugins = ["pytester"]
@@ -48,6 +48,7 @@ class ClosingApiStub:
 class KubernetesStub(KubernetesBackend):
     def __init__(self) -> None:
         self.api_client = ClosingApiStub()
+        self.core_v1_api = FakeWorkloadPodsApi()
         self.crds: set[str] = set()
         self.crd_reads: list[str] = []
         self.ready_deployments: set[tuple[str, str]] = set()

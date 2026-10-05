@@ -364,11 +364,24 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
+    def check_application_health(self, model: JujuModelHandle, application: str) -> None:
+        """Reject workload failures and disconnected agents without requiring idle."""
+        self.logger.info("Checking application health for %s/%s.", model.uri, application)
+        health = self.backend.application_health(model, application)
+        if not health.units or set(health.units) != set(health.agents):
+            raise RuntimeError(f"Incomplete unit health for {model.uri}/{application}.")
+        if (
+            health.status in {"", "error", "blocked", "unknown"}
+            or any(status in {"", "error", "blocked", "unknown"} for status in health.units.values())
+            or any(status in {"", "error", "lost", "down", "unknown"} for status in health.agents.values())
+        ):
+            raise RuntimeError(f"Unhealthy application {model.uri}/{application}: {health}")
+
     def validate_model(
         self,
         model: JujuModelHandle,
         level: str | None = "simple",
-    ) -> None:
+    ) -> dict[str, list[ValidationResult]]:
         """Validate all applications in the model, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
@@ -379,6 +392,9 @@ class JujuClient:
             level: Validation level ("simple" or "deep"), or None to skip functional validation
                 entirely (e.g. when only running a persistence op).
 
+        Returns:
+            Functional validation results by unit, excluding persistence results.
+
         Raises:
             JujuValidationError: If any validation or persistence checks fail.
         """
@@ -388,6 +404,7 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        functional_results: dict[str, list[ValidationResult]] = {}
         persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
@@ -402,6 +419,9 @@ class JujuClient:
                 for extension in self.extensions:
                     for unit, unit_results in extension.post_validate(model, application, level).items():
                         results.setdefault(unit, []).extend(unit_results)
+
+            for unit, unit_results in results.items():
+                functional_results.setdefault(unit, []).extend(unit_results)
 
             for extension, persistence_operation in persistence_operations:
                 for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
@@ -445,6 +465,7 @@ class JujuClient:
         # Raise exception for any failed validation results
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
+        return functional_results
 
     def bootstrap_controller(
         self,
