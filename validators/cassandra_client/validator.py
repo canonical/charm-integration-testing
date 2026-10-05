@@ -261,9 +261,15 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
             try:
                 # `marker` is the partition key, so this is a single-partition read, not a full
                 # table scan - no ALLOW FILTERING needed, unlike a query on a non-key column.
+                # `checkpoint_ref` is the clustering key, and is additionally constrained to the
+                # expected [1, expected.ref] range: without this, rows replaced or corrupted with
+                # the same marker but different checkpoint_ref values could still satisfy a plain
+                # count and report a false PASS (mirroring the PostgreSQL reference
+                # implementation's `checkpoint_ref BETWEEN 1 AND %s`).
                 rows = session.execute(
-                    f"SELECT COUNT(*) FROM {qualified_table} WHERE marker = %s",  # nosec B608
-                    (marker,),
+                    f"SELECT COUNT(*) FROM {qualified_table} "  # nosec B608
+                    "WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s",
+                    (marker, expected.ref),
                 )
                 row = rows.one()
                 matching = int(row[0]) if row else 0

@@ -375,11 +375,14 @@ class TestCassandraClientPersistenceValidatorCheckpoint:
         # THEN
         assert any('"myks"."canary_da7d88bc9ad4_{:019d}"'.format(99) in q for q in session.executed_queries)
 
-    def test_filters_row_count_by_token(self) -> None:
+    def test_filters_row_count_by_token_and_checkpoint_ref_range(self) -> None:
         # GIVEN
         # Regression test for: checkpoint() must count only rows tagged with the per-run token,
         # not every row in the table - a table recreated from scratch with an unrelated but
-        # equally-sized set of rows would otherwise still pass.
+        # equally-sized set of rows would otherwise still pass. It must also constrain
+        # checkpoint_ref to the expected [1, expected.ref] range: without this, rows replaced or
+        # corrupted with the same marker but different checkpoint_ref values could still satisfy a
+        # plain count and report a false PASS.
         validator = _make_persistence_validator(VALID_DATABAG)
         session = SessionStub(execute_results=[RowsStub([(1,)])])
 
@@ -389,11 +392,15 @@ class TestCassandraClientPersistenceValidatorCheckpoint:
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
         # THEN the row count query and the follow-up insert are both scoped to the same token,
-        # which is random per prepare() run so it cannot be reproduced by a recreated table
+        # which is random per prepare() run so it cannot be reproduced by a recreated table, and
+        # the count is additionally range-bound on checkpoint_ref
         select_index = next(i for i, q in enumerate(session.executed_queries) if "COUNT(*)" in q)
         insert_index = next(i for i, q in enumerate(session.executed_queries) if "INSERT INTO" in q)
-        assert "WHERE marker = %s" in session.executed_queries[select_index]
-        assert session.executed_params[select_index] == (TEST_TOKEN,)
+        assert (
+            "WHERE marker = %s AND checkpoint_ref >= 1 AND checkpoint_ref <= %s"
+            in session.executed_queries[select_index]
+        )
+        assert session.executed_params[select_index] == (TEST_TOKEN, 1)
         assert session.executed_params[insert_index][0] == TEST_TOKEN
 
     def test_rejects_state_without_a_token(self) -> None:
