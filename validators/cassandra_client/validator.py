@@ -38,6 +38,17 @@ _CANARY_TABLE_PREFIX = "canary_"
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _IDENTIFIER_WIDTH = 19
 
+# Fields the legacy, unit-scoped "cassandra" interface actually publishes (see
+# _CassandraConnectionMixin._connection_data). Used to pick, per unit, whether that unit's
+# databag is usable - never to merge fields across units.
+_LEGACY_REQUIRED_FIELDS = ("host", "username", "password")
+
+# Replication settings for the dedicated keyspace this validator creates and owns when the
+# relation has no per-tenant keyspace of its own (the legacy "cassandra" interface has no
+# "database"/keyspace field at all - see _ensure_canary_keyspace). A replication factor of 1 is
+# sufficient for ephemeral canary data and works against a single-unit test deployment.
+_CANARY_KEYSPACE_REPLICATION = "{'class': 'SimpleStrategy', 'replication_factor': 1}"
+
 
 def _quote_identifier(name: str) -> str:
     """Safely quote a CQL identifier for interpolation into a query string.
@@ -49,27 +60,64 @@ def _quote_identifier(name: str) -> str:
 
 
 class _CassandraConnectionMixin:
-    """Shared credential-resolution and connection helpers for cassandra_client validators.
+    """Shared credential-resolution and connection helpers for cassandra validators.
 
     Kept separate from ``CassandraClientPersistenceValidator`` so a future functional
     (``BaseValidator``) validator for this interface can reuse the same logic without duplicating
     it, mirroring ``_PostgreSQLConnectionMixin`` in ``validators/postgresql_client/validator.py``.
     """
 
-    def _resolve_credentials(self) -> dict[str, str]:
-        """Resolve credentials from the relation databag or Juju secrets."""
-        return {
+    def _connection_data(self) -> dict[str, str]:
+        """Return the connection databag for this relation.
+
+        Prefers the modern, app-scoped convention (``endpoints``/``database``, matching
+        ``postgresql_client``/``mongodb_client``/``etcd_client``), resolving any Juju-secret-based
+        credentials via ``resolve_secret``. Falls back to the legacy, unit-scoped ``cassandra``
+        interface published by the only charm currently available for it (see
+        ``CassandraClientPersistenceValidator``'s class docstring): that charm never sets any
+        app-scoped relation data, instead publishing ``host``/``native_transport_port``/
+        ``username``/``password`` directly on each related unit's own databag, with no
+        per-relation keyspace concept at all.
+
+        Mirrors the unit-selection strategy ``MySQLValidator._connection_data`` uses for the
+        similarly unit-scoped legacy ``mysql`` interface (``validators/mysql/validator.py``):
+        never merge fields from different units - that could silently produce an invalid hybrid,
+        e.g. one unit's ``host`` combined with another's credentials. Instead select a single
+        unit's databag deterministically: the lowest-sorted unit whose databag has every legacy
+        field, falling back to the lowest-sorted unit's databag so an incomplete deployment still
+        surfaces a deterministic schema failure rather than a merged, inconsistent one.
+        """
+        creds = {
             **self.resolve_secret("secret-user", "username", "password"),  # type: ignore[attr-defined]
             **self.resolve_secret("secret-tls", "tls-ca"),  # type: ignore[attr-defined]
         }
+        data: dict[str, str] = self.databag | creds  # type: ignore[attr-defined]
+        if data.get("endpoints"):
+            return data
 
-    def _parse_endpoints(self, endpoints: str) -> tuple[list[str], int]:
-        """Parse a comma-separated "host:port" list into contact points and a shared port.
+        units = sorted(self.relation.units, key=lambda u: u.name)  # type: ignore[attr-defined]
+        unit_databags = [dict(self.relation.data.get(unit, {})) for unit in units]  # type: ignore[attr-defined]
+        for unit_databag in unit_databags:
+            if all(str(unit_databag.get(f, "")).strip() for f in _LEGACY_REQUIRED_FIELDS):
+                return unit_databag
+        return unit_databags[0] if unit_databags else data
 
-        ``Cluster`` takes one ``port`` shared by every contact point (unlike a list of
-        "host:port" pairs), so the port from the last entry that specifies one wins; every entry
-        is expected to share the same port in practice.
+    def _parse_endpoints(self, data: dict[str, str]) -> tuple[list[str], int]:
+        """Parse contact points and a shared port out of *data*.
+
+        Prefers a modern, comma-separated "endpoints" field ("host:port, host:port, ..."); falls
+        back to the legacy ``cassandra`` interface's single ``host``/``native_transport_port``
+        fields when "endpoints" isn't present. ``Cluster`` takes one ``port`` shared by every
+        contact point (unlike a list of "host:port" pairs), so for "endpoints" the port from the
+        last entry that specifies one wins; every entry is expected to share the same port in
+        practice.
         """
+        endpoints = data.get("endpoints")
+        if not endpoints:
+            host = data.get("host", "").strip()
+            port = int(data["native_transport_port"]) if data.get("native_transport_port") else 9042
+            return ([host] if host else [], port)
+
         hosts: list[str] = []
         port = 9042
         for entry in (e.strip() for e in endpoints.split(",")):
@@ -102,9 +150,9 @@ class _CassandraConnectionMixin:
         Callers are responsible for shutting the session's cluster down (``session.cluster.shutdown()``)
         once finished - this mirrors psycopg2's ``conn.close()`` in ``_PostgreSQLConnectionMixin``.
         """
-        hosts, port = self._parse_endpoints(data["endpoints"])
+        hosts, port = self._parse_endpoints(data)
         if not hosts:
-            raise RuntimeError("no usable contact points found in 'endpoints'")
+            raise RuntimeError("no usable contact points found in 'endpoints'/'host'")
         auth_provider = PlainTextAuthProvider(username=data["username"], password=data["password"])
         ssl_context = self._build_ssl_context(data["tls-ca"]) if data.get("tls-ca") else None
         cluster = Cluster(
@@ -121,8 +169,25 @@ class _CassandraConnectionMixin:
 
 
 class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersistenceValidator):
-    """Reference-style persistence validator for the ``cassandra_client`` interface, modelled on
+    """Reference-style persistence validator for the ``cassandra`` interface, modelled on
     ``PostgreSQLClientPersistenceValidator`` (see SQ103 and ``validators/postgresql_client/validator.py``).
+    Registered under the ``cassandra`` interface (not ``cassandra_client``) to match the
+    interface actually published by the ``cassandra`` charm on CharmHub - no charm currently
+    provides or requires a ``cassandra_client`` interface.
+
+    This validator supports two databag conventions:
+
+    - **Modern** (app-scoped ``endpoints``/``database``/``username``/``password``, matching
+      ``postgresql_client``/``mongodb_client``/``etcd_client``), for any future charm that
+      publishes this interface that way.
+    - **Legacy** (the only charm currently published for this interface, ``cassandra`` revision
+      65): a reactive-framework charm that sets no app-scoped relation data at all, instead
+      publishing ``host``/``native_transport_port``/``username``/``password`` directly on each
+      related unit's own databag, with no per-relation keyspace concept. ``_connection_data``
+      selects a single unit's databag deterministically (never merging across units, mirroring
+      ``MySQLValidator._connection_data`` for the similarly unit-scoped legacy ``mysql``
+      interface), and ``_open_session`` falls back to a dedicated keyspace this validator creates
+      and owns (see ``_ensure_canary_keyspace``) when no ``database`` field is published.
 
     Each validator instance owns a dedicated canary table named
     ``canary_{scope_token}_{identifier}``, where ``scope_token`` is a fixed-width hash of this
@@ -261,46 +326,89 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
         ``..._backup``) is skipped instead of destroyed.
         """
         self._require_requires_role()
+        data = self._connection_data()
         # Incomplete credentials mean cleanup can't run: raise PersistenceNotApplicable so the
         # runner records a skip (not a successful cleanup) and keeps the tracked state, rather than
         # forgetting orphaned canary data.
-        creds = self._resolve_credentials()
-        if not self.validate_schema(["endpoints", "database", "username", "password"], creds).passed:
+        if not self._has_usable_credentials(data):
             raise PersistenceNotApplicable(
                 "Relation credentials are incomplete; cleanup cannot remove canary data yet."
             )
-        session, keyspace = self._open_session()
+        session = self._connect(data)
         try:
-            rows = session.execute(
-                "SELECT table_name FROM system_schema.tables WHERE keyspace_name = %s",
-                (keyspace,),
-            )
-            table_names = [row[0] for row in rows]
-            name_regex = self._canary_table_regex()
-            for table_name in table_names:
-                match = name_regex.fullmatch(table_name)
-                if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
-                    continue
-                qualified_table = self._qualified_table(keyspace, table_name)
-                session.execute(f"DROP TABLE IF EXISTS {qualified_table}")  # nosec B608 - identifier came from system_schema and was matched against a fixed shape regex above
+            keyspace = data.get("database")
+            if keyspace:
+                self._drop_discovered_canary_tables(session, keyspace)
+            else:
+                # Legacy "cassandra" interface: this validator owns a dedicated keyspace (see
+                # _ensure_canary_keyspace) rather than sharing one with the charm, so cleanup drops
+                # the whole keyspace outright instead of hunting for individual tables inside it.
+                # IF EXISTS makes this safe to call even if prepare() was never reached.
+                session.execute(
+                    f"DROP KEYSPACE IF EXISTS {_quote_identifier(self._canary_keyspace_name())}"  # nosec B608 - keyspace name is derived from a fixed model/relation/unit hash, not user input
+                )
         finally:
             session.cluster.shutdown()
+
+    def _drop_discovered_canary_tables(self, session: Session, keyspace: str) -> None:
+        """Discover and drop every canary table this validator instance may have created in
+        *keyspace*, matching the fixed-width pattern _canary_table_regex() produces so a
+        same-prefixed but unrelated table (e.g. a hand-created "..._backup") is skipped instead
+        of destroyed."""
+        rows = session.execute(
+            "SELECT table_name FROM system_schema.tables WHERE keyspace_name = %s",
+            (keyspace,),
+        )
+        table_names = [row[0] for row in rows]
+        name_regex = self._canary_table_regex()
+        for table_name in table_names:
+            match = name_regex.fullmatch(table_name)
+            if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
+                continue
+            qualified_table = self._qualified_table(keyspace, table_name)
+            session.execute(f"DROP TABLE IF EXISTS {qualified_table}")  # nosec B608 - identifier came from system_schema and was matched against a fixed shape regex above
 
     def _require_requires_role(self) -> None:
         if self.role != "requires":
             raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
 
+    def _has_usable_credentials(self, data: dict[str, str]) -> bool:
+        """Whether *data* has everything _open_session()/_connect() needs: a username/password
+        pair, plus at least one usable contact point under either the modern "endpoints" field or
+        the legacy "host" field."""
+        if not self.validate_schema(["username", "password"], data=data).passed:
+            return False
+        hosts, _ = self._parse_endpoints(data)
+        return bool(hosts)
+
     def _open_session(self) -> tuple[Session, str]:
-        creds = self._resolve_credentials()
-        data = self.databag | creds
+        data = self._connection_data()
         # Unlike the functional validator's ValidationCheck-reporting path, these methods have no
         # check list to report a schema failure through, so a missing/blank required field is
         # raised rather than silently reaching the driver with incomplete credentials.
-        schema_check = self.validate_schema(["endpoints", "database", "username", "password"], creds)
+        schema_check = self.validate_schema(["username", "password"], data=data)
         if not schema_check.passed:
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
         session = self._connect(data)
-        return session, data["database"]
+        keyspace = data.get("database")
+        if keyspace:
+            # Modern convention: the charm already provisioned a per-relation keyspace for us.
+            return session, keyspace
+        # Legacy "cassandra" interface: no per-relation keyspace exists at all, so this validator
+        # owns a dedicated keyspace, scoped the same way its canary tables already are (see
+        # _canary_table_prefix), and creates it on demand.
+        return session, self._ensure_canary_keyspace(session)
+
+    def _canary_keyspace_name(self) -> str:
+        return f"canary_{self._canary_scope_token()}"
+
+    def _ensure_canary_keyspace(self, session: Session) -> str:
+        keyspace = self._canary_keyspace_name()
+        session.execute(
+            f"CREATE KEYSPACE IF NOT EXISTS {_quote_identifier(keyspace)} "  # nosec B608 - keyspace name is derived from a fixed model/relation/unit hash, not user input
+            f"WITH replication = {_CANARY_KEYSPACE_REPLICATION}"
+        )
+        return keyspace
 
     def _qualified_table(self, keyspace: str, table_name: str) -> str:
         return f"{_quote_identifier(keyspace)}.{_quote_identifier(table_name)}"

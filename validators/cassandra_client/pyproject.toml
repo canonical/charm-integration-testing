@@ -4,7 +4,7 @@
 [project]
 name = "validators-cassandra-client"
 version = "0.1.0"
-description = "Validator for cassandra_client interface"
+description = "Validator for the cassandra interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [project.entry-points."endpoint_persistence_validators"]
-cassandra_client = "validators.cassandra_client:CassandraClientPersistenceValidator"
+cassandra = "validators.cassandra_client:CassandraClientPersistenceValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]

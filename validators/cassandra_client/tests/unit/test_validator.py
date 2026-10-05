@@ -17,6 +17,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -41,10 +42,39 @@ def _make_persistence_validator(
         ops.CharmBase,
         make_charm_from_relation(
             relation,
-            interface_name="cassandra_client",
+            interface_name="cassandra",
             role=role,
             local_model_uuid=model_uuid,
             local_unit_name=unit_name,
+        ),
+    )
+    return CassandraClientPersistenceValidator(charm, cast(ops.Relation, relation))
+
+
+def _make_legacy_persistence_validator(
+    unit_databags: dict[str, dict[str, str]],
+    endpoint: str = "db",
+    role: RelationRoleStub = RelationRoleStub.requires,
+    relation_id: int = 0,
+    model_uuid: str = "11111111-1111-1111-1111-111111111111",
+    local_unit_name: str = "app/0",
+) -> CassandraClientPersistenceValidator:
+    """Build a validator against a legacy, unit-scoped relation: the remote application sets no
+    app-scoped data at all (matching the real "cassandra" charm), and each entry in
+    *unit_databags* (keyed by unit name) becomes that remote unit's own databag."""
+    app = ApplicationStub()
+    units = [UnitStub(name) for name in unit_databags]
+    data: dict[Any, dict[str, str]] = {app: {}}
+    data.update({unit: unit_databags[unit.name] for unit in units})
+    relation = RelationStub(name=endpoint, id=relation_id, app=app, data=data, units=frozenset(units))
+    charm = cast(
+        ops.CharmBase,
+        make_charm_from_relation(
+            relation,
+            interface_name="cassandra",
+            role=role,
+            local_model_uuid=model_uuid,
+            local_unit_name=local_unit_name,
         ),
     )
     return CassandraClientPersistenceValidator(charm, cast(ops.Relation, relation))
@@ -350,7 +380,7 @@ class TestCassandraClientPersistenceValidatorCheckpoint:
 
         # THEN
         assert result.endpoint == "my-db"
-        assert result.interface == "cassandra_client"
+        assert result.interface == "cassandra"
         assert result.level == "deep"
 
     def test_raises_when_expected_identifier_is_out_of_range(self) -> None:
@@ -510,6 +540,112 @@ class TestCassandraClientPersistenceValidatorCleanup:
     def test_noop_when_endpoints_present_but_other_required_fields_are_missing(self) -> None:
         # GIVEN a relation with "endpoints" but not yet database/username/password (still mid-setup).
         validator = _make_persistence_validator({"endpoints": "10.1.2.3:9042"})
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(PersistenceNotApplicable):
+                validator.cleanup()
+
+        # THEN no connection was attempted
+        mock_cluster_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Legacy, unit-scoped "cassandra" interface (the only charm currently published for it; see
+# CassandraClientPersistenceValidator's class docstring). Unlike the modern tests above - which
+# put "endpoints"/"database"/"username"/"password" in the remote application's own databag - these
+# tests put only "host"/"native_transport_port"/"username"/"password" on each remote *unit's* own
+# databag, with no app-scoped data at all, matching what the real charm actually publishes.
+# ---------------------------------------------------------------------------
+
+LEGACY_UNIT_DATABAG: dict[str, str] = {
+    "host": "10.1.2.3",
+    "native_transport_port": "9042",
+    "username": "myuser",
+    "password": "mypassword",
+}
+
+
+class TestCassandraClientPersistenceValidatorLegacyInterface:
+    def test_prepare_uses_host_and_native_transport_port_as_contact_point(self) -> None:
+        # GIVEN a relation with no app-scoped data, only a single legacy unit databag
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            state = validator.prepare()
+
+        # THEN the single legacy unit's host/port were used as the contact point
+        assert mock_cluster_cls.call_args.kwargs["contact_points"] == ["10.1.2.3"]
+        assert mock_cluster_cls.call_args.kwargs["port"] == 9042
+        assert isinstance(state, PersistenceState)
+        assert state.ref == 1
+
+    def test_prepare_creates_and_uses_a_dedicated_keyspace_when_no_database_field_exists(self) -> None:
+        # GIVEN a legacy relation with no "database" (keyspace) field anywhere
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN a dedicated keyspace was created before the canary table, and every subsequent
+        # query is qualified against that same keyspace rather than any charm-provided one.
+        queries = session.executed_queries
+        assert "CREATE KEYSPACE IF NOT EXISTS" in queries[0]
+        assert all('"canary_da7d88bc9ad4"' in q for q in queries if "canary_" in q.split(".")[0])
+
+    def test_never_merges_fields_from_different_units(self) -> None:
+        # GIVEN two legacy units, one with a complete databag and one deliberately incomplete -
+        # a naive merge of the two could produce a usable-looking hybrid that isn't real.
+        complete = {**LEGACY_UNIT_DATABAG, "host": "10.9.9.9"}
+        incomplete = {"host": "10.1.1.1", "native_transport_port": "9042"}  # no username/password
+        validator = _make_legacy_persistence_validator({"cassandra/0": incomplete, "cassandra/1": complete})
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN the complete unit's own host was used in full, not a hybrid of the two
+        assert mock_cluster_cls.call_args.kwargs["contact_points"] == ["10.9.9.9"]
+
+    def test_falls_back_to_lowest_sorted_unit_when_none_are_complete(self) -> None:
+        # GIVEN two legacy units, neither with a complete databag
+        validator = _make_legacy_persistence_validator(
+            {
+                "cassandra/1": {"host": "10.2.2.2"},
+                "cassandra/0": {"host": "10.1.1.1"},
+            }
+        )
+
+        # WHEN / THEN a deterministic schema failure is surfaced (missing username/password),
+        # rather than silently reaching the driver with an incomplete/merged credential set.
+        with pytest.raises(RuntimeError, match="username"):
+            validator.prepare()
+
+    def test_cleanup_drops_the_dedicated_keyspace_when_no_database_field_exists(self) -> None:
+        # GIVEN
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.cleanup()
+
+        # THEN the whole dedicated keyspace is dropped outright, rather than hunting for
+        # individual tables inside a keyspace this validator doesn't actually own.
+        assert any("DROP KEYSPACE IF EXISTS" in q and '"canary_da7d88bc9ad4"' in q for q in session.executed_queries)
+
+    def test_cleanup_is_a_noop_when_legacy_fields_are_incomplete(self) -> None:
+        # GIVEN a legacy unit databag missing credentials (e.g. relation still mid-setup)
+        validator = _make_legacy_persistence_validator({"cassandra/0": {"host": "10.1.2.3"}})
 
         with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
             # WHEN / THEN

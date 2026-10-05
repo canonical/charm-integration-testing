@@ -1,0 +1,162 @@
+CassandraClientPersistenceValidator — verification summary
+============================================================
+Date: 2026-10-05
+Commit base: 6dbd88fa839b43e0507f50c8ee53788210a74193
+Scope: validators/cassandra_client/ (CassandraClientPersistenceValidator)
+
+ORIGINAL CLAIM UNDER INVESTIGATION
+-----------------------------------
+Prior agents implemented CassandraClientPersistenceValidator (prepare/checkpoint/cleanup,
+canary-table pattern) registered under the `cassandra_client` interface, then claimed no charm
+exists that satisfies the interface, so live (end-to-end) verification was impossible.
+
+VERDICT: The code itself was correct and well-tested, but the interface registration was wrong,
+and that claim was half right: no charm anywhere provides/requires `cassandra_client` — but a real
+charm (`cassandra`, the legacy reactive-framework charm, CharmHub revision 65) does exist for the
+related, actually-published interface `cassandra`. Rather than stop at "no charm, can't verify", a
+live deployment was built (LXD substrate, the real `cassandra` charm, and a throwaway custom
+requirer charm) and the validator was re-pointed at the `cassandra` interface, run against it, and
+fixed where its assumptions didn't match the real charm's protocol. Full prepare -> disrupt
+(real service restart) -> checkpoint -> cleanup lifecycle now passes against live infrastructure.
+
+STEP 1 — STATIC VERIFICATION (code, tests, wiring)
+----------------------------------------------------
+- validator.py reviewed in full: canary-table pattern (masked 63-bit identifiers, random
+  per-prepare token, token-scoped row counts, system_schema.tables-based cleanup discovery,
+  role gating) matches the PostgreSQLClientPersistenceValidator reference design.
+- poetry run pytest validators/cassandra_client -q         -> 35/35 passed
+  (29 original + 6 new tests added in this session for the legacy unit-scoped databag path)
+- poetry run pytest validators/runner -q                   -> 66/66 passed
+- Entry point verified via importlib.metadata.entry_points(group="endpoint_persistence_validators")
+  -> resolves "cassandra" -> CassandraClientPersistenceValidator
+- ./scripts/format.sh and ./scripts/lint.sh (ruff, mypy, bandit, yamlfix, markdownlint-cli2)
+  -> all clean
+
+STEP 2 — INDEPENDENTLY RE-CHECKING THE "NO CHARM" CLAIM
+----------------------------------------------------------
+- Queried CharmHub directly (bundle_builder_x CharmhubClient.find_charms and the raw
+  https://api.charmhub.io/v2/charms/find API) for any charm providing/requiring
+  `cassandra_client`: zero results, both ways. The claim of "no `cassandra_client` charm" was
+  correct.
+- However, exactly one Cassandra-related charm exists on CharmHub: `cassandra` (reactive
+  framework, machine charm, last published 2021, revision 65, channel latest/stable), which
+  provides the interface `cassandra` (NOT `cassandra_client`) on a `database`/`database-admin`
+  endpoint. `data-integrator` declares its own `cassandra` endpoint using `interface:
+  cassandra_client` — a genuine mismatch against the real charm, which is almost certainly why
+  the validator was originally built against `cassandra_client` in the first place.
+  No requires-side charm for `cassandra` exists either, so a throwaway custom charm was required
+  regardless of which interface name was used.
+- Searched for any other Cassandra/Scylla-family charm names (cassandra-k8s, scylla, scylladb,
+  cassandra-operator, datastax): none exist.
+- Decision (user-approved): reconcile the validator's registration to the real interface
+  (`cassandra`) rather than the aspirational one (`cassandra_client`), since only the former is
+  actually published, and build a throwaway requirer charm to enable a genuine live test rather
+  than stopping at a documented blocker.
+
+STEP 3 — BUILDING LIVE INFRASTRUCTURE
+----------------------------------------
+- Installed LXD 5.21 and Juju 3.6.29 (snap), bootstrapped controller `lxd-ctrl` on `localhost`,
+  created model `cassandra-test`.
+- Scaffolded and packed a minimal throwaway charm `cassandra-tester` (charmcraft, ubuntu@24.04)
+  declaring `requires: database: interface: cassandra`.
+- Deployed the real `cassandra` charm (channel latest/stable, revision 65). Its default
+  `install_sources` (http://www.apache.org/dist/cassandra/debian) is dead/decommissioned
+  upstream; fixed via `juju config cassandra install_sources=...` pointing at
+  https://debian.cassandra.apache.org, plus a manual GPG key import, to get the charm's install
+  hook to succeed. This is itself evidence the charm is unmaintained since ~2021 — a real caveat
+  on how "supported" this interface is going forward, independent of the validator's correctness.
+- Related `cassandra:database <-> cassandra-tester:database` over interface `cassandra`; both
+  units reached active/idle.
+
+STEP 4 — CRITICAL FINDING: DATABAG SCHEMA MISMATCH (reproduced, not speculative)
+------------------------------------------------------------------------------------
+Inspecting the real relation data (`juju show-unit cassandra-tester/1`) showed the `cassandra`
+charm publishes connection data per-UNIT (cluster_name, datacenter, host, native_transport_port,
+password, rpc_port, username) — it never sets ANY app-scoped relation data, has no `endpoints`
+field, no per-relation `database` (keyspace) field, and no TLS/secrets. The validator, as
+originally written, assumed a modern data-integrator-style app-scoped databag
+(endpoints/database/username/password), matching its postgresql_client/mongodb_client/etcd_client
+siblings.
+
+Running `run_validators --persistence prepare` against this live relation reproduced the expected
+failure exactly: `ERROR ... RuntimeError: Cannot open a connection for database: Missing:
+endpoints, database, username, password`.
+
+STEP 5 — FIX: ADAPT THE VALIDATOR (user-approved option)
+-------------------------------------------------------------
+validators/cassandra_client/validator.py now supports both conventions:
+- Modern (app-scoped endpoints/database/username/password) — unchanged behaviour, all 29
+  pre-existing unit tests still pass unmodified.
+- Legacy (the real `cassandra` charm's unit-scoped host/native_transport_port/username/password,
+  no keyspace at all): `_connection_data()` selects a single remote unit's databag
+  deterministically (never merging fields across units — mirrors the existing precedent in
+  `validators/mysql/validator.py`'s `MySQLValidator._connection_data`, which solves the identical
+  problem for the similarly unit-scoped legacy `mysql` interface), and `_open_session()` falls
+  back to a dedicated keyspace this validator creates and owns
+  (`canary_<model/relation/unit-scope-token>`) when no `database` field exists. `cleanup()` drops
+  that whole dedicated keyspace outright in the legacy case, instead of hunting for individual
+  tables inside a keyspace it doesn't own.
+- Verified live, before writing any code, that the real charm's granted credentials actually
+  permit CREATE/DROP KEYSPACE (tested directly via the cassandra-driver against the real node).
+- 6 new unit tests added covering: legacy host/port contact point resolution, dedicated-keyspace
+  creation/use, never-merge-across-units safety (including a deliberately incomplete unit),
+  deterministic fallback-to-lowest-sorted-unit, and legacy-mode cleanup (keyspace drop + no-op
+  on incomplete credentials).
+- Re-ran full test/lint suite after the fix: 35/35 cassandra_client tests, 66/66 runner tests,
+  format.sh and lint.sh all clean.
+
+STEP 6 — LIVE END-TO-END VERIFICATION (after the fix)
+----------------------------------------------------------
+All commands run via `development-sandbox/bin/dev-persistence.py` against the live
+`cassandra-tester/1` unit (model `cassandra-test`, relation id 2, interface `cassandra`):
+
+1. prepare()
+   -> state written: {"id": 3369444302444599851, "ref": 1, "token": "171e930b..."}
+   -> confirmed directly on the real Cassandra node (cassandra-driver query): dedicated keyspace
+      `canary_b725fb5f636f` created, canary table created, one tagged row present.
+
+2. REAL DISRUPTION: `sudo systemctl restart cassandra` on cassandra/0 (the actual Cassandra
+   process was stopped and restarted — not a no-op). Waited for the native transport port
+   (9042) to come back up and both units to return to active/idle before checkpointing (an
+   immediate checkpoint attempt correctly surfaced `ConnectionRefusedError` while the service was
+   still starting, rather than falsely passing).
+
+3. checkpoint(expected) -> PASS
+   "Found expected 1 marked row(s) in 'canary_b725fb5f636f_3369444302444599851'."
+   This is the core claim of a persistence validator demonstrated for real: canary data written
+   before a disruption was independently verified present, by token, after the disruption.
+
+4. cleanup() -> confirmed via direct driver query: the dedicated canary keyspace was fully
+   removed from the cluster afterward.
+
+An earlier full lifecycle run (prepare -> checkpoint -> cleanup, no disruption in between) was
+also exercised first as a smoke test and passed identically.
+
+CAVEATS / LIMITATIONS
+------------------------
+- The `cassandra` charm is effectively unmaintained (reactive framework, last published 2021,
+  broken default install_sources) — this is a property of the only available charm for this
+  interface, not of the validator. Future revalidation against this charm may need the same
+  install_sources/GPG workaround documented in this session's history.
+- `development-sandbox/bin/verify-persistence-validator.sh`'s default disruption (scale the
+  provider to zero units and back) was deliberately NOT used for the live run: this charm is a
+  single-unit machine charm with no declared Juju storage, so scaling to zero destroys the
+  underlying LXD machine/container and all Cassandra data irrecoverably, and scaling back up
+  reinstalls from scratch (hitting the same install_sources/GPG issue again). A real, in-place
+  service restart (`systemctl restart cassandra`) was used instead as a meaningful, non-destructive
+  disruption that a real operational event (e.g. a service crash/restart) could plausibly produce.
+  `verify-persistence-validator.sh --down-cmd/--restore-cmd` could be pointed at this same
+  restart/wait pattern for a fully scripted bundle, but was not run as-is in this session.
+- Only a single Cassandra unit was deployed/tested; multi-node contact-point behavior
+  (`_parse_endpoints`'s "endpoints" comma-list path) is covered by unit tests but was not
+  exercised live.
+
+CONCLUSION
+------------
+CassandraClientPersistenceValidator is correct, well-tested, and now genuinely verified end-to-end
+against real, live infrastructure: a real Juju relation, the real published `cassandra` charm, and
+a real service-level disruption. The validator's interface registration was corrected from the
+aspirational `cassandra_client` (no charm anywhere implements it) to the actually-published
+`cassandra` interface, and its credential-resolution logic was extended (not replaced) to also
+support that charm's real, unit-scoped, keyspace-less databag convention, while remaining fully
+backward compatible with the modern app-scoped convention its PostgreSQL/MongoDB/etcd siblings use.
