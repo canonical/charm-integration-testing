@@ -43,12 +43,6 @@ _IDENTIFIER_WIDTH = 19
 # databag is usable - never to merge fields across units.
 _LEGACY_REQUIRED_FIELDS = ("host", "username", "password")
 
-# Replication settings for the dedicated keyspace this validator creates and owns when the
-# relation has no per-tenant keyspace of its own (the legacy "cassandra" interface has no
-# "database"/keyspace field at all - see _ensure_canary_keyspace). A replication factor of 1 is
-# sufficient for ephemeral canary data and works against a single-unit test deployment.
-_CANARY_KEYSPACE_REPLICATION = "{'class': 'SimpleStrategy', 'replication_factor': 1}"
-
 
 def _quote_identifier(name: str) -> str:
     """Safely quote a CQL identifier for interpolation into a query string.
@@ -96,7 +90,14 @@ class _CassandraConnectionMixin:
             return data
 
         units = sorted(self.relation.units, key=lambda u: u.name)  # type: ignore[attr-defined]
-        unit_databags = [dict(self.relation.data.get(unit, {})) for unit in units]  # type: ignore[attr-defined]
+        unit_databags: list[dict[str, str]] = []
+        for unit in units:
+            unit_data = dict(self.relation.data.get(unit, {}))  # type: ignore[attr-defined]
+            unit_creds = {
+                **self.resolve_secret("secret-user", "username", "password", data=unit_data),  # type: ignore[attr-defined]
+                **self.resolve_secret("secret-tls", "tls-ca", data=unit_data),  # type: ignore[attr-defined]
+            }
+            unit_databags.append(unit_data | unit_creds)
         for unit_databag in unit_databags:
             if all(str(unit_databag.get(f, "")).strip() for f in _LEGACY_REQUIRED_FIELDS):
                 return unit_databag
@@ -334,6 +335,13 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
             raise PersistenceNotApplicable(
                 "Relation credentials are incomplete; cleanup cannot remove canary data yet."
             )
+        if "endpoints" in data and not data.get("database"):
+            # Mirrors the guard in _open_session(): a modern, app-scoped relation missing its
+            # "database" keyspace is a misconfiguration, not the unit-scoped legacy interface, so
+            # cleanup must not guess at (or drop) a validator-owned keyspace it never created.
+            raise PersistenceNotApplicable(
+                "Relation published 'endpoints' but no 'database' keyspace; cleanup cannot proceed."
+            )
         session = self._connect(data)
         try:
             keyspace = data.get("database")
@@ -389,6 +397,17 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
         schema_check = self.validate_schema(["username", "password"], data=data)
         if not schema_check.passed:
             raise RuntimeError(f"Cannot open a connection for {self.endpoint}: {schema_check.message}")
+        if "endpoints" in data and not data.get("database"):
+            # A modern, app-scoped relation (publishing "endpoints") is expected to also publish
+            # "database" - the provider's intended keyspace. Falling back to a validator-owned
+            # keyspace here would mean reading/writing an independent keyspace instead of the
+            # provider's, letting a misconfigured modern provider produce a false persistence
+            # PASS. The dedicated-keyspace fallback below is reserved for the unit-scoped legacy
+            # "cassandra" interface, which never has an "endpoints" key at all.
+            raise RuntimeError(
+                f"Cannot open a connection for {self.endpoint}: relation published 'endpoints' but "
+                "no 'database' keyspace"
+            )
         session = self._connect(data)
         keyspace = data.get("database")
         if keyspace:
@@ -406,9 +425,24 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
         keyspace = self._canary_keyspace_name()
         session.execute(
             f"CREATE KEYSPACE IF NOT EXISTS {_quote_identifier(keyspace)} "  # nosec B608 - keyspace name is derived from a fixed model/relation/unit hash, not user input
-            f"WITH replication = {_CANARY_KEYSPACE_REPLICATION}"
+            f"WITH replication = {self._canary_keyspace_replication(session)}"
         )
         return keyspace
+
+    def _canary_keyspace_replication(self, session: Session) -> str:
+        """Replication settings for ``_ensure_canary_keyspace``, sized to the live cluster.
+
+        A fixed replication factor of 1 would mean losing (or replacing) the single node that
+        owns the canary's only replica makes this validator report data loss caused by its own
+        keyspace setup, even on a cluster where a properly replicated application keyspace would
+        have survived the same event. Deriving the factor from the number of nodes currently up
+        keeps a single-node deployment working (factor 1, the only value quorum allows) while
+        giving a multi-node cluster real replication, capped at 3 since Cassandra sees
+        diminishing resilience/consistency benefit beyond that.
+        """
+        host_count = sum(1 for host in session.cluster.metadata.all_hosts() if host.is_up is not False)
+        replication_factor = max(1, min(host_count, 3))
+        return f"{{'class': 'SimpleStrategy', 'replication_factor': {replication_factor}}}"
 
     def _qualified_table(self, keyspace: str, table_name: str) -> str:
         return f"{_quote_identifier(keyspace)}.{_quote_identifier(table_name)}"

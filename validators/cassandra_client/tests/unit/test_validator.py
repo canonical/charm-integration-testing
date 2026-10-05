@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
 from validators.cassandra_client.validator import CassandraClientPersistenceValidator
-from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
 from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
@@ -81,9 +81,27 @@ def _make_legacy_persistence_validator(
 
 
 @dataclass
+class HostStub:
+    """Minimal stub for cassandra.pool.Host; only the "is_up" flag matters here."""
+
+    is_up: bool | None = True
+
+
+@dataclass
+class MetadataStub:
+    """Minimal stub for cassandra.metadata.Metadata; only all_hosts() is used here."""
+
+    hosts: list[HostStub] = field(default_factory=lambda: [HostStub()])
+
+    def all_hosts(self) -> list[HostStub]:
+        return self.hosts
+
+
+@dataclass
 class ClusterStub:
     """Minimal stub for cassandra.cluster.Cluster; tracks whether shutdown() was called."""
 
+    metadata: MetadataStub = field(default_factory=MetadataStub)
     shutdown_called: bool = field(default=False, init=False)
 
     def shutdown(self) -> None:
@@ -206,6 +224,24 @@ class TestCassandraClientPersistenceValidatorConnection:
         # WHEN / THEN
         with pytest.raises(RuntimeError, match="contact points"):
             validator.prepare()
+
+    def test_prepare_rejects_modern_relation_missing_database_instead_of_using_a_dedicated_keyspace(
+        self,
+    ) -> None:
+        # GIVEN a modern, app-scoped relation (has "endpoints") that is missing "database" - a
+        # misconfigured provider, not the legacy interface. Regression test for: this used to
+        # silently fall back to a validator-owned dedicated keyspace instead of the provider's
+        # intended one, which could mask a real provider misconfiguration as a false PASS.
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "database"}
+        validator = _make_persistence_validator(databag)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="database"):
+                validator.prepare()
+
+        # THEN no connection was even attempted, let alone a dedicated keyspace created.
+        mock_cluster_cls.assert_not_called()
 
 
 class TestCassandraClientPersistenceValidatorPrepare:
@@ -549,6 +585,21 @@ class TestCassandraClientPersistenceValidatorCleanup:
         # THEN no connection was attempted
         mock_cluster_cls.assert_not_called()
 
+    def test_raises_not_applicable_when_modern_relation_is_missing_database(self) -> None:
+        # GIVEN a modern, app-scoped relation (has "endpoints" and full credentials) that is
+        # missing "database" - mirrors the prepare()/checkpoint() guard: cleanup must not guess
+        # at, or drop, a validator-owned keyspace it never created for a misconfigured provider.
+        databag = {k: v for k, v in VALID_DATABAG.items() if k != "database"}
+        validator = _make_persistence_validator(databag)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(PersistenceNotApplicable):
+                validator.cleanup()
+
+        # THEN no connection was attempted
+        mock_cluster_cls.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Legacy, unit-scoped "cassandra" interface (the only charm currently published for it; see
@@ -654,3 +705,85 @@ class TestCassandraClientPersistenceValidatorLegacyInterface:
 
         # THEN no connection was attempted
         mock_cluster_cls.assert_not_called()
+
+    def test_resolves_username_and_password_from_a_juju_secret_on_the_unit_databag(self) -> None:
+        # GIVEN a legacy unit databag that publishes its credentials as a Juju secret URI
+        # (secret-user) instead of plaintext username/password fields. Regression test for: this
+        # previously read "username"/"password" directly off the unit databag, so a secret URI
+        # would be passed to the driver as the literal credential instead of being resolved.
+        app = ApplicationStub()
+        unit = UnitStub("cassandra/0")
+        secret_uri = "secret:cassandra-creds"
+        unit_databag = {
+            "host": "10.1.2.3",
+            "native_transport_port": "9042",
+            "secret-user": secret_uri,
+        }
+        relation = RelationStub(name="db", id=0, app=app, data={app: {}, unit: unit_databag}, units=frozenset({unit}))
+        charm = cast(
+            ops.CharmBase,
+            make_charm_from_relation_and_secrets(
+                relation, {secret_uri: {"username": "myuser", "password": "mypassword"}}
+            ),
+        )
+        validator = CassandraClientPersistenceValidator(charm, cast(ops.Relation, relation))
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN the secret was resolved to the real username/password rather than passing the URI
+        # itself to the driver.
+        auth_provider = mock_cluster_cls.call_args.kwargs["auth_provider"]
+        assert auth_provider.username == "myuser"
+
+
+class TestCassandraClientPersistenceValidatorKeyspaceReplication:
+    def test_uses_replication_factor_one_for_a_single_node_cluster(self) -> None:
+        # GIVEN a legacy relation (requires a validator-owned keyspace) backed by a single node
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        session = SessionStub(cluster=ClusterStub(metadata=MetadataStub(hosts=[HostStub()])))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN
+        create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
+        assert "'replication_factor': 1" in create_keyspace_query
+
+    def test_scales_replication_factor_to_cluster_size_capped_at_three(self) -> None:
+        # GIVEN a legacy relation backed by a 5-node cluster. Regression test for: a fixed
+        # replication factor of 1 would mean losing the single node owning the canary's only
+        # replica reports data loss caused by this validator's own keyspace, even where a
+        # properly replicated application keyspace would have survived losing that same node.
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        five_nodes = MetadataStub(hosts=[HostStub() for _ in range(5)])
+        session = SessionStub(cluster=ClusterStub(metadata=five_nodes))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN the factor is capped at 3, not scaled all the way up to 5
+        create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
+        assert "'replication_factor': 3" in create_keyspace_query
+
+    def test_excludes_down_hosts_from_the_replication_factor(self) -> None:
+        # GIVEN a 3-node cluster where one node is currently down
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        mixed_hosts = MetadataStub(hosts=[HostStub(is_up=True), HostStub(is_up=True), HostStub(is_up=False)])
+        session = SessionStub(cluster=ClusterStub(metadata=mixed_hosts))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN only the 2 up hosts count toward the replication factor
+        create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
+        assert "'replication_factor': 2" in create_keyspace_query
