@@ -195,12 +195,14 @@ class PersistenceKafkaAdminClientStub:
     application_topic_replica_count: int | None = None
     deleted: list[list[str]] = field(default_factory=list, init=False, repr=False)
     created_replication_factors: list[int] = field(default_factory=list, init=False, repr=False)
+    created_replica_assignments: list[dict[int, list[int]]] = field(default_factory=list, init=False, repr=False)
 
     def create_topics(self, new_topics: list[Any]) -> dict[str, Any]:
         if self.create_error:
             raise self.create_error
         for new_topic in new_topics:
             self.created_replication_factors.append(new_topic.replication_factor)
+            self.created_replica_assignments.append(new_topic.replica_assignments)
             if new_topic.name not in self.topics:
                 self.topics.append(new_topic.name)
         return {}
@@ -1057,11 +1059,15 @@ class TestKafkaClientPersistenceValidatorPrepare:
         # THEN
         assert admin.created_replication_factors == [3]
 
-    def test_matches_canary_replication_factor_to_the_application_topic_instead_of_broker_count(self) -> None:
+    def test_pins_the_canary_to_the_application_topics_own_replica_assignment(self) -> None:
         # GIVEN a 7-broker cluster where the related application topic (named in the databag) is
-        # itself only replicated twice: deriving the canary's RF purely from broker count (capped
-        # at 3) would decouple it from the actual topic being validated - either over- or
-        # under-stating its durability relative to what the application data can really tolerate.
+        # itself only replicated twice, on brokers 0 and 1. Regression test for: matching only the
+        # replication *factor* (e.g. creating an RF=2 canary without specifying which brokers)
+        # lets Kafka assign the canary's partition to a different pair of brokers than the
+        # application topic - a broker failure that destroys the application's only replicas could
+        # leave an unaffected canary replica reporting a false PASS. The canary must be pinned to
+        # the exact same brokers as the application topic's own partition 0, not merely the same
+        # replica count.
         databag = PERSISTENCE_VALID_DATABAG | {"topic": "app-topic"}
         validator = _make_persistence_validator(databag)
         admin = PersistenceKafkaAdminClientStub(broker_count=7, application_topic_replica_count=2)
@@ -1074,8 +1080,9 @@ class TestKafkaClientPersistenceValidatorPrepare:
             # WHEN
             validator.prepare()
 
-        # THEN the canary topic mirrors the application topic's RF, not the broker-count heuristic
-        assert admin.created_replication_factors == [2]
+        # THEN the canary topic's partition 0 is explicitly pinned to the same broker IDs as the
+        # application topic's partition 0, not just given a matching replication factor
+        assert admin.created_replica_assignments == [{0: [0, 1]}]
 
     def test_falls_back_to_a_replication_factor_of_one_when_describe_cluster_fails(self) -> None:
         # GIVEN describe_cluster() fails (e.g. the credentials lack cluster-describe authority):
@@ -1249,6 +1256,98 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         # produced again
         assert result.status == "PASS"
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=3)
+        assert producer.sent == []
+
+    def test_fails_when_a_duplicate_next_ref_is_present(self) -> None:
+        # GIVEN the topic contains TWO copies of the "next" message (ref 3), not one. Regression
+        # test for: the ambiguous-retry tolerance must accept at most a single extra record at
+        # expected.ref + 1 - a second copy is real corruption (e.g. two independent producer
+        # retries, or data duplication), not a single ambiguous acknowledgement, and must still
+        # fail rather than being silently absorbed by the same exception.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={
+                topic: [
+                    _canary_record(TEST_TOKEN, 1),
+                    _canary_record(TEST_TOKEN, 2),
+                    _canary_record(TEST_TOKEN, 3),
+                    _canary_record(TEST_TOKEN, 3),
+                ]
+            }
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the duplicate next-ref is not silently tolerated
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+        assert producer.sent == []
+
+    def test_fails_when_a_same_token_record_has_a_ref_beyond_the_tolerated_next_ref(self) -> None:
+        # GIVEN the topic contains refs 1, 2 (matching expected.ref=2) and ref 4 - beyond the
+        # single `expected.ref + 1 == 3` exception the ambiguous-retry tolerance allows.
+        # Regression test for: a prior version's range filter (`1 <= ref <= expected.ref`) simply
+        # discarded any ref outside that window with no upper bound beyond expected.ref + 1,
+        # so an out-of-range ref like this one was silently ignored instead of failing the check.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={
+                topic: [
+                    _canary_record(TEST_TOKEN, 1),
+                    _canary_record(TEST_TOKEN, 2),
+                    _canary_record(TEST_TOKEN, 4),
+                ]
+            }
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
+        assert producer.sent == []
+
+    def test_fails_when_a_same_token_record_has_a_non_positive_ref(self) -> None:
+        # GIVEN the topic contains an out-of-range ref of 0 alongside the expected refs 1 and 2.
+        # Regression test for: the prior unconditional `1 <= ref <= expected.ref` range filter
+        # silently discarded a ref=0 (or negative) record instead of failing on it.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={
+                topic: [
+                    _canary_record(TEST_TOKEN, 0),
+                    _canary_record(TEST_TOKEN, 1),
+                    _canary_record(TEST_TOKEN, 2),
+                ]
+            }
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN
+        assert result.status == "FAIL"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=2)
         assert producer.sent == []
 
     def test_fails_when_message_count_is_lower_than_expected(self) -> None:

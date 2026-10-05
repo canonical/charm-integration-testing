@@ -165,32 +165,38 @@ class _KafkaConnectionMixin:
         """Build a KafkaAdminClient with appropriate security settings."""
         return KafkaAdminClient(**self._build_kafka_client_kwargs(data))
 
-    def _resolve_replication_factor(self, admin: KafkaAdminClient, application_topic: str | None) -> int:
-        """Pick a replication factor matching the related application topic's own durability.
+    def _resolve_canary_replica_assignment(
+        self, admin: KafkaAdminClient, application_topic: str | None
+    ) -> list[int] | None:
+        """Return the application topic's own partition-0 replica node IDs, or ``None``.
 
-        Hard-coding replication_factor=1 (or deriving it only from the live broker count, capped
-        at an arbitrary production-sized default) decouples the canary's durability from the
-        application's own: on a 3+ broker cluster where the application topic is itself only
-        replicated once, a single broker loss could remove the application's only replica while an
-        RF=3 canary topic survives and reports a false PASS; the reverse (an application topic
-        replicated beyond a fixed cap) has the opposite problem. Describing the application's own
-        topic and mirroring its partition 0 replica count ties the canary to the actual topology
-        being validated, instead of an assumption about it.
-
-        Falls back to the live broker count (capped at 3) when the application topic is unknown or
-        cannot yet be described - e.g. the relation was just established and the provider has not
-        created it - so prepare()/checkpoint() can still run rather than fail outright on topic
-        creation.
+        Matching only the replication *factor* doesn't put the canary partition on the same
+        brokers as the application topic: Kafka assigns each topic's partitions to brokers
+        independently, so with e.g. RF=1 the application's partition could land on broker A while
+        a same-RF canary lands on broker B - losing A then destroys the application's only replica
+        while the canary, on an unaffected broker, keeps reporting PASS. Returning the application
+        topic's actual replica node IDs lets the canary be created with an explicit
+        ``replica_assignments`` pinning it to the exact same brokers (the same failure domain),
+        instead of merely the same replica *count*.
         """
-        if application_topic:
-            try:
-                topics = admin.describe_topics([application_topic])
-                partitions = topics[0]["partitions"] if topics else []
-                replica_nodes = partitions[0]["replica_nodes"] if partitions else []
-                if replica_nodes:
-                    return len(replica_nodes)
-            except Exception:  # nosec B110 - best-effort; fall back to the broker-count heuristic
-                pass
+        if not application_topic:
+            return None
+        try:
+            topics = admin.describe_topics([application_topic])
+            partitions = topics[0]["partitions"] if topics else []
+            replica_nodes = partitions[0]["replica_nodes"] if partitions else []
+            return list(replica_nodes) if replica_nodes else None
+        except Exception:  # nosec B110 - best-effort; fall back to the broker-count heuristic
+            return None
+
+    def _resolve_replication_factor(self, admin: KafkaAdminClient) -> int:
+        """Pick a fallback replication factor from the live broker count, capped at 3.
+
+        Used only when the application topic is unknown, not yet describable (e.g. the relation
+        was just established), or has no partitions yet - see
+        ``_resolve_canary_replica_assignment``, which is preferred whenever it can return an
+        explicit replica assignment tied to the real application topic's own placement.
+        """
         try:
             broker_count = len(admin.describe_cluster()["brokers"])
         except Exception:  # nosec B110 - best-effort; fall back to the safe single-broker default
@@ -207,8 +213,13 @@ class _KafkaConnectionMixin:
         admin: KafkaAdminClient | None = None
         try:
             admin = self._build_admin_client(data)
-            replication_factor = self._resolve_replication_factor(admin, data.get("topic"))
-            admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=replication_factor)])
+            replica_assignment = self._resolve_canary_replica_assignment(admin, data.get("topic"))
+            if replica_assignment:
+                new_topic = NewTopic(topic, replica_assignments={0: replica_assignment})
+            else:
+                replication_factor = self._resolve_replication_factor(admin)
+                new_topic = NewTopic(topic, num_partitions=1, replication_factor=replication_factor)
+            admin.create_topics([new_topic])
         except TopicAlreadyExistsError:
             pass
         except Exception:  # nosec B110 - best-effort; produce step will catch real failures
@@ -614,28 +625,42 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
                 passed = False
                 next_ref_already_written = False
             elif refs_are_valid:
-                # Bounded to [1, expected.ref]: the producer call below writes
-                # expected.ref + 1 *before* this method's result/state reach the caller, so if
-                # future.get() succeeds but the process or caller is interrupted before receiving
-                # that result, a retried checkpoint() is invoked with the same (unadvanced)
-                # `expected` while the topic already contains that extra, ambiguously-acknowledged
-                # message. An unbounded exact-set check would then see one ref too many and
-                # permanently report FAIL on every retry despite no data having been lost.
-                # Ignoring any ref beyond expected.ref (mirroring the PostgreSQL/Cassandra
-                # reference implementations' `checkpoint_ref BETWEEN 1 AND %s`) makes that retry
-                # idempotent instead.
+                # Bounded to [1, expected.ref] for the *sequence* check: the producer call below
+                # writes expected.ref + 1 *before* this method's result/state reach the caller, so
+                # if future.get() succeeds but the process or caller is interrupted before
+                # receiving that result, a retried checkpoint() is invoked with the same
+                # (unadvanced) `expected` while the topic already contains that extra,
+                # ambiguously-acknowledged message. Tolerating exactly one record at
+                # expected.ref + 1 (mirroring the PostgreSQL/Cassandra reference implementations'
+                # `checkpoint_ref BETWEEN 1 AND %s`, plus this single named exception) makes that
+                # retry idempotent instead of permanently failing every subsequent attempt.
+                #
+                # Everything else out of [1, expected.ref] - ref <= 0, a second (duplicate) copy of
+                # expected.ref + 1, or any ref beyond expected.ref + 1 - is real corruption, not an
+                # ambiguous-retry artifact, and must still fail: silently discarding it here (as an
+                # unconditional `1 <= ref <= expected.ref` bound would) let an extra record beyond
+                # the tolerated exception produce a false PASS.
                 in_range_refs = sorted(
                     record["ref"] for record in same_token_records if 1 <= record["ref"] <= expected.ref
                 )
+                next_ref_records = [record for record in same_token_records if record["ref"] == expected.ref + 1]
+                unexpected_records = [
+                    record
+                    for record in same_token_records
+                    if not (1 <= record["ref"] <= expected.ref) and record["ref"] != expected.ref + 1
+                ]
                 matching = len(in_range_refs)
-                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(in_range_refs))
+                sequence_intact = matching == expected.ref and all(
+                    ref == index + 1 for index, ref in enumerate(in_range_refs)
+                )
+                passed = sequence_intact and len(next_ref_records) <= 1 and not unexpected_records
                 # A prior, ambiguously-acknowledged attempt may have already written the next
                 # message this call is about to produce - detected without needing any durable,
                 # external idempotency tracking, since this ref is already tagged with our own
                 # unguessable per-run token. Re-producing it would leave a second, duplicate
                 # message at the same ref, which the *next* real checkpoint's exact-set/sequence
                 # check would then reject as corruption.
-                next_ref_already_written = any(record["ref"] == expected.ref + 1 for record in same_token_records)
+                next_ref_already_written = passed and bool(next_ref_records)
             else:
                 matching = len(same_token_records)
                 passed = False
