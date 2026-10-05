@@ -24,9 +24,13 @@ STEP 1 — STATIC VERIFICATION (code, tests, wiring)
 - validator.py reviewed in full: canary-table pattern (masked 63-bit identifiers, random
   per-prepare token, token-scoped row counts, system_schema.tables-based cleanup discovery,
   role gating) matches the PostgreSQLClientPersistenceValidator reference design.
-- poetry run pytest validators/cassandra_client -q         -> 43/43 passed
-  (29 original + 6 new tests added for the legacy unit-scoped databag path + 2 for the
-  checkpoint_ref range fix + 3 for the subsequent Copilot-review fixes, below)
+- poetry run pytest validators/cassandra_client -q         -> 46/46 passed
+  (29 original collected tests (28 test methods, one of which is parametrized over two cases)
+  + 6 added for the legacy unit-scoped databag path + 6 added during round-1 Copilot review
+  remediation + 2 added during round-3 remediation + 3 added during round-4 remediation = 46
+  collected test items; see STEP 7/8 below for what each remediation round fixed. The
+  checkpoint_ref range fix (round 2) strengthened an existing test in place rather than adding
+  a new one, so it contributes 0 to this total.)
 - poetry run pytest validators/runner -q                   -> 66/66 passed
 - Entry point verified via importlib.metadata.entry_points(group="endpoint_persistence_validators")
   -> resolves "cassandra" -> CassandraClientPersistenceValidator
@@ -103,7 +107,7 @@ validators/cassandra_client/validator.py now supports both conventions:
   creation/use, never-merge-across-units safety (including a deliberately incomplete unit),
   deterministic fallback-to-lowest-sorted-unit, and legacy-mode cleanup (keyspace drop + no-op
   on incomplete credentials).
-- Re-ran full test/lint suite after the fix: 43/43 cassandra_client tests, 66/66 runner tests,
+- Re-ran full test/lint suite after the fix: 35/35 cassandra_client tests, 66/66 runner tests,
   format.sh and lint.sh all clean.
 
 STEP 6 — LIVE END-TO-END VERIFICATION (after the fix)
@@ -185,4 +189,34 @@ fixed, each verified with a new regression test:
 
 All fixes were re-verified with the full suite: 43/43 cassandra_client tests, 66/66 runner tests,
 format.sh and lint.sh all clean.
+
+STEP 8 — FOURTH ROUND OF COPILOT PR REVIEW FINDINGS
+---------------------------------------------------------
+A fourth review pass flagged a documentation inconsistency and two more findings in code that
+hadn't changed since the previous review ("previously missed"):
+
+1. (Low) This summary and the PR description reported inconsistent/incorrect test counts and an
+   arithmetic breakdown that didn't sum to the reported total. Fixed by recomputing the actual
+   breakdown directly from `git log`/`grep -c "    def test_"` at each remediation commit (see
+   STEP 1's updated breakdown above) instead of estimating, and correcting every stale count in
+   this file and the PR description.
+2. (Medium) `_parse_endpoints()` used `partition(":")` to split each "endpoints" entry into
+   host/port, which splits on the *first* colon. A bracketed IPv6 contact point (e.g.
+   "[::1]:9042", which the modern interface's "endpoints" format allows and the etcd_client
+   validator already treats as valid) splits on the colon *inside* the address instead of the
+   host/port separator, leaving a mangled host and a non-numeric "port" that raised ValueError
+   before any connection was attempted. Fixed by switching to `rpartition(":")` (splitting on the
+   *last* colon, matching the etcd_client validator's precedent) and stripping the brackets
+   before handing the host to the driver, which expects bare IPv6 literals. Tests:
+   test_parses_a_bracketed_ipv6_endpoint, test_parses_a_bracketed_ipv6_endpoint_alongside_a_plain_hostname.
+3. (Medium) `_connect()`'s `cluster.connect()` call had no exception handling: if it raised (e.g.
+   the service is still restarting), no `Session` was ever returned, so none of the callers'
+   `finally: session.cluster.shutdown()` blocks could run, leaking the newly constructed
+   cluster's driver resources on every failed connection attempt. Fixed by wrapping the initial
+   `connect()` call in a try/except that shuts the cluster down before re-raising the original
+   failure. Test: test_shuts_down_the_cluster_when_the_initial_connect_fails.
+
+All fixes were re-verified with the full suite: 46/46 cassandra_client tests, 66/66 runner tests,
+format.sh and lint.sh all clean.
+
 

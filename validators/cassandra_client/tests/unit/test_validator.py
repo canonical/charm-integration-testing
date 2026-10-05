@@ -243,6 +243,59 @@ class TestCassandraClientPersistenceValidatorConnection:
         # THEN no connection was even attempted, let alone a dedicated keyspace created.
         mock_cluster_cls.assert_not_called()
 
+    def test_parses_a_bracketed_ipv6_endpoint(self) -> None:
+        # GIVEN a modern "endpoints" entry using a bracketed IPv6 literal, as produced by any
+        # provider deployed on an IPv6-only network. Regression test for: partition(":") split
+        # "[::1]:9042" on the first colon (inside the address itself), leaving host="[" and
+        # port_str="1]:9042", which raised ValueError in int() before any connection was
+        # attempted.
+        databag = {**VALID_DATABAG, "endpoints": "[::1]:9042"}
+        validator = _make_persistence_validator(databag)
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN the driver receives a bare (unbracketed) IPv6 contact point and the right port.
+        _, kwargs = mock_cluster_cls.call_args
+        assert kwargs["contact_points"] == ["::1"]
+        assert kwargs["port"] == 9042
+
+    def test_parses_a_bracketed_ipv6_endpoint_alongside_a_plain_hostname(self) -> None:
+        # GIVEN a mix of a bracketed IPv6 contact point and a plain hostname, sharing one port.
+        databag = {**VALID_DATABAG, "endpoints": "cassandra-0.example:9042,[2001:db8::1]:9042"}
+        validator = _make_persistence_validator(databag)
+        session = SessionStub()
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN
+        _, kwargs = mock_cluster_cls.call_args
+        assert kwargs["contact_points"] == ["cassandra-0.example", "2001:db8::1"]
+        assert kwargs["port"] == 9042
+
+    def test_shuts_down_the_cluster_when_the_initial_connect_fails(self) -> None:
+        # GIVEN Cluster.connect() raises (e.g. the service is still restarting). Regression test
+        # for: this previously left the newly constructed cluster running - connect() raising
+        # means no Session is ever returned, so none of the callers' `finally:
+        # session.cluster.shutdown()` blocks can run, leaking the cluster's driver resources on
+        # every such failure.
+        validator = _make_persistence_validator(VALID_DATABAG)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.side_effect = RuntimeError("connection refused")
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="connection refused"):
+                validator.prepare()
+
+        # THEN the cluster that failed to connect was still shut down.
+        mock_cluster_cls.return_value.shutdown.assert_called_once()
+
 
 class TestCassandraClientPersistenceValidatorPrepare:
     def test_creates_canary_table_and_returns_state(self) -> None:

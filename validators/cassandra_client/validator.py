@@ -112,6 +112,14 @@ class _CassandraConnectionMixin:
         contact point (unlike a list of "host:port" pairs), so for "endpoints" the port from the
         last entry that specifies one wins; every entry is expected to share the same port in
         practice.
+
+        An entry may be a bracketed IPv6 literal, e.g. "[::1]:9042" - ``partition(":")`` would
+        split that on the *first* colon (inside the address itself) rather than the one
+        separating host from port, leaving a mangled host and a non-numeric "port" that fails
+        ``int()`` before any connection is attempted. ``rpartition(":")`` instead splits on the
+        *last* colon, which is always the host/port separator for both plain and bracketed
+        entries. ``Cluster`` expects bare contact points (no brackets) for IPv6 literals, so the
+        brackets are stripped after splitting.
         """
         endpoints = data.get("endpoints")
         if not endpoints:
@@ -124,7 +132,14 @@ class _CassandraConnectionMixin:
         for entry in (e.strip() for e in endpoints.split(",")):
             if not entry:
                 continue
-            host, _, port_str = entry.partition(":")
+            if ":" in entry:
+                host, _, port_str = entry.rpartition(":")
+            else:
+                # No colon at all: a bare host with no explicit port, not an empty host with an
+                # explicit one - rpartition(":") can't distinguish the two (both yield host="",
+                # non-empty remainder), so check for a colon up front instead.
+                host, port_str = entry, ""
+            host = host.removeprefix("[").removesuffix("]")
             if host:
                 hosts.append(host)
             if port_str:
@@ -164,7 +179,15 @@ class _CassandraConnectionMixin:
             connect_timeout=5,
             control_connection_timeout=5,
         )
-        session = cluster.connect()
+        try:
+            session = cluster.connect()
+        except Exception:
+            # Cluster.connect() raising (e.g. the service is still restarting) means no Session
+            # was ever returned, so none of the callers' `finally: session.cluster.shutdown()`
+            # blocks can run - shut the cluster down here instead, or every failed connection
+            # attempt leaks its driver resources (background IO threads, control connection).
+            cluster.shutdown()
+            raise
         session.default_consistency_level = ConsistencyLevel.QUORUM
         return session
 
