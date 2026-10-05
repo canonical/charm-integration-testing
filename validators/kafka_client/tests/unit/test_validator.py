@@ -979,6 +979,25 @@ class TestKafkaClientPersistenceValidatorPrepare:
         payload = json.loads(value.decode())  # type: ignore[union-attr]
         assert payload == {"token": state.token, "ref": 1}
 
+    def test_produces_canary_message_with_acks_all_for_durability(self) -> None:
+        # GIVEN. Regression test for: the persistence producer used kafka-python's default
+        # acks=1 (leader-only acknowledgement), so future.get() returning successfully did not
+        # confirm replication to the other replicas; a broker disruption immediately after could
+        # lose the just-written canary and cause a false persistence failure.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer) as mock_producer_cls,
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN the persistence producer requires every replica to acknowledge the write
+        assert mock_producer_cls.call_args.kwargs["acks"] == "all"
+
     def test_creates_canary_topic_with_a_replication_factor_matching_the_live_broker_count(self) -> None:
         # GIVEN a 3-broker cluster: hard-coding replication_factor=1 would mean a single broker
         # loss can remove the canary topic's only replica even though the cluster itself (and the

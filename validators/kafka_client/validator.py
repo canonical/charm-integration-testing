@@ -146,9 +146,19 @@ class _KafkaConnectionMixin:
         kwargs["consumer_timeout_ms"] = _CLIENT_TIMEOUT_MS
         return KafkaConsumer(**kwargs)
 
-    def _build_producer(self, data: dict[str, str]) -> KafkaProducer:
-        """Build a KafkaProducer with appropriate security settings."""
+    def _build_producer(self, data: dict[str, str], *, acks: int | str = 1) -> KafkaProducer:
+        """Build a KafkaProducer with appropriate security settings.
+
+        ``acks`` defaults to kafka-python's own default (1: leader-only acknowledgement), matching
+        the functional validator's existing round-trip behavior. The persistence producer passes
+        ``acks="all"`` instead (see ``_produce_canary_message``): leader-only acknowledgement lets
+        ``future.get()`` return before the write is replicated, so a broker disruption immediately
+        after a successful ``prepare()``/``checkpoint()`` can lose the just-written canary and
+        make this validator report a false persistence failure for a disruption the application's
+        own, fully-replicated data would have survived.
+        """
         kwargs = self._build_kafka_client_kwargs(data)
+        kwargs["acks"] = acks
         return KafkaProducer(**kwargs)
 
     def _build_admin_client(self, data: dict[str, str]) -> KafkaAdminClient:
@@ -698,7 +708,7 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
     def _produce_canary_message(self, data: dict[str, str], topic: str, token: str, ref: int) -> None:
         producer: KafkaProducer | None = None
         try:
-            producer = self._build_producer(data)
+            producer = self._build_producer(data, acks="all")
             value = json.dumps({"token": token, "ref": ref}).encode()
             # Key must be unique per (token, ref): a constant key would let a broker/topic
             # configured with cleanup.policy=compact collapse every canary message down to just
