@@ -150,6 +150,11 @@ class KafkaAdminClientStub:
     def describe_cluster(self) -> dict[str, Any]:
         return {"brokers": [{"node_id": i} for i in range(self.broker_count)]}
 
+    def describe_topics(self, topics: list[str]) -> list[dict[str, Any]]:
+        # Simulates the application topic not (yet) being describable, so callers fall back to
+        # the broker-count heuristic - matching tests written before describe_topics() existed.
+        return []
+
     def close(self) -> None:
         pass
 
@@ -187,6 +192,7 @@ class PersistenceKafkaAdminClientStub:
     delete_error: Exception | None = None
     broker_count: int = 1
     describe_cluster_error: Exception | None = None
+    application_topic_replica_count: int | None = None
     deleted: list[list[str]] = field(default_factory=list, init=False, repr=False)
     created_replication_factors: list[int] = field(default_factory=list, init=False, repr=False)
 
@@ -203,6 +209,23 @@ class PersistenceKafkaAdminClientStub:
         if self.describe_cluster_error:
             raise self.describe_cluster_error
         return {"brokers": [{"node_id": i} for i in range(self.broker_count)]}
+
+    def describe_topics(self, topics: list[str]) -> list[dict[str, Any]]:
+        # None (the default) simulates the application topic not being describable - e.g. not
+        # yet created - so callers fall back to the broker-count heuristic.
+        if self.application_topic_replica_count is None:
+            return []
+        return [
+            {
+                "name": topics[0],
+                "partitions": [
+                    {
+                        "partition_index": 0,
+                        "replica_nodes": list(range(self.application_topic_replica_count)),
+                    }
+                ],
+            }
+        ]
 
     def list_topics(self) -> list[str]:
         if self.list_error:
@@ -1034,6 +1057,26 @@ class TestKafkaClientPersistenceValidatorPrepare:
         # THEN
         assert admin.created_replication_factors == [3]
 
+    def test_matches_canary_replication_factor_to_the_application_topic_instead_of_broker_count(self) -> None:
+        # GIVEN a 7-broker cluster where the related application topic (named in the databag) is
+        # itself only replicated twice: deriving the canary's RF purely from broker count (capped
+        # at 3) would decouple it from the actual topic being validated - either over- or
+        # under-stating its durability relative to what the application data can really tolerate.
+        databag = PERSISTENCE_VALID_DATABAG | {"topic": "app-topic"}
+        validator = _make_persistence_validator(databag)
+        admin = PersistenceKafkaAdminClientStub(broker_count=7, application_topic_replica_count=2)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN the canary topic mirrors the application topic's RF, not the broker-count heuristic
+        assert admin.created_replication_factors == [2]
+
     def test_falls_back_to_a_replication_factor_of_one_when_describe_cluster_fails(self) -> None:
         # GIVEN describe_cluster() fails (e.g. the credentials lack cluster-describe authority):
         # topic creation must still proceed with the safe single-broker default rather than
@@ -1178,6 +1221,35 @@ class TestKafkaClientPersistenceValidatorCheckpoint:
         _, key, value = producer.sent[0]
         assert json.loads(value.decode()) == {"token": TEST_TOKEN, "ref": 3}  # type: ignore[union-attr]
         assert key == f"{TEST_TOKEN}:3".encode()
+
+    def test_passes_and_does_not_re_produce_when_the_next_message_is_already_present(self) -> None:
+        # GIVEN the topic already contains the "next" message (ref 3) a previous checkpoint()
+        # attempt produced: Kafka's acks="all" guarantees the write was durable, but if
+        # future.get() succeeded and the process or caller was interrupted before this call's
+        # PASS result/advanced state reached the caller, the harness retries checkpoint() with the
+        # same (unadvanced) expected.ref=2 state. The extra, already-written ref=3 message must not
+        # make this retry fail, and must not be re-produced a second time.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{42:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={
+                topic: [_canary_record(TEST_TOKEN, 1), _canary_record(TEST_TOKEN, 2), _canary_record(TEST_TOKEN, 3)]
+            }
+        )
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the retry is recognized as a PASS and the already-present next message is not
+        # produced again
+        assert result.status == "PASS"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=3)
+        assert producer.sent == []
 
     def test_fails_when_message_count_is_lower_than_expected(self) -> None:
         # GIVEN data loss: fewer matching messages than expected

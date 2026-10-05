@@ -165,16 +165,32 @@ class _KafkaConnectionMixin:
         """Build a KafkaAdminClient with appropriate security settings."""
         return KafkaAdminClient(**self._build_kafka_client_kwargs(data))
 
-    def _resolve_replication_factor(self, admin: KafkaAdminClient) -> int:
-        """Pick a replication factor compatible with the live cluster.
+    def _resolve_replication_factor(self, admin: KafkaAdminClient, application_topic: str | None) -> int:
+        """Pick a replication factor matching the related application topic's own durability.
 
-        Hard-coding replication_factor=1 lets a single broker loss or scale-down remove the
-        only replica of this validator's canary topic even when the application's own topic is
-        replicated, producing a false persistence failure; clusters enforcing
-        min.insync.replicas can also reject the create outright. Mirror the live broker count
-        instead (capped at 3, a common production replication factor) so create_topics() never
-        requests more replicas than exist.
+        Hard-coding replication_factor=1 (or deriving it only from the live broker count, capped
+        at an arbitrary production-sized default) decouples the canary's durability from the
+        application's own: on a 3+ broker cluster where the application topic is itself only
+        replicated once, a single broker loss could remove the application's only replica while an
+        RF=3 canary topic survives and reports a false PASS; the reverse (an application topic
+        replicated beyond a fixed cap) has the opposite problem. Describing the application's own
+        topic and mirroring its partition 0 replica count ties the canary to the actual topology
+        being validated, instead of an assumption about it.
+
+        Falls back to the live broker count (capped at 3) when the application topic is unknown or
+        cannot yet be described - e.g. the relation was just established and the provider has not
+        created it - so prepare()/checkpoint() can still run rather than fail outright on topic
+        creation.
         """
+        if application_topic:
+            try:
+                topics = admin.describe_topics([application_topic])
+                partitions = topics[0]["partitions"] if topics else []
+                replica_nodes = partitions[0]["replica_nodes"] if partitions else []
+                if replica_nodes:
+                    return len(replica_nodes)
+            except Exception:  # nosec B110 - best-effort; fall back to the broker-count heuristic
+                pass
         try:
             broker_count = len(admin.describe_cluster()["brokers"])
         except Exception:  # nosec B110 - best-effort; fall back to the safe single-broker default
@@ -191,7 +207,7 @@ class _KafkaConnectionMixin:
         admin: KafkaAdminClient | None = None
         try:
             admin = self._build_admin_client(data)
-            replication_factor = self._resolve_replication_factor(admin)
+            replication_factor = self._resolve_replication_factor(admin, data.get("topic"))
             admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=replication_factor)])
         except TopicAlreadyExistsError:
             pass
@@ -596,19 +612,40 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
             if incomplete_read:
                 matching = len(same_token_records)
                 passed = False
+                next_ref_already_written = False
             elif refs_are_valid:
-                matching_refs = sorted(record["ref"] for record in same_token_records)
-                matching = len(matching_refs)
-                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(matching_refs))
+                # Bounded to [1, expected.ref]: the producer call below writes
+                # expected.ref + 1 *before* this method's result/state reach the caller, so if
+                # future.get() succeeds but the process or caller is interrupted before receiving
+                # that result, a retried checkpoint() is invoked with the same (unadvanced)
+                # `expected` while the topic already contains that extra, ambiguously-acknowledged
+                # message. An unbounded exact-set check would then see one ref too many and
+                # permanently report FAIL on every retry despite no data having been lost.
+                # Ignoring any ref beyond expected.ref (mirroring the PostgreSQL/Cassandra
+                # reference implementations' `checkpoint_ref BETWEEN 1 AND %s`) makes that retry
+                # idempotent instead.
+                in_range_refs = sorted(
+                    record["ref"] for record in same_token_records if 1 <= record["ref"] <= expected.ref
+                )
+                matching = len(in_range_refs)
+                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(in_range_refs))
+                # A prior, ambiguously-acknowledged attempt may have already written the next
+                # message this call is about to produce - detected without needing any durable,
+                # external idempotency tracking, since this ref is already tagged with our own
+                # unguessable per-run token. Re-producing it would leave a second, duplicate
+                # message at the same ref, which the *next* real checkpoint's exact-set/sequence
+                # check would then reject as corruption.
+                next_ref_already_written = any(record["ref"] == expected.ref + 1 for record in same_token_records)
             else:
                 matching = len(same_token_records)
                 passed = False
+                next_ref_already_written = False
 
             # Only write the next canary message when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
             # unconditionally would grow `actual` past what the harness will ever compare against
             # again, masking the mismatch behind permanent drift.
-            if passed:
+            if passed and not next_ref_already_written:
                 self._produce_canary_message(data, topic, expected.token, expected.ref + 1)
         finally:
             # Same rationale as prepare(): remove the temp CA file built for this call's clients
