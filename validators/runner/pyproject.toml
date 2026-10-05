@@ -27,6 +27,7 @@ dependencies = [
     "validators-kafka-client",
     "validators-etcd-client",
     "validators-opensearch-client",
+    "validators-cassandra-client",
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",
