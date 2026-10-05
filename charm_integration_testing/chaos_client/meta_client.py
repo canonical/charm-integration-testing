@@ -215,7 +215,7 @@ class MetaChaosClient(ChaosClient):
 
         application_name = unit.split("/", 1)[0]
         info = applications.get(application_name)
-        if info is None or info.channel is None or info.base is None:
+        if info is None or not info.charm or info.channel is None or info.base is None:
             raise ChaosResourceConstraintsError(
                 f"Incomplete application metadata for unit '{unit}' in model '{model.uri}': "
                 "cannot resolve chaos resource constraints without a known charm, channel and base."
