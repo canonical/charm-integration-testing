@@ -201,6 +201,8 @@ class PersistenceOpenSearchClientStub:
     count_error: Exception | None = None
     search_error: Exception | None = None
     delete_error: Exception | None = None
+    shard_failures: int = 0
+    search_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def index(self, index: str, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         if self.index_error:
@@ -219,13 +221,15 @@ class PersistenceOpenSearchClientStub:
         return {"count": matching}
 
     def search(self, index: str, body: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+        self.search_calls.append({"body": body, **kwargs})
         if self.search_error:
             raise self.search_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        # Sort key mirrors OpenSearch's "_doc" sort: the document's position in internal (here,
-        # insertion) order, not a value derived from "_id" - the validator must not rely on "_id"
-        # fielddata, which is disabled by default on a real cluster.
+        # This stub ignores the requested sort field name entirely and always returns matches in
+        # insertion order - it isn't trying to model the real shard-local-vs-global sort key
+        # distinction the validator's docstrings discuss, only to exercise search_after-based
+        # pagination and field-level query matching.
         matches = [
             (position, doc_id)
             for position, (doc_id, doc) in enumerate(self.indices[index].documents.items())
@@ -241,7 +245,15 @@ class PersistenceOpenSearchClientStub:
             {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [position]}
             for position, doc_id in matches
         ]
-        return {"hits": {"hits": hits}}
+        shard_count = max(self.shard_failures, 1)
+        return {
+            "hits": {"hits": hits},
+            "_shards": {
+                "total": shard_count,
+                "successful": shard_count - self.shard_failures,
+                "failed": self.shard_failures,
+            },
+        }
 
     def delete(self, index: str, id: str, **kwargs: Any) -> None:
         if self.delete_error:
@@ -839,6 +851,40 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert result.status == "PASS"
         assert new_state.ref == 6
 
+    def test_paginates_using_a_globally_stable_sort_key_not_the_shard_local_doc_order(self) -> None:
+        # GIVEN. Regression test for: pagination used to sort by "_doc" (a shard-local Lucene
+        # document order), so on a multi-shard index the next page's search_after cursor could
+        # skip matching documents that live on a different shard than the current page ended on.
+        # validator_checkpoint_ref is a real, doc-valued field unique per token, so sorting on it
+        # is globally consistent regardless of shard distribution.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, 1)])
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # THEN
+        assert client.search_calls[0]["body"]["sort"] == [{"validator_checkpoint_ref": "asc"}]
+
+    def test_requests_full_shard_coverage_and_rejects_a_partial_search_result(self) -> None:
+        # GIVEN a search that only queried some shards successfully (e.g. mid-disruption). If the
+        # returned, incomplete hit count happens to match expected.ref, a naive check would report
+        # a false PASS without having actually verified all of the canary data.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub(shard_failures=1)
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, 1)])
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="shard"):
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
+        # AND the request itself asked the cluster to fail outright on a partial result, rather
+        # than relying solely on this response-level check.
+        assert client.search_calls[0]["allow_partial_search_results"] is False
+
     def test_fails_when_matching_token_belongs_to_a_different_scope(self) -> None:
         # GIVEN the shared index has documents carrying this expected token, but tagged with a
         # different relation/unit's validator_scope - e.g. a token collision, or a state that was
@@ -997,6 +1043,23 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
             # WHEN / THEN (must not raise)
             validator.cleanup()
+
+    def test_requests_full_shard_coverage_and_rejects_a_partial_search_result(self) -> None:
+        # GIVEN a cleanup search that only queried some shards successfully (e.g. mid-disruption).
+        # Converging on "zero remaining hits" here would leave a validator-owned document on the
+        # unqueried shard orphaned in the index instead of being cleaned up.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub(shard_failures=1)
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        store.add(_canary_doc(TEST_SCOPE, "a", 1))
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="shard"):
+                validator.cleanup()
+
+        # AND the request itself asked the cluster to fail outright on a partial result
+        assert client.search_calls[0]["allow_partial_search_results"] is False
 
     def test_leaves_other_scopes_and_application_data_untouched(self) -> None:
         # GIVEN the shared index holds a document from a different relation/unit scope and the

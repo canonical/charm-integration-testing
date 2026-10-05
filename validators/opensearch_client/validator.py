@@ -523,17 +523,39 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             request_timeout=_REQUEST_TIMEOUT,
         )
 
+    def _reject_partial_response(self, response: dict[str, Any], context: str) -> None:
+        """Raise if *response* reflects a search that didn't query every shard successfully.
+
+        Passing ``allow_partial_search_results=False`` on the request already asks the cluster to
+        fail the whole search instead of silently returning partial results, but this is a
+        belt-and-suspenders check on the response's own ``_shards`` block in case that request
+        parameter is ignored or unsupported by a given cluster/client version. Without either, a
+        disruption that fails one shard could let OpenSearch return only the healthy shards' hits;
+        if those happen to match ``expected.ref``, checkpoint() would report PASS without having
+        actually verified all of the canary data, and cleanup() could leave orphaned documents on
+        the unqueried shard behind.
+        """
+        shards = response.get("_shards", {})
+        failed = shards.get("failed", 0)
+        if failed:
+            raise RuntimeError(
+                f"{context}: {failed} of {shards.get('total', '?')} shard(s) failed; refusing to use a partial result"
+            )
+
     def _collect_matching_refs(self, client: OpenSearch, index_name: str, scope: str, token: str) -> list[Any]:
         """Return every ``validator_checkpoint_ref`` value for documents matching scope/token/kind.
 
         Paginates via ``search_after`` rather than a single ``size=_CLEANUP_SEARCH_SIZE`` page: an
         interrupted run or repeated checkpoints could in principle leave more than one page of
         same-token documents (e.g. after a replay), and only inspecting the first page would
-        silently under-count them. Sorts by ``_doc`` (Lucene's internal, always-available document
-        order) rather than ``_id``: OpenSearch disables fielddata on the ``_id`` field by default,
-        so sorting on it raises ``illegal_argument_exception`` on a real cluster even though the
-        in-memory test stub would happily accept it - ``_doc`` needs no such opt-in and is the
-        documented choice for pagination that doesn't care about result ordering. Returns raw
+        silently under-count them. Sorts by ``_REF_FIELD`` (the ``validator_checkpoint_ref`` an
+        application document can never share within one token - see ``_write_canary_document``)
+        rather than ``_doc``: ``_doc`` is only a shard-local Lucene document order, so pagination
+        built on it can skip documents that live on a different shard than the current page's
+        cursor; ``_REF_FIELD`` is a real, doc-valued field, so sorting on it is globally consistent
+        regardless of how documents are distributed across shards. (Sorting on ``_id`` instead
+        would avoid the same cross-shard problem, but OpenSearch disables fielddata on ``_id`` by
+        default, so that raises ``illegal_argument_exception`` on a real cluster.) Returns raw
         (possibly non-int) values rather than filtering them out, so a malformed ``_REF_FIELD``
         (e.g. a string) is reported back to checkpoint() instead of being silently ignored.
         """
@@ -551,14 +573,20 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     }
                 },
                 "size": _CLEANUP_SEARCH_SIZE,
-                "sort": [{"_doc": "asc"}],
+                "sort": [{_REF_FIELD: "asc"}],
             }
             if search_after is not None:
                 body["search_after"] = search_after
             try:
-                response = client.search(index=index_name, body=body, request_timeout=_REQUEST_TIMEOUT)
+                response = client.search(
+                    index=index_name,
+                    body=body,
+                    allow_partial_search_results=False,
+                    request_timeout=_REQUEST_TIMEOUT,
+                )
             except NotFoundError:
                 return refs
+            self._reject_partial_response(response, f"Searching for canary documents in '{index_name}'")
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
                 return refs
@@ -585,6 +613,12 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         # Filters on validator_kind as well as validator_scope: this is the only thing that lets
         # cleanup() tell a validator-owned document apart from an application document that happens
         # to carry the same field name/value as validator_scope (see _KIND_FIELD's comment).
+        #
+        # Requires every shard to have been queried successfully (allow_partial_search_results, and
+        # the _reject_partial_response belt-and-suspenders check): a shard failing mid-disruption
+        # could otherwise let OpenSearch silently return only the healthy shards' matches, leaving
+        # this method converge on "zero remaining hits" while a validator-owned document on the
+        # failed shard is still orphaned in the index.
         while True:
             try:
                 response = client.search(
@@ -600,10 +634,12 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                         },
                         "size": _CLEANUP_SEARCH_SIZE,
                     },
+                    allow_partial_search_results=False,
                     request_timeout=_REQUEST_TIMEOUT,
                 )
             except NotFoundError:
                 return
+            self._reject_partial_response(response, f"Searching for canary documents to delete in '{index_name}'")
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
                 return
