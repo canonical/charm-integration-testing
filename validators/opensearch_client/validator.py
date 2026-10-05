@@ -55,6 +55,10 @@ _KIND_VALUE = "opensearchclientpersistencecanary"
 # page rather than the total number of documents cleanup() can remove.
 _CLEANUP_SEARCH_SIZE = 10_000
 
+# Keep-alive for the scroll context _collect_matching_refs() opens - see its docstring for why
+# scroll (not search_after) is used to page through same-token documents.
+_SCROLL_KEEPALIVE = "1m"
+
 
 def _exact_match_filter(field: str, value: str) -> dict[str, Any]:
     """Build a query clause that exact-matches ``value`` in ``field``, independent of mapping.
@@ -545,23 +549,30 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
     def _collect_matching_refs(self, client: OpenSearch, index_name: str, scope: str, token: str) -> list[Any]:
         """Return every ``validator_checkpoint_ref`` value for documents matching scope/token/kind.
 
-        Paginates via ``search_after`` rather than a single ``size=_CLEANUP_SEARCH_SIZE`` page: an
+        Paginates via a scroll context rather than a single ``size=_CLEANUP_SEARCH_SIZE`` page: an
         interrupted run or repeated checkpoints could in principle leave more than one page of
         same-token documents (e.g. after a replay), and only inspecting the first page would
-        silently under-count them. Sorts by ``_REF_FIELD`` (the ``validator_checkpoint_ref`` an
-        application document can never share within one token - see ``_write_canary_document``)
-        rather than ``_doc``: ``_doc`` is only a shard-local Lucene document order, so pagination
-        built on it can skip documents that live on a different shard than the current page's
-        cursor; ``_REF_FIELD`` is a real, doc-valued field, so sorting on it is globally consistent
-        regardless of how documents are distributed across shards. (Sorting on ``_id`` instead
-        would avoid the same cross-shard problem, but OpenSearch disables fielddata on ``_id`` by
-        default, so that raises ``illegal_argument_exception`` on a real cluster.) Returns raw
-        (possibly non-int) values rather than filtering them out, so a malformed ``_REF_FIELD``
-        (e.g. a string) is reported back to checkpoint() instead of being silently ignored.
+        silently under-count them.
+
+        Uses scroll rather than ``sort``/``search_after``: ``_REF_FIELD`` (the
+        ``validator_checkpoint_ref``) is unique per *token* (see ``_write_canary_document``), but
+        not necessarily unique per *page boundary* - a checkpoint() retry after an ambiguous
+        acknowledgement can leave a genuine duplicate ref, and the duplicate-ref case is exactly
+        what checkpoint() needs to detect as a FAIL. Regression test for: pagination keyed on
+        ``search_after=[last_hit_sort_value]`` treats that value as *exclusive*, so if a page
+        boundary falls between two hits sharing the same ``_REF_FIELD`` value, the next page's
+        query (`search_after` greater-than) skips the remaining duplicate(s) outright - e.g. refs
+        ``[1, 2, 2, 3]`` with a page size of 2 would silently become ``[1, 2, 3]``, hiding a
+        duplicate checkpoint() must fail on. A scroll context instead walks a fixed, point-in-time
+        snapshot of every matching document via an opaque server-side cursor, with no field-value
+        comparison involved, so duplicate (or any other repeated) sort-key values can never cause
+        documents to be skipped at a page boundary. Returns raw (possibly non-int) values rather
+        than filtering them out, so a malformed ``_REF_FIELD`` (e.g. a string) is reported back to
+        checkpoint() instead of being silently ignored.
         """
         refs: list[Any] = []
-        search_after: list[Any] | None = None
-        while True:
+        scroll_id: str | None = None
+        try:
             body: dict[str, Any] = {
                 "query": {
                     "bool": {
@@ -573,28 +584,36 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     }
                 },
                 "size": _CLEANUP_SEARCH_SIZE,
-                "sort": [{_REF_FIELD: "asc"}],
             }
-            if search_after is not None:
-                body["search_after"] = search_after
             try:
                 response = client.search(
                     index=index_name,
                     body=body,
+                    scroll=_SCROLL_KEEPALIVE,
                     allow_partial_search_results=False,
                     request_timeout=_REQUEST_TIMEOUT,
                 )
             except NotFoundError:
                 return refs
-            self._reject_partial_response(response, f"Searching for canary documents in '{index_name}'")
-            hits = response.get("hits", {}).get("hits", [])
-            if not hits:
-                return refs
-            for hit in hits:
-                refs.append(hit.get("_source", {}).get(_REF_FIELD))
-            search_after = hits[-1].get("sort")
-            if search_after is None or len(hits) < _CLEANUP_SEARCH_SIZE:
-                return refs
+            while True:
+                self._reject_partial_response(response, f"Searching for canary documents in '{index_name}'")
+                hits = response.get("hits", {}).get("hits", [])
+                scroll_id = response.get("_scroll_id", scroll_id)
+                if not hits:
+                    return refs
+                for hit in hits:
+                    refs.append(hit.get("_source", {}).get(_REF_FIELD))
+                if len(hits) < _CLEANUP_SEARCH_SIZE or scroll_id is None:
+                    return refs
+                response = client.scroll(scroll_id=scroll_id, scroll=_SCROLL_KEEPALIVE)
+        finally:
+            if scroll_id is not None:
+                # Best-effort: an expired/already-cleared scroll context must not fail the
+                # checkpoint that already successfully collected its data.
+                try:
+                    client.clear_scroll(scroll_id=scroll_id)
+                except Exception:  # nosec B110 - best-effort cleanup
+                    pass
 
     def _delete_matching_documents(self, client: OpenSearch, index_name: str, scope: str) -> None:
         # Deletes by individually resolved document _id rather than via the OpenSearch

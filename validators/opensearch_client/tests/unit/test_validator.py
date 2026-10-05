@@ -201,8 +201,12 @@ class PersistenceOpenSearchClientStub:
     count_error: Exception | None = None
     search_error: Exception | None = None
     delete_error: Exception | None = None
+    scroll_error: Exception | None = None
     shard_failures: int = 0
     search_calls: list[dict[str, Any]] = field(default_factory=list)
+    scroll_calls: list[dict[str, Any]] = field(default_factory=list)
+    clear_scroll_calls: list[str] = field(default_factory=list)
+    _scroll_pages: dict[str, tuple[str, int, list[tuple[int, str]]]] = field(default_factory=dict, init=False)
 
     def index(self, index: str, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         if self.index_error:
@@ -220,6 +224,20 @@ class PersistenceOpenSearchClientStub:
         matching = sum(1 for doc in self.indices[index].documents.values() if _matches_query(body, doc))
         return {"count": matching}
 
+    def _shards_block(self) -> dict[str, int]:
+        shard_count = max(self.shard_failures, 1)
+        return {
+            "total": shard_count,
+            "successful": shard_count - self.shard_failures,
+            "failed": self.shard_failures,
+        }
+
+    def _hits_for(self, index: str, matches: list[tuple[int, str]]) -> list[dict[str, Any]]:
+        return [
+            {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [position]}
+            for position, doc_id in matches
+        ]
+
     def search(self, index: str, body: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         self.search_calls.append({"body": body, **kwargs})
         if self.search_error:
@@ -228,8 +246,8 @@ class PersistenceOpenSearchClientStub:
             raise NotFoundError(404, "index_not_found_exception")
         # This stub ignores the requested sort field name entirely and always returns matches in
         # insertion order - it isn't trying to model the real shard-local-vs-global sort key
-        # distinction the validator's docstrings discuss, only to exercise search_after-based
-        # pagination and field-level query matching.
+        # distinction the validator's docstrings discuss, only to exercise pagination and
+        # field-level query matching.
         matches = [
             (position, doc_id)
             for position, (doc_id, doc) in enumerate(self.indices[index].documents.items())
@@ -240,20 +258,41 @@ class PersistenceOpenSearchClientStub:
             matches = [(position, doc_id) for position, doc_id in matches if position > search_after[0]]
         size = (body or {}).get("size")
         if size is not None:
-            matches = matches[:size]
-        hits = [
-            {"_id": doc_id, "_source": self.indices[index].documents[doc_id], "sort": [position]}
-            for position, doc_id in matches
-        ]
-        shard_count = max(self.shard_failures, 1)
-        return {
-            "hits": {"hits": hits},
-            "_shards": {
-                "total": shard_count,
-                "successful": shard_count - self.shard_failures,
-                "failed": self.shard_failures,
-            },
+            page, remaining = matches[:size], matches[size:]
+        else:
+            page, remaining = matches, []
+        response: dict[str, Any] = {
+            "hits": {"hits": self._hits_for(index, page)},
+            "_shards": self._shards_block(),
         }
+        if kwargs.get("scroll"):
+            # Model a real scroll context: the first page is returned immediately, with the
+            # remaining matches held server-side under an opaque scroll_id for scroll() to
+            # continue from - no field-value/search_after comparison involved, so this never skips
+            # a hit at a page boundary even when several hits share the same sort-key value.
+            scroll_id = f"scroll-{len(self._scroll_pages)}"
+            self._scroll_pages[scroll_id] = (index, size or len(matches), remaining)
+            response["_scroll_id"] = scroll_id
+        return response
+
+    def scroll(self, scroll_id: str, **kwargs: Any) -> dict[str, Any]:
+        self.scroll_calls.append({"scroll_id": scroll_id, **kwargs})
+        if self.scroll_error:
+            raise self.scroll_error
+        index, size, remaining = self._scroll_pages.get(scroll_id, (None, 0, []))
+        if index is None:
+            return {"hits": {"hits": []}, "_shards": self._shards_block()}
+        page, rest = remaining[:size], remaining[size:]
+        self._scroll_pages[scroll_id] = (index, size, rest)
+        return {
+            "hits": {"hits": self._hits_for(index, page)},
+            "_shards": self._shards_block(),
+            "_scroll_id": scroll_id,
+        }
+
+    def clear_scroll(self, scroll_id: str, **kwargs: Any) -> None:
+        self.clear_scroll_calls.append(scroll_id)
+        self._scroll_pages.pop(scroll_id, None)
 
     def delete(self, index: str, id: str, **kwargs: Any) -> None:
         if self.delete_error:
@@ -851,12 +890,12 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert result.status == "PASS"
         assert new_state.ref == 6
 
-    def test_paginates_using_a_globally_stable_sort_key_not_the_shard_local_doc_order(self) -> None:
-        # GIVEN. Regression test for: pagination used to sort by "_doc" (a shard-local Lucene
-        # document order), so on a multi-shard index the next page's search_after cursor could
-        # skip matching documents that live on a different shard than the current page ended on.
-        # validator_checkpoint_ref is a real, doc-valued field unique per token, so sorting on it
-        # is globally consistent regardless of shard distribution.
+    def test_opens_a_scroll_context_to_page_through_matching_documents(self) -> None:
+        # GIVEN. Regression test for: pagination used to key search_after off a sort field value,
+        # so a page boundary falling between two hits sharing the same sort-key value (a genuine
+        # duplicate ref) would silently skip the remaining duplicate(s). A scroll context instead
+        # walks a fixed snapshot via an opaque, server-side cursor with no field-value comparison,
+        # so this can never happen.
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         client = PersistenceOpenSearchClientStub()
         self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, 1)])
@@ -865,8 +904,38 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
             # WHEN
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
 
-        # THEN
-        assert client.search_calls[0]["body"]["sort"] == [{"validator_checkpoint_ref": "asc"}]
+        # THEN the search opened a scroll context, and it was cleared afterward
+        assert client.search_calls[0]["scroll"] == "1m"
+        assert client.clear_scroll_calls == ["scroll-0"]
+
+    def test_detects_a_duplicate_ref_split_across_a_scroll_page_boundary(self) -> None:
+        # GIVEN two documents sharing the same validator_checkpoint_ref (e.g. a checkpoint() retry
+        # after an ambiguous write), landing on opposite sides of a page boundary. A sort-key-based
+        # search_after cursor would have treated the first one's sort value as an exclusive bound
+        # and silently dropped the second from the next page; scroll pagination must still return
+        # both so checkpoint() correctly fails on the duplicate.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(
+            client,
+            [
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 1),
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 2),
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 2),
+                _canary_doc(TEST_SCOPE, TEST_TOKEN, 3),
+            ],
+        )
+
+        with (
+            patch("validators.opensearch_client.validator.OpenSearch", return_value=client),
+            patch("validators.opensearch_client.validator._CLEANUP_SEARCH_SIZE", 2),
+        ):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=3))
+
+        # THEN the duplicate ref=2 document was not skipped at the page boundary, so checkpoint()
+        # correctly reports FAIL (4 documents found, not the expected 3)
+        assert result.status == "FAIL"
 
     def test_requests_full_shard_coverage_and_rejects_a_partial_search_result(self) -> None:
         # GIVEN a search that only queried some shards successfully (e.g. mid-disruption). If the
