@@ -24,8 +24,9 @@ STEP 1 — STATIC VERIFICATION (code, tests, wiring)
 - validator.py reviewed in full: canary-table pattern (masked 63-bit identifiers, random
   per-prepare token, token-scoped row counts, system_schema.tables-based cleanup discovery,
   role gating) matches the PostgreSQLClientPersistenceValidator reference design.
-- poetry run pytest validators/cassandra_client -q         -> 35/35 passed
-  (29 original + 6 new tests added in this session for the legacy unit-scoped databag path)
+- poetry run pytest validators/cassandra_client -q         -> 43/43 passed
+  (29 original + 6 new tests added for the legacy unit-scoped databag path + 2 for the
+  checkpoint_ref range fix + 3 for the subsequent Copilot-review fixes, below)
 - poetry run pytest validators/runner -q                   -> 66/66 passed
 - Entry point verified via importlib.metadata.entry_points(group="endpoint_persistence_validators")
   -> resolves "cassandra" -> CassandraClientPersistenceValidator
@@ -102,7 +103,7 @@ validators/cassandra_client/validator.py now supports both conventions:
   creation/use, never-merge-across-units safety (including a deliberately incomplete unit),
   deterministic fallback-to-lowest-sorted-unit, and legacy-mode cleanup (keyspace drop + no-op
   on incomplete credentials).
-- Re-ran full test/lint suite after the fix: 35/35 cassandra_client tests, 66/66 runner tests,
+- Re-ran full test/lint suite after the fix: 43/43 cassandra_client tests, 66/66 runner tests,
   format.sh and lint.sh all clean.
 
 STEP 6 — LIVE END-TO-END VERIFICATION (after the fix)
@@ -160,3 +161,28 @@ aspirational `cassandra_client` (no charm anywhere implements it) to the actuall
 `cassandra` interface, and its credential-resolution logic was extended (not replaced) to also
 support that charm's real, unit-scoped, keyspace-less databag convention, while remaining fully
 backward compatible with the modern app-scoped convention its PostgreSQL/MongoDB/etcd siblings use.
+
+STEP 7 — ADDRESSING COPILOT PR REVIEW FINDINGS (post-PR remediation)
+-------------------------------------------------------------------------
+Three rounds of automated Copilot code review findings on the pull request were investigated and
+fixed, each verified with a new regression test:
+
+1. (High) checkpoint()'s row-count query only filtered by `marker`, never bounding
+   `checkpoint_ref`, so a corrupted/replaced row sharing the same marker but a stale/future ref
+   could still produce a false PASS. Fixed by constraining the count to
+   `checkpoint_ref BETWEEN 1 AND expected.ref`, mirroring the PostgreSQL reference
+   implementation. Test: test_filters_row_count_by_token_and_checkpoint_ref_range.
+2. (Medium) The modern/legacy relation discriminator used `data.get("endpoints")` truthiness, so
+   a relation publishing a blank "endpoints" value fell through to the unit-databag scan and could
+   be misidentified as the legacy interface, bypassing the missing-"database"-keyspace guard.
+   Fixed by checking key presence (`"endpoints" in data`) instead of truthiness. Test:
+   test_treats_a_blank_endpoints_field_as_modern_and_does_not_fall_back_to_unit_databags.
+3. (Medium) If dedicated-keyspace creation failed in the legacy path (e.g. insufficient
+   permissions or schema-propagation failure), the exception escaped `_open_session()` before any
+   `finally` block could close the session, leaking the cluster connection on every such failure.
+   Fixed by wrapping keyspace creation in a try/except that shuts the cluster down before
+   re-raising. Test: test_shuts_down_the_cluster_when_dedicated_keyspace_creation_fails.
+
+All fixes were re-verified with the full suite: 43/43 cassandra_client tests, 66/66 runner tests,
+format.sh and lint.sh all clean.
+

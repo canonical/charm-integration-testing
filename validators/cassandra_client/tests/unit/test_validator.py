@@ -746,6 +746,48 @@ class TestCassandraClientPersistenceValidatorLegacyInterface:
         auth_provider = mock_cluster_cls.call_args.kwargs["auth_provider"]
         assert auth_provider.username == "myuser"
 
+    def test_treats_a_blank_endpoints_field_as_modern_and_does_not_fall_back_to_unit_databags(self) -> None:
+        # GIVEN a relation that publishes an "endpoints" key with a blank value (e.g. mid
+        # relation-changed hook ordering) while a related unit also happens to publish legacy
+        # host/credentials fields. Regression test for: the modern/legacy discriminator used to
+        # check `data.get("endpoints")` truthiness, so a blank "endpoints" value fell through to
+        # the unit-databag scan below and could silently treat a modern, app-scoped relation as
+        # the unit-scoped legacy interface - bypassing the missing-"database"-keyspace guard and
+        # risking a false PASS against a validator-owned keyspace instead of the real one.
+        app = ApplicationStub()
+        unit = UnitStub("cassandra/0")
+        app_databag = {"endpoints": "", "username": "modernuser", "password": "modernpass"}
+        unit_databag = dict(LEGACY_UNIT_DATABAG)
+        relation = RelationStub(
+            name="db", id=0, app=app, data={app: app_databag, unit: unit_databag}, units=frozenset({unit})
+        )
+        charm = cast(ops.CharmBase, make_charm_from_relation(relation))
+        validator = CassandraClientPersistenceValidator(charm, cast(ops.Relation, relation))
+
+        # WHEN / THEN the modern path is taken (blank "endpoints" key still counts as modern), so
+        # the missing "database" keyspace guard fires instead of silently using the legacy unit
+        # databag's host/credentials.
+        with pytest.raises(RuntimeError, match="no 'database' keyspace"):
+            validator.prepare()
+
+    def test_shuts_down_the_cluster_when_dedicated_keyspace_creation_fails(self) -> None:
+        # GIVEN a legacy relation whose credentials can connect but cannot create the dedicated
+        # canary keyspace (e.g. insufficient permissions, or schema propagation failure).
+        # Regression test for: this exception used to escape _open_session() before the
+        # prepare()/checkpoint()/cleanup() finally blocks could run (they never receive a
+        # session to close), leaking the cluster's connection on every such failure.
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        session = SessionStub(execute_error=RuntimeError("keyspace creation not permitted"))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="keyspace creation not permitted"):
+                validator.prepare()
+
+        # THEN the cluster was shut down before the exception propagated
+        assert session.cluster.shutdown_called
+
 
 class TestCassandraClientPersistenceValidatorKeyspaceReplication:
     def test_uses_replication_factor_one_for_a_single_node_cluster(self) -> None:

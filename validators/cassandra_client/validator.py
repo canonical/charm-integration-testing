@@ -86,7 +86,7 @@ class _CassandraConnectionMixin:
             **self.resolve_secret("secret-tls", "tls-ca"),  # type: ignore[attr-defined]
         }
         data: dict[str, str] = self.databag | creds  # type: ignore[attr-defined]
-        if data.get("endpoints"):
+        if "endpoints" in data:
             return data
 
         units = sorted(self.relation.units, key=lambda u: u.name)  # type: ignore[attr-defined]
@@ -421,8 +421,16 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
             return session, keyspace
         # Legacy "cassandra" interface: no per-relation keyspace exists at all, so this validator
         # owns a dedicated keyspace, scoped the same way its canary tables already are (see
-        # _canary_table_prefix), and creates it on demand.
-        return session, self._ensure_canary_keyspace(session)
+        # _canary_table_prefix), and creates it on demand. If keyspace creation fails (e.g. the
+        # credentials lack permission, or schema propagation fails), the session must still be
+        # shut down here - this is the last point before the exception escapes the method, past
+        # which the prepare()/checkpoint()/cleanup() finally blocks that normally close it can't
+        # help, since they never receive the session.
+        try:
+            return session, self._ensure_canary_keyspace(session)
+        except Exception:
+            session.cluster.shutdown()
+            raise
 
     def _canary_keyspace_name(self) -> str:
         return f"canary_{self._canary_scope_token()}"
