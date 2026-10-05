@@ -10,11 +10,12 @@ from typing import Callable, cast
 from unittest.mock import MagicMock
 
 import pytest
-from chaos_client import ChaosCleanupError, MetaChaosClient
+from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraintsClient
 from chaos_client.chaos_mesh_detection import CHAOS_MESH_CRDS
 from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import LITMUS_CRDS, OPERATOR_NAMESPACE
-from juju import JujuModelHandle
+from juju import CharmChannel as JujuCharmChannel
+from juju import JujuApplicationInfo, JujuModelHandle
 from juju.backend import JujuExecOutput
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
@@ -87,6 +88,21 @@ class JujuBackendStub(NullJujuBackend):
         if self.exec_error is not None:
             raise self.exec_error
         return JujuExecOutput(return_code=self.exec_return_code, stdout="", stderr="")
+
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
+        # Resolvable by default so chaos dispatch tests don't trip the chaos
+        # resource constraints lookup; override/replace in tests that need otherwise.
+        return {
+            "postgresql": JujuApplicationInfo(
+                charm="postgresql-k8s",
+                revision=1,
+                channel=JujuCharmChannel.parse("14/stable"),
+                base="22.04",
+            )
+        }
+
+
+RESOURCE_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
 
 
 class FinalizerRequest:
@@ -461,7 +477,7 @@ class TestExperimentClients:
         # GIVEN the target model with all, some or none of the Chaos Mesh CRDs
         backend = JujuBackendStub()
         backend.kubernetes.crds.update(crds)
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
         duration = timedelta(seconds=10)
 
         # WHEN requesting each experiment through the common client
@@ -496,7 +512,7 @@ class TestExperimentClients:
         neighbor = KubernetesStub()
         neighbor.crds.update(CHAOS_MESH_CRDS)
         backend.clients[NEIGHBOR.uri] = KubernetesClient(neighbor)
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN requesting target stress, THEN the neighbor is not used as a fallback
         with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
@@ -514,7 +530,7 @@ class TestExperimentClients:
         litmus = MagicMock(spec=LitmusChaosClient)
         factory = MagicMock(return_value=litmus)
         monkeypatch.setattr(chaos_tools, "LitmusChaosClient", factory)
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN tests request CPU and memory stress without selecting a tool
         client.stress_cpu(TARGET, "postgresql/0", 2, timedelta(seconds=30))
@@ -538,7 +554,7 @@ class TestExperimentClients:
         litmus = MagicMock(spec=LitmusChaosClient)
         litmus.stress_cpu.side_effect = failure
         monkeypatch.setattr(chaos_tools, "LitmusChaosClient", lambda _: litmus)
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN execution fails and teardown runs
         with pytest.raises(ApiException) as exc_info:
@@ -554,7 +570,7 @@ class TestExperimentClients:
         # GIVEN only Chaos Mesh installed
         backend = JujuBackendStub()
         backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN requesting stress
         client.stress_cpu(TARGET, "postgresql/0", 1, timedelta(seconds=30))
@@ -571,11 +587,11 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         backend.kubernetes.crds.update(LITMUS_CRDS)
         backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        previous = chaos_client_for_model(backend, TARGET)
+        previous = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN Litmus disappears before a later request
         backend.kubernetes.crds.clear()
-        current = chaos_client_for_model(backend, TARGET)
+        current = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # THEN detection is refreshed and neither construction creates experiment resources
         assert current is not previous
@@ -594,7 +610,7 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         api = ConflictingApi()
         backend.kubernetes.networking_v1_api = api
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN creation fails and teardown runs
         with pytest.raises(ApiException) as exc_info:
@@ -610,7 +626,7 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         backend.kubernetes.crds.update((*LITMUS_CRDS, *CHAOS_MESH_CRDS))
         backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN requesting I/O latency and cleaning up
         client.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
@@ -627,7 +643,7 @@ class TestExperimentClients:
     def test_network_isolation_without_installed_tools(self) -> None:
         # GIVEN a Kubernetes model without chaos operators
         backend = JujuBackendStub()
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN isolating ingress and cleaning up
         client.isolate_network(TARGET.model, "postgresql/0")
@@ -644,11 +660,11 @@ class TestExperimentClients:
         # GIVEN a previous client request while Mesh was installed
         backend = JujuBackendStub()
         backend.kubernetes.crds.update(CHAOS_MESH_CRDS)
-        previous = chaos_client_for_model(backend, TARGET)
+        previous = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN Mesh is removed before the next request
         backend.kubernetes.crds.clear()
-        current = chaos_client_for_model(backend, TARGET)
+        current = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # THEN the new client skips latency instead of using the old installation report
         assert current is not previous
@@ -662,7 +678,7 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         if machine:
             backend.clients[TARGET.uri] = None
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN filling disk and cleaning up
         client.fill_disk(TARGET, "postgresql/0", "/tmp/fill", 128)
@@ -681,7 +697,7 @@ class TestExperimentClients:
         if litmus_present:
             backend.kubernetes.crds.update(LITMUS_CRDS)
             backend.kubernetes.ready_deployments.add((OPERATOR_NAMESPACE, "litmus"))
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN requesting latency, THEN only that unsupported experiment causes a skip
         with pytest.raises(pytest.skip.Exception, match="io_latency"):
@@ -694,7 +710,7 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         if machine:
             backend.clients[TARGET.uri] = None
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN requesting pressure, THEN workload-local stress-ng is not used
         with pytest.raises(pytest.skip.Exception, match="stress_cpu"):
@@ -713,14 +729,14 @@ class TestExperimentClients:
 
         # WHEN building experiment clients, THEN the original error propagates
         with pytest.raises(ApiException) as exc_info:
-            chaos_client_for_model(backend, TARGET)
+            chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
         assert exc_info.value is backend.kubernetes.error
 
     def test_execution_errors_are_not_skipped(self) -> None:
         # GIVEN a native command failure
         backend = JujuBackendStub()
         backend.exec_error = RuntimeError("command failed")
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN executing disk fill, THEN the original error propagates
         with pytest.raises(RuntimeError) as exc_info:
@@ -737,13 +753,13 @@ class TestExperimentClients:
 
         # WHEN building clients, THEN configuration failure propagates
         with pytest.raises(KeyError):
-            chaos_client_for_model(backend, TARGET)
+            chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
     def test_nonzero_native_exit_and_cleanup_failure_are_reported(self) -> None:
         # GIVEN a native command returning a nonzero exit code
         backend = JujuBackendStub()
         backend.exec_return_code = 1
-        client = chaos_client_for_model(backend, TARGET)
+        client = chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
         # WHEN executing and cleaning up, THEN neither failure is hidden
         with pytest.raises(RuntimeError, match="exit code 1"):
@@ -760,7 +776,9 @@ class TestExperimentClients:
         # GIVEN a fixture request and two models on one cluster
         backend = JujuBackendStub()
         request = FinalizerRequest()
-        resolve = unwrap(chaos_tools.chaos_tool_for_model)(cast(pytest.FixtureRequest, request), backend, None)
+        resolve = unwrap(chaos_tools.chaos_tool_for_model)(
+            cast(pytest.FixtureRequest, request), backend, RESOURCE_CONSTRAINTS_CLIENT, None
+        )
 
         # WHEN requesting clients and executing an experiment in each model
         target = resolve(TARGET)
@@ -782,7 +800,7 @@ class TestExperimentClients:
     def test_target_fixture_uses_target_model(self) -> None:
         # GIVEN a resolver that records the requested model
         models: list[JujuModelHandle] = []
-        client = MetaChaosClient([])
+        client = MetaChaosClient([], JujuBackendStub(), RESOURCE_CONSTRAINTS_CLIENT)
 
         def resolve(model: JujuModelHandle) -> MetaChaosClient:
             models.append(model)
@@ -846,6 +864,18 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
                 record("model lookup")
                 return KubernetesClient(BackendStub())
 
+            def list_applications(self, model):
+                from juju import CharmChannel, JujuApplicationInfo
+
+                return {
+                    "postgresql": JujuApplicationInfo(
+                        charm="postgresql-k8s",
+                        revision=1,
+                        channel=CharmChannel.parse("14/stable"),
+                        base="22.04",
+                    )
+                }
+
 
         @pytest.fixture(scope="session")
         def logger():
@@ -855,6 +885,12 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
         @pytest.fixture(scope="session")
         def juju_backend():
             return JujuBackendStub()
+
+        @pytest.fixture(scope="session")
+        def resource_constraints_client():
+            from chaos_client import ResourceConstraintsClient
+
+            return ResourceConstraintsClient()
 
 
         @pytest.fixture(scope="session")
