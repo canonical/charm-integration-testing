@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, NoReturn
 
 import pytest
-from chaos_client import ChaosClient, ChaosMeshChaosClient, MetaChaosClient
+from chaos_client import ChaosClient, ChaosMeshChaosClient, MetaChaosClient, ResourceConstraintsClient
 from chaos_client.adapters import DiskFillClient, NetworkIsolationClient
 from chaos_client.chaos_mesh_detection import chaos_mesh_is_available
 from chaos_client.litmus_client import LitmusChaosClient
@@ -97,7 +97,9 @@ def detect_chaos_tools(
     detect_initial_tools(scopes, cloud_kubeconfigs, logger)
 
 
-def chaos_client_for_model(backend: JujuBackend, model: JujuModelHandle) -> MetaChaosClient:
+def chaos_client_for_model(
+    backend: JujuBackend, model: JujuModelHandle, resource_constraints_client: ResourceConstraintsClient
+) -> MetaChaosClient:
     """Build experiment clients for the model's substrate."""
     tools: list[ChaosClient] = []
     kubernetes = backend.get_kubernetes_client_for_model(model)
@@ -112,17 +114,20 @@ def chaos_client_for_model(backend: JujuBackend, model: JujuModelHandle) -> Meta
     def skip_unsupported(operation: str) -> NoReturn:
         pytest.skip(f"No available chaos client supports '{operation}' for {model.uri}.")
 
-    return MetaChaosClient(tools, on_unsupported=skip_unsupported)
+    return MetaChaosClient(tools, backend, resource_constraints_client, on_unsupported=skip_unsupported)
 
 
 @pytest.fixture
 def chaos_tool_for_model(
-    request: pytest.FixtureRequest, juju_backend: JujuBackend, detect_chaos_tools: None
+    request: pytest.FixtureRequest,
+    juju_backend: JujuBackend,
+    resource_constraints_client: ResourceConstraintsClient,
+    detect_chaos_tools: None,
 ) -> Callable[[JujuModelHandle], MetaChaosClient]:
     """Provide experiment clients with cleanup at test teardown."""
 
     def resolve(model: JujuModelHandle) -> MetaChaosClient:
-        client = chaos_client_for_model(juju_backend, model)
+        client = chaos_client_for_model(juju_backend, model, resource_constraints_client)
         request.addfinalizer(client.cleanup_all)
         return client
 
