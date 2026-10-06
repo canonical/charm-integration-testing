@@ -53,6 +53,13 @@ class TestCharmChannel:
                 expected_branch="fix-123",
             ),
             Params(
+                label="trackless_risk_branch",
+                input="stable/feature",
+                expected_track="",
+                expected_risk="stable",
+                expected_branch="feature",
+            ),
+            Params(
                 label="from_dict",
                 input={"track": "2.0", "risk": "edge", "branch": ""},
                 expected_track="2.0",

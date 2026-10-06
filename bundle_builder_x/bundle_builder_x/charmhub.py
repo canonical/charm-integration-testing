@@ -121,6 +121,7 @@ class CharmhubClient:
                     juju_version=juju_version,
                     platform=platform,
                     charm_track=charm_track,
+                    charm_branch=charm_branch,
                     charm_revision=charm_revision,
                     ubuntu_version=ubuntu_version,
                 )
@@ -149,6 +150,7 @@ class CharmhubClient:
                     juju_version=juju_version,
                     platform=platform,
                     charm_track=charm_track,
+                    charm_branch=charm_branch,
                     ubuntu_version=ubuntu_version,
                 )
             elif charm_risk is not None:
@@ -538,6 +540,7 @@ class CharmhubClient:
         charm_track: str,
         charm_revision: int,
         ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
     ) -> Charm:
         attempt_errors: list[CharmReleaseNotFoundException] = []
         for risk in ["stable", "candidate", "beta", "edge"]:
@@ -547,7 +550,7 @@ class CharmhubClient:
                     ubuntu_arch=ubuntu_arch,
                     juju_version=juju_version,
                     platform=platform,
-                    charm_channel=CharmChannel(track=charm_track, risk=risk, branch=""),
+                    charm_channel=CharmChannel(track=charm_track, risk=risk, branch=charm_branch or ""),
                     charm_revision=charm_revision,
                     ubuntu_version=ubuntu_version,
                 )
@@ -575,6 +578,7 @@ class CharmhubClient:
         platform: str | None,
         charm_track: str,
         ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
     ) -> Charm:
         attempt_errors: list[CharmReleaseNotFoundException] = []
         for risk in ["stable", "candidate", "beta", "edge"]:
@@ -584,7 +588,7 @@ class CharmhubClient:
                     ubuntu_arch=ubuntu_arch,
                     juju_version=juju_version,
                     platform=platform,
-                    charm_channel=CharmChannel(track=charm_track, risk=risk, branch=""),
+                    charm_channel=CharmChannel(track=charm_track, risk=risk, branch=charm_branch or ""),
                     ubuntu_version=ubuntu_version,
                 )
             except CharmReleaseNotFoundException as exc:

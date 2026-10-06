@@ -23,6 +23,7 @@ ASSUMES_OPS: dict[str, Callable[["JujuVersion", "JujuVersion"], bool]] = {
 # state/application.go Endpoints()). It is not declared in charm metadata for most principals,
 # so charmhub's find API returns no results when filtering by provides=juju-info.
 JUJU_INFO_INTERFACE = "juju-info"
+_CHANNEL_RISK_ORDER = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
 
 
 class CharmAssumesEntry(BaseModel):
@@ -108,6 +109,8 @@ class CharmChannel(BaseModel):
                 case 1:
                     return {"track": "", "risk": parts[0], "branch": ""}
                 case 2:
+                    if parts[0] in _CHANNEL_RISK_ORDER:
+                        return {"track": "", "risk": parts[0], "branch": parts[1]}
                     return {"track": parts[0], "risk": parts[1], "branch": ""}
                 case 3:
                     return {"track": parts[0], "risk": parts[1], "branch": parts[2]}
@@ -127,10 +130,9 @@ class CharmChannel(BaseModel):
         return self.track if self.track != "" else "latest"
 
     def __lt__(self, other: "CharmChannel") -> bool:
-        _risk_order = {"stable": 0, "candidate": 1, "beta": 2, "edge": 3}
-        return (self.explicit_track, _risk_order.get(self.risk, 99), self.branch) < (
+        return (self.explicit_track, _CHANNEL_RISK_ORDER.get(self.risk, 99), self.branch) < (
             other.explicit_track,
-            _risk_order.get(other.risk, 99),
+            _CHANNEL_RISK_ORDER.get(other.risk, 99),
             other.branch,
         )
 

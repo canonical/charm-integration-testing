@@ -17,6 +17,13 @@ def _ch(track: str, risk: str) -> CharmChannel:
 
 
 class TestCharmChannel:
+    def test_parses_trackless_channel_branch(self) -> None:
+        channel = CharmChannel.model_validate("stable/feature")
+
+        assert channel.track == ""
+        assert channel.risk == "stable"
+        assert channel.branch == "feature"
+
     class TestOrdering:
         def test_stable_before_candidate(self) -> None:
             # GIVEN two channels on the same track differing only by risk

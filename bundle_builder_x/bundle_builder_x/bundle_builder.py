@@ -782,6 +782,7 @@ class BundleBuilder:
         risk: str | None,
         connect_to_id: int,
         revision: int | None = None,
+        branch: str | None = None,
     ) -> bool:
         """Fetch `charm_name` on the given channel and add it to the domain for `charm_id`.
 
@@ -798,6 +799,7 @@ class BundleBuilder:
                 charm_track=track,
                 charm_risk=risk,
                 charm_revision=revision,
+                charm_branch=branch,
             )
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
@@ -832,9 +834,11 @@ class BundleBuilder:
             resolved = CharmChannel.model_validate(tag.required_channel)
             track: str | None = resolved.track or None
             risk: str | None = resolved.risk or None
+            branch: str | None = resolved.branch or None
         else:
             track = tag.required_track or None
             risk = tag.required_risk or None
+            branch = None
 
         if self._fetch_and_add_charm_variant(
             charm_id=tag.peer_charm_id,
@@ -844,6 +848,7 @@ class BundleBuilder:
             track=track,
             risk=risk,
             revision=tag.required_revision,
+            branch=branch,
             connect_to_id=tag.charm.charm_id,
         ):
             return True
@@ -856,6 +861,7 @@ class BundleBuilder:
             track=peer_channel.track,
             risk=peer_channel.risk,
             connect_to_id=tag.peer_charm_id,
+            branch=peer_channel.branch or None,
         )
 
     def _handle_subordinate_base_mismatch(
@@ -886,6 +892,7 @@ class BundleBuilder:
                 platform=model.platform,
                 charm_track=sub_charm_spec.channel.track or None,
                 charm_risk=sub_charm_spec.channel.risk or None,
+                charm_branch=sub_charm_spec.channel.branch or None,
                 ubuntu_version=principal_base,
             )
             expanded |= self._add_charm_for_charm_id(
@@ -913,6 +920,7 @@ class BundleBuilder:
                 platform=model.platform,
                 charm_track=principal_spec.channel.track or None,
                 charm_risk=principal_spec.channel.risk or None,
+                charm_branch=principal_spec.channel.branch or None,
                 ubuntu_version=tag.subordinate_base,
             )
             expanded |= self._add_charm_for_charm_id(
@@ -944,6 +952,7 @@ class BundleBuilder:
             ubuntu_version=app.base,
             juju_version=model.juju_version,
             platform=model.platform,
+            charm_branch=app.channel.branch if app.channel else None,
         )
 
     def _get_charms_for_endpoint(
