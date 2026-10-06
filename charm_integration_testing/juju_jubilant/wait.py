@@ -263,6 +263,33 @@ def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -
     )
 
 
+def unit_leaves_status(
+    status: jubilant.Status,
+    unit: str,
+    workload_statuses: frozenset[str] = frozenset({"active"}),
+    unit_agent_statuses: frozenset[str] = frozenset({"idle"}),
+) -> tuple[bool, JujuWaitState]:
+    unit_info = get_unit_info(status, unit)
+    if unit_info is None:
+        return False, JujuWaitState(message=f"waiting for unit '{unit}' to leave active/idle status")
+
+    workload_left_status = unit_info.workload_status.current not in workload_statuses
+    unit_agent_left_status = unit_info.juju_status.current not in unit_agent_statuses
+    is_compliant = workload_left_status or unit_agent_left_status
+
+    noncompliant_units: dict[str, JujuUnitState | None] = {}
+    noncompliant_unit_agents: dict[str, JujuUnitAgentState | None] = {}
+    if not is_compliant:
+        noncompliant_units[unit] = get_unit_state(status, unit)
+        noncompliant_unit_agents[unit] = get_unit_agent_state(status, unit)
+
+    return is_compliant, JujuWaitState(
+        message=f"waiting for unit '{unit}' to leave active/idle status",
+        noncompliant_units=noncompliant_units,
+        noncompliant_unit_agents=noncompliant_unit_agents,
+    )
+
+
 def applications_are_removed(status: jubilant.Status, *application_args: str) -> tuple[bool, JujuWaitState]:
     if application_args:
         applications = set(application_args)

@@ -50,6 +50,7 @@ from .wait import (
     bundle_applications_integrations_exist,
     integrations_are_removed,
     saas_is_removed,
+    unit_leaves_status,
     units_have_message,
 )
 
@@ -331,6 +332,9 @@ class JubilantBackend(JujuCmdBackend):
 
     def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_scaled(status, application), timeout=timeout)
+
+    def wait_for_unit_disruption(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, lambda status: unit_leaves_status(status, unit), timeout=timeout)
 
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)

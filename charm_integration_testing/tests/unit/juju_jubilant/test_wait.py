@@ -2,6 +2,8 @@
 # See LICENSE file for licensing details.
 
 
+import dataclasses
+
 import jubilant
 import pytest
 from juju import JujuIntegrationApplication
@@ -18,6 +20,7 @@ from juju_jubilant.wait import (
     get_unit_state,
     integrations_are_removed,
     saas_is_removed,
+    unit_leaves_status,
     units_have_message,
 )
 
@@ -486,6 +489,58 @@ class TestWaitConditions:
         # THEN
         assert result is False
         assert "database/0" in wait.noncompliant_units
+
+    def test_unit_leaves_status_not_ready(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = unit_leaves_status(sample_database_webapp_status, "database/0")
+
+        # THEN
+        assert result is False
+        assert wait.message == "waiting for unit 'database/0' to leave active/idle status"
+        assert "database/0" in wait.noncompliant_units
+        assert "database/0" in wait.noncompliant_unit_agents
+
+    def test_unit_leaves_status_workload_changed(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN
+        unit = sample_database_webapp_status.apps["database"].units["database/0"]
+        sample_database_webapp_status.apps["database"].units["database/0"] = dataclasses.replace(
+            unit,
+            workload_status=dataclasses.replace(unit.workload_status, current="blocked"),
+        )
+
+        # WHEN
+        result, wait = unit_leaves_status(sample_database_webapp_status, "database/0")
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_units == {}
+        assert wait.noncompliant_unit_agents == {}
+
+    def test_unit_leaves_status_agent_changed(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN
+        unit = sample_database_webapp_status.apps["database"].units["database/0"]
+        sample_database_webapp_status.apps["database"].units["database/0"] = dataclasses.replace(
+            unit,
+            juju_status=dataclasses.replace(unit.juju_status, current="executing"),
+        )
+
+        # WHEN
+        result, wait = unit_leaves_status(sample_database_webapp_status, "database/0")
+
+        # THEN
+        assert result is True
+        assert wait.noncompliant_units == {}
+        assert wait.noncompliant_unit_agents == {}
+
+    def test_unit_leaves_status_missing_unit(self, sample_database_webapp_status: jubilant.Status) -> None:
+        # GIVEN / WHEN
+        result, wait = unit_leaves_status(sample_database_webapp_status, "database/1")
+
+        # THEN
+        assert result is False
+        assert wait.message == "waiting for unit 'database/1' to leave active/idle status"
+        assert wait.noncompliant_units == {}
+        assert wait.noncompliant_unit_agents == {}
 
     def test_applications_are_removed_none_removed(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN

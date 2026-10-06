@@ -101,6 +101,16 @@ class WaitIdleBackendStub(NullJujuBackend):
         self.calls.append((models, timeout, count, strict_timeout))
 
 
+@dataclass
+class WaitForUnitDisruptionBackendStub(NullJujuBackend):
+    """Backend stub that records unit disruption waits."""
+
+    calls: list[tuple[JujuModelHandle, str, timedelta | None]] = field(default_factory=list)
+
+    def wait_for_unit_disruption(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.calls.append((model, unit, timeout))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -283,6 +293,23 @@ class TestJujuClientMultiModelIdleForPeriod:
         # THEN nothing is logged or delegated
         assert logger.infos == []
         assert backend.calls == []
+
+
+class TestJujuClientWaitForUnitDisruption:
+    def test_logs_and_delegates(self) -> None:
+        # GIVEN a client with a backend that records unit disruption waits
+        backend = WaitForUnitDisruptionBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller-1", model="model-1")
+        timeout = timedelta(minutes=5)
+
+        # WHEN waiting for a unit to leave active/idle
+        client.wait_for_unit_disruption(model=model, unit="my-app/0", timeout=timeout)
+
+        # THEN the wait is logged and delegated to the backend
+        assert logger.infos == ["Waiting 0:05:00 for unit 'my-app/0' to leave active/idle status."]
+        assert backend.calls == [(model, "my-app/0", timeout)]
 
 
 class TestJujuValidationError:
