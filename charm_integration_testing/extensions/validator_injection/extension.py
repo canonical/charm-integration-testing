@@ -33,8 +33,10 @@ install_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/juju/validators"
+remote_packages_path = f"{remote_validators_path}/packages"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
+validators_ready_cmd = f"test -x {venv_runner} && test -x {uv_bin}"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 # The ops run_validators' --persistence flag accepts (see validators/runner/runner.py).
@@ -230,7 +232,7 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
@@ -258,7 +260,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
 
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 # An unconfigured validators_path means no validators are being tested at all, so
                 # this must be a silent skip rather than a hard failure. Return None (not the
@@ -294,11 +296,15 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        mkdir = f"mkdir -p {remote_validators_path}"
+        mkdir = f"rm -rf {remote_packages_path} && mkdir -p {remote_validators_path}"
         if not is_k8s:
-            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
+            mkdir = (
+                f"sudo rm -rf {remote_packages_path} && "
+                f"sudo mkdir -p {remote_validators_path} && "
+                f"sudo chown -R $(id -u) {remote_validators_path}"
+            )
         self.juju.ssh(model, unit, mkdir)
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_packages_path}")
 
         # Copy uv binary
         uv_file = self._get_uv_file()
@@ -309,7 +315,7 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{install_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
+                f"{install_env} {uv_bin} venv --clear --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (
