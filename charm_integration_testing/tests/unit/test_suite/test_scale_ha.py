@@ -25,8 +25,11 @@ class RecordingJujuClient:
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None
         self.fail_next_scale_after_callback = False
+        self.fail_scale_after_callback_on_call: int | None = None
         self.fail_next_multi_model_idle = False
         self.fail_multi_model_idle_on_call: int | None = None
+        self.fail_next_remove_after_callback = False
+        self.extra_units_on_scale_up = 0
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -34,15 +37,20 @@ class RecordingJujuClient:
 
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.calls.append(("scale_application", application, num, model))
+        scale_calls = len([call for call in self.calls if call[0] == "scale_application"])
         if num > len(self.units):
             next_index = max((int(unit.rsplit("/", maxsplit=1)[-1]) for unit in self.units), default=-1) + 1
             self.units.extend(
                 f"{application}/{index}" for index in range(next_index, next_index + num - len(self.units))
             )
+            self.units.extend(f"{application}/surge-extra-{index}" for index in range(self.extra_units_on_scale_up))
+            self.extra_units_on_scale_up = 0
         elif num < len(self.units):
             self.units = sorted(self.units, key=lambda unit: int(unit.rsplit("/", maxsplit=1)[-1]))[:num]
         if callable(self.scale_callback):
             self.scale_callback(num)
+        if self.fail_scale_after_callback_on_call == scale_calls:
+            raise RuntimeError("scale cleanup hook failed")
         if self.fail_next_scale_after_callback:
             self.fail_next_scale_after_callback = False
             raise RuntimeError("scale extension failed")
@@ -53,6 +61,9 @@ class RecordingJujuClient:
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
         self.units.remove(unit)
+        if self.fail_next_remove_after_callback:
+            self.fail_next_remove_after_callback = False
+            raise RuntimeError("unit removal hook failed")
 
     def idle_for_period(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("idle_for_period", model, timeout))
@@ -397,6 +408,31 @@ def test_unit_rotation_removes_machine_surge_when_post_scale_hook_fails() -> Non
     assert client.units == ["target/0", "target/1", "target/2"]
 
 
+def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_multi_model_idle = True
+    client.fail_next_remove_after_callback = True
+    client.extra_units_on_scale_up = 1
+
+    with pytest.raises(RuntimeError, match="unit removal hook failed"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=False),
+            None,
+            MODEL,
+            None,
+            "target",
+            _charm(),
+        )
+
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == [
+        "target/3",
+        "target/surge-extra-0",
+    ]
+    assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 2
+    assert client.units == ["target/0", "target/1", "target/2"]
+
+
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
 def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset: bool) -> None:
     client = RecordingJujuClient(current_units=2)
@@ -525,6 +561,28 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fail
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="cleanup idle wait failed"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=True),
+            cast(KubernetesClient, kubernetes_client),
+            MODEL,
+            None,
+            "target",
+            _charm(ha_units=2),
+        )
+
+    assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+
+
+def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails() -> None:
+    client = RecordingJujuClient(current_units=2)
+    client.fail_scale_after_callback_on_call = 2
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(RuntimeError, match="scale cleanup hook failed"):
         scale_ha.test_unit_rotation(
             cast(JujuClient, client),
             RecordingJujuBackend(k8s_model=True),

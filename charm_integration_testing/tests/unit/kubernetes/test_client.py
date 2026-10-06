@@ -899,6 +899,7 @@ class TestKubernetesClientInit:
             pod = create_sample_pod("app-0", "test-namespace", labels={"app.kubernetes.io/name": "app"})
             pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
             backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.return_value = V1PodListStub(items=[pod])
             client = KubernetesClient(
                 backend=backend,
                 default_timeout=timedelta(microseconds=1),
