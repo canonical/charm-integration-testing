@@ -334,8 +334,9 @@ class JubilantBackend(JujuCmdBackend):
         self.wait(model, lambda status: applications_are_scaled(status, application), timeout=timeout)
 
     def wait_for_unit_disruption(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
-        # Ready once the unit leaves active/idle; does not wait for recovery (see wait_idle).
-        self.wait(model, lambda status: unit_leaves_status(status, unit), timeout=timeout)
+        # Edge-triggered: return on the first observed disruption (successes=1), unlike wait_idle's
+        # debounced confirmation of sustained recovery. Does not wait for recovery (see wait_idle).
+        self.wait(model, lambda status: unit_leaves_status(status, unit), timeout=timeout, successes=1)
 
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)

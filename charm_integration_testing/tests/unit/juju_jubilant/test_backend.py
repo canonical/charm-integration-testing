@@ -1042,6 +1042,21 @@ class TestJubilantBackend:
             # THEN wait was called
             assert wait_stub.call_count == 1
 
+        def test_returns_on_first_observed_disruption(self) -> None:
+            # GIVEN a unit that is already outside active/idle on the very first status poll
+            stub = StatusStub(
+                unit_workload_statuses={"my-app/0": "blocked"},
+                unit_juju_statuses={"my-app/0": "idle"},
+            )
+            client = JubilantClientStub(client=stub)
+            backend = JubilantBackend(client)
+
+            # WHEN
+            backend.wait_for_unit_disruption(TEST_MODEL, "my-app/0", timeout=timedelta(seconds=10))
+
+            # THEN only a single status poll was needed (edge-triggered, not debounced like wait_idle)
+            assert stub.call_count == 1
+
         def test_timeout(self) -> None:
             # GIVEN
             wait_stub = WaitStub(raise_timeout=True)
