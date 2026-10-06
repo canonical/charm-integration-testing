@@ -1,0 +1,8 @@
+---
+# Source: https://github.com/canonical/smtp-integrator-operator
+#
+# host (config): charm blocks with "invalid configuration: host" when unset;
+# provide a placeholder so the unit reaches active. See issue 685.
+overrides:
+  - configs:
+      host: ['smtp.example.com']

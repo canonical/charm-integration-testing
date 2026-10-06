@@ -5,11 +5,23 @@ from .backend import ChaosClient
 from .chaos_mesh_client import ChaosMeshChaosClient, ChaosMeshNotInstalledError
 from .client import NativeChaosClient
 from .kubernetes_client import KubernetesChaosClient
+from .litmus_client import LitmusChaosClient, LitmusNotInstalledError
+from .meta_client import ChaosCleanupError, ChaosNotSupportedError, ChaosResourceConstraintsError, MetaChaosClient
+from .resource_constraints import CharmResourceConstraints, CharmResourceConstraintsFile, ResourceConstraintsClient
 
 __all__ = [
+    "ChaosCleanupError",
     "ChaosClient",
     "ChaosMeshChaosClient",
     "ChaosMeshNotInstalledError",
+    "ChaosNotSupportedError",
+    "ChaosResourceConstraintsError",
+    "CharmResourceConstraints",
+    "CharmResourceConstraintsFile",
     "KubernetesChaosClient",
+    "LitmusChaosClient",
+    "LitmusNotInstalledError",
+    "MetaChaosClient",
     "NativeChaosClient",
+    "ResourceConstraintsClient",
 ]

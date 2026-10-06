@@ -8,6 +8,21 @@ from juju import JujuModelHandle
 
 
 class ChaosClient(ABC):
+    """Chaos experiment interface.
+
+    Use NotImplementedError only for unsupported operations, before any side effects.
+    """
+
+    @abstractmethod
+    def supports(self, operation: str) -> bool:
+        """Report whether this client can currently run the named experiment operation.
+
+        Must be side-effect free and consistent with whether the matching method would
+        raise NotImplementedError, so callers can check support before resolving data
+        (e.g. resource constraints) needed only to actually run the experiment.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError

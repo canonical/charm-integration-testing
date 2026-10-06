@@ -9,22 +9,9 @@ from juju import JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
+from .shared import FakeNetworkingV1Api
+
 TEST_MODEL = JujuModelHandle(controller="test-controller", model="test-model")
-
-
-class FakeNetworkingV1Api:
-    def __init__(self) -> None:
-        self.create_calls: list[tuple[str, object]] = []
-        self.delete_calls: list[tuple[str, str]] = []
-        self.raise_on_delete: Exception | None = None
-
-    def create_namespaced_network_policy(self, namespace: str, body: object) -> None:
-        self.create_calls.append((namespace, body))
-
-    def delete_namespaced_network_policy(self, name: str, namespace: str) -> None:
-        self.delete_calls.append((name, namespace))
-        if self.raise_on_delete is not None:
-            raise self.raise_on_delete
 
 
 class KubernetesBackendStub(KubernetesBackend):

@@ -15,6 +15,9 @@ class KubernetesChaosClient(ChaosClient):
     def __init__(self, backend: KubernetesBackend):
         self._backend = backend
 
+    def supports(self, operation: str) -> bool:
+        return operation == "isolate_network"
+
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
 
@@ -39,8 +42,13 @@ class KubernetesChaosClient(ChaosClient):
         raise NotImplementedError
 
     def isolate_network(self, model: str, unit: str) -> None:
+        policy = self._network_policy(model, unit)
+        self._backend.networking_v1_api.create_namespaced_network_policy(namespace=model, body=policy)
+
+    @staticmethod
+    def _network_policy(model: str, unit: str) -> client.V1NetworkPolicy:
         application = unit.split("/")[0]
-        policy = client.V1NetworkPolicy(
+        return client.V1NetworkPolicy(
             metadata=client.V1ObjectMeta(name=f"chaos-isolate-{application}", namespace=model),
             spec=client.V1NetworkPolicySpec(
                 pod_selector=client.V1LabelSelector(match_labels={"app.kubernetes.io/name": application}),
@@ -48,7 +56,6 @@ class KubernetesChaosClient(ChaosClient):
                 ingress=[],
             ),
         )
-        self._backend.networking_v1_api.create_namespaced_network_policy(namespace=model, body=policy)
 
     def remove_network_isolation(self, model: str, unit: str) -> None:
         application = unit.split("/")[0]

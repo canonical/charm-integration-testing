@@ -15,6 +15,7 @@ from .assertion_tags import (
     Assertions,
     AssertionTag,
     CharmEndpointNonOptionalTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
     EndpointCountMatchesIntegrationsTag,
     IntegrationFeatureMismatchTag,
     PeerChannelMismatchTag,
@@ -64,6 +65,7 @@ _EXPANSION_PRIORITY: dict[Assertions, int] = {
     Assertions.APPLICATION_INTEGRATION_EXISTS: 1,
     Assertions.CHARM_ENDPOINT_NON_OPTIONAL: 2,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
+    Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS: 3,
     Assertions.PEER_CHANNEL_MISMATCH: 4,
     Assertions.SUBORDINATE_BASE_MISMATCH: 5,
 }
@@ -420,8 +422,11 @@ class BundleBuilder:
             # eagerly pairs); connect them directly.
             return AssertionHandlingResult(expanded=self._connect_apps_for_integration(app_integration_exists, domain))
 
-        elif tag.kind == Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS:
-            count_tag = cast(EndpointCountMatchesIntegrationsTag, tag)
+        elif tag.kind in (
+            Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS,
+            Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS,
+        ):
+            count_tag = cast(EndpointCountMatchesIntegrationsTag | CrossModelEndpointCountMatchesIntegrationsTag, tag)
             return AssertionHandlingResult(
                 expanded=self._expand_for_endpoint(
                     count_tag.charm.charm_id,
@@ -1009,9 +1014,13 @@ class BundleBuilder:
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
-        # Dedup per parent charm_id: one candidate instance is enough during expansion.
+        # Dedup per (parent charm_id, model): one instance per model is enough during
+        # expansion (scoping by model lets a cross-model requirement add a distinct instance).
         # Additional instances needed only for optimization are added after satisfiability.
-        if any(domain.charms[added_id].spec == charm for added_id in parent_charm.charms_added):
+        if any(
+            domain.charms[added_id].spec == charm and domain.charms[added_id].model == model_ref
+            for added_id in parent_charm.charms_added
+        ):
             return False
 
         # Traverse the dependency chain to detect cycles
@@ -1026,8 +1035,9 @@ class BundleBuilder:
                 continue
             visited.add(ancestor_id)
 
-            # If the charm we're trying to add is already this ancestor charm, it would create a cycle
-            if domain.charms[ancestor_id].spec == charm:
+            # Same charm+model as an ancestor would be a cycle; a different model means a
+            # distinct application instance (e.g. for a cross-model-only requirement).
+            if domain.charms[ancestor_id].spec == charm and domain.charms[ancestor_id].model == model_ref:
                 return False
 
             # Continue traversing: find parents that added this ancestor

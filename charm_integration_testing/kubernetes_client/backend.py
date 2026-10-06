@@ -74,6 +74,36 @@ class KubernetesBackend:
             raise
         return True
 
+    def deployment_is_ready(self, namespace: str, name: str) -> bool:
+        """Return True when updated, ready and available replicas meet the nonzero desired count.
+
+        Allows surge replicas; does not wait for old pods to terminate. API errors other than 404 propagate.
+        """
+        try:
+            deployment = self.apps_v1_api.read_namespaced_deployment(name=name, namespace=namespace)
+        except ApiException as error:
+            if error.status == 404:
+                return False
+            raise
+
+        metadata = deployment.metadata
+        spec = deployment.spec
+        status = deployment.status
+        if metadata is None or spec is None or status is None:
+            return False
+        if metadata.deletion_timestamp is not None or metadata.generation is None:
+            return False
+        if (status.observed_generation or 0) < metadata.generation:
+            return False
+
+        replicas = spec.replicas if spec.replicas is not None else 1
+        return bool(
+            replicas > 0
+            and (status.updated_replicas or 0) >= replicas
+            and (status.ready_replicas or 0) >= replicas
+            and (status.available_replicas or 0) >= replicas
+        )
+
     @classmethod
     def k8s_client(
         cls,

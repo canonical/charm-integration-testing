@@ -606,13 +606,13 @@ class JubilantBackend(JujuCmdBackend):
         parsed_url = offer.parse_url()
         if parsed_url is None:
             return None
-        # Qualify with the owner explicitly (rather than relying on the currently authenticated
-        # user matching), since the offering model may belong to a different owner than the
-        # model that consumed the offer.
-        qualified_offering_model = dataclasses.replace(parsed_url.model, owner=parsed_url.owner)
+        # The offering model may belong to a different owner than the model that consumed the
+        # offer, so address it with the owner parsed from the URL rather than relying on the
+        # currently authenticated user matching.
+        offering_model = parsed_url.model
 
         try:
-            offering_status = self.status(qualified_offering_model)
+            offering_status = self.status(offering_model)
         except jubilant.CLIError:
             # The offering controller/model may not be reachable from here (e.g. a different,
             # unregistered controller), or may no longer exist.
@@ -788,6 +788,13 @@ class JubilantBackend(JujuCmdBackend):
         ``get_kubernetes_client``, which caches per cloud.
         """
         model_info = self.client.model(JujuModelHandle(controller=controller, model="controller")).show_model()
+        if model_info.type != "kubernetes":
+            return None
+        return self.get_kubernetes_client(model_info.cloud)
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Resolve the model's current cloud independently of its controller's cloud."""
+        model_info = self.client.model(model).show_model()
         if model_info.type != "kubernetes":
             return None
         return self.get_kubernetes_client(model_info.cloud)
