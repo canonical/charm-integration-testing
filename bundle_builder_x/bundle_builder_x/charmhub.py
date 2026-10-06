@@ -157,7 +157,7 @@ class CharmhubClient:
                     ubuntu_arch=ubuntu_arch,
                     juju_version=juju_version,
                     platform=platform,
-                    charm_channel=CharmChannel(track="", risk=charm_risk, branch=""),
+                    charm_channel=CharmChannel(track="", risk=charm_risk, branch=charm_branch or ""),
                     ubuntu_version=ubuntu_version,
                 )
             else:

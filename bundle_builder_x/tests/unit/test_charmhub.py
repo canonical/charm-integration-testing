@@ -509,6 +509,23 @@ class TestCharmhubClient:
             # THEN the resolved charm retains that branch
             assert charm.channel.branch == "candidate-build"
 
+        def test_preserves_branch_on_trackless_channel(self) -> None:
+            # GIVEN a charm requested from a trackless channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with only risk and branch
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_risk="stable",
+                charm_branch="feature",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains the trackless channel branch
+            assert str(charm.channel) == "stable/feature"
+
     # ---------------------------------------------------------------------------
     # TestBundleBuilderPlatformMismatch
     # ---------------------------------------------------------------------------

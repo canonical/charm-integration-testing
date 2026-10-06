@@ -736,6 +736,11 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
                 "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
+    if resolved_channel.branch:
+        pytest.skip(
+            f"Unable to select a historical revision for branched channel '{resolved_channel}': "
+            "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
+        )
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
