@@ -1058,6 +1058,27 @@ class TestKafkaClientPersistenceValidatorPrepare:
         # THEN the persistence producer requires every replica to acknowledge the write
         assert mock_producer_cls.call_args.kwargs["acks"] == "all"
 
+    def test_produces_canary_message_with_idempotence_enabled(self) -> None:
+        # GIVEN. Regression test for: acks="all" alone only guarantees a write is replicated once
+        # accepted, it does not stop a non-idempotent producer from appending a duplicate record
+        # if a retry fires after an ack is lost in transit. A duplicate canary message would then
+        # be seen by checkpoint() as an unexpected extra record and reported as data loss even
+        # though the canary survived.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer) as mock_producer_cls,
+        ):
+            # WHEN
+            validator.prepare()
+
+        # THEN the persistence producer is idempotent, so a transport-level retry cannot append
+        # a duplicate record on top of an already-acknowledged write
+        assert mock_producer_cls.call_args.kwargs["enable_idempotence"] is True
+
     def test_creates_canary_topic_with_a_replication_factor_matching_the_live_broker_count(self) -> None:
         # GIVEN a 3-broker cluster: hard-coding replication_factor=1 would mean a single broker
         # loss can remove the canary topic's only replica even though the cluster itself (and the

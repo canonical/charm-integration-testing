@@ -146,7 +146,9 @@ class _KafkaConnectionMixin:
         kwargs["consumer_timeout_ms"] = _CLIENT_TIMEOUT_MS
         return KafkaConsumer(**kwargs)
 
-    def _build_producer(self, data: dict[str, str], *, acks: int | str = 1) -> KafkaProducer:
+    def _build_producer(
+        self, data: dict[str, str], *, acks: int | str = 1, enable_idempotence: bool = False
+    ) -> KafkaProducer:
         """Build a KafkaProducer with appropriate security settings.
 
         ``acks`` defaults to kafka-python's own default (1: leader-only acknowledgement), matching
@@ -156,9 +158,17 @@ class _KafkaConnectionMixin:
         after a successful ``prepare()``/``checkpoint()`` can lose the just-written canary and
         make this validator report a false persistence failure for a disruption the application's
         own, fully-replicated data would have survived.
+
+        ``enable_idempotence`` also defaults to off, matching the functional validator's existing
+        behavior. The persistence producer passes ``enable_idempotence=True``: ``acks="all"`` alone
+        only guarantees a write is replicated once accepted, it does not stop a non-idempotent
+        producer from appending a duplicate record if a retry fires after an ack is lost in
+        transit. A duplicate canary message would otherwise be seen by checkpoint() as an
+        unexpected extra record and reported as data loss even though the canary survived.
         """
         kwargs = self._build_kafka_client_kwargs(data)
         kwargs["acks"] = acks
+        kwargs["enable_idempotence"] = enable_idempotence
         return KafkaProducer(**kwargs)
 
     def _build_admin_client(self, data: dict[str, str]) -> KafkaAdminClient:
@@ -790,7 +800,7 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
     def _produce_canary_message(self, data: dict[str, str], topic: str, token: str, ref: int) -> None:
         producer: KafkaProducer | None = None
         try:
-            producer = self._build_producer(data, acks="all")
+            producer = self._build_producer(data, acks="all", enable_idempotence=True)
             value = json.dumps({"token": token, "ref": ref}).encode()
             # Key must be unique per (token, ref): a constant key would let a broker/topic
             # configured with cleanup.policy=compact collapse every canary message down to just
