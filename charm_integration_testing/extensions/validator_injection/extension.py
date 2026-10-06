@@ -36,6 +36,7 @@ remote_validators_path = "/var/lib/juju/validators"
 remote_packages_path = f"{remote_validators_path}/packages"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
+validators_ready_cmd = f"test -x {venv_runner} && test -x {uv_bin}"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 # The ops run_validators' --persistence flag accepts (see validators/runner/runner.py).
@@ -231,8 +232,7 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        validators_ready = f"test -x {venv_runner} && test -x {uv_bin}"
-        if self.juju.exec_unit(model, unit, validators_ready, operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
@@ -260,7 +260,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
 
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 # An unconfigured validators_path means no validators are being tested at all, so
                 # this must be a silent skip rather than a hard failure. Return None (not the

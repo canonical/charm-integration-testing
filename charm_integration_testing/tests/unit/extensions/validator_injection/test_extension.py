@@ -246,6 +246,7 @@ class TestValidatorInjectorExtension:
             # THEN the venv was installed - i.e. more than just the readiness check and the run
             # command were executed - and the op still succeeded afterwards
             run_cmds = [call[2] for call in juju.exec_calls if "--persistence" in call[2]]
+            assert juju.exec_calls[0][2] == f"test -x {venv_runner} && test -x {uv_bin}"
             assert len(run_cmds) == 1
             assert len(juju.exec_calls) > 2
 
@@ -869,6 +870,7 @@ class TestValidatorInjectorExtension:
             pip_cmd = juju.exec_calls[2][2]
             assert "UV_NO_CACHE=1" in venv_cmd, f"UV_NO_CACHE not in venv command: {venv_cmd}"
             assert "UV_NO_CACHE=1" in pip_cmd, f"UV_NO_CACHE not in pip install command: {pip_cmd}"
+            assert "--clear" in venv_cmd
 
         def test_raises_when_apt_install_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN chmod +x uv fails
