@@ -238,6 +238,40 @@ The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
 
+Total CPU stress
+----------------
+
+``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
+one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+
+It temporarily limits the workload container to one CPU, waits for all bundle
+units to become active/idle, then starts four stress workers. Stress is held for
+``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
+required. Chaos Mesh waits up to one minute for the controller to confirm target
+selection and injection before the hold period starts. A startup timeout fails
+the test and still triggers cleanup. The requested experiment duration includes
+two extra minutes to allow for startup and polling.
+After cleanup, all bundle units, including a cross-model neighbor,
+must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
+default). Available deep interface validators run for the target application and
+its test neighbor, including validators implemented on the consumer side,
+before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+When no validator applies, logs report the missing validation coverage; only
+status recovery is checked. Deployment validation supplies the initial baseline.
+Original CPU requests and limits are restored even after failure or skip.
+A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
+
+For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
+``data-integrator:postgresql``. The ``postgresql_client`` validator runs on
+data-integrator and checks database connectivity, a query, and a write/read cycle
+at the deep level. The integration-test workflow includes this combination with
+PostgreSQL revision 495, channel ``14/stable``, and base ``22.04``. For manual
+workflow runs, use those same values and the branch containing your changes.
+The existing ``certificates`` combination does not exercise this DB validator.
+Confirm validation results for the neighbor in the live logs; an empty or skipped
+validation result is not evidence of successful database recovery.
+
 Network isolation recovery
 --------------------------
 
