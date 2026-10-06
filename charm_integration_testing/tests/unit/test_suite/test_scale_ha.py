@@ -85,6 +85,7 @@ class RecordingKubernetesClient:
         self.scale_down_uid: str | None = None
         self.defer_next_scale_down = False
         self.fail_wait_for_new_pod = False
+        self.fail_wait_for_pod_ready = False
 
     def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
         pod = K8sClient.V1Pod()
@@ -161,6 +162,8 @@ class RecordingKubernetesClient:
 
     def wait_for_pod_ready(self, pod_name: str, namespace: str, timeout: timedelta) -> None:
         self.calls.append(("wait_for_pod_ready", namespace, pod_name, timeout))
+        if self.fail_wait_for_pod_ready:
+            raise TimeoutError("replacement pod did not become ready")
 
     def wait(
         self,
@@ -421,6 +424,31 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="replacement pod did not appear"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=True),
+            cast(KubernetesClient, kubernetes_client),
+            MODEL,
+            None,
+            "target",
+            _charm(ha_units=2),
+        )
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 3, MODEL),
+        ("scale_application", "target", 2, MODEL),
+    ]
+    assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
+
+
+def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    kubernetes_client.fail_wait_for_pod_ready = True
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(TimeoutError, match="replacement pod did not become ready"):
         scale_ha.test_unit_rotation(
             cast(JujuClient, client),
             RecordingJujuBackend(k8s_model=True),
