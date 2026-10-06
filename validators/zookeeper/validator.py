@@ -28,6 +28,10 @@ _MAX_ZNODE_VERSION = (1 << 31) - 1
 _CLIENT_TIMEOUT_SECONDS = 10
 
 
+class _IncompleteConnectionConfig(RuntimeError):
+    pass
+
+
 class _KazooStat(Protocol):
     version: int
 
@@ -112,7 +116,12 @@ class ZookeeperPersistenceValidator(BasePersistenceValidator):
 
     def cleanup(self) -> None:
         self._require_requires_role()
-        config = self._connection_config()
+        try:
+            config = self._connection_config()
+        except _IncompleteConnectionConfig as error:
+            raise PersistenceNotApplicable(
+                "Relation connection fields are incomplete; cleanup cannot remove canary data yet."
+            ) from error
         parent = self._parent_path(config["database"])
         node_regex = re.compile(re.escape(self._canary_node_prefix()) + r"(?P<identifier>[0-9]{20})")
 
@@ -142,15 +151,17 @@ class ZookeeperPersistenceValidator(BasePersistenceValidator):
         required = ["endpoints", "database", "username", "password"]
         if not self.validate_schema(required, credentials).passed:
             missing = [field for field in required if not (self.databag | credentials).get(field)]
-            raise RuntimeError(f"Cannot connect to ZooKeeper: missing relation fields {', '.join(missing)}")
+            raise _IncompleteConnectionConfig(
+                f"Cannot connect to ZooKeeper: missing relation fields {', '.join(missing)}"
+            )
 
         config = self.databag | credentials
         endpoints = [endpoint.strip() for endpoint in config["endpoints"].split(",") if endpoint.strip()]
         if not endpoints:
-            raise RuntimeError("Cannot connect to ZooKeeper: 'endpoints' is blank")
+            raise _IncompleteConnectionConfig("Cannot connect to ZooKeeper: 'endpoints' is blank")
         config["endpoints"] = ",".join(endpoints)
         if self.databag.get("secret-tls") and not config.get("tls-ca"):
-            raise RuntimeError("Cannot connect to ZooKeeper: TLS secret is missing 'tls-ca'")
+            raise _IncompleteConnectionConfig("Cannot connect to ZooKeeper: TLS secret is missing 'tls-ca'")
         return config
 
     def _resolve_secret(self, uri_key: str, *fields: str) -> dict[str, str]:

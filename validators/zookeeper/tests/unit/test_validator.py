@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import ops
 import pytest
-from kazoo.exceptions import BadVersionError, NoNodeError  # type: ignore[import-untyped]
+from kazoo.exceptions import BadVersionError, NoAuthError, NoNodeError  # type: ignore[import-untyped]
 
 from validators.base import PersistenceNotApplicable, PersistenceState
 from validators.test_utils.helpers import make_charm_from_relation
@@ -284,6 +284,52 @@ class TestCheckpoint:
 
 
 class TestCleanup:
+    @pytest.mark.parametrize("missing_field", ["endpoints", "database", "username", "password", "tls-ca"])
+    def test_incomplete_connection_fields_skip_without_connecting(self, missing_field: str) -> None:
+        # GIVEN a relation with an incomplete connection configuration.
+        validator, _ = _make_validator()
+        if missing_field in {"endpoints", "database"}:
+            del validator.relation.data[validator.relation.app][missing_field]
+        else:
+            secret = dict(_TLS_SECRET if missing_field == "tls-ca" else _USER_SECRET)
+            del secret[missing_field]
+            uri = "secret://tls" if missing_field == "tls-ca" else "secret://user"
+            secrets = {"secret://user": SecretStub(_USER_SECRET), "secret://tls": SecretStub(_TLS_SECRET)}
+            secrets[uri] = SecretStub(secret)
+            with patch.object(validator.charm.model, "get_secret", side_effect=lambda *, id: secrets[id]):
+                self._assert_cleanup_skips(validator)
+            return
+
+        # WHEN cleanup is requested, THEN it skips without opening a client.
+        self._assert_cleanup_skips(validator)
+
+    @staticmethod
+    def _assert_cleanup_skips(validator: ZookeeperPersistenceValidator) -> None:
+        with patch.object(validator, "_client") as client:
+            with pytest.raises(PersistenceNotApplicable, match="incomplete"):
+                validator.cleanup()
+        client.assert_not_called()
+
+    def test_blank_endpoints_skip_without_connecting(self) -> None:
+        validator, _ = _make_validator()
+        validator.relation.data[validator.relation.app]["endpoints"] = " , "
+        self._assert_cleanup_skips(validator)
+
+    @pytest.mark.parametrize("operation", ["start", "delete"])
+    def test_operational_failures_propagate(self, operation: str) -> None:
+        # GIVEN an existing canary and a client operation that fails.
+        validator, fake_client = _make_validator()
+        path = f"/canary/{validator._canary_node_name(1)}"
+        fake_client.nodes[path] = (b"token", 1)
+        with (
+            patch("validators.zookeeper.validator.KazooClient", return_value=fake_client),
+            patch.object(fake_client, operation, side_effect=NoAuthError),
+        ):
+            # WHEN cleanup runs, THEN the operational failure is not converted to a skip.
+            with pytest.raises(NoAuthError):
+                validator.cleanup()
+        assert path in fake_client.nodes
+
     def test_deletes_exact_scoped_canaries_and_preserves_other_nodes(self) -> None:
         validator, fake_client = _make_validator()
         prefix = validator._canary_node_prefix()
