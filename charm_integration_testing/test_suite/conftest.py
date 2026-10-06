@@ -79,6 +79,9 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
+from bundle_builder_x import (
+    JujuVersion as BundleJujuVersion,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -654,6 +657,9 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
     target_revision: int | None = request.getfixturevalue("target_revision")
     target_series: str | None = request.getfixturevalue("target_series")
     target_arch: str = request.getfixturevalue("target_arch")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
@@ -670,6 +676,8 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
             charm_branch=channel_branch,
             charm_revision=target_revision,
             ubuntu_version=target_series,
+            platform=target_platform,
+            juju_version=bundle_juju_version,
         )
     except BaseMismatchError:
         # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
