@@ -537,7 +537,7 @@ class TestCharmhubClient:
             charm = client.charm_from_store(
                 charm_name="ceph-mon",
                 ubuntu_arch="amd64",
-                charm_track="",
+                charm_track=None,
                 charm_risk="stable",
                 charm_branch="feature",
                 charm_revision=5,

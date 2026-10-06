@@ -125,6 +125,16 @@ class CharmhubClient:
                     charm_revision=charm_revision,
                     ubuntu_version=ubuntu_version,
                 )
+            elif charm_risk is not None and charm_revision is not None:
+                result = self._charm_from_store_by_channel_and_revision(
+                    charm_name=charm_name,
+                    ubuntu_arch=ubuntu_arch,
+                    juju_version=juju_version,
+                    platform=platform,
+                    charm_channel=CharmChannel(track="", risk=charm_risk, branch=charm_branch or ""),
+                    charm_revision=charm_revision,
+                    ubuntu_version=ubuntu_version,
+                )
             elif charm_revision is not None:
                 result = self._charm_from_store_by_revision(
                     charm_name=charm_name,
