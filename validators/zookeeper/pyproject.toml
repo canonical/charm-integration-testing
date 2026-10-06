@@ -1,0 +1,34 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-zookeeper"
+version = "0.1.0"
+description = "Persistence validator for the zookeeper interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "kazoo[sasl]>=2.10.0,<3",
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_persistence_validators"]
+zookeeper = "validators.zookeeper:ZookeeperPersistenceValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.zookeeper"]
+
+[tool.setuptools.package-dir]
+"validators.zookeeper" = "."
