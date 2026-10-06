@@ -236,25 +236,31 @@ if [ -z "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
     # juju snap cannot redirect output to files directly, so capture via pipe.
     _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
     juju status -m "$MODEL" --format=json | cat > "$_status_file"
-    orig_units=$(python3 - "$PROVIDER" "$_status_file" <<'PY'
+    read -r orig_units orig_app_units < <(python3 - "$PROVIDER" "$APP" "$_status_file" <<'PY'
 import json, sys
-provider, status_file = sys.argv[1], sys.argv[2]
+provider, app_name, status_file = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(status_file) as f:
     data = json.load(f)
-app = data.get("applications", {}).get(provider, {})
-scale = app.get("scale")
-if isinstance(scale, int):
-    print(scale)
+applications = data.get("applications", {})
+provider_app = applications.get(provider, {})
+provider_scale = provider_app.get("scale")
+provider_units = provider_app.get("units", {})
+if isinstance(provider_scale, int):
+    expected_provider_units = provider_scale
 else:
-    units = app.get("units", {})
-    print(len(units) if isinstance(units, dict) else 1)
+    expected_provider_units = len(provider_units) if isinstance(provider_units, dict) else 1
+app_units = applications.get(app_name, {}).get("units", {})
+expected_app_units = len(app_units) if isinstance(app_units, dict) else 0
+print(expected_provider_units, expected_app_units)
 PY
     )
     rm -f "$_status_file"
 elif [ -z "$DOWN_CMD" ]; then
     orig_units="$PROVIDER_UNITS"
+    orig_app_units=0
 else
     orig_units=0
+    orig_app_units=0
 fi
 
 if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
@@ -277,7 +283,37 @@ run_step status_restored "juju status -m $MODEL --relations"
 # finish when the original unit disappears. Polling status avoids checkpointing during that gap.
 read -r -d '' wait_cmd <<EOF || true
 for attempt in \$(seq 1 180); do
-    if juju status -m "$MODEL" --format=json | cat | python3 -c 'import json, sys; d=json.load(sys.stdin); apps=d.get("applications", {}); provider=apps.get(sys.argv[1], {}); app=apps.get(sys.argv[2], {}); expected=int(sys.argv[3]); provider_units=provider.get("units", {}); app_units=app.get("units", {}); good_provider=expected == 0 or (provider.get("application-status", {}).get("current") == "active" and len(provider_units) >= expected and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in provider_units.values())); good_app=app.get("application-status", {}).get("current") == "active" and bool(app_units) and all(u.get("juju-status", {}).get("current") == "idle" and u.get("workload-status", {}).get("current") == "active" for u in app_units.values()); sys.exit(0 if good_provider and good_app else 1)' "$PROVIDER" "$APP" "$orig_units"; then
+    if juju status -m "$MODEL" --format=json | cat | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+apps = d.get("applications", {})
+provider = apps.get(sys.argv[1], {})
+app = apps.get(sys.argv[2], {})
+expected_provider = int(sys.argv[3])
+expected_app = int(sys.argv[4])
+provider_units = provider.get("units", {})
+app_units = app.get("units", {})
+good_provider = expected_provider == 0 or (
+    provider.get("application-status", {}).get("current") == "active"
+    and len(provider_units) == expected_provider
+    and all(
+        u.get("juju-status", {}).get("current") == "idle"
+        and u.get("workload-status", {}).get("current") == "active"
+        for u in provider_units.values()
+    )
+)
+good_app = (
+    app.get("application-status", {}).get("current") == "active"
+    and bool(app_units)
+    and (expected_app == 0 or len(app_units) == expected_app)
+    and all(
+        u.get("juju-status", {}).get("current") == "idle"
+        and u.get("workload-status", {}).get("current") == "active"
+        for u in app_units.values()
+    )
+)
+sys.exit(0 if good_provider and good_app else 1)
+' "$PROVIDER" "$APP" "$orig_units" "$orig_app_units"; then
         exit 0
     fi
     sleep 5
