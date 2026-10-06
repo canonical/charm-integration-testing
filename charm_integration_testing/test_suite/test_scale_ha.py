@@ -196,7 +196,24 @@ def test_unit_rotation(
         pytest.fail(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
     if is_k8s_model:
         assert kubernetes_client is not None
-        current_pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+
+        def expected_pods() -> list[K8sClient.V1Pod] | None:
+            observed_pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+            observed_uids = {
+                pod.metadata.uid for pod in observed_pods if pod.metadata is not None and pod.metadata.uid is not None
+            }
+            if len(observed_pods) == len(units) and not original_uids & observed_uids:
+                return observed_pods
+            return None
+
+        current_pods = kubernetes_client.wait(
+            check=expected_pods,
+            timeout_message=(
+                f"Kubernetes pods for {target_application} did not converge to {len(units)} rotated pods "
+                "within timeout."
+            ),
+            timeout=_UNIT_ROTATION_TIMEOUT,
+        )
         current_uids = {
             pod.metadata.uid for pod in current_pods if pod.metadata is not None and pod.metadata.uid is not None
         }
