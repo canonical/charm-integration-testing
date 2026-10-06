@@ -23,6 +23,7 @@ class RecordingJujuClient:
         self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None
+        self.fail_next_scale_after_callback = False
         self.fail_next_multi_model_idle = False
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -40,6 +41,9 @@ class RecordingJujuClient:
             self.units = sorted(self.units, key=lambda unit: int(unit.rsplit("/", maxsplit=1)[-1]))[:num]
         if callable(self.scale_callback):
             self.scale_callback(num)
+        if self.fail_next_scale_after_callback:
+            self.fail_next_scale_after_callback = False
+            raise RuntimeError("scale extension failed")
 
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         return list(self.units)
@@ -389,3 +393,28 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
         ("scale_application", "target", 2, MODEL),
     ]
     assert client.units == ["target/0", "target/1"]
+
+
+def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
+    client = RecordingJujuClient(current_units=2)
+    client.fail_next_scale_after_callback = True
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(RuntimeError, match="scale extension failed"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=True),
+            cast(KubernetesClient, kubernetes_client),
+            MODEL,
+            None,
+            "target",
+            _charm(ha_units=2),
+        )
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 3, MODEL),
+        ("scale_application", "target", 2, MODEL),
+    ]
+    assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
