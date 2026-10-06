@@ -11,7 +11,11 @@ from unittest.mock import patch
 import ops
 import pytest
 from kafka import TopicPartition  # type: ignore[import-untyped]
-from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError  # type: ignore[import-untyped]
+from kafka.errors import (  # type: ignore[import-untyped]
+    TopicAlreadyExistsError,
+    TopicAuthorizationFailedError,
+    UnknownTopicOrPartitionError,
+)
 from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
@@ -190,6 +194,7 @@ class PersistenceKafkaAdminClientStub:
     create_error: Exception | None = None
     list_error: Exception | None = None
     delete_error: Exception | None = None
+    delete_errors_by_topic: dict[str, Exception] = field(default_factory=dict)
     broker_count: int = 1
     describe_cluster_error: Exception | None = None
     application_topic_replica_count: int | None = None
@@ -237,6 +242,9 @@ class PersistenceKafkaAdminClientStub:
     def delete_topics(self, topics: list[str]) -> dict[str, Any]:
         if self.delete_error:
             raise self.delete_error
+        for name in topics:
+            if name in self.delete_errors_by_topic:
+                raise self.delete_errors_by_topic[name]
         self.deleted.append(list(topics))
         self.topics = [t for t in self.topics if t not in topics]
         return {}
@@ -1657,6 +1665,40 @@ class TestKafkaClientPersistenceValidatorCleanup:
         deleted = {name for batch in admin.deleted for name in batch}
         assert deleted == {canary_a, canary_b}
         assert "unrelated-topic" in admin.topics
+
+    def test_an_already_gone_topic_does_not_mask_a_sibling_deletion_failure(self) -> None:
+        # GIVEN two canary topics: one already gone (e.g. a concurrent cleanup), and one that
+        # fails deletion for an unrelated reason. Regression test for: deleting both in a single
+        # batch call would have let the first topic's UnknownTopicOrPartitionError swallow the
+        # whole batch, silently leaving the second topic behind.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        already_gone = f"validator_canary_{TEST_SCOPE_TOKEN}_{1:020d}"
+        fails_to_delete = f"validator_canary_{TEST_SCOPE_TOKEN}_{2:020d}"
+        admin = PersistenceKafkaAdminClientStub(
+            topics=[already_gone, fails_to_delete],
+            delete_errors_by_topic={already_gone: UnknownTopicOrPartitionError()},
+        )
+
+        with patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin):
+            # WHEN
+            validator.cleanup()
+
+        # THEN the still-present topic was still attempted (and deleted), not masked by the
+        # other topic's ignored error
+        assert fails_to_delete not in admin.topics
+
+    def test_a_genuine_deletion_error_still_propagates(self) -> None:
+        # GIVEN a canary topic whose deletion fails for a reason other than "already gone"
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        canary = f"validator_canary_{TEST_SCOPE_TOKEN}_{1:020d}"
+        admin = PersistenceKafkaAdminClientStub(
+            topics=[canary], delete_errors_by_topic={canary: TopicAuthorizationFailedError()}
+        )
+
+        with patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin):
+            # THEN the error is not silently swallowed
+            with pytest.raises(TopicAuthorizationFailedError):
+                validator.cleanup()
 
     def test_no_op_when_no_canary_topics_exist(self) -> None:
         # GIVEN no canary topics on the cluster

@@ -737,9 +737,15 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
                 if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
                     continue
                 to_delete.append(name)
-            if to_delete:
+            # Deleted one topic per call, not as a single batch: `KafkaAdminClient.delete_topics()`
+            # raises on the first non-NoError, non-ignored per-topic error it finds in the response
+            # (raise_errors=True by default), which means a batch call stops reporting as soon as it
+            # hits one topic's error - an `UnknownTopicOrPartitionError` for an already-gone topic
+            # would otherwise be swallowed here and silently mask a genuine deletion failure on a
+            # different topic in the same batch, leaving it behind with cleanup() reporting success.
+            for name in to_delete:
                 try:
-                    admin.delete_topics(to_delete)
+                    admin.delete_topics([name])
                 except UnknownTopicOrPartitionError:
                     # Already gone (e.g. a concurrent cleanup, or manual removal) - not an error.
                     pass
