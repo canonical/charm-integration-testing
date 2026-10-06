@@ -552,12 +552,14 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
 
         Passing ``allow_partial_search_results=False`` on the request already asks the cluster to
         fail the whole search instead of silently returning partial results, but this is a
-        belt-and-suspenders check on the response's own ``_shards`` block in case that request
-        parameter is ignored or unsupported by a given cluster/client version. Without either, a
-        disruption that fails one shard could let OpenSearch return only the healthy shards' hits;
-        if those happen to match ``expected.ref``, checkpoint() would report PASS without having
-        actually verified all of the canary data, and cleanup() could leave orphaned documents on
-        the unqueried shard behind.
+        belt-and-suspenders check on the response's own ``_shards``/``timed_out`` fields in case
+        that request parameter is ignored or unsupported by a given cluster/client version.
+        Without either, a disruption that fails one shard (or a search that simply times out
+        before querying every shard, which OpenSearch reports via ``timed_out: true`` without
+        necessarily marking any shard as "failed") could let OpenSearch return only a subset of
+        hits; if those happen to match ``expected.ref``, checkpoint() would report PASS without
+        having actually verified all of the canary data, and cleanup() could stop while orphaned
+        documents remain on the unqueried shard.
         """
         shards = response.get("_shards", {})
         failed = shards.get("failed", 0)
@@ -565,6 +567,8 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             raise RuntimeError(
                 f"{context}: {failed} of {shards.get('total', '?')} shard(s) failed; refusing to use a partial result"
             )
+        if response.get("timed_out"):
+            raise RuntimeError(f"{context}: search timed out; refusing to use a partial result")
 
     def _collect_matching_refs(self, client: OpenSearch, index_name: str, scope: str, token: str) -> list[Any]:
         """Return every ``validator_checkpoint_ref`` value for documents matching scope/token/kind.
@@ -676,26 +680,31 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         #
         # A hit surviving `_hit_matches_exactly()`'s re-check (see that helper's docstring) is left
         # alone rather than deleted - it's some other application document that merely shares a
-        # `term`-tokenized word with our scope/kind, not validator-owned data. Since such a
-        # document is never deleted, it would otherwise keep reappearing in every subsequent page's
-        # search and spin this loop forever; `skipped_ids` excludes already-considered-and-rejected
-        # documents from mattering towards progress, and the loop stops once a page yields no new
-        # deletions, rather than only when the search returns zero hits.
+        # `term`-tokenized word with our scope/kind, not validator-owned data. `skipped_ids` is
+        # excluded from every subsequent page's query (via `must_not`/`ids`) so such a document
+        # cannot keep reappearing and spin this loop forever, but - critically - excluding it is
+        # also what lets the search advance to the *next* page of real candidates instead of
+        # repeating the same first page forever: without that exclusion a page entirely filled
+        # with false positives would leave a genuine canary past that page undiscovered. The loop
+        # stops once a page returns no hits at all (nothing left to delete or skip).
         expected_fields = {_SCOPE_FIELD: scope, _KIND_FIELD: _KIND_VALUE}
         skipped_ids: set[str] = set()
         while True:
+            query: dict[str, Any] = {
+                "bool": {
+                    "filter": [
+                        _exact_match_filter(_SCOPE_FIELD, scope),
+                        _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
+                    ]
+                }
+            }
+            if skipped_ids:
+                query["bool"]["must_not"] = [{"ids": {"values": sorted(skipped_ids)}}]
             try:
                 response = client.search(
                     index=index_name,
                     body={
-                        "query": {
-                            "bool": {
-                                "filter": [
-                                    _exact_match_filter(_SCOPE_FIELD, scope),
-                                    _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
-                                ]
-                            }
-                        },
+                        "query": query,
                         "size": _CLEANUP_SEARCH_SIZE,
                     },
                     allow_partial_search_results=False,
@@ -707,7 +716,6 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
                 return
-            deleted_this_page = 0
             for hit in hits:
                 doc_id = hit.get("_id")
                 if not doc_id or doc_id in skipped_ids:
@@ -717,11 +725,8 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     continue
                 try:
                     client.delete(index=index_name, id=doc_id, refresh=True, request_timeout=_REQUEST_TIMEOUT)
-                    deleted_this_page += 1
                 except NotFoundError:
                     pass
-            if deleted_this_page == 0:
-                return
 
     def _canary_scope_token(self) -> str:
         """Fixed-width hash scoping canary documents to this model, relation and unit.

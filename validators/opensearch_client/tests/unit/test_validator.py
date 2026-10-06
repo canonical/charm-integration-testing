@@ -163,11 +163,13 @@ class PersistenceIndexStub:
         return doc_id
 
 
-def _query_matches(clause: dict[str, Any], doc: dict[str, Any]) -> bool:
+def _query_matches(clause: dict[str, Any], doc: dict[str, Any], doc_id: str | None = None) -> bool:
     """Recursively evaluate a query clause against a document.
 
     Understands the shapes the validator's count()/search() calls use: a plain
-    ``{"term": {field: value}}``, a conjunction ``{"bool": {"filter": [...]}}``, and a disjunction
+    ``{"term": {field: value}}``, an ``{"ids": {"values": [...]}}`` clause, a conjunction
+    ``{"bool": {"filter": [...]}}``, an optional sibling ``{"bool": {"must_not": [...]}}``
+    (used by cleanup's rejected-hit pagination), and a disjunction
     ``{"bool": {"should": [...], "minimum_should_match": 1}}`` (used by ``_exact_match_filter()`` to
     match a field regardless of whether OpenSearch mapped it as ``keyword`` or analyzed ``text``
     with a ``.keyword`` multi-field). Any ``.keyword`` suffix is stripped to match against the
@@ -177,16 +179,21 @@ def _query_matches(clause: dict[str, Any], doc: dict[str, Any]) -> bool:
     if "term" in clause:
         field_name, value = next(iter(clause["term"].items()))
         return bool(doc.get(field_name.removesuffix(".keyword")) == value)
+    if "ids" in clause:
+        return doc_id in clause["ids"]["values"]
     bool_clause = clause["bool"]
     if "filter" in bool_clause:
-        return all(_query_matches(c, doc) for c in bool_clause["filter"])
-    return any(_query_matches(c, doc) for c in bool_clause["should"])
+        matches = all(_query_matches(c, doc, doc_id) for c in bool_clause["filter"])
+        if "must_not" in bool_clause:
+            matches = matches and not any(_query_matches(c, doc, doc_id) for c in bool_clause["must_not"])
+        return matches
+    return any(_query_matches(c, doc, doc_id) for c in bool_clause["should"])
 
 
-def _matches_query(body: dict[str, Any] | None, doc: dict[str, Any]) -> bool:
+def _matches_query(body: dict[str, Any] | None, doc: dict[str, Any], doc_id: str | None = None) -> bool:
     if not body:
         return True
-    return _query_matches(body["query"], doc)
+    return _query_matches(body["query"], doc, doc_id)
 
 
 @dataclass
@@ -204,6 +211,7 @@ class PersistenceOpenSearchClientStub:
     delete_error: Exception | None = None
     scroll_error: Exception | None = None
     shard_failures: int = 0
+    timed_out: bool = False
     search_calls: list[dict[str, Any]] = field(default_factory=list)
     scroll_calls: list[dict[str, Any]] = field(default_factory=list)
     clear_scroll_calls: list[str] = field(default_factory=list)
@@ -222,7 +230,7 @@ class PersistenceOpenSearchClientStub:
             raise self.count_error
         if index not in self.indices:
             raise NotFoundError(404, "index_not_found_exception")
-        matching = sum(1 for doc in self.indices[index].documents.values() if _matches_query(body, doc))
+        matching = sum(1 for doc_id, doc in self.indices[index].documents.items() if _matches_query(body, doc, doc_id))
         return {"count": matching}
 
     def _shards_block(self) -> dict[str, int]:
@@ -252,7 +260,7 @@ class PersistenceOpenSearchClientStub:
         matches = [
             (position, doc_id)
             for position, (doc_id, doc) in enumerate(self.indices[index].documents.items())
-            if _matches_query(body, doc)
+            if _matches_query(body, doc, doc_id)
         ]
         search_after = (body or {}).get("search_after")
         if search_after is not None:
@@ -265,6 +273,7 @@ class PersistenceOpenSearchClientStub:
         response: dict[str, Any] = {
             "hits": {"hits": self._hits_for(index, page)},
             "_shards": self._shards_block(),
+            "timed_out": self.timed_out,
         }
         if kwargs.get("scroll"):
             # Model a real scroll context: the first page is returned immediately, with the
@@ -982,6 +991,19 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         # than relying solely on this response-level check.
         assert client.search_calls[0]["allow_partial_search_results"] is False
 
+    def test_rejects_a_timed_out_search_result_even_with_no_failed_shards(self) -> None:
+        # GIVEN a search that times out before querying every shard. OpenSearch can report this
+        # via `timed_out: true` with `_shards.failed` left at 0, so a check that only looks at
+        # `_shards.failed` would miss it and could report a false PASS from an incomplete hit set.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub(timed_out=True)
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, 1)])
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="timed out"):
+                validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=1))
+
     def test_fails_when_matching_token_belongs_to_a_different_scope(self) -> None:
         # GIVEN the shared index has documents carrying this expected token, but tagged with a
         # different relation/unit's validator_scope - e.g. a token collision, or a state that was
@@ -1110,6 +1132,35 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         # THEN
         assert doc_1 not in store.documents
         assert doc_2 not in store.documents
+
+    def test_advances_past_a_page_of_rejected_hits_to_reach_a_later_genuine_canary(self) -> None:
+        # GIVEN a first search page entirely filled with text-analyzer false positives (hits
+        # `_hit_matches_exactly()` deliberately rejects - see that helper's docstring) and a
+        # genuine canary document that would only appear on a later page. Regression test for:
+        # since the rejected hits are never deleted, a naive implementation would repeat the same
+        # first page forever (or give up after a single page with zero deletions) and never reach
+        # the genuine canary beyond it.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        false_positive_ids = {store.add(_canary_doc(TEST_SCOPE, str(i), 1)) for i in range(2)}
+        genuine_id = store.add(_canary_doc(TEST_SCOPE, "genuine", 1))
+
+        def fake_hit_matches_exactly(hit: dict[str, Any], expected: dict[str, str]) -> bool:
+            return hit["_id"] not in false_positive_ids
+
+        with (
+            patch("validators.opensearch_client.validator.OpenSearch", return_value=client),
+            patch("validators.opensearch_client.validator._CLEANUP_SEARCH_SIZE", 2),
+            patch("validators.opensearch_client.validator._hit_matches_exactly", side_effect=fake_hit_matches_exactly),
+        ):
+            # WHEN
+            validator.cleanup()
+
+        # THEN the genuine canary beyond the all-false-positive first page was still found and
+        # deleted, and the false positives were left untouched
+        assert genuine_id not in store.documents
+        assert false_positive_ids <= set(store.documents)
 
     def test_deletes_all_documents_across_multiple_search_pages(self) -> None:
         # GIVEN more scoped canary documents than fit in a single cleanup() search page - each
