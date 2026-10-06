@@ -296,7 +296,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         count_query = next(q for q in cursor.executed_queries if "COUNT(*)" in q)
         assert "`mydb`." in count_query
 
-    def test_filters_row_count_by_token(self) -> None:
+    def test_filters_row_count_by_case_sensitive_token(self) -> None:
         # GIVEN a bare count(*) would let a table recreated from scratch with an equally-sized set
         # of unrelated rows pass, so the count must be scoped to the random per-run token.
         validator = _make_persistence_validator(VALID_DATABAG)
@@ -310,7 +310,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         # THEN both the count query and the follow-up insert are scoped to the same token
         count_index = next(i for i, q in enumerate(cursor.executed_queries) if "COUNT(*)" in q)
         insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
-        assert "WHERE marker = %s" in cursor.executed_queries[count_index]
+        assert "WHERE CAST(marker AS BINARY) = CAST(%s AS BINARY)" in cursor.executed_queries[count_index]
         assert cursor.executed_params[count_index] == (TEST_TOKEN, 1)
         assert cursor.executed_params[insert_index][1] == TEST_TOKEN
 

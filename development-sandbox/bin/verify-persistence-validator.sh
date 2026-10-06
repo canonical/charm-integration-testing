@@ -41,7 +41,8 @@ Required:
 
 Optional:
   --interface <name>     Endpoint interface name (default: same as --validator)
-  --provider-units <n>   Units to restore provider to (default: auto from juju status)
+  --provider-units <n>   Expected restored provider units (default: auto from Juju status;
+                         required with custom --down-cmd/--restore-cmd)
   --down-cmd <cmd>       Override the disruption command entirely (e.g. for k8s-only backends).
                          When set, --restore-cmd must also be provided.
   --restore-cmd <cmd>    Override the restore command (paired with --down-cmd).
@@ -127,6 +128,14 @@ if [ -n "$DOWN_CMD" ] && [ -z "$RESTORE_CMD" ]; then
 fi
 if [ -z "$DOWN_CMD" ] && [ -n "$RESTORE_CMD" ]; then
     echo "--restore-cmd requires --down-cmd to also be set" >&2
+    exit 1
+fi
+if [ "$PROVIDER_UNITS" != "auto" ] && ! [[ "$PROVIDER_UNITS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--provider-units must be 'auto' or a positive integer" >&2
+    exit 1
+fi
+if [ -n "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
+    echo "Custom --down-cmd/--restore-cmd require an explicit --provider-units count" >&2
     exit 1
 fi
 
@@ -261,11 +270,11 @@ PY
         orig_units="$PROVIDER_UNITS"
     fi
 else
-    orig_units=0
+    orig_units="$PROVIDER_UNITS"
     orig_app_units=0
 fi
 
-if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
+if [ -z "$DOWN_CMD" ] && { [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; }; then
     orig_units=1
 fi
 

@@ -333,7 +333,8 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
                     # Require id = checkpoint_ref, not just a matching row count. Explicit IDs
                     # keep this invariant independent of server AUTO_INCREMENT settings.
                     cur.execute(
-                        f"SELECT COUNT(*) FROM {qualified_table} WHERE marker = %s "  # nosec B608
+                        f"SELECT COUNT(*) FROM {qualified_table} "  # nosec B608
+                        "WHERE CAST(marker AS BINARY) = CAST(%s AS BINARY) "
                         "AND id = checkpoint_ref AND checkpoint_ref BETWEEN 1 AND %s",
                         (marker, expected.ref),
                     )
