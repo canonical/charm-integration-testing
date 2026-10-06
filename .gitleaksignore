@@ -2,7 +2,6 @@
 # grpc.ssl_channel_credentials() where `key_bytes` is a variable holding the
 # client's TLS private key material already supplied via the relation
 # databag, not a hardcoded secret. The generic-api-key rule matches on the
-# `private_key=` keyword alone. This finding is on a commit from an open,
-# unmerged branch (SQT-928-etcd-persistence) that gitleaks' default `--all`
-# git-log scan picks up regardless of which branch/PR triggered the scan.
-d44a04b7cabfc8a0a002a4d172f210a420659297:validators/etcd_client/validator.py:generic-api-key:1388
+# `private_key=` keyword alone. This finding is on the SQT-928-etcd-persistence
+# merge commit, which gitleaks' default `--all` scan picks up on every branch.
+e1fb6e8f87c78d1711a07c271ce35680e8944078:validators/etcd_client/validator.py:generic-api-key:1410
