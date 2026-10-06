@@ -23,9 +23,10 @@ def test_teardown(
     neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
     # Canary data is dropped by the extension's pre-removal hooks: pre_remove_integration cleans
-    # up the consuming side before the CMR relation is removed below, and pre_remove cleans up the
-    # target model before its application is destroyed. Both run while the relations still exist,
-    # which cleanup() needs to visit them.
+    # up tracked state on the consuming side before the CMR relation is removed below, and
+    # pre_remove cleans up tracked state in the target model before its application is destroyed.
+    # Current client persistence validators only seed canaries on the consuming side. Cleanup runs
+    # before removal so the relation is still available to visit.
 
     # Juju refuses to destroy an application whose offer still has a connected consumer
     # ("used by N consumer(s)"). For CMR integrations the consumer lives in whichever model is
