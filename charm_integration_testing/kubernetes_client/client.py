@@ -311,6 +311,40 @@ class KubernetesClient:
             delay=delay,
         )
 
+    def wait_for_charm_pods_ready(
+        self,
+        application_name: str,
+        namespace: str,
+        expected_count: int,
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> list[K8sClient.V1Pod]:
+        """Wait until the application has the expected number of Running, Ready pods."""
+
+        def check() -> list[K8sClient.V1Pod] | None:
+            pods = self.get_charm_pods(application_name, model=namespace)
+            if len(pods) != expected_count:
+                return None
+            for pod in pods:
+                if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
+                    return None
+                if not any(
+                    condition.type == "Ready" and condition.status == "True"
+                    for condition in pod.status.conditions or []
+                ):
+                    return None
+            return pods
+
+        return self.wait(
+            check=check,
+            timeout_message=(
+                f"Application '{application_name}' in namespace '{namespace}' did not reach {expected_count} "
+                "Running, Ready pods within timeout"
+            ),
+            timeout=timeout,
+            delay=delay,
+        )
+
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """
         Deletes the specified pod.

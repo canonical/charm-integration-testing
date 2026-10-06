@@ -165,6 +165,22 @@ class RecordingKubernetesClient:
         if self.fail_wait_for_pod_ready:
             raise TimeoutError("replacement pod did not become ready")
 
+    def wait_for_charm_pods_ready(
+        self,
+        application_name: str,
+        namespace: str,
+        expected_count: int,
+        timeout: timedelta,
+    ) -> list[K8sClient.V1Pod]:
+        self.calls.append(("wait_for_charm_pods_ready", application_name, namespace, expected_count, timeout))
+        if len(self.pods) > expected_count and self.scale_down_uid is not None:
+            pod = next(pod for pod in self.pods if pod.metadata is not None and pod.metadata.uid == self.scale_down_uid)
+            self.pods.remove(pod)
+            self.scale_down_uid = None
+        if len(self.pods) != expected_count:
+            raise TimeoutError(f"expected {expected_count} ready pods")
+        return list(self.pods)
+
     def wait(
         self,
         check: Callable[[], list[K8sClient.V1Pod] | None],
@@ -411,6 +427,9 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert len([call for call in client.calls if call[0] == "validate_model"]) == 3
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
+    assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [
+        ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15))
+    ]
     assert len([call for call in kubernetes_client.calls if call[0] == "wait"]) == 1
     assert not {f"uid-{index}" for index in range(2)} & {
         pod.metadata.uid for pod in kubernetes_client.pods if pod.metadata is not None
@@ -440,6 +459,7 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
 
 
 def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
@@ -465,6 +485,7 @@ def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
 
 
 def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
@@ -490,3 +511,4 @@ def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1

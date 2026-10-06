@@ -865,6 +865,51 @@ class TestKubernetesClientInit:
             assert result == ready_pod
             assert mock_sleep.call_count == 1
 
+    class TestWaitForCharmPodsReady:
+        """Test suite for wait_for_charm_pods_ready method."""
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_expected_ready_pod_set(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a deployment that first has too few ready pods, then reaches the desired replica count
+            pending_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", labels={"app.kubernetes.io/name": "app"}
+            )
+            ready_pod = create_sample_pod("app-hash-pod-2", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[pending_pod]),
+                V1PodListStub(items=[ready_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the application pod set
+            result = client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
+            # THEN it returns only after the desired pods are Running and Ready
+            assert result == [ready_pod]
+            assert mock_sleep.call_count == 1
+
+        def test_waits_when_expected_pod_is_not_ready(self) -> None:
+            # GIVEN the expected number of pods, but one is not Ready
+            pod = create_sample_pod("app-0", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            backend = MagicMock()
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(microseconds=1),
+                default_delay=timedelta(0),
+            )
+
+            # WHEN waiting for readiness
+            # THEN it times out instead of treating pod count alone as success
+            with pytest.raises(TimeoutError, match="did not reach 1 Running, Ready pods"):
+                client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
     class TestDeletePod:
         """Test suite for delete_pod method."""
 

@@ -80,6 +80,24 @@ def _wait_for_rotated_kubernetes_pods(
     )
 
 
+def _restore_kubernetes_pod_count(
+    juju_client: JujuClient,
+    kubernetes_client: KubernetesClient,
+    target_model_ref: JujuModelHandle,
+    target_application: str,
+    unit_count: int,
+    models: list[JujuModelHandle],
+) -> None:
+    juju_client.scale_application(target_application, unit_count, model=target_model_ref)
+    juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+    kubernetes_client.wait_for_charm_pods_ready(
+        target_application,
+        target_model_ref.model,
+        expected_count=unit_count,
+        timeout=_UNIT_ROTATION_TIMEOUT,
+    )
+
+
 def _rotate_kubernetes_pods(
     juju_client: JujuClient,
     kubernetes_client: KubernetesClient,
@@ -128,8 +146,14 @@ def _rotate_kubernetes_pods(
             for model in models:
                 juju_client.validate_model(model=model, level="simple")
     finally:
-        juju_client.scale_application(target_application, len(units), model=target_model_ref)
-        juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+        _restore_kubernetes_pod_count(
+            juju_client,
+            kubernetes_client,
+            target_model_ref,
+            target_application,
+            len(units),
+            models,
+        )
 
     _wait_for_rotated_kubernetes_pods(kubernetes_client, target_application, namespace, len(units), original_uids)
     for model in models:
