@@ -269,6 +269,15 @@ def unit_leaves_status(
     unit_statuses: frozenset[str] = frozenset({"active"}),
     unit_agent_statuses: frozenset[str] = frozenset({"idle"}),
 ) -> tuple[bool, JujuWaitState]:
+    """Detect disruption: ready once the unit's workload OR agent status leaves the given sets.
+
+    This is the inverse of ``all_statuses_are_in``'s per-unit check, and is used to confirm a
+    fault (e.g. a chaos experiment) actually disrupted the unit. It is NOT a recovery wait: a
+    unit that is currently ``blocked``/``executing`` is already "ready" by this predicate's
+    definition, even though it has not returned to ``active``/``idle``. To wait for a unit (or
+    model) to reach and hold ``active``/``idle``, use ``all_statuses_are_in`` (via
+    ``JujuBackend.wait_idle``/``JujuClient.idle_for_period``) instead.
+    """
     unit_info = get_unit_info(status, unit)
     if unit_info is None:
         return False, JujuWaitState(

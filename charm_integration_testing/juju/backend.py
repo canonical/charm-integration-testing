@@ -230,6 +230,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_for_unit_disruption(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        """Wait until the unit's workload or agent status leaves active/idle (disruption detection).
+
+        This does not wait for recovery; use ``wait_idle``/``wait_idle_multi_model`` for that.
+        """
         raise NotImplementedError
 
     @abstractmethod

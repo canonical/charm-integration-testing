@@ -78,6 +78,8 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
+    # Wait for a unit to leave active/idle (disruption detection); use idle_for_period to wait
+    # for recovery back to active/idle.
     def wait_for_unit_disruption(
         self,
         model: JujuModelHandle,
