@@ -424,10 +424,15 @@ def _http_probe_check(url: str) -> ValidationCheck:
             status = resp.status
         return ValidationCheck(name="http_probe", passed=True, message=f"HTTP probe returned status {status}.")
     except HTTPError as exc:
-        # Any HTTP status code proves the ingress is active and routing traffic.
         # HTTPError is also a file-like response object; close it to release the socket.
         code = exc.code
         exc.close()
+        if 500 <= code < 600:
+            return ValidationCheck(
+                name="http_probe",
+                passed=False,
+                message=f"HTTP probe returned server error status {code}.",
+            )
         return ValidationCheck(
             name="http_probe",
             passed=True,

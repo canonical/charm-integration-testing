@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, build_opener
 
 import ops
+import pytest
 import yaml
 
 from validators.ingress_per_unit.validator import (
@@ -336,6 +337,22 @@ class TestIngressPerUnitValidatorDeep:
         ):
             result = validator.validate(level="deep")
         assert result.status == "PASS"
+        response.close.assert_called_once()
+
+    @pytest.mark.parametrize("status", [500, 502, 503, 504, 599])
+    def test_fail_when_server_returns_5xx(self, status: int) -> None:
+        response = HTTPError(VALID_PROVIDER_URL, status, "Server Error", {}, None)  # type: ignore[arg-type]
+        response.close = MagicMock()
+        validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch("validators.ingress_per_unit.validator._HTTP_OPENER.open", side_effect=response),
+        ):
+            result = validator.validate(level="deep")
+        probe_check = next(check for check in result.checks if check.name == "http_probe")
+        assert result.status == "FAIL"
+        assert not probe_check.passed
+        assert f"status {status}" in probe_check.message
         response.close.assert_called_once()
 
     def test_fail_when_http_transport_fails(self) -> None:
