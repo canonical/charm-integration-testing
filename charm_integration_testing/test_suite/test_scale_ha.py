@@ -89,13 +89,26 @@ def _restore_kubernetes_pod_count(
     models: list[JujuModelHandle],
 ) -> None:
     juju_client.scale_application(target_application, unit_count, model=target_model_ref)
-    juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-    kubernetes_client.wait_for_charm_pods_ready(
-        target_application,
-        target_model_ref.model,
-        expected_count=unit_count,
-        timeout=_UNIT_ROTATION_TIMEOUT,
-    )
+    idle_wait_error: Exception | None = None
+    try:
+        juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+    except Exception as error:
+        idle_wait_error = error
+
+    try:
+        kubernetes_client.wait_for_charm_pods_ready(
+            target_application,
+            target_model_ref.model,
+            expected_count=unit_count,
+            timeout=_UNIT_ROTATION_TIMEOUT,
+        )
+    except Exception as convergence_error:
+        if idle_wait_error is not None:
+            raise convergence_error from idle_wait_error
+        raise
+
+    if idle_wait_error is not None:
+        raise idle_wait_error
 
 
 def _rotate_kubernetes_pods(

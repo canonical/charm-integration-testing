@@ -26,6 +26,7 @@ class RecordingJujuClient:
         self.scale_callback: object | None = None
         self.fail_next_scale_after_callback = False
         self.fail_next_multi_model_idle = False
+        self.fail_multi_model_idle_on_call: int | None = None
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -58,9 +59,12 @@ class RecordingJujuClient:
 
     def multi_model_idle_for_period(self, models: list[JujuModelHandle], timeout: timedelta | None = None) -> None:
         self.calls.append(("multi_model_idle_for_period", models, timeout))
+        idle_calls = len([call for call in self.calls if call[0] == "multi_model_idle_for_period"])
         if self.fail_next_multi_model_idle:
             self.fail_next_multi_model_idle = False
             raise TimeoutError("model failed to become idle")
+        if self.fail_multi_model_idle_on_call == idle_calls:
+            raise TimeoutError("cleanup idle wait failed")
 
     def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
         self.calls.append(("validate_model", model, level))
@@ -509,6 +513,28 @@ def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
         ("scale_application", "target", 3, MODEL),
         ("scale_application", "target", 2, MODEL),
     ]
+    assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+
+
+def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fails() -> None:
+    client = RecordingJujuClient(current_units=2)
+    client.fail_multi_model_idle_on_call = 4
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(TimeoutError, match="cleanup idle wait failed"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=True),
+            cast(KubernetesClient, kubernetes_client),
+            MODEL,
+            None,
+            "target",
+            _charm(ha_units=2),
+        )
+
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
     assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
