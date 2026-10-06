@@ -1,7 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -152,6 +154,39 @@ class TestPrepare:
             "service": "zookeeper",
             "principal": "zk-sasl-md5",
         }
+
+    @pytest.mark.parametrize("fail_during_use", [False, True], ids=["success", "error"])
+    def test_tls_client_uses_temporary_ca_and_cleans_up(self, fail_during_use: bool) -> None:
+        # GIVEN a TLS-enabled connection and a stubbed Kazoo client.
+        validator, fake_client = _make_validator()
+        config = validator._connection_config()
+
+        # WHEN the real client context is entered and then exited.
+        expected_outcome = (
+            pytest.raises(RuntimeError, match="client operation failed") if fail_during_use else nullcontext()
+        )
+        with patch("validators.zookeeper.validator.KazooClient", return_value=fake_client) as client_factory:
+            with expected_outcome:
+                with validator._client(config) as client:
+                    assert client is fake_client
+                    assert fake_client.started
+                    assert client_factory.call_args is not None
+                    options = client_factory.call_args.kwargs
+                    assert options["use_ssl"] is True
+                    assert options["hosts"] == _DATABAG["endpoints"]
+                    assert isinstance(options["ca"], str)
+                    ca_file = Path(options["ca"])
+                    assert ca_file.is_absolute()
+                    assert ca_file.name == "ca.pem"
+                    assert ca_file.read_text(encoding="utf-8") == _TLS_SECRET["tls-ca"]
+                    if fail_during_use:
+                        raise RuntimeError("client operation failed")
+
+        # THEN both the client and temporary CA directory are cleaned up.
+        assert not fake_client.started
+        assert fake_client.closed
+        assert not ca_file.exists()
+        assert not ca_file.parent.exists()
 
     def test_connection_config_refreshes_credential_secrets(self) -> None:
         validator, _ = _make_validator()
