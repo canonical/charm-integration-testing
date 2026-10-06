@@ -201,9 +201,11 @@ jobs:
           echo "| \`series\` | \`${series}\` |" >> $GITHUB_STEP_SUMMARY
       - name: Validate CMR inputs
         if: ${{ inputs.same_controller }}
+        env:
+          NEIGHBOR_ENVIRONMENT: ${{ inputs.neighbor_environment }}
         shell: bash
         run: |
-          if [[ -z "${{ inputs.neighbor_environment }}" ]]; then
+          if [[ -z "${NEIGHBOR_ENVIRONMENT}" ]]; then
             echo "same_controller requires neighbor_environment." >&2
             exit 1
           fi
