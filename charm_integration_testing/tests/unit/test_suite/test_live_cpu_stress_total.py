@@ -72,7 +72,7 @@ def test_cleanup_and_recovery_order(
 
     monkeypatch.setattr(module, "temporary_cpu_limit", limited)
     chaos = MagicMock()
-    monkeypatch.setattr(module, "chaos_client_for_model", lambda *_: chaos)
+    factory = MagicMock(return_value=chaos)
 
     def stress(*args: object, **kwargs: object) -> None:
         events.append("stress")
@@ -119,7 +119,15 @@ def test_cleanup_and_recovery_order(
 
     def run() -> None:
         module.test_live_cpu_stress_total(
-            juju, MODEL, "app", timedelta(seconds=10), timedelta(minutes=15), kubernetes, neighbor, "neighbor-app"
+            juju,
+            MODEL,
+            "app",
+            timedelta(seconds=10),
+            timedelta(minutes=15),
+            kubernetes,
+            neighbor,
+            "neighbor-app",
+            factory,
         )
 
     # WHEN the test succeeds, fails, or skips, THEN cleanup and resource restoration run.
@@ -150,17 +158,21 @@ def test_cleanup_and_recovery_order(
         if failure not in {"validation", "neighbor_validation"}:
             juju.validate_model.assert_not_called()
 
+    factory.assert_called_once_with(MODEL)
+
 
 @pytest.mark.parametrize("kubernetes", [False, True])
 def test_unsupported_environment_skips_before_mutation(monkeypatch: pytest.MonkeyPatch, kubernetes: bool) -> None:
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
+    factory = MagicMock()
     target = MagicMock() if kubernetes else None
     juju.backend.get_kubernetes_client_for_model.return_value = target
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: set())
     with pytest.raises(pytest.skip.Exception):
         module.test_live_cpu_stress_total(
-            juju, MODEL, "app", timedelta(seconds=10), timedelta(minutes=15), target, None, "neighbor-app"
+            juju, MODEL, "app", timedelta(seconds=10), timedelta(minutes=15), target, None, "neighbor-app", factory
         )
     if target is not None:
         target.get_charm_pods.assert_not_called()
     juju.multi_model_idle_for_period.assert_not_called()
+    factory.assert_not_called()

@@ -3,14 +3,16 @@
 
 from datetime import timedelta
 from time import sleep
+from typing import Callable
 
 import pytest
+from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
 from kubernetes.utils.quantity import parse_quantity  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 from kubernetes_client.cpu_limit import temporary_cpu_limit
 
-from .fixtures.chaos_tools import ChaosTool, available_chaos_tools, chaos_client_for_model
+from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
 
 
@@ -36,8 +38,8 @@ def test_live_cpu_stress_total(
     kubernetes_client: KubernetesClient | None,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str,
+    chaos_tool_for_model: Callable[[JujuModelHandle], MetaChaosClient],
 ) -> None:
-    backend = juju_client.backend
     kubernetes = kubernetes_client
     if kubernetes is None:
         pytest.skip("Total CPU stress requires Kubernetes.")
@@ -77,7 +79,7 @@ def test_live_cpu_stress_total(
     if len(containers) != 1:
         pytest.fail(f"Expected one workload container, found {containers}.")
     owner = owners[0]
-    chaos = chaos_client_for_model(backend, target_model_ref)
+    chaos = chaos_tool_for_model(target_model_ref)
     with temporary_cpu_limit(
         kubernetes, namespace, owner.name, owner.uid, containers[0], int(cpu_recovery_timeout.total_seconds())
     ):
