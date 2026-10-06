@@ -23,6 +23,16 @@ jobs:
             target_base: '22.04'
             neighbor_charm: self-signed-certificates
             neighbor_endpoint: certificates
+          # Exercise PostgreSQL through its consumer-side database validator.
+          - target_environment: ps6-sqa-stg_charm_qa_kubernetes-1
+            target_charm: postgresql-k8s
+            target_endpoint: database
+            target_revision: 495
+            target_track: 14
+            target_risk: stable
+            target_base: '22.04'
+            neighbor_charm: data-integrator
+            neighbor_endpoint: postgresql
     uses: ./.github/workflows/charm-testing-integration-test-assert-pass.yaml
     permissions:
       contents: read
