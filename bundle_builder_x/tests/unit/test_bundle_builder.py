@@ -100,9 +100,9 @@ class _FakeCharmhubClient(CharmhubClient):
         platform: str | None = None,
         charm_track: str | None = None,
         charm_risk: str | None = None,
-        charm_branch: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
     ) -> Charm:
         self.charm_from_store_calls.append(
             {
