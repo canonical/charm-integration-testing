@@ -539,8 +539,8 @@ class TestWaitConditions:
         # THEN
         assert result is False
         assert wait.message == "waiting for unit 'database/1' to leave active/idle status"
-        assert wait.noncompliant_units == {}
-        assert wait.noncompliant_unit_agents == {}
+        assert wait.noncompliant_units == {"database/1": None}
+        assert wait.noncompliant_unit_agents == {"database/1": None}
 
     def test_applications_are_removed_none_removed(self, sample_database_webapp_status: jubilant.Status) -> None:
         # GIVEN / WHEN

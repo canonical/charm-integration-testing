@@ -271,7 +271,11 @@ def unit_leaves_status(
 ) -> tuple[bool, JujuWaitState]:
     unit_info = get_unit_info(status, unit)
     if unit_info is None:
-        return False, JujuWaitState(message=f"waiting for unit '{unit}' to leave active/idle status")
+        return False, JujuWaitState(
+            message=f"waiting for unit '{unit}' to leave active/idle status",
+            noncompliant_units={unit: None},
+            noncompliant_unit_agents={unit: None},
+        )
 
     workload_left_status = unit_info.workload_status.current not in unit_statuses
     unit_agent_left_status = unit_info.juju_status.current not in unit_agent_statuses
