@@ -126,8 +126,8 @@ def test_unit_rotation(
     if is_k8s_model:
         assert kubernetes_client is not None
         original_uids = {pod.metadata.uid for pod in pods if pod.metadata is not None and pod.metadata.uid is not None}
-        juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
         try:
+            juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
             juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
             for unit, pod in zip(units, pods, strict=True):
                 if pod.metadata is None or pod.metadata.name is None or pod.metadata.uid is None:
