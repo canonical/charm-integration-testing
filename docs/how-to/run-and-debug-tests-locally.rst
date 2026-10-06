@@ -238,9 +238,8 @@ The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
 
-
 Total CPU stress
-~~~~~~~~~~~~~~~~
+----------------
 
 ``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
 ``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
@@ -272,3 +271,40 @@ workflow runs, use those same values and the branch containing your changes.
 The existing ``certificates`` combination does not exercise this DB validator.
 Confirm validation results for the neighbor in the live logs; an empty or skipped
 validation result is not evidence of successful database recovery.
+
+Network isolation recovery
+--------------------------
+
+``test_live_network_isolation`` requires Kubernetes and applies an ingress-only
+``NetworkPolicy`` to all Pods of the target application. It leaves egress unrestricted
+and retains the policy for ten minutes after the API accepts it. This interval
+does not prove when the network plugin started enforcing the policy.
+
+All bundle models must be active/idle before isolation. Remaining active/idle
+during isolation is valid. After policy removal, all bundle models must return
+to active/idle within fifteen minutes, without a test-driven restart. Deep
+validators then run for every application in the target and neighbor models,
+including consumer-side validators. Missing or skipped validators provide no
+functional coverage; the status check alone only verifies Juju state recovery.
+Policy creation, cleanup, recovery and validation errors fail the test.
+
+The temporary connection probes have been removed. This test does not independently
+measure packet blocking or continuously verify agent connectivity during the
+observation interval. Network enforcement must be supported by the cluster.
+
+Disk fill recovery
+------------------
+
+``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
+and machine models. It allocates 98 percent of the available space reported by
+``df`` in the execution working directory, using a unique file per test. This
+is not a guarantee of 98 percent total file system usage or of filling the
+application's data volume. Per-charm resource settings are not consumed yet.
+
+All bundle models must be active/idle before allocation. The file remains for
+ten minutes; no unhealthy status transition is required. Cleanup removes the
+file, then all bundle models must recover to active/idle within fifteen minutes
+without a test-driven restart. Available deep validators run on all applications
+in both target and neighbor models. Missing validators leave functional coverage
+unverified. Allocation, file checks, cleanup, recovery and validation errors fail
+the test.

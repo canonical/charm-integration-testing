@@ -2,11 +2,13 @@
 # See LICENSE file for licensing details.
 
 import pytest
-from chaos_client import ChaosCleanupError, MetaChaosClient
+from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraintsClient
 from chaos_client.adapters import NetworkIsolationClient
+from juju import JujuApplicationInfo
 from kubernetes.client import ApiException, V1NetworkPolicy  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
+from ..extensions.shared import NullJujuBackend
 from .shared import FakeNetworkingV1Api
 
 
@@ -26,11 +28,16 @@ class TimeoutApi(FakeNetworkingV1Api):
         raise TimeoutError("Lost create response")
 
 
+class JujuBackendStub(NullJujuBackend):
+    def list_applications(self, model: object) -> dict[str, JujuApplicationInfo]:
+        return {}
+
+
 @pytest.mark.parametrize("created", [False, True])
 def test_cleanup_reconciles_creation_timeout(created: bool) -> None:
     # GIVEN a create call whose response is lost
     api = TimeoutApi(created)
-    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))])
+    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))], JujuBackendStub(), ResourceConstraintsClient())
 
     # WHEN execution fails and teardown runs
     with pytest.raises(TimeoutError):
@@ -68,7 +75,7 @@ def test_cleanup_preserves_policy_owned_by_another_client() -> None:
 def test_cleanup_retries_after_api_failure(failure: str) -> None:
     # GIVEN an owned policy whose cleanup API fails
     api = FakeNetworkingV1Api()
-    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))])
+    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))], JujuBackendStub(), ResourceConstraintsClient())
     tool.isolate_network("model", "app/0")
     error = ApiException(status=500)
     if failure == "read":
@@ -91,7 +98,7 @@ def test_cleanup_retries_after_api_failure(failure: str) -> None:
 def test_uid_conflict_keeps_replacement_policy_for_retry() -> None:
     # GIVEN a policy replaced between its ownership check and deletion
     api = FakeNetworkingV1Api()
-    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))])
+    tool = MetaChaosClient([NetworkIsolationClient(BackendStub(api))], JujuBackendStub(), ResourceConstraintsClient())
     tool.isolate_network("model", "app/0")
     api.raise_on_delete = ApiException(status=409)
 
@@ -120,7 +127,7 @@ def test_create_conflict_does_not_delete_existing_policy() -> None:
     backend = BackendStub(api)
     owner = NetworkIsolationClient(backend)
     owner.isolate_network("model", "app/0")
-    other = MetaChaosClient([NetworkIsolationClient(backend)])
+    other = MetaChaosClient([NetworkIsolationClient(backend)], JujuBackendStub(), ResourceConstraintsClient())
 
     # WHEN another client's creation conflicts and teardown runs
     with pytest.raises(ApiException):

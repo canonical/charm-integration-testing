@@ -72,6 +72,9 @@ class LitmusChaosClient(ChaosClient):
         self._owner = uuid4().hex
         self._created: list[_ExperimentRun] = []
 
+    def supports(self, operation: str) -> bool:
+        return operation in {"stress_cpu", "stress_memory"}
+
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
         if workers <= 0:
             raise ValueError("CPU workers must be positive.")
