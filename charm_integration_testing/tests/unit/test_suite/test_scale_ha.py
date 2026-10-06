@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from juju import JujuBackend, JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient
+from kubernetes_client import KubernetesClient, PodStatus
 from test_suite import test_scale_ha as scale_ha
 
 from bundle_builder_x import Charm, CharmChannel
+
+from ..extensions.shared import NullJujuBackend
 
 
 class RecordingJujuClient:
@@ -55,54 +57,69 @@ class RecordingJujuClient:
         self.calls.append(("validate_model", model, level))
 
 
-class RecordingJujuBackend:
-    def __init__(self, *, is_k8s: bool) -> None:
-        self.is_k8s = is_k8s
+class RecordingJujuBackend(NullJujuBackend):
+    def __init__(self, *, k8s_model: bool) -> None:
+        self.is_k8s = k8s_model
 
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.is_k8s
 
 
 class RecordingKubernetesClient:
-    def __init__(self, application: str, unit_count: int) -> None:
+    def __init__(self, application: str, unit_count: int, *, statefulset: bool = True) -> None:
         self.application = application
+        self.statefulset = statefulset
+        self._pod_name_counter = 0
         self.pods = [self._pod(index, f"uid-{index}") for index in range(unit_count)]
         self.calls: list[tuple[object, ...]] = []
         self._deleted_index: int | None = None
+        self.fail_wait_for_new_pod = False
 
     def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
         pod = K8sClient.V1Pod()
+        self._pod_name_counter += 1
+        pod_name = (
+            f"{self.application}-{index}"
+            if self.statefulset
+            else f"{self.application}-hash-pod-{self._pod_name_counter}"
+        )
+        labels = {"apps.kubernetes.io/pod-index": str(index)} if self.statefulset else {}
         pod.metadata = K8sClient.V1ObjectMeta(
-            name=f"{self.application}-{index}",
+            name=pod_name,
             uid=uid,
-            labels={"apps.kubernetes.io/pod-index": str(index)},
+            labels=labels,
         )
         return pod
 
     def scale_to(self, num_units: int) -> None:
         current_indices = {
-            int(pod.metadata.labels["apps.kubernetes.io/pod-index"])
+            self._index_for_uid(pod.metadata.uid)
             for pod in self.pods
-            if pod.metadata is not None and pod.metadata.labels is not None
+            if pod.metadata is not None and pod.metadata.uid is not None
         }
         self.pods = [
             pod
             for pod in self.pods
-            if pod.metadata is not None
-            and pod.metadata.labels is not None
-            and int(pod.metadata.labels["apps.kubernetes.io/pod-index"]) < num_units
+            if self._index_for_uid(pod.metadata.uid if pod.metadata is not None else None) < num_units
         ]
         for index in range(num_units):
             if index not in current_indices:
                 self.pods.append(self._pod(index, f"uid-{index}"))
+
+    def _index_for_uid(self, uid: str | None) -> int:
+        if uid is None:
+            return -1
+        if uid.startswith("replacement-"):
+            return int(uid.removeprefix("replacement-"))
+        return int(uid.removeprefix("uid-"))
 
     def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
         return list(self.pods)
 
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         pod = next(pod for pod in self.pods if pod.metadata is not None and pod.metadata.name == pod_name)
-        assert pod.metadata is not None and pod.metadata.labels is not None
-        self._deleted_index = int(pod.metadata.labels["apps.kubernetes.io/pod-index"])
+        assert pod.metadata is not None
+        self._deleted_index = self._index_for_uid(pod.metadata.uid)
         self.pods.remove(pod)
         self.calls.append(("delete_pod", namespace, pod_name))
 
@@ -113,6 +130,8 @@ class RecordingKubernetesClient:
         existing_uids: set[str],
         timeout: timedelta,
     ) -> K8sClient.V1Pod:
+        if self.fail_wait_for_new_pod:
+            raise TimeoutError("replacement pod did not appear")
         assert self._deleted_index is not None
         pod = self._pod(self._deleted_index, f"replacement-{self._deleted_index}")
         self.pods.append(pod)
@@ -123,7 +142,7 @@ class RecordingKubernetesClient:
         self,
         pod_name: str,
         namespace: str,
-        target_status: object,
+        target_status: PodStatus,
         timeout: timedelta,
     ) -> None:
         self.calls.append(("wait_for_pod_status", namespace, pod_name, target_status, timeout))
@@ -266,7 +285,7 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
 
     scale_ha.test_unit_rotation(
         cast(JujuClient, client),
-        cast(JujuBackend, RecordingJujuBackend(is_k8s=False)),
+        RecordingJujuBackend(k8s_model=False),
         None,
         MODEL,
         None,
@@ -285,14 +304,15 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
     assert client.units == ["target/3", "target/4", "target/5"]
 
 
-def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity() -> None:
+@pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
+def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset: bool) -> None:
     client = RecordingJujuClient(current_units=2)
-    kubernetes_client = RecordingKubernetesClient("target", 2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=statefulset)
     client.scale_callback = kubernetes_client.scale_to
 
     scale_ha.test_unit_rotation(
         cast(JujuClient, client),
-        cast(JujuBackend, RecordingJujuBackend(is_k8s=True)),
+        RecordingJujuBackend(k8s_model=True),
         cast(KubernetesClient, kubernetes_client),
         MODEL,
         None,
@@ -305,9 +325,37 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity() -> None:
         ("scale_application", "target", 2, MODEL),
     ] * 2
     assert [call[2] for call in kubernetes_client.calls if call[0] == "delete_pod"] == [
-        "target-0",
-        "target-1",
+        "target-0" if statefulset else "target-hash-pod-1",
+        "target-1" if statefulset else "target-hash-pod-2",
     ]
     assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_new_pod"]) == 2
+    assert [(call[2], call[3]) for call in kubernetes_client.calls if call[0] == "wait_for_pod_status"] == [
+        ("target-0" if statefulset else "target-hash-pod-4", PodStatus.RUNNING),
+        ("target-1" if statefulset else "target-hash-pod-6", PodStatus.RUNNING),
+    ]
     assert len([call for call in client.calls if call[0] == "validate_model"]) == 2
+    assert client.units == ["target/0", "target/1"]
+
+
+def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    kubernetes_client.fail_wait_for_new_pod = True
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(TimeoutError, match="replacement pod did not appear"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=True),
+            cast(KubernetesClient, kubernetes_client),
+            MODEL,
+            None,
+            "target",
+            _charm(ha_units=2),
+        )
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 3, MODEL),
+        ("scale_application", "target", 2, MODEL),
+    ]
     assert client.units == ["target/0", "target/1"]
