@@ -232,11 +232,11 @@ run_step status_prepared "juju status -m $MODEL --relations"
 # checkpointing. Checkpointing while the disruption is still in flight would
 # test the wrong thing (and can produce ERROR/skipped results rather than a
 # genuine data-survival verdict).
-if [ -z "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
+if [ -z "$DOWN_CMD" ]; then
     # juju snap cannot redirect output to files directly, so capture via pipe.
     _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
     juju status -m "$MODEL" --format=json | cat > "$_status_file"
-    read -r orig_units orig_app_units < <(python3 - "$PROVIDER" "$APP" "$_status_file" <<'PY'
+    read -r discovered_provider_units orig_app_units < <(python3 - "$PROVIDER" "$APP" "$_status_file" <<'PY'
 import json, sys
 provider, app_name, status_file = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(status_file) as f:
@@ -255,9 +255,11 @@ print(expected_provider_units, expected_app_units)
 PY
     )
     rm -f "$_status_file"
-elif [ -z "$DOWN_CMD" ]; then
-    orig_units="$PROVIDER_UNITS"
-    orig_app_units=0
+    if [ "$PROVIDER_UNITS" = "auto" ]; then
+        orig_units="$discovered_provider_units"
+    else
+        orig_units="$PROVIDER_UNITS"
+    fi
 else
     orig_units=0
     orig_app_units=0
