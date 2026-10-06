@@ -168,17 +168,28 @@ def test_unit_rotation(
             juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
     else:
         for unit in units:
-            juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
-            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-            juju_client.remove_unit(unit, model=target_model_ref)
-            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-            current_units = juju_client.application_units(target_application, model=target_model_ref)
-            if len(current_units) != len(units):
-                pytest.fail(f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}.")
-            if unit in current_units:
-                pytest.fail(f"Unit {unit} was not removed after rotation.")
-            for model in models:
-                juju_client.validate_model(model=model, level="simple")
+            original_units = set(juju_client.application_units(target_application, model=target_model_ref))
+            try:
+                juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
+                juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+                juju_client.remove_unit(unit, model=target_model_ref)
+                juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+                current_units = juju_client.application_units(target_application, model=target_model_ref)
+                if len(current_units) != len(units):
+                    pytest.fail(f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}.")
+                if unit in current_units:
+                    pytest.fail(f"Unit {unit} was not removed after rotation.")
+                for model in models:
+                    juju_client.validate_model(model=model, level="simple")
+            finally:
+                current_units = juju_client.application_units(target_application, model=target_model_ref)
+                if len(current_units) > len(units):
+                    surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
+                    if not surge_units:
+                        pytest.fail(f"Unable to identify a surge unit to remove after rotating {unit}.")
+                    for surge_unit in surge_units[: len(current_units) - len(units)]:
+                        juju_client.remove_unit(surge_unit, model=target_model_ref)
+                    juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
 
     current_units = juju_client.application_units(target_application, model=target_model_ref)
     if len(current_units) != len(units):
