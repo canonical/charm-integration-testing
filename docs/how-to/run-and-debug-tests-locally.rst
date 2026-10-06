@@ -328,5 +328,3 @@ creating the neighbor model:
 In same-controller mode the neighbor model name is still generated separately, so the
 two models remain distinct. ``--neighbor-controller`` must not be passed alongside
 ``--same-controller``.
-
-
