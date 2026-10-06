@@ -22,6 +22,7 @@ from validators.ingress_per_unit.validator import (
     _insecure_https_context,
     _NoRedirectHandler,
     _port_range_check,
+    _tcp_endpoint_check,
     _unit_url_check,
     _url_format_check,
 )
@@ -184,6 +185,31 @@ class TestUnitUrlCheck:
     def test_unit_absent_does_not_echo_provider_mapping_keys(self) -> None:
         check, _ = _unit_url_check({"secret-token": VALID_PROVIDER_URL}, _UNIT_NAME)
         assert not check.passed
+        assert "secret-token" not in check.message
+
+
+class TestTcpEndpointCheck:
+    @pytest.mark.parametrize(
+        ("endpoint", "expected"),
+        [
+            ("example.com:81", ("example.com", 81)),
+            ("10.9.43.201:443", ("10.9.43.201", 443)),
+            ("[2001:db8::1]:443", ("2001:db8::1", 443)),
+        ],
+    )
+    def test_valid_tcp_endpoint(self, endpoint: str, expected: tuple[str, int]) -> None:
+        check, parsed = _tcp_endpoint_check(endpoint)
+        assert check.passed
+        assert parsed == expected
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        ["example.com", "example.com:0", "example.com:65536", "example.com:secret-token", "http://example.com:81"],
+    )
+    def test_invalid_tcp_endpoint(self, endpoint: str) -> None:
+        check, parsed = _tcp_endpoint_check(endpoint)
+        assert not check.passed
+        assert parsed is None
         assert "secret-token" not in check.message
 
 
@@ -356,16 +382,31 @@ class TestIngressPerUnitValidatorDeep:
         open_request.assert_called_once()
 
     def test_tcp_mode_skips_http_probe(self) -> None:
-        validator = _make_validator({**VALID_UNIT_DATA, "mode": "tcp"}, _provider_databag())
+        validator = _make_validator(
+            {**VALID_UNIT_DATA, "mode": "tcp"},
+            _provider_databag({_UNIT_NAME: {"url": "example.com:81"}}),
+        )
         with (
-            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch("validators.ingress_per_unit.validator.socket.create_connection") as create_connection,
             patch("validators.ingress_per_unit.validator._HTTP_OPENER.open") as open_request,
         ):
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
         assert any(check.name == "connect" and check.passed for check in result.checks)
         assert not any(check.name == "http_probe" for check in result.checks)
+        create_connection.assert_called_once_with(("example.com", 81), timeout=5)
         open_request.assert_not_called()
+
+    def test_tcp_mode_rejects_malformed_endpoint_before_connecting(self) -> None:
+        validator = _make_validator(
+            {**VALID_UNIT_DATA, "mode": "tcp"},
+            _provider_databag({_UNIT_NAME: {"url": "example.com:bad-port"}}),
+        )
+        with patch("validators.ingress_per_unit.validator.socket.create_connection") as create_connection:
+            result = validator.validate(level="deep")
+        assert result.status == "FAIL"
+        assert any(check.name == "tcp_endpoint" and not check.passed for check in result.checks)
+        create_connection.assert_not_called()
 
     def test_redirect_handler_does_not_follow_redirect(self) -> None:
         opener = _build_http_opener()

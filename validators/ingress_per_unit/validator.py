@@ -72,8 +72,8 @@ class IngressPerUnitValidator(BaseValidator):
 
     Validation levels:
       * simple (L1): this unit's own databag advertises a well-formed endpoint.
-      * deep   (L2): the provider advertises a well-formed ingress URL for this unit
-        and that URL is reachable.
+      * deep   (L2): the provider advertises a well-formed endpoint for this unit
+        and that endpoint is reachable.
     """
 
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
@@ -123,12 +123,19 @@ class IngressPerUnitValidator(BaseValidator):
         if not url_check.passed:
             return self._fail_result(level, checks)
 
-        format_check = _url_format_check(url)
-        checks.append(format_check)
-        if not format_check.passed:
-            return self._fail_result(level, checks)
+        if mode == "tcp":
+            endpoint_check, endpoint = _tcp_endpoint_check(url)
+            checks.append(endpoint_check)
+            if endpoint is None:
+                return self._fail_result(level, checks)
+            host, port = endpoint
+        else:
+            format_check = _url_format_check(url)
+            checks.append(format_check)
+            if not format_check.passed:
+                return self._fail_result(level, checks)
+            host, port = _extract_host_port(url)
 
-        host, port = _extract_host_port(url)
         checks.append(_connectivity_check(host, port, url))
         if checks[-1].passed and mode == "http":
             checks.append(_http_probe_check(url))
@@ -429,6 +436,60 @@ def _extract_host_port(url: str) -> tuple[str, int]:
     if parsed.port is not None:
         return host, parsed.port
     return host, 443 if parsed.scheme == "https" else 80
+
+
+def _tcp_endpoint_check(endpoint: str) -> tuple[ValidationCheck, tuple[str, int] | None]:
+    """Validate and split a provider's bare TCP-mode ``host:port`` endpoint."""
+    if endpoint.startswith("["):
+        closing_bracket = endpoint.find("]")
+        if closing_bracket == -1 or endpoint[closing_bracket + 1 : closing_bracket + 2] != ":":
+            host = ""
+            raw_port = ""
+        else:
+            host = endpoint[1:closing_bracket]
+            raw_port = endpoint[closing_bracket + 2 :]
+            try:
+                ipaddress.IPv6Address(host)
+            except ValueError:
+                host = ""
+    else:
+        host, separator, raw_port = endpoint.partition(":")
+        if not separator or ":" in raw_port:
+            host = ""
+
+    if not host or not _is_valid_host(host):
+        return (
+            ValidationCheck(
+                name="tcp_endpoint",
+                passed=False,
+                message="TCP ingress endpoint must contain a valid host and port.",
+            ),
+            None,
+        )
+    if not re.fullmatch(r"[0-9]{1,5}", raw_port):
+        return (
+            ValidationCheck(
+                name="tcp_endpoint",
+                passed=False,
+                message="TCP ingress endpoint must contain a valid host and port.",
+            ),
+            None,
+        )
+    port = int(raw_port)
+    if not _MIN_PORT <= port <= _MAX_PORT:
+        return (
+            ValidationCheck(
+                name="tcp_endpoint",
+                passed=False,
+                message="TCP ingress endpoint must contain a valid host and port.",
+            ),
+            None,
+        )
+
+    return (
+        ValidationCheck(name="tcp_endpoint", passed=True, message="TCP ingress endpoint is well-formed."),
+        (host, port),
+    )
 
 
 def _connectivity_check(host: str, port: int, url: str) -> ValidationCheck:
