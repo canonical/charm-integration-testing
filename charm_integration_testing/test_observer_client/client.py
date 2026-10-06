@@ -301,8 +301,8 @@ class TestObserverClient:
         artefacts = self._extract_first_list(history_payload, "artefacts", "items", "results", "data")
 
         self.logger.debug(f"Found {len(artefacts)} artefacts in history")
-        result_query_failed = False
-        result_query_succeeded = False
+        any_result_query_failed = False
+        any_result_query_succeeded = False
 
         for artefact in artefacts:
             artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
@@ -343,7 +343,7 @@ class TestObserverClient:
                     self.logger.debug(f"Querying test results for execution {execution_id}")
                     try:
                         test_results_payload = self.query_test_results_for_execution(execution_id=execution_id)
-                        result_query_succeeded = True
+                        any_result_query_succeeded = True
                         if self._has_test_passed(test_results_payload, test_name):
                             self.logger.info(
                                 f"Found historical revision {revision} with passing {test_name} "
@@ -352,11 +352,11 @@ class TestObserverClient:
                             yield revision
                             break
                     except TestObserverQueryError as exc:
-                        result_query_failed = True
+                        any_result_query_failed = True
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
                         continue
 
-        if result_query_failed and not result_query_succeeded:
+        if any_result_query_failed and not any_result_query_succeeded:
             raise TestObserverQueryError(
                 f"Could not determine a historical revision with passing {test_name} for {charm_name}: "
                 "all test result queries failed"
