@@ -526,6 +526,29 @@ class TestCharmhubClient:
             # THEN the resolved charm retains the trackless channel branch
             assert str(charm.channel) == "stable/feature"
 
+        def test_preserves_trackless_channel_during_revision_compatibility_lookup(self) -> None:
+            # GIVEN a revision pinned to a trackless channel branch
+            client = self._client_and_stub(
+                {"platforms": ["machine"]},
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            )
+
+            # WHEN validating the revision against that exact channel and base
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                charm_track="",
+                charm_risk="stable",
+                charm_branch="feature",
+                charm_revision=5,
+                ubuntu_version="22.04",
+                platform="machine",
+            )
+
+            # THEN the trackless channel remains unqualified by a synthetic latest track
+            assert charm.channel.track == ""
+            assert str(charm.channel) == "stable/feature"
+
     # ---------------------------------------------------------------------------
     # TestBundleBuilderPlatformMismatch
     # ---------------------------------------------------------------------------

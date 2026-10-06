@@ -717,7 +717,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             charmhub_client.charm_from_store(
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
-                charm_track=resolved_channel.explicit_track,
+                charm_track=resolved_channel.track,
                 charm_risk=resolved_channel.risk,
                 charm_branch=resolved_channel.branch or None,
                 charm_revision=revision,
