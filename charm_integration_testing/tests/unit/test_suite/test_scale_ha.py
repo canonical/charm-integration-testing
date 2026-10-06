@@ -355,6 +355,25 @@ def test_unit_rotation_removes_machine_surge_after_failure() -> None:
     assert client.units == ["target/0", "target/1", "target/2"]
 
 
+def test_unit_rotation_removes_machine_surge_when_post_scale_hook_fails() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_scale_after_callback = True
+
+    with pytest.raises(RuntimeError, match="scale extension failed"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=False),
+            None,
+            MODEL,
+            None,
+            "target",
+            _charm(),
+        )
+
+    assert [call for call in client.calls if call[0] == "remove_unit"] == [("remove_unit", "target/3", MODEL)]
+    assert client.units == ["target/0", "target/1", "target/2"]
+
+
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
 def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset: bool) -> None:
     client = RecordingJujuClient(current_units=2)
@@ -417,6 +436,7 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
         ("scale_application", "target", 2, MODEL),
     ]
     assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
 
 
 def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
