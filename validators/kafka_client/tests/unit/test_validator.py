@@ -145,10 +145,12 @@ class KafkaAdminClientStub:
 
     create_error: Exception | None = None
     broker_count: int = 1
+    created_topics: list[Any] = field(default_factory=list, init=False, repr=False)
 
     def create_topics(self, new_topics: list[Any]) -> dict[str, Any]:
         if self.create_error:
             raise self.create_error
+        self.created_topics.extend(new_topics)
         return {}
 
     def describe_cluster(self) -> dict[str, Any]:
@@ -552,6 +554,31 @@ class TestKafkaClientValidatorDeep:
         assert result.status == "FAIL"
         bs_check = next(c for c in result.checks if c.name == "endpoints_format")
         assert not bs_check.passed
+
+    def test_creates_the_probe_topic_with_a_single_replica_regardless_of_cluster_size(self) -> None:
+        # GIVEN a multi-broker cluster. Regression test for: the persistence validator's canary
+        # topic creation mirrors the application topic's own replica count/placement (see
+        # _resolve_canary_replica_assignment / _resolve_replication_factor), but this shared
+        # helper is also used by the functional validator's own probe topic here - which must keep
+        # its original single-replica creation policy regardless of cluster size or application
+        # topic replication, since it's unrelated to persistence verification.
+        validator = _make_validator(VALID_DATABAG)
+        admin = KafkaAdminClientStub(broker_count=3)
+        producer_stub = KafkaProducerStub()
+        consumer_stub = KafkaConsumerStub()
+        consumer_stub.poll_batches = [{"tp": [ConsumerRecordStub(value=b"validator-canary")]}]
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer_stub),
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer_stub),
+        ):
+            # WHEN
+            validator.validate(level="deep")
+
+        # THEN
+        assert len(admin.created_topics) == 1
+        assert admin.created_topics[0].replication_factor == 1
 
     def test_passes_when_canary_message_produced_and_consumed(self) -> None:
         # GIVEN a complete databag, a producer that sends successfully, and a consumer

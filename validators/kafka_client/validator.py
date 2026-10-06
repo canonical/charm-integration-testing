@@ -203,22 +203,36 @@ class _KafkaConnectionMixin:
             return 1
         return max(1, min(3, broker_count))
 
-    def _ensure_topic_exists(self, data: dict[str, str], topic: str) -> None:
+    def _ensure_topic_exists(self, data: dict[str, str], topic: str, match_application_topology: bool = False) -> None:
         """Create the topic if it does not already exist.
 
         kafka-k8s sets auto.create.topics.enable=false, so the topic must be
         created explicitly. Errors are swallowed — if creation fails the produce
         step will surface a meaningful error instead.
+
+        ``match_application_topology`` is ``False`` by default, preserving this method's original
+        single-replica functional-probe behavior for ``KafkaClientValidator._validate_deep()``'s own
+        probe topic. Only the persistence validator's canary topic (see
+        ``KafkaClientPersistenceValidator.prepare()``) opts into pinning its replica count/placement
+        to the application topic's own topology (see ``_resolve_canary_replica_assignment``) - a
+        functional probe run without that opt-in must keep working on a cluster/credentials set up
+        only for a single-replica topic, exactly as it did before persistence support existed.
         """
         admin: KafkaAdminClient | None = None
         try:
             admin = self._build_admin_client(data)
-            replica_assignment = self._resolve_canary_replica_assignment(admin, data.get("topic"))
+            replica_assignment = (
+                self._resolve_canary_replica_assignment(admin, data.get("topic"))
+                if match_application_topology
+                else None
+            )
             if replica_assignment:
                 new_topic = NewTopic(topic, replica_assignments={0: replica_assignment})
-            else:
+            elif match_application_topology:
                 replication_factor = self._resolve_replication_factor(admin)
                 new_topic = NewTopic(topic, num_partitions=1, replication_factor=replication_factor)
+            else:
+                new_topic = NewTopic(topic, num_partitions=1, replication_factor=1)
             admin.create_topics([new_topic])
         except TopicAlreadyExistsError:
             pass
@@ -567,7 +581,7 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         token = uuid.uuid4().hex
         try:
             data = self._connection_data()
-            self._ensure_topic_exists(data, topic)
+            self._ensure_topic_exists(data, topic, match_application_topology=True)
             self._produce_canary_message(data, topic, token, 1)
         finally:
             # _build_kafka_client_kwargs() writes the TLS CA to a temp file and reuses it across
