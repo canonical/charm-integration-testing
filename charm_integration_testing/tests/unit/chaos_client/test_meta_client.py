@@ -552,7 +552,8 @@ def test_stress_cpu_rejects_unsupported_scenario() -> None:
     assert tool.calls == []
 
 
-def test_stress_memory_exhaustion_uses_constraint_overrides() -> None:
+@pytest.mark.parametrize("margin", [timedelta(0), timedelta(minutes=2)])
+def test_stress_memory_exhaustion_uses_constraint_overrides(margin: timedelta) -> None:
     # GIVEN an exhaustion constraint overriding all memory values
     tool = ClientStub({"stress_memory"})
     client = MetaChaosClient(
@@ -568,10 +569,20 @@ def test_stress_memory_exhaustion_uses_constraint_overrides() -> None:
     )
 
     # WHEN stressing memory
-    client.stress_memory(TEST_MODEL, UNIT, 1, 512, DURATION)
+    client.stress_memory(TEST_MODEL, UNIT, 1, 512, DURATION, duration_margin=margin)
 
     # THEN the merged values are dispatched
-    assert tool.calls == [("stress_memory", (TEST_MODEL, UNIT, 3, 2048, timedelta(seconds=90)))]
+    assert tool.calls == [("stress_memory", (TEST_MODEL, UNIT, 3, 2048, timedelta(seconds=90) + margin))]
+
+
+def test_stress_memory_rejects_negative_duration_margin() -> None:
+    tool = ClientStub({"stress_memory"})
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+
+    with pytest.raises(ValueError, match="duration margin must not be negative"):
+        client.stress_memory(TEST_MODEL, UNIT, 1, 512, DURATION, duration_margin=timedelta(seconds=-1))
+
+    assert tool.calls == []
 
 
 def test_stress_memory_moderate_pressure_overrides_only_configured_fields() -> None:

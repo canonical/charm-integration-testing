@@ -241,26 +241,25 @@ matching Juju model configuration options.
 Total memory stress
 -------------------
 
-``test_live_memory_stress_total`` requires Kubernetes and Litmus or Chaos Mesh
-with the ``StressChaos`` resource; otherwise it skips. It temporarily applies a
-``1Gi`` workload memory limit and stresses one unit. Defaults are one worker,
-``2048`` MB and up to ``600`` seconds of observation after confirmed injection.
+``test_live_memory_stress_total`` supports StatefulSet-backed Kubernetes workloads
+and skips when no memory stress tool is available. It applies a temporary ``1Gi``
+workload limit and stresses one unit using Litmus or Chaos Mesh.
 
-Per-charm settings can override ``memory_exhaustion_workers``,
-``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds``.
-Override the ``memory_limit`` fixture separately; the requested stress size must
-be at least the limit.
+Defaults are one worker, ``2048`` MB and ``600`` seconds of observation after
+confirmed injection. Per-charm ``memory_exhaustion_workers``,
+``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` override
+these values. The experiment receives an additional two minutes after settings
+are resolved. Override ``memory_limit`` separately; stress size must cover it.
 
-A new out-of-memory termination in the target container, timestamped after
-injection is confirmed, ends observation early. A status change or restart is
-not required. Experiment errors,
-Experiment completion without this evidence before the observation period ends,
+A new out-of-memory termination in the target container after confirmed injection
+ends observation early, even before restart. Neither termination nor a status
+change is required. Experiment errors, early completion without this evidence
 and cleanup failures fail the test.
 
 After cleanup, all bundle models must reach active/idle within fifteen minutes
-and pass available deep validators while the memory limit remains in place.
-Skipped or missing validators provide no functional coverage. Original memory
-settings are restored on success or failure, with a final idle check on success.
+and pass available deep validators while the limit remains applied. Missing or
+skipped validators provide no functional coverage. Original memory settings are
+restored on success or failure, with a final idle check on success.
 
 Network isolation recovery
 --------------------------

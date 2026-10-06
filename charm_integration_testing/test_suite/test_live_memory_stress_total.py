@@ -14,7 +14,6 @@ from kubernetes_client.memory_limit import temporary_memory_limit
 
 from bundle_builder_x.charm import CharmChannel
 
-from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
 
 
@@ -67,11 +66,9 @@ def test_live_memory_stress_total(
     kubernetes = kubernetes_client
     if kubernetes is None:
         pytest.skip("Total memory stress requires Kubernetes.")
-    tools = available_chaos_tools(kubernetes.backend)
-    if not tools:
-        pytest.skip("Total memory stress requires Litmus or Chaos Mesh.")
-    if ChaosTool.LITMUS not in tools and not kubernetes.backend.crd_exists("stresschaos.chaos-mesh.org"):
-        pytest.skip("Chaos Mesh memory stress requires the StressChaos CRD.")
+    chaos = chaos_tool_for_model(target_model_ref)
+    if not chaos.supports("stress_memory"):
+        pytest.skip("Total memory stress requires a supported memory stress tool.")
 
     info = backend.list_applications(target_model_ref)[target_application]
     if info.channel is None or info.base is None:
@@ -82,10 +79,11 @@ def test_live_memory_stress_total(
     workers = settings.memory_exhaustion_workers or 1
     size_mb = settings.memory_exhaustion_size_mb or 2048
     memory_stress_duration = timedelta(seconds=settings.memory_exhaustion_duration_seconds or 600)
-    if memory_recovery_timeout.total_seconds() <= 0 or parse_quantity(memory_limit) <= 0:
+    limit_bytes = parse_quantity(memory_limit)
+    if memory_recovery_timeout.total_seconds() <= 0 or limit_bytes <= 0:
         raise ValueError("Memory limit and recovery timeout must be positive.")
     # Require the size parameter to cover the limit, treating MB conservatively as decimal.
-    if size_mb * 1_000_000 < parse_quantity(memory_limit):
+    if size_mb * 1_000_000 < limit_bytes:
         raise ValueError("Total memory stress size must be at least the container memory limit.")
     juju_client.logger.info(
         "Memory stress settings: limit=%s, workers=%s, size_mb=%s, duration=%s",
@@ -126,7 +124,6 @@ def test_live_memory_stress_total(
     if len(containers) != 1:
         pytest.fail(f"Expected one workload container, found {containers}.")
     owner = owners[0]
-    chaos = chaos_tool_for_model(target_model_ref)
     with temporary_memory_limit(
         kubernetes,
         namespace,
@@ -152,7 +149,7 @@ def test_live_memory_stress_total(
             pytest.fail(f"Expected one Pod for {unit} after memory limit rollout.")
         workload = next(item for item in targets[0].spec.containers if item.name == containers[0])
         limit = (workload.resources.limits or {}).get("memory") if workload.resources else None
-        if limit is None or parse_quantity(limit) != parse_quantity(memory_limit):
+        if limit is None or parse_quantity(limit) != limit_bytes:
             pytest.fail(f"Memory limit was not applied to {unit}/{containers[0]}.")
         baseline = targets[0]
         baseline_statuses = baseline.status.container_statuses or [] if baseline.status else []
@@ -168,10 +165,11 @@ def test_live_memory_stress_total(
                 if item.metadata.uid != baseline_uid or item.status is None:
                     continue
                 for state in item.status.container_statuses or []:
-                    terminated = state.last_state.terminated if state.last_state else None
+                    terminated = state.state.terminated if state.state else None
+                    if terminated is None and state.restart_count > baseline_restarts:
+                        terminated = state.last_state.terminated if state.last_state else None
                     if (
                         state.name == containers[0]
-                        and state.restart_count > baseline_restarts
                         and terminated is not None
                         and terminated.reason == "OOMKilled"
                         and terminated.exit_code == 137
@@ -194,7 +192,8 @@ def test_live_memory_stress_total(
                 unit,
                 workers=workers,
                 size_mb=size_mb,
-                duration=memory_stress_duration + timedelta(minutes=2),
+                duration=memory_stress_duration,
+                duration_margin=timedelta(minutes=2),
             )
             injection_confirmed_at = datetime.now(timezone.utc)
             # A new target OOM confirms exhaustion; otherwise observe for the full window.
