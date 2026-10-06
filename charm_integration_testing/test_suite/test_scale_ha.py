@@ -8,7 +8,7 @@ import pytest
 import yaml
 from juju import JujuBackend, JujuClient, JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient, PodStatus
+from kubernetes_client import KubernetesClient
 
 from bundle_builder_x import Charm
 
@@ -123,15 +123,13 @@ def test_unit_rotation(
             )
 
     models = _models_to_validate(target_model_ref, neighbor_model_ref)
-    for index, unit in enumerate(units):
-        replacement_uid: str | None = None
+    if is_k8s_model:
+        assert kubernetes_client is not None
+        original_uids = {pod.metadata.uid for pod in pods if pod.metadata is not None and pod.metadata.uid is not None}
         juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
-
-        if is_k8s_model:
-            assert kubernetes_client is not None
-            pod = pods[index]
-            try:
-                juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+        try:
+            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+            for unit, pod in zip(units, pods, strict=True):
                 if pod.metadata is None or pod.metadata.name is None or pod.metadata.uid is None:
                     pytest.fail(f"Kubernetes pod metadata is incomplete for unit {unit}.")
                 pod_name = pod.metadata.name
@@ -157,34 +155,43 @@ def test_unit_rotation(
                     or replacement_pod.metadata.uid is None
                 ):
                     pytest.fail(f"Replacement pod metadata is incomplete for unit {unit}.")
-                replacement_uid = replacement_pod.metadata.uid
-                kubernetes_client.wait_for_pod_status(
+                kubernetes_client.wait_for_pod_ready(
                     pod_name=replacement_pod.metadata.name,
                     namespace=target_model_ref.model,
-                    target_status=PodStatus.RUNNING,
                     timeout=_UNIT_ROTATION_TIMEOUT,
                 )
                 juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-            finally:
-                juju_client.scale_application(target_application, len(units), model=target_model_ref)
-                juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-        else:
+                for model in models:
+                    juju_client.validate_model(model=model, level="simple")
+        finally:
+            juju_client.scale_application(target_application, len(units), model=target_model_ref)
+            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+    else:
+        for unit in units:
+            juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
             juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
             juju_client.remove_unit(unit, model=target_model_ref)
             juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
-        current_units = juju_client.application_units(target_application, model=target_model_ref)
-        if len(current_units) != len(units):
-            pytest.fail(f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}.")
-        if not is_k8s_model and unit in current_units:
-            pytest.fail(f"Unit {unit} was not removed after rotation.")
-        if is_k8s_model:
-            assert kubernetes_client is not None
-            assert replacement_uid is not None
-            current_pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
-            if replacement_uid not in {
-                pod.metadata.uid for pod in current_pods if pod.metadata is not None and pod.metadata.uid is not None
-            }:
-                pytest.fail(f"Replacement pod for unit {unit} did not survive removal of the surge unit.")
+            current_units = juju_client.application_units(target_application, model=target_model_ref)
+            if len(current_units) != len(units):
+                pytest.fail(f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}.")
+            if unit in current_units:
+                pytest.fail(f"Unit {unit} was not removed after rotation.")
+            for model in models:
+                juju_client.validate_model(model=model, level="simple")
 
+    current_units = juju_client.application_units(target_application, model=target_model_ref)
+    if len(current_units) != len(units):
+        pytest.fail(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
+    if is_k8s_model:
+        assert kubernetes_client is not None
+        current_pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+        current_uids = {
+            pod.metadata.uid for pod in current_pods if pod.metadata is not None and pod.metadata.uid is not None
+        }
+        if len(current_pods) != len(units):
+            pytest.fail(f"Expected {len(units)} Kubernetes pods after rotation, found {len(current_pods)}.")
+        if original_uids & current_uids:
+            pytest.fail(f"Original Kubernetes pods remain after rotation: {sorted(original_uids & current_uids)}.")
         for model in models:
             juju_client.validate_model(model=model, level="simple")

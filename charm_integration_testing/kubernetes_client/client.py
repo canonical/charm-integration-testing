@@ -265,6 +265,52 @@ class KubernetesClient:
             delay=delay,
         )
 
+    def wait_for_pod_ready(
+        self,
+        pod_name: str,
+        namespace: str,
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> K8sClient.V1Pod:
+        """Wait for the named pod to be Running with its Kubernetes Ready condition true.
+
+        Args:
+            pod_name: Name of the pod to poll
+            namespace: Namespace where the pod is located
+            timeout: Maximum time to wait
+            delay: Delay between checks
+
+        Returns:
+            The pod once it is ready
+
+        Raises:
+            TimeoutError: If the pod does not become ready within the timeout
+            ApiException: If reading the pod fails for a reason other than it not existing yet
+        """
+
+        def check() -> K8sClient.V1Pod | None:
+            try:
+                pod = self.backend.core_v1_api.read_namespaced_pod(pod_name, namespace)
+            except ApiException as e:
+                if e.status == 404:
+                    return None
+                raise
+            if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
+                return None
+            if any(
+                condition.type == "Ready" and condition.status == "True" for condition in pod.status.conditions or []
+            ):
+                self.logger.info(f"Pod {pod_name} in namespace {namespace} is ready")
+                return pod
+            return None
+
+        return self.wait(
+            check=check,
+            timeout_message=f"Pod '{pod_name}' in namespace '{namespace}' did not become ready within timeout",
+            timeout=timeout,
+            delay=delay,
+        )
+
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """
         Deletes the specified pod.

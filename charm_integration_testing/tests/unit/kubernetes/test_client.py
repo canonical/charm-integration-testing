@@ -9,7 +9,13 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
+from kubernetes.client import (  # type: ignore[import-untyped]
+    ApiException,
+    V1ObjectMeta,
+    V1Pod,
+    V1PodCondition,
+    V1PodStatus,
+)
 from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
 from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
@@ -832,6 +838,32 @@ class TestKubernetesClientInit:
             assert "Pod 'test-pod' in namespace 'test-namespace' did not reach Running status within timeout" in str(
                 exc_info.value
             )
+
+    class TestWaitForPodReady:
+        """Test suite for wait_for_pod_ready method."""
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_ready_condition_after_running(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running pod that becomes ready after an initial read
+            running_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            running_pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            ready_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            mock_backend = MagicMock()
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = [running_pod, ready_pod]
+            client = KubernetesClient(
+                backend=mock_backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for readiness
+            result = client.wait_for_pod_ready("test-pod", "test-namespace")
+
+            # THEN returns the pod only after the Ready condition is true
+            assert result == ready_pod
+            assert mock_sleep.call_count == 1
 
     class TestDeletePod:
         """Test suite for delete_pod method."""
