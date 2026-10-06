@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuBackend, JujuClient, JujuModelHandle
+from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient
 from test_suite import test_scale_ha as scale_ha
 
 from bundle_builder_x import Charm, CharmChannel
@@ -16,21 +18,115 @@ from bundle_builder_x import Charm, CharmChannel
 
 class RecordingJujuClient:
     def __init__(self, current_units: int) -> None:
-        self.current_units = current_units
+        self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
+        self.scale_callback: object | None = None
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
-        return self.current_units
+        return len(self.units)
 
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.calls.append(("scale_application", application, num, model))
+        if num > len(self.units):
+            next_index = max((int(unit.rsplit("/", maxsplit=1)[-1]) for unit in self.units), default=-1) + 1
+            self.units.extend(
+                f"{application}/{index}" for index in range(next_index, next_index + num - len(self.units))
+            )
+        elif num < len(self.units):
+            self.units = sorted(self.units, key=lambda unit: int(unit.rsplit("/", maxsplit=1)[-1]))[:num]
+        if callable(self.scale_callback):
+            self.scale_callback(num)
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        return list(self.units)
+
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.calls.append(("remove_unit", unit, model))
+        self.units.remove(unit)
 
     def idle_for_period(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("idle_for_period", model, timeout))
 
+    def multi_model_idle_for_period(self, models: list[JujuModelHandle], timeout: timedelta | None = None) -> None:
+        self.calls.append(("multi_model_idle_for_period", models, timeout))
+
     def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
         self.calls.append(("validate_model", model, level))
+
+
+class RecordingJujuBackend:
+    def __init__(self, *, is_k8s: bool) -> None:
+        self.is_k8s = is_k8s
+
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return self.is_k8s
+
+
+class RecordingKubernetesClient:
+    def __init__(self, application: str, unit_count: int) -> None:
+        self.application = application
+        self.pods = [self._pod(index, f"uid-{index}") for index in range(unit_count)]
+        self.calls: list[tuple[object, ...]] = []
+        self._deleted_index: int | None = None
+
+    def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
+        pod = K8sClient.V1Pod()
+        pod.metadata = K8sClient.V1ObjectMeta(
+            name=f"{self.application}-{index}",
+            uid=uid,
+            labels={"apps.kubernetes.io/pod-index": str(index)},
+        )
+        return pod
+
+    def scale_to(self, num_units: int) -> None:
+        current_indices = {
+            int(pod.metadata.labels["apps.kubernetes.io/pod-index"])
+            for pod in self.pods
+            if pod.metadata is not None and pod.metadata.labels is not None
+        }
+        self.pods = [
+            pod
+            for pod in self.pods
+            if pod.metadata is not None
+            and pod.metadata.labels is not None
+            and int(pod.metadata.labels["apps.kubernetes.io/pod-index"]) < num_units
+        ]
+        for index in range(num_units):
+            if index not in current_indices:
+                self.pods.append(self._pod(index, f"uid-{index}"))
+
+    def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
+        return list(self.pods)
+
+    def delete_pod(self, namespace: str, pod_name: str) -> None:
+        pod = next(pod for pod in self.pods if pod.metadata is not None and pod.metadata.name == pod_name)
+        assert pod.metadata is not None and pod.metadata.labels is not None
+        self._deleted_index = int(pod.metadata.labels["apps.kubernetes.io/pod-index"])
+        self.pods.remove(pod)
+        self.calls.append(("delete_pod", namespace, pod_name))
+
+    def wait_for_new_pod(
+        self,
+        application_name: str,
+        namespace: str,
+        existing_uids: set[str],
+        timeout: timedelta,
+    ) -> K8sClient.V1Pod:
+        assert self._deleted_index is not None
+        pod = self._pod(self._deleted_index, f"replacement-{self._deleted_index}")
+        self.pods.append(pod)
+        self.calls.append(("wait_for_new_pod", namespace, existing_uids, timeout))
+        return pod
+
+    def wait_for_pod_status(
+        self,
+        pod_name: str,
+        namespace: str,
+        target_status: object,
+        timeout: timedelta,
+    ) -> None:
+        self.calls.append(("wait_for_pod_status", namespace, pod_name, target_status, timeout))
 
 
 MODEL = JujuModelHandle(controller="controller", model="model")
@@ -163,3 +259,55 @@ def test_bundle_application_units_reads_platform_specific_unit_key(tmp_path: Pat
 
     assert scale_ha._bundle_application_units(bundle, "target", "kubernetes") == 2
     assert scale_ha._bundle_application_units(bundle, "machine-target", "machine") == 4
+
+
+def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
+    client = RecordingJujuClient(current_units=3)
+
+    scale_ha.test_unit_rotation(
+        cast(JujuClient, client),
+        cast(JujuBackend, RecordingJujuBackend(is_k8s=False)),
+        None,
+        MODEL,
+        None,
+        "target",
+        _charm(),
+    )
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 4, MODEL),
+        ("scale_application", "target", 4, MODEL),
+        ("scale_application", "target", 4, MODEL),
+    ]
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0", "target/1", "target/2"]
+    validations = [call for call in client.calls if call[0] == "validate_model"]
+    assert validations == [("validate_model", MODEL, "simple")] * 3
+    assert client.units == ["target/3", "target/4", "target/5"]
+
+
+def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2)
+    client.scale_callback = kubernetes_client.scale_to
+
+    scale_ha.test_unit_rotation(
+        cast(JujuClient, client),
+        cast(JujuBackend, RecordingJujuBackend(is_k8s=True)),
+        cast(KubernetesClient, kubernetes_client),
+        MODEL,
+        None,
+        "target",
+        _charm(ha_units=2),
+    )
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 3, MODEL),
+        ("scale_application", "target", 2, MODEL),
+    ] * 2
+    assert [call[2] for call in kubernetes_client.calls if call[0] == "delete_pod"] == [
+        "target-0",
+        "target-1",
+    ]
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_new_pod"]) == 2
+    assert len([call for call in client.calls if call[0] == "validate_model"]) == 2
+    assert client.units == ["target/0", "target/1"]

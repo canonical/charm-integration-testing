@@ -443,6 +443,35 @@ class ModelExistsStub:
 
 
 class TestJubilantBackend:
+    class TestRemoveUnit:
+        def test_removes_a_specific_unit_on_machine_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a machine model and a client that records unit removal
+            class RemoveUnitStub:
+                def __init__(self) -> None:
+                    self.removed_units: list[str] = []
+
+                def remove_unit(self, unit: str) -> None:
+                    self.removed_units.append(unit)
+
+            model_client = RemoveUnitStub()
+            backend = JubilantBackend(JubilantClientStub(client=model_client))
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: False)
+
+            # WHEN removing a specific unit
+            backend.remove_unit(TEST_MODEL, "mysql/2")
+
+            # THEN Jubilant receives the unit identifier
+            assert model_client.removed_units == ["mysql/2"]
+
+        def test_rejects_targeted_removal_on_kubernetes_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a Kubernetes model
+            backend = JubilantBackend()
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: True)
+
+            # WHEN / THEN specific unit removal fails explicitly
+            with pytest.raises(ValueError, match="does not support removing a specific unit"):
+                backend.remove_unit(TEST_MODEL, "mysql/2")
+
     class TestWait:
         def test_wait_success(self) -> None:
             # GIVEN a backend with mocked status

@@ -56,9 +56,21 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing unit {unit}.")
+        self.backend.remove_unit(model, unit)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_scale(model)
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.logger.info(f"Getting the units for {application}.")
+        return self.backend.application_units(model, application)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

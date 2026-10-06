@@ -6,16 +6,20 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient, JujuModelHandle
+from juju import JujuBackend, JujuClient, JujuModelHandle
+from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient, PodStatus
 
 from bundle_builder_x import Charm
 
 from .scheduler.states import State
 
+_UNIT_ROTATION_TIMEOUT = timedelta(minutes=15)
+
 
 def _require_principal_charm(charm: Charm | None) -> Charm:
     if charm is None:
-        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
+        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA tests.")
     if charm.subordinate:
         pytest.skip(f"{charm.name} is subordinate and cannot be scaled independently.")
     return charm
@@ -42,6 +46,41 @@ def _bundle_application_units(bundle_path: Path, application: str, platform: str
     if isinstance(units, bool) or not isinstance(units, int) or units < 1:
         raise ValueError(f"Application '{application}' in {bundle_path} must define a positive integer '{units_key}'.")
     return units
+
+
+def _models_to_validate(
+    target_model_ref: JujuModelHandle, neighbor_model_ref: JujuModelHandle | None
+) -> list[JujuModelHandle]:
+    return [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
+
+
+def _unit_pod_index(pod: K8sClient.V1Pod, application: str) -> str | None:
+    metadata = pod.metadata
+    if metadata is None:
+        return None
+    labels = metadata.labels or {}
+    index = labels.get("apps.kubernetes.io/pod-index")
+    if isinstance(index, str):
+        return index
+    prefix = f"{application}-"
+    if metadata.name is not None and metadata.name.startswith(prefix):
+        suffix = metadata.name.removeprefix(prefix)
+        return suffix if suffix.isdecimal() else None
+    return None
+
+
+def _unit_pods(units: list[str], pods: list[K8sClient.V1Pod], application: str) -> dict[str, K8sClient.V1Pod]:
+    pods_by_unit: dict[str, K8sClient.V1Pod] = {}
+    for unit in units:
+        unit_index = unit.rsplit("/", maxsplit=1)[-1]
+        matching_pods = [pod for pod in pods if _unit_pod_index(pod, application) == unit_index]
+        if len(matching_pods) != 1:
+            pytest.skip(f"Cannot map Kubernetes unit {unit} to exactly one workload pod for application {application}.")
+        pods_by_unit[unit] = matching_pods[0]
+
+    if len(pods) != len(units):
+        pytest.skip(f"Application {application} does not have one Kubernetes workload pod per Juju unit.")
+    return pods_by_unit
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED_HA)
@@ -78,3 +117,98 @@ def test_scale_from_ha(
     juju_client.scale_application(target_application, original_units, model=target_model_ref)
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
     juju_client.validate_model(model=target_model_ref, level="simple")
+
+
+@pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
+def test_unit_rotation(
+    juju_client: JujuClient,
+    juju_backend: JujuBackend,
+    kubernetes_client: KubernetesClient | None,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
+    target_application: str,
+    target_deployed_charm: Charm | None,
+) -> None:
+    charm = _require_principal_charm(target_deployed_charm)
+    if not charm.scale_down:
+        pytest.skip(f"{charm.name} does not support scaling down from HA.")
+    units = juju_client.application_units(target_application, model=target_model_ref)
+    if len(units) < charm.ha_units:
+        pytest.fail(
+            f"Application {target_application} has {len(units)} units, fewer than its HA requirement "
+            f"of {charm.ha_units}."
+        )
+
+    is_k8s_model = juju_backend.is_k8s_model(target_model_ref)
+    pods_by_unit: dict[str, K8sClient.V1Pod] = {}
+    if is_k8s_model:
+        if kubernetes_client is None:
+            pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
+        pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+        pods_by_unit = _unit_pods(units, pods, target_application)
+
+    models = _models_to_validate(target_model_ref, neighbor_model_ref)
+    for unit in units:
+        replacement_uid: str | None = None
+        juju_client.scale_application(target_application, len(units) + 1, model=target_model_ref)
+        juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+
+        if is_k8s_model:
+            assert kubernetes_client is not None
+            pod = pods_by_unit[unit]
+            if pod.metadata is None or pod.metadata.name is None or pod.metadata.uid is None:
+                pytest.fail(f"Kubernetes pod metadata is incomplete for unit {unit}.")
+            pod_name = pod.metadata.name
+            pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+            existing_uids = {
+                existing_pod.metadata.uid
+                for existing_pod in pods
+                if existing_pod.metadata is not None and existing_pod.metadata.uid is not None
+            }
+            if pod.metadata.uid not in existing_uids:
+                pytest.fail(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
+
+            kubernetes_client.delete_pod(namespace=target_model_ref.model, pod_name=pod_name)
+            replacement_pod = kubernetes_client.wait_for_new_pod(
+                application_name=target_application,
+                namespace=target_model_ref.model,
+                existing_uids=existing_uids,
+                timeout=_UNIT_ROTATION_TIMEOUT,
+            )
+            if _unit_pod_index(replacement_pod, target_application) != unit.rsplit("/", maxsplit=1)[-1]:
+                pytest.fail(f"Unexpected Kubernetes pod replaced unit {unit}.")
+            if (
+                replacement_pod.metadata is None
+                or replacement_pod.metadata.name is None
+                or replacement_pod.metadata.uid is None
+            ):
+                pytest.fail(f"Replacement pod metadata is incomplete for unit {unit}.")
+            replacement_uid = replacement_pod.metadata.uid
+            kubernetes_client.wait_for_pod_status(
+                pod_name=replacement_pod.metadata.name,
+                namespace=target_model_ref.model,
+                target_status=PodStatus.RUNNING,
+                timeout=_UNIT_ROTATION_TIMEOUT,
+            )
+            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+            juju_client.scale_application(target_application, len(units), model=target_model_ref)
+        else:
+            juju_client.remove_unit(unit, model=target_model_ref)
+
+        juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+        current_units = juju_client.application_units(target_application, model=target_model_ref)
+        if len(current_units) != len(units):
+            pytest.fail(f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}.")
+        if not is_k8s_model and unit in current_units:
+            pytest.fail(f"Unit {unit} was not removed after rotation.")
+        if is_k8s_model:
+            assert kubernetes_client is not None
+            assert replacement_uid is not None
+            current_pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
+            if replacement_uid not in {
+                pod.metadata.uid for pod in current_pods if pod.metadata is not None and pod.metadata.uid is not None
+            }:
+                pytest.fail(f"Replacement pod for unit {unit} did not survive removal of the surge unit.")
+
+        for model in models:
+            juju_client.validate_model(model=model, level="simple")

@@ -101,6 +101,19 @@ class WaitIdleBackendStub(NullJujuBackend):
         self.calls.append((models, timeout, count, strict_timeout))
 
 
+@dataclass
+class UnitOperationsBackendStub(NullJujuBackend):
+    units: list[str] = field(default_factory=list)
+    removed_units: list[str] = field(default_factory=list)
+
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        return list(self.units)
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.removed_units.append(unit)
+        self.units.remove(unit)
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -283,6 +296,23 @@ class TestJujuClientMultiModelIdleForPeriod:
         # THEN nothing is logged or delegated
         assert logger.infos == []
         assert backend.calls == []
+
+
+class TestJujuClientUnitOperations:
+    def test_lists_application_units_and_removes_specific_unit(self) -> None:
+        # GIVEN a backend with two units
+        backend = UnitOperationsBackendStub(units=["app/0", "app/1"])
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        # WHEN listing and removing a unit
+        units = client.application_units("app", model)
+        client.remove_unit("app/0", model)
+
+        # THEN unit lookup and removal are delegated through the client
+        assert units == ["app/0", "app/1"]
+        assert backend.removed_units == ["app/0"]
+        assert backend.units == ["app/1"]
 
 
 class TestJujuValidationError:
