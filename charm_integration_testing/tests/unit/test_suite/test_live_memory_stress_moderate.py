@@ -2,17 +2,20 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from logging import getLogger
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 from chaos_client import ChaosResourceConstraintsError, MetaChaosClient, ResourceConstraintsClient
-from juju import CharmChannel, JujuApplicationInfo, JujuModelHandle
+from juju import CharmChannel, JujuApplicationInfo, JujuClient, JujuModelHandle, JujuValidationError
 from test_suite import test_live_memory_stress_moderate as live
 from test_suite.fixtures.chaos_tools import ChaosTool
 
 from validators.base.validator import ValidationResult
+
+from ..extensions.shared import NullJujuBackend
 
 MODEL = JujuModelHandle(controller="controller", model="target")
 Scenario = tuple[dict[str, Any], Mock, Mock, list[float]]
@@ -96,12 +99,60 @@ def test_per_charm_settings_and_neighbor_model(scenario: Scenario, tmp_path: Pat
     )
     meta = MetaChaosClient([chaos], client.backend, ResourceConstraintsClient(tmp_path))
     arguments.update(chaos_tool_for_model=Mock(return_value=meta), neighbor_model_ref=NEIGHBOR)
-    client.validate_model.side_effect = lambda *, model, level: {"neighbor/0": [result()]} if model == NEIGHBOR else {}
+    client.validate_model.side_effect = lambda *, model, level, applications: (
+        {"neighbor/0": [result()]} if model == NEIGHBOR else {}
+    )
     live.test_live_memory_stress_moderate(**arguments)
     chaos.stress_memory.assert_called_once_with(MODEL, "target/0", 2, 64, timedelta(seconds=140))
     client.backend.list_applications.assert_called_once_with(MODEL)
     assert clock[0] == 20
     assert {call.kwargs["model"] for call in client.validate_model.call_args_list} == {MODEL, NEIGHBOR}
+
+
+@pytest.mark.parametrize("neighbor_model", [MODEL, NEIGHBOR], ids=["same-model", "cross-model"])
+@pytest.mark.parametrize("failing_application", ["unrelated", "target", "neighbor"])
+def test_validation_scopes_applications_before_running(
+    neighbor_model: JujuModelHandle, failing_application: str
+) -> None:
+    # GIVEN a real validation client and a failing application in the model
+    calls: list[tuple[JujuModelHandle, str]] = []
+
+    class Backend(NullJujuBackend):
+        def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
+            return {
+                app: JujuApplicationInfo(
+                    charm="postgresql-k8s", revision=495, channel=CharmChannel.parse("14/stable"), base="22.04"
+                )
+                for app in ("target", "neighbor", "unrelated")
+            }
+
+        def validate_application(
+            self, model: JujuModelHandle, application: str, level: str
+        ) -> dict[str, list[ValidationResult]]:
+            calls.append((model, application))
+            return {
+                f"{application}/0": [
+                    result(
+                        endpoint="database" if application == "target" else "postgresql",
+                        status="FAIL" if application == failing_application else "PASS",
+                    )
+                ]
+            }
+
+    client = JujuClient(Backend(), getLogger(__name__))
+    endpoints = [(MODEL, "target", "database"), (neighbor_model, "neighbor", "postgresql")]
+    # WHEN validating duplicate endpoints, THEN each selected application runs once
+    if failing_application == "unrelated":
+        passed = live.validate_service(client, endpoints + [endpoints[0]])
+        assert passed == {
+            (MODEL, "target/0", "database", "postgresql_client", 1),
+            (neighbor_model, "neighbor/0", "postgresql", "postgresql_client", 1),
+        }
+        assert calls == [(MODEL, "target"), (neighbor_model, "neighbor")]
+    else:
+        # A selected application's failure must still propagate.
+        with pytest.raises(JujuValidationError):
+            live.validate_service(client, endpoints)
 
 
 @pytest.mark.parametrize(
