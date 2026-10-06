@@ -472,14 +472,26 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
         A fixed replication factor of 1 would mean losing (or replacing) the single node that
         owns the canary's only replica makes this validator report data loss caused by its own
         keyspace setup, even on a cluster where a properly replicated application keyspace would
-        have survived the same event. Deriving the factor from the number of nodes currently up
-        keeps a single-node deployment working (factor 1, the only value quorum allows) while
-        giving a multi-node cluster real replication, capped at 3 since Cassandra sees
-        diminishing resilience/consistency benefit beyond that.
+        have survived the same event. ``NetworkTopologyStrategy`` (rather than ``SimpleStrategy``,
+        which ignores rack/datacenter placement entirely) sizes a per-datacenter factor from that
+        datacenter's node count, capped at 3 since Cassandra sees diminishing resilience/consistency
+        benefit beyond that. Node counts include hosts the driver currently reports as down: this
+        keyspace is only ever created once (``IF NOT EXISTS``), so sizing it from a transient
+        down-count would under-replicate it permanently relative to the real cluster size, and a
+        later disruption could then report loss caused by the canary's own under-replication rather
+        than by the application's own (properly replicated) data actually being lost.
         """
-        host_count = sum(1 for host in session.cluster.metadata.all_hosts() if host.is_up is not False)
-        replication_factor = max(1, min(host_count, 3))
-        return f"{{'class': 'SimpleStrategy', 'replication_factor': {replication_factor}}}"
+        host_counts_by_dc: dict[str, int] = {}
+        for host in session.cluster.metadata.all_hosts():
+            datacenter = getattr(host, "datacenter", None) or "datacenter1"
+            host_counts_by_dc[datacenter] = host_counts_by_dc.get(datacenter, 0) + 1
+        if not host_counts_by_dc:
+            host_counts_by_dc["datacenter1"] = 1
+        factors = ", ".join(
+            f"'{datacenter}': {max(1, min(host_count, 3))}"
+            for datacenter, host_count in sorted(host_counts_by_dc.items())
+        )
+        return f"{{'class': 'NetworkTopologyStrategy', {factors}}}"
 
     def _qualified_table(self, keyspace: str, table_name: str) -> str:
         return f"{_quote_identifier(keyspace)}.{_quote_identifier(table_name)}"

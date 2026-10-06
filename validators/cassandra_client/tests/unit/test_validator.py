@@ -82,9 +82,10 @@ def _make_legacy_persistence_validator(
 
 @dataclass
 class HostStub:
-    """Minimal stub for cassandra.pool.Host; only the "is_up" flag matters here."""
+    """Minimal stub for cassandra.pool.Host; only "is_up" and "datacenter" matter here."""
 
     is_up: bool | None = True
+    datacenter: str | None = "datacenter1"
 
 
 @dataclass
@@ -855,7 +856,8 @@ class TestCassandraClientPersistenceValidatorKeyspaceReplication:
 
         # THEN
         create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
-        assert "'replication_factor': 1" in create_keyspace_query
+        assert "'class': 'NetworkTopologyStrategy'" in create_keyspace_query
+        assert "'datacenter1': 1" in create_keyspace_query
 
     def test_scales_replication_factor_to_cluster_size_capped_at_three(self) -> None:
         # GIVEN a legacy relation backed by a 5-node cluster. Regression test for: a fixed
@@ -873,10 +875,13 @@ class TestCassandraClientPersistenceValidatorKeyspaceReplication:
 
         # THEN the factor is capped at 3, not scaled all the way up to 5
         create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
-        assert "'replication_factor': 3" in create_keyspace_query
+        assert "'datacenter1': 3" in create_keyspace_query
 
-    def test_excludes_down_hosts_from_the_replication_factor(self) -> None:
-        # GIVEN a 3-node cluster where one node is currently down
+    def test_includes_down_hosts_towards_the_replication_factor(self) -> None:
+        # GIVEN a 3-node cluster where one node is currently (possibly transiently) down.
+        # Regression test for: this keyspace is only ever created once (`IF NOT EXISTS`), so
+        # excluding a transiently-down host from the factor at creation time would permanently
+        # under-replicate it relative to the real cluster size.
         validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
         mixed_hosts = MetadataStub(hosts=[HostStub(is_up=True), HostStub(is_up=True), HostStub(is_up=False)])
         session = SessionStub(cluster=ClusterStub(metadata=mixed_hosts))
@@ -886,6 +891,29 @@ class TestCassandraClientPersistenceValidatorKeyspaceReplication:
             # WHEN
             validator.prepare()
 
-        # THEN only the 2 up hosts count toward the replication factor
+        # THEN all 3 nodes count toward the factor, regardless of current up/down state
         create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
-        assert "'replication_factor': 2" in create_keyspace_query
+        assert "'datacenter1': 3" in create_keyspace_query
+
+    def test_sizes_replication_per_datacenter_for_a_multi_dc_cluster(self) -> None:
+        # GIVEN a cluster spanning two datacenters with different node counts
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        multi_dc_hosts = MetadataStub(
+            hosts=[
+                HostStub(datacenter="dc1"),
+                HostStub(datacenter="dc1"),
+                HostStub(datacenter="dc2"),
+            ]
+        )
+        session = SessionStub(cluster=ClusterStub(metadata=multi_dc_hosts))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN each datacenter gets its own factor, sized from only its own hosts
+        create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
+        assert "'class': 'NetworkTopologyStrategy'" in create_keyspace_query
+        assert "'dc1': 2" in create_keyspace_query
+        assert "'dc2': 1" in create_keyspace_query
