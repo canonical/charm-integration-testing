@@ -271,7 +271,20 @@ PY
     fi
 else
     orig_units="$PROVIDER_UNITS"
-    orig_app_units=0
+    # Custom disruption commands do not trigger provider-count discovery, but the validator
+    # application still needs to return to its original unit count before checkpointing.
+    _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
+    juju status -m "$MODEL" --format=json | cat > "$_status_file"
+    orig_app_units=$(python3 - "$APP" "$_status_file" <<'PY'
+import json, sys
+app_name, status_file = sys.argv[1], sys.argv[2]
+with open(status_file) as f:
+    data = json.load(f)
+app_units = data.get("applications", {}).get(app_name, {}).get("units", {})
+print(len(app_units) if isinstance(app_units, dict) else 0)
+PY
+    )
+    rm -f "$_status_file"
 fi
 
 if [ -z "$DOWN_CMD" ] && { [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; }; then
