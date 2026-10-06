@@ -1,11 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import ssl
 from importlib.metadata import entry_points
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import HTTPSHandler, ProxyHandler
 
 import ops
 import pytest
@@ -13,9 +14,10 @@ import yaml
 
 from validators.ingress_per_unit.validator import (
     IngressPerUnitValidator,
+    _build_http_opener,
     _decode_provider_urls,
     _host_format_check,
-    _NoRedirectHandler,
+    _insecure_https_context,
     _port_range_check,
     _unit_url_check,
     _url_format_check,
@@ -291,6 +293,12 @@ class TestIngressPerUnitValidatorSimple:
         assert result.status == "FAIL"
         assert any(c.name == "port_range" and not c.passed for c in result.checks)
 
+    def test_fail_invalid_mode(self) -> None:
+        validator = _make_validator({**VALID_UNIT_DATA, "mode": "udp"})
+        result = validator.validate(level="simple")
+        assert result.status == "FAIL"
+        assert any(c.name == "mode" and not c.passed for c in result.checks)
+
 
 # ---------------------------------------------------------------------------
 # L2 – deep validation
@@ -300,10 +308,18 @@ class TestIngressPerUnitValidatorSimple:
 class TestIngressPerUnitValidatorDeep:
     def test_opener_disables_environment_proxies(self) -> None:
         with patch("urllib.request.getproxies", return_value={"http": "http://proxy.example:3128"}) as getproxies:
-            opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+            opener = _build_http_opener()
         proxy_handlers = [handler for handler in getattr(opener, "handlers") if isinstance(handler, ProxyHandler)]
         assert not proxy_handlers
         getproxies.assert_not_called()
+
+    def test_opener_disables_https_certificate_verification(self) -> None:
+        opener = _build_http_opener()
+        https_handlers = [handler for handler in getattr(opener, "handlers") if isinstance(handler, HTTPSHandler)]
+        assert len(https_handlers) == 1
+        context = _insecure_https_context()
+        assert not context.check_hostname
+        assert context.verify_mode == ssl.CERT_NONE
 
     def test_pass_when_url_reachable(self) -> None:
         validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
@@ -313,6 +329,35 @@ class TestIngressPerUnitValidatorDeep:
         ):
             result = validator.validate(level="deep")
         assert result.status == "PASS", result.checks
+
+    def test_pass_when_https_url_reachable(self) -> None:
+        https_url = VALID_PROVIDER_URL.replace("http://", "https://", 1)
+        validator = _make_validator(
+            VALID_UNIT_DATA,
+            _provider_databag({_UNIT_NAME: {"url": https_url}}),
+        )
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch(
+                "validators.ingress_per_unit.validator._HTTP_OPENER.open",
+                return_value=_mock_response(),
+            ) as open_request,
+        ):
+            result = validator.validate(level="deep")
+        assert result.status == "PASS", result.checks
+        open_request.assert_called_once()
+
+    def test_tcp_mode_skips_http_probe(self) -> None:
+        validator = _make_validator({**VALID_UNIT_DATA, "mode": "tcp"}, _provider_databag())
+        with (
+            patch("validators.ingress_per_unit.validator.socket.create_connection"),
+            patch("validators.ingress_per_unit.validator._HTTP_OPENER.open") as open_request,
+        ):
+            result = validator.validate(level="deep")
+        assert result.status == "PASS", result.checks
+        assert any(check.name == "connect" and check.passed for check in result.checks)
+        assert not any(check.name == "http_probe" for check in result.checks)
+        open_request.assert_not_called()
 
     def test_pass_when_url_redirects_without_following(self) -> None:
         response = HTTPError(VALID_PROVIDER_URL, 302, "Found", {}, None)  # type: ignore[arg-type]

@@ -4,10 +4,11 @@
 import ipaddress
 import re
 import socket
+import ssl
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, OpenerDirector, ProxyHandler, Request, build_opener
 
 import yaml  # pyyaml; the provider publishes its unit->URL mapping as a YAML-encoded string
 
@@ -31,6 +32,7 @@ _HTTP_TIMEOUT = 10
 
 _MIN_PORT = 1
 _MAX_PORT = 65535
+_SUPPORTED_MODES = ("http", "tcp")
 
 _HOSTNAME_LABEL = r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
 _HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
@@ -41,7 +43,23 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         return None
 
 
-_HTTP_OPENER = build_opener(ProxyHandler({}), _NoRedirectHandler())
+def _insecure_https_context() -> ssl.SSLContext:
+    """Skip certificate verification because this interface carries no CA trust material."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _build_http_opener() -> OpenerDirector:
+    return build_opener(
+        ProxyHandler({}),
+        _NoRedirectHandler(),
+        HTTPSHandler(context=_insecure_https_context()),
+    )
+
+
+_HTTP_OPENER = _build_http_opener()
 
 
 class IngressPerUnitValidator(BaseValidator):
@@ -85,6 +103,12 @@ class IngressPerUnitValidator(BaseValidator):
         if not port_check.passed:
             return self._fail_result(level, checks)
 
+        mode = local.get("mode", "http")
+        mode_check = _ingress_mode_check(mode)
+        checks.append(mode_check)
+        if not mode_check.passed:
+            return self._fail_result(level, checks)
+
         if level == "simple":
             return self._make_result(level=level, checks=checks)
 
@@ -106,7 +130,7 @@ class IngressPerUnitValidator(BaseValidator):
 
         host, port = _extract_host_port(url)
         checks.append(_connectivity_check(host, port, url))
-        if checks[-1].passed:
+        if checks[-1].passed and mode == "http":
             checks.append(_http_probe_check(url))
 
         return self._make_result(level=level, checks=checks)
@@ -182,6 +206,13 @@ def _port_range_check(port: str) -> ValidationCheck:
             message=f"port {value} is outside the valid range {_MIN_PORT}-{_MAX_PORT}.",
         )
     return ValidationCheck(name="port_range", passed=True, message=f"port {value} is valid.")
+
+
+def _ingress_mode_check(mode: str) -> ValidationCheck:
+    """Confirm the optional transport mode is supported."""
+    if mode not in _SUPPORTED_MODES:
+        return ValidationCheck(name="mode", passed=False, message="Ingress mode must be 'http' or 'tcp'.")
+    return ValidationCheck(name="mode", passed=True, message=f"Ingress mode '{mode}' is supported.")
 
 
 # ---------------------------------------------------------------------------
