@@ -181,6 +181,10 @@ class ValidatorInjectorExtension(JujuExtension):
     ) -> None:
         # For a CMR teardown the integration is removed before the applications, so cleanup
         # must run here (relations still exist) rather than in pre_remove.
+        # This hook only receives the model that owns the integration. Current client persistence
+        # validators seed canaries only on the requires side, which is the consuming model for a
+        # CMR. If a validator starts seeding provider-side canaries, this lifecycle must be extended
+        # to identify and clean the other model before the integration is removed.
         endpoint_filters: dict[str, set[str]] = {}
         for endpoint in (endpoint_1, endpoint_2):
             endpoint_filters.setdefault(endpoint.application, set()).add(endpoint.endpoint)
