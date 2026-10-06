@@ -88,13 +88,15 @@ def _restore_kubernetes_pod_count(
     unit_count: int,
     models: list[JujuModelHandle],
 ) -> None:
-    juju_client.scale_application(target_application, unit_count, model=target_model_ref)
-    idle_wait_error: Exception | None = None
+    cleanup_errors: list[Exception] = []
+    try:
+        juju_client.scale_application(target_application, unit_count, model=target_model_ref)
+    except Exception as error:
+        cleanup_errors.append(error)
     try:
         juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
     except Exception as error:
-        idle_wait_error = error
-
+        cleanup_errors.append(error)
     try:
         kubernetes_client.wait_for_charm_pods_ready(
             target_application,
@@ -103,12 +105,12 @@ def _restore_kubernetes_pod_count(
             timeout=_UNIT_ROTATION_TIMEOUT,
         )
     except Exception as convergence_error:
-        if idle_wait_error is not None:
-            raise convergence_error from idle_wait_error
-        raise
+        cleanup_errors.append(convergence_error)
 
-    if idle_wait_error is not None:
-        raise idle_wait_error
+    if cleanup_errors:
+        if len(cleanup_errors) > 1:
+            raise cleanup_errors[0] from cleanup_errors[-1]
+        raise cleanup_errors[0]
 
 
 def _rotate_kubernetes_pods(
@@ -185,11 +187,25 @@ def _cleanup_machine_surge(
     current_units = juju_client.application_units(target_application, model=target_model_ref)
     if len(current_units) > unit_count:
         surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
+        cleanup_errors: list[Exception] = []
         if not surge_units:
-            pytest.fail(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
-        for surge_unit in surge_units[: len(current_units) - unit_count]:
-            juju_client.remove_unit(surge_unit, model=target_model_ref)
-        juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+            cleanup_errors.append(
+                RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
+            )
+        else:
+            for surge_unit in surge_units[: len(current_units) - unit_count]:
+                try:
+                    juju_client.remove_unit(surge_unit, model=target_model_ref)
+                except Exception as error:
+                    cleanup_errors.append(error)
+        try:
+            juju_client.multi_model_idle_for_period(models, timeout=_UNIT_ROTATION_TIMEOUT)
+        except Exception as error:
+            cleanup_errors.append(error)
+        if cleanup_errors:
+            if len(cleanup_errors) > 1:
+                raise cleanup_errors[0] from cleanup_errors[-1]
+            raise cleanup_errors[0]
 
 
 def _rotate_machine_units(
