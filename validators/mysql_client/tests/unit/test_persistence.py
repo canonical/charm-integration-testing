@@ -166,8 +166,9 @@ class TestMySQLClientPersistenceValidatorPrepare:
         assert "DROP TABLE IF EXISTS" in queries
         assert "CREATE TABLE" in queries
         assert "INSERT INTO" in queries
+        assert "AUTO_INCREMENT" not in queries
         # The token is written as the row's marker, so checkpoint() can match on it later
-        assert conn.cursor_stub.executed_params[-1][0] == state.token
+        assert conn.cursor_stub.executed_params[-1] == (1, state.token, 1)
 
     def test_generates_distinct_identifiers_across_calls(self) -> None:
         # GIVEN
@@ -224,7 +225,9 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         assert check.passed
         assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=3)
         # A new row is still written to continue the chain
-        assert any("INSERT INTO" in q for q in cursor.executed_queries)
+        insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
+        assert "(id, marker, checkpoint_ref, written_at)" in cursor.executed_queries[insert_index]
+        assert cursor.executed_params[insert_index] == (3, TEST_TOKEN, 3)
 
     def test_fails_when_row_count_is_lower_than_expected(self) -> None:
         # GIVEN data loss: fewer matching rows than expected
@@ -309,13 +312,27 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
         assert "WHERE marker = %s" in cursor.executed_queries[count_index]
         assert cursor.executed_params[count_index] == (TEST_TOKEN, 1)
-        assert cursor.executed_params[insert_index][0] == TEST_TOKEN
+        assert cursor.executed_params[insert_index][1] == TEST_TOKEN
+
+    def test_explicit_canary_ids_do_not_depend_on_auto_increment_settings(self) -> None:
+        # GIVEN server AUTO_INCREMENT settings may use non-default increments or offsets.
+        validator = _make_persistence_validator(VALID_DATABAG)
+        cursor = CursorStub(fetchone_rows=[("mydb",), (2,)])
+        conn = ConnStub(cursor_stub=cursor)
+
+        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+            # WHEN the existing canary rows match refs 1 and 2
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN the next row is assigned its checkpoint ID explicitly, regardless of those settings
+        assert result.status == "PASS"
+        assert new_state == PersistenceState(token=TEST_TOKEN, id=42, ref=3)
+        insert_index = next(i for i, q in enumerate(cursor.executed_queries) if "INSERT INTO" in q)
+        assert "(id, marker, checkpoint_ref, written_at)" in cursor.executed_queries[insert_index]
+        assert cursor.executed_params[insert_index] == (3, TEST_TOKEN, 3)
 
     def test_fails_when_table_was_dropped_and_recreated_with_same_ref(self) -> None:
-        # GIVEN a table dropped and recreated from scratch: AUTO_INCREMENT resets, so reinserting
-        # rows with the same checkpoint_ref reproduces `id == checkpoint_ref` and the same row
-        # count. Only the random per-run token distinguishes the original rows from the recreated
-        # ones, so the token-scoped count matches nothing.
+        # GIVEN a recreated table has no rows carrying the original random per-run token.
         validator = _make_persistence_validator(VALID_DATABAG)
         cursor = CursorStub(fetchone_rows=[("mydb",), (0,)])
         conn = ConnStub(cursor_stub=cursor)

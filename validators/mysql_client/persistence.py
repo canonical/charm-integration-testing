@@ -67,22 +67,22 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
         identifier = uuid.uuid4().int & _MAX_CANARY_IDENTIFIER
         table = _quote_identifier(self._canary_table_name(identifier))
         # Random per-run token written to every canary row and matched on by checkpoint(). It must
-        # not be derivable from `identifier`/`ref`: those are reproducible, so a backend that lost
-        # the canary data and recreated the table from scratch (resetting AUTO_INCREMENT) would
-        # reproduce the same value and pass falsely.
+        # not be derivable from `identifier`/`ref`: those are reproducible, so a recreated table
+        # must not be able to reproduce the canary marker from its name or checkpoint sequence.
         token = uuid.uuid4().hex
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - identifier is safely quoted
                 cur.execute(
-                    f"CREATE TABLE {table} (id BIGINT AUTO_INCREMENT PRIMARY KEY, "  # nosec B608
+                    f"CREATE TABLE {table} (id BIGINT PRIMARY KEY, "  # nosec B608
                     "marker VARCHAR(255) NOT NULL, checkpoint_ref BIGINT NOT NULL, written_at DATETIME)"
                 )
                 # checkpoint_ref=1 tracks that this row was written at prepare() time (ref=1)
                 cur.execute(
-                    f"INSERT INTO {table} (marker, checkpoint_ref, written_at) VALUES (%s, %s, NOW())",  # nosec B608
-                    (token, 1),
+                    f"INSERT INTO {table} (id, marker, checkpoint_ref, written_at) "  # nosec B608
+                    "VALUES (%s, %s, %s, NOW())",
+                    (1, token, 1),
                 )
         finally:
             conn.close()
@@ -107,10 +107,8 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
                     qualified_table = None
                 else:
                     qualified_table = f"{_quote_identifier(schema)}.{_quote_identifier(table_name)}"
-                    # Require id = checkpoint_ref, not just a matching row count: AUTO_INCREMENT
-                    # ids are not reused while the table lives, so a row deleted and replaced by a
-                    # look-alike gets a fresh, out-of-sequence id and fails this check even though
-                    # a bare COUNT(*)/token match would not have caught it.
+                    # Require id = checkpoint_ref, not just a matching row count. Explicit IDs
+                    # keep this invariant independent of server AUTO_INCREMENT settings.
                     cur.execute(
                         f"SELECT COUNT(*) FROM {qualified_table} WHERE marker = %s "  # nosec B608
                         "AND id = checkpoint_ref AND checkpoint_ref BETWEEN 1 AND %s",
@@ -126,9 +124,9 @@ class MySQLClientPersistenceValidator(_MySQLConnectionMixin, BasePersistenceVali
                 # compare against again, masking the mismatch behind permanent drift.
                 if passed and qualified_table is not None:
                     cur.execute(
-                        f"INSERT INTO {qualified_table} (marker, checkpoint_ref, written_at) "  # nosec B608
-                        "VALUES (%s, %s, NOW())",
-                        (marker, expected.ref + 1),
+                        f"INSERT INTO {qualified_table} (id, marker, checkpoint_ref, written_at) "  # nosec B608
+                        "VALUES (%s, %s, %s, NOW())",
+                        (expected.ref + 1, marker, expected.ref + 1),
                     )
         finally:
             conn.close()
