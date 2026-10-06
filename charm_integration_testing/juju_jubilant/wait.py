@@ -266,14 +266,14 @@ def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -
 def unit_leaves_status(
     status: jubilant.Status,
     unit: str,
-    workload_statuses: frozenset[str] = frozenset({"active"}),
+    unit_statuses: frozenset[str] = frozenset({"active"}),
     unit_agent_statuses: frozenset[str] = frozenset({"idle"}),
 ) -> tuple[bool, JujuWaitState]:
     unit_info = get_unit_info(status, unit)
     if unit_info is None:
         return False, JujuWaitState(message=f"waiting for unit '{unit}' to leave active/idle status")
 
-    workload_left_status = unit_info.workload_status.current not in workload_statuses
+    workload_left_status = unit_info.workload_status.current not in unit_statuses
     unit_agent_left_status = unit_info.juju_status.current not in unit_agent_statuses
     is_compliant = workload_left_status or unit_agent_left_status
 
