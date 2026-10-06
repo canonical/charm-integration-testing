@@ -39,7 +39,7 @@ _HOSTNAME_RE = re.compile(rf"^{_HOSTNAME_LABEL}(\.{_HOSTNAME_LABEL})*$")
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+    def redirect_request(self, *args: Any, **kwargs: Any) -> Request | None:
         return None
 
 

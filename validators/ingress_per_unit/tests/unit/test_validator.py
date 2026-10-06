@@ -2,11 +2,13 @@
 # See LICENSE file for licensing details.
 
 import ssl
+from email.message import Message
 from importlib.metadata import entry_points
+from io import BytesIO
 from typing import cast
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPSHandler, ProxyHandler
+from urllib.request import HTTPSHandler, ProxyHandler, Request
 
 import ops
 import pytest
@@ -18,6 +20,7 @@ from validators.ingress_per_unit.validator import (
     _decode_provider_urls,
     _host_format_check,
     _insecure_https_context,
+    _NoRedirectHandler,
     _port_range_check,
     _unit_url_check,
     _url_format_check,
@@ -359,7 +362,21 @@ class TestIngressPerUnitValidatorDeep:
         assert not any(check.name == "http_probe" for check in result.checks)
         open_request.assert_not_called()
 
-    def test_pass_when_url_redirects_without_following(self) -> None:
+    def test_redirect_handler_does_not_follow_redirect(self) -> None:
+        opener = _build_http_opener()
+        handlers = getattr(opener, "handlers")
+        redirect_handler = next(handler for handler in handlers if isinstance(handler, _NoRedirectHandler))
+        redirect_request = redirect_handler.redirect_request(
+            Request(VALID_PROVIDER_URL),
+            BytesIO(),
+            302,
+            "Found",
+            Message(),
+            "http://redirected.example/",
+        )
+        assert redirect_request is None
+
+    def test_pass_when_server_returns_redirect_status(self) -> None:
         response = HTTPError(VALID_PROVIDER_URL, 302, "Found", {}, None)  # type: ignore[arg-type]
         validator = _make_validator(VALID_UNIT_DATA, _provider_databag())
         with (
