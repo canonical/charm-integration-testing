@@ -181,6 +181,11 @@ class TestUnitUrlCheck:
         assert url == ""
         assert _UNIT_NAME in check.message
 
+    def test_unit_absent_does_not_echo_provider_mapping_keys(self) -> None:
+        check, _ = _unit_url_check({"secret-token": VALID_PROVIDER_URL}, _UNIT_NAME)
+        assert not check.passed
+        assert "secret-token" not in check.message
+
 
 class TestUrlFormatCheck:
     def test_valid_http(self) -> None:

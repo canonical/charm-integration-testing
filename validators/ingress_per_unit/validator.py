@@ -302,10 +302,7 @@ def _unit_url_check(urls: dict[str, str], unit_name: str) -> tuple[ValidationChe
             ValidationCheck(
                 name="unit_url",
                 passed=False,
-                message=(
-                    f"No ingress URL advertised for unit '{unit_name}'. "
-                    f"Advertised units: {', '.join(sorted(urls)) or '(none)'}."
-                ),
+                message=f"No ingress URL advertised for unit '{unit_name}'.",
             ),
             "",
         )
