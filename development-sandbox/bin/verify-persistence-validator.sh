@@ -295,9 +295,10 @@ expected_provider = int(sys.argv[3])
 expected_app = int(sys.argv[4])
 provider_units = provider.get("units", {})
 app_units = app.get("units", {})
-good_provider = expected_provider == 0 or (
+good_provider = (
     provider.get("application-status", {}).get("current") == "active"
-    and len(provider_units) == expected_provider
+    and bool(provider_units)
+    and (expected_provider == 0 or len(provider_units) == expected_provider)
     and all(
         u.get("juju-status", {}).get("current") == "idle"
         and u.get("workload-status", {}).get("current") == "active"

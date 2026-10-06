@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 from validators.base import PersistenceNotApplicable, PersistenceState
-from validators.mysql_client.persistence import MySQLClientPersistenceValidator
 from validators.mysql_client.tests.unit.stubs import ConnStub, CursorStub
+from validators.mysql_client.validator import MySQLClientPersistenceValidator
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
     ApplicationStub,
@@ -116,7 +116,7 @@ class TestMySQLClientPersistenceValidatorConnection:
         validator = _make_persistence_validator(VALID_DATABAG)
         conn = ConnStub()
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.prepare()
 
@@ -153,7 +153,7 @@ class TestMySQLClientPersistenceValidatorPrepare:
         validator = _make_persistence_validator(VALID_DATABAG)
         conn = ConnStub()
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             state = validator.prepare()
 
@@ -174,7 +174,7 @@ class TestMySQLClientPersistenceValidatorPrepare:
         # GIVEN
         validator = _make_persistence_validator(VALID_DATABAG)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=ConnStub()):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=ConnStub()):
             # WHEN
             first = validator.prepare()
             second = validator.prepare()
@@ -191,8 +191,8 @@ class TestMySQLClientPersistenceValidatorPrepare:
         conn = ConnStub()
 
         with (
-            patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn),
-            patch("validators.mysql_client.persistence.uuid.uuid4") as mock_uuid,
+            patch("validators.mysql_client.validator.pymysql.connect", return_value=conn),
+            patch("validators.mysql_client.validator.uuid.uuid4") as mock_uuid,
         ):
             mock_uuid.return_value.int = 12345
             mock_uuid.return_value.hex = TEST_TOKEN
@@ -215,7 +215,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (2,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
 
@@ -235,7 +235,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=7, ref=3))
 
@@ -255,7 +255,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[None])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=7, ref=1))
 
@@ -270,7 +270,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
@@ -285,7 +285,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
@@ -303,7 +303,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=99, ref=1))
 
@@ -320,7 +320,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (2,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN the existing canary rows match refs 1 and 2
             result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
 
@@ -337,7 +337,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (0,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
 
@@ -359,7 +359,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         cursor = CursorStub(fetchone_rows=[("mydb",), (1,)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             result, _ = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=1))
 
@@ -375,7 +375,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         # table instead of failing safely.
         validator = _make_persistence_validator(VALID_DATABAG)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect") as mock_connect:
+        with patch("validators.mysql_client.validator.pymysql.connect") as mock_connect:
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
                 validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=identifier, ref=1))
@@ -390,7 +390,7 @@ class TestMySQLClientPersistenceValidatorCheckpoint:
         # `actual == expected.ref` and report a false PASS.
         validator = _make_persistence_validator(VALID_DATABAG)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect") as mock_connect:
+        with patch("validators.mysql_client.validator.pymysql.connect") as mock_connect:
             # WHEN / THEN
             with pytest.raises(ValueError, match="out of range"):
                 validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=1, ref=ref))
@@ -408,7 +408,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[("mydb", table_1), ("mydb", table_2)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -425,7 +425,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -439,7 +439,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -454,7 +454,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -469,7 +469,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -485,7 +485,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -501,7 +501,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -526,7 +526,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[("mydb", good_table), ("mydb", look_alike)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -544,7 +544,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         cursor = CursorStub(fetchall_rows=[("mydb", good_table), ("mydb", out_of_range_table)])
         conn = ConnStub(cursor_stub=cursor)
 
-        with patch("validators.mysql_client.persistence.pymysql.connect", return_value=conn):
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
             # WHEN
             validator.cleanup()
 
@@ -557,7 +557,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         # GIVEN a databag without any credential fields (e.g. the relation is already gone)
         validator = _make_persistence_validator({})
 
-        with patch("validators.mysql_client.persistence.pymysql.connect") as mock_connect:
+        with patch("validators.mysql_client.validator.pymysql.connect") as mock_connect:
             # WHEN / THEN cleanup is skipped rather than reporting a success that removed nothing
             with pytest.raises(PersistenceNotApplicable):
                 validator.cleanup()
@@ -569,7 +569,7 @@ class TestMySQLClientPersistenceValidatorCleanup:
         # GIVEN a relation with "endpoints" but not yet database/username/password (mid-setup)
         validator = _make_persistence_validator({"endpoints": "10.1.2.3:3306"})
 
-        with patch("validators.mysql_client.persistence.pymysql.connect") as mock_connect:
+        with patch("validators.mysql_client.validator.pymysql.connect") as mock_connect:
             # WHEN / THEN
             with pytest.raises(PersistenceNotApplicable):
                 validator.cleanup()
