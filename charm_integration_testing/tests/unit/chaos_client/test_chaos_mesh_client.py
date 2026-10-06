@@ -14,12 +14,14 @@ from chaos_client import (
     ChaosMeshChaosClient,
     ChaosMeshNotInstalledError,
     MetaChaosClient,
+    ResourceConstraintsClient,
 )
-from juju import JujuModelHandle
+from juju import CharmChannel, JujuApplicationInfo, JujuModelHandle
 from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
+from ..extensions.shared import NullJujuBackend
 from .shared import FakeCustomObjectsApi
 
 TEST_MODEL = JujuModelHandle(controller="test-controller", model="test-model")
@@ -79,6 +81,18 @@ class FailedCreateApi(FakeCustomObjectsApi):
         raise self.error
 
 
+class JujuBackendStub(NullJujuBackend):
+    def list_applications(self, model: object) -> dict[str, JujuApplicationInfo]:
+        return {
+            "postgresql": JujuApplicationInfo(
+                charm="postgresql-k8s",
+                revision=1,
+                channel=CharmChannel.parse("14/stable"),
+                base="22.04",
+            )
+        }
+
+
 class TestCreationFailureCleanup:
     @pytest.mark.parametrize("replaced", [False, True], ids=["original", "replacement"])
     @pytest.mark.parametrize("resource_exists", [True, False], ids=["created", "not-created"])
@@ -90,7 +104,7 @@ class TestCreationFailureCleanup:
         backend = BackendStub()
         backend.custom_objects_api = api
         mesh = ChaosMeshChaosClient(backend)
-        client = MetaChaosClient([mesh])
+        client = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
 
         # WHEN execution fails
         with pytest.raises(TimeoutError) as exc_info:
@@ -130,7 +144,7 @@ class TestCreationFailureCleanup:
         backend = BackendStub()
         backend.custom_objects_api = api
         mesh = ChaosMeshChaosClient(backend)
-        client = MetaChaosClient([mesh])
+        client = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
 
         # WHEN execution fails and teardown runs
         with pytest.raises(ApiException) as exc_info:
@@ -247,7 +261,11 @@ class TestExperimentAvailability:
         # GIVEN stress-only Mesh followed by a client capable of I/O latency
         first = BackendStub(crds=("stresschaos.chaos-mesh.org",))
         second = BackendStub(crds=("iochaos.chaos-mesh.org",))
-        client = MetaChaosClient([ChaosMeshChaosClient(first), ChaosMeshChaosClient(second)])
+        client = MetaChaosClient(
+            [ChaosMeshChaosClient(first), ChaosMeshChaosClient(second)],
+            JujuBackendStub(),
+            ResourceConstraintsClient(),
+        )
 
         # WHEN requesting latency and cleaning up
         client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10))
@@ -732,7 +750,7 @@ class TestStressObservation:
         # GIVEN an experiment whose initial injection succeeded
         backend = BackendStub()
         mesh = ChaosMeshChaosClient(backend)
-        meta = MetaChaosClient([mesh])
+        meta = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
         meta.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
         api = backend.custom_objects_api
         resource = mesh._created[0]

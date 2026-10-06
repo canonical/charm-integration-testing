@@ -15,6 +15,9 @@ class KubernetesChaosClient(ChaosClient):
     def __init__(self, backend: KubernetesBackend):
         self._backend = backend
 
+    def supports(self, operation: str) -> bool:
+        return operation == "isolate_network"
+
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
 
