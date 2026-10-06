@@ -142,30 +142,26 @@ Moderate memory stress
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
-Mesh with ``StressChaos``. It skips when neither tool is available or when no
-simple interface validator passes for the tested target or neighbor endpoint.
-Persistence checks alone do not provide this functional coverage.
+Mesh with ``StressChaos``. It skips without memory stress support or passing
+simple validators for the tested target or neighbor endpoints.
 
-Per-charm resource settings select ``memory_moderate_pressure_workers``,
-``memory_moderate_pressure_size_mb`` and
-``memory_moderate_pressure_duration_seconds`` using the deployed charm's
-channel and Ubuntu base. Defaults are one worker, 128 MB and 300 seconds.
-These are starting values to calibrate for each workload, not a guarantee
-of moderate pressure. The test does not change container memory limits.
+Defaults are one worker, 128 MB and five minutes. Per-charm settings
+``memory_moderate_pressure_workers``, ``memory_moderate_pressure_size_mb`` and
+``memory_moderate_pressure_duration_seconds`` override them. Tune these values
+for the workload; container memory limits are unchanged.
 
-After confirmed injection, simple validators run repeatedly with a ten-second
-pause between rounds. Target and neighbor application and unit statuses are
-checked before and after each round; blocked workloads, workload or agent
-errors, missing baseline validation coverage and experiment failures fail the
-test. Remaining active/idle is valid. Early experiment completion is a failure,
-including after an out-of-memory restart. Checks are sampled: validator runtime
-extends the gap, and transient failures between samples may be missed.
+After confirmed injection, the test repeatedly checks experiment status,
+workload health and simple validators. Error/blocked workloads, disconnected
+agents, lost validation coverage, experiment errors and early completion fail.
+Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
+Startup and final validation share a two-minute allowance; calls exceeding the
+execution budget fail when they return.
 
-Cleanup runs even on failure. After stress removal, the bundle models must
-reach active/idle within fifteen minutes and pass simple validation again,
-without test-driven restarts. The experiment duration includes two extra minutes
-for startup and validation overhead; an experiment that ends before the final
-observation check fails. Failed cleanup is retried at test teardown.
+Cleanup runs on failure too; failed cleanup remains registered for retry.
+Chaos Mesh memory cleanup waits for resource deletion. After successful
+observation and cleanup, models must recover to active/idle within fifteen
+minutes and pass simple validation without additional restarts.
+Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Install the repository dependencies
 -----------------------------------
@@ -266,3 +262,40 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Network isolation recovery
+--------------------------
+
+``test_live_network_isolation`` requires Kubernetes and applies an ingress-only
+``NetworkPolicy`` to all Pods of the target application. It leaves egress unrestricted
+and retains the policy for ten minutes after the API accepts it. This interval
+does not prove when the network plugin started enforcing the policy.
+
+All bundle models must be active/idle before isolation. Remaining active/idle
+during isolation is valid. After policy removal, all bundle models must return
+to active/idle within fifteen minutes, without a test-driven restart. Deep
+validators then run for every application in the target and neighbor models,
+including consumer-side validators. Missing or skipped validators provide no
+functional coverage; the status check alone only verifies Juju state recovery.
+Policy creation, cleanup, recovery and validation errors fail the test.
+
+The temporary connection probes have been removed. This test does not independently
+measure packet blocking or continuously verify agent connectivity during the
+observation interval. Network enforcement must be supported by the cluster.
+
+Disk fill recovery
+------------------
+
+``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
+and machine models. It allocates 98 percent of the available space reported by
+``df`` in the execution working directory, using a unique file per test. This
+is not a guarantee of 98 percent total file system usage or of filling the
+application's data volume. Per-charm resource settings are not consumed yet.
+
+All bundle models must be active/idle before allocation. The file remains for
+ten minutes; no unhealthy status transition is required. Cleanup removes the
+file, then all bundle models must recover to active/idle within fifteen minutes
+without a test-driven restart. Available deep validators run on all applications
+in both target and neighbor models. Missing validators leave functional coverage
+unverified. Allocation, file checks, cleanup, recovery and validation errors fail
+the test.

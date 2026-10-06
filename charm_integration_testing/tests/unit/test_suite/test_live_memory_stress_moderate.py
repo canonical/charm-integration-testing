@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from chaos_client import ResourceConstraintsClient
+from chaos_client import ChaosResourceConstraintsError, MetaChaosClient, ResourceConstraintsClient
 from juju import CharmChannel, JujuApplicationInfo, JujuModelHandle
 from test_suite import test_live_memory_stress_moderate as live
 from test_suite.fixtures.chaos_tools import ChaosTool
@@ -49,6 +49,7 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     client.backend.application_units.return_value = ["target/0"]
     client.validate_model.return_value = {"neighbor/0": [result()]}
     chaos = Mock()
+    chaos.stress_memory.return_value = timedelta(minutes=5)
     arguments: dict[str, Any] = dict(
         juju_client=client,
         chaos_tool_for_model=Mock(return_value=chaos),
@@ -58,7 +59,6 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
         neighbor_model_ref=None,
         neighbor_application="neighbor",
         neighbor_endpoint="postgresql",
-        resource_constraints_client=ResourceConstraintsClient(),
         kubernetes_client=Mock(),
         memory_pressure_check_interval=timedelta(seconds=10),
         memory_pressure_recovery_timeout=timedelta(minutes=15),
@@ -68,11 +68,17 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
 
 def test_lifecycle_and_injection_time(scenario: Scenario) -> None:
     arguments, client, chaos, clock = scenario
-    chaos.stress_memory.side_effect = lambda *args, **kwargs: clock.__setitem__(0, 50)
+    chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, 50), timedelta(minutes=5))[1]
     live.test_live_memory_stress_moderate(**arguments)
     assert clock[0] == 350
     chaos.stress_memory.assert_called_once_with(
-        MODEL, "target/0", workers=1, size_mb=128, duration=timedelta(seconds=420)
+        MODEL,
+        "target/0",
+        workers=1,
+        size_mb=128,
+        duration=timedelta(seconds=300),
+        scenario="moderate_pressure",
+        duration_margin=timedelta(minutes=2),
     )
     assert client.validate_model.call_count == 33  # Baseline, 31 observation rounds, recovery.
     assert chaos.check_stress.call_count == 62
@@ -88,12 +94,12 @@ def test_per_charm_settings_and_neighbor_model(scenario: Scenario, tmp_path: Pat
         "    memory_moderate_pressure_workers: 2\n    memory_moderate_pressure_size_mb: 64\n"
         "    memory_moderate_pressure_duration_seconds: 20\n"
     )
-    arguments.update(resource_constraints_client=ResourceConstraintsClient(tmp_path), neighbor_model_ref=NEIGHBOR)
+    meta = MetaChaosClient([chaos], client.backend, ResourceConstraintsClient(tmp_path))
+    arguments.update(chaos_tool_for_model=Mock(return_value=meta), neighbor_model_ref=NEIGHBOR)
     client.validate_model.side_effect = lambda *, model, level: {"neighbor/0": [result()]} if model == NEIGHBOR else {}
     live.test_live_memory_stress_moderate(**arguments)
-    chaos.stress_memory.assert_called_once_with(
-        MODEL, "target/0", workers=2, size_mb=64, duration=timedelta(seconds=140)
-    )
+    chaos.stress_memory.assert_called_once_with(MODEL, "target/0", 2, 64, timedelta(seconds=140))
+    client.backend.list_applications.assert_called_once_with(MODEL)
     assert clock[0] == 20
     assert {call.kwargs["model"] for call in client.validate_model.call_args_list} == {MODEL, NEIGHBOR}
 
@@ -116,8 +122,12 @@ def test_no_functional_coverage_skips(scenario: Scenario, results: dict[str, lis
     chaos.stress_memory.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["inject", "experiment", "health", "validation", "coverage", "cleanup", "recovery"])
-def test_failures_and_cleanup(scenario: Scenario, failure: str) -> None:
+@pytest.mark.parametrize(
+    ("failure", "cleanup_fails"),
+    [(phase, False) for phase in ("inject", "experiment", "health", "validation", "coverage", "cleanup", "recovery")]
+    + [("inject", True), ("experiment", True)],
+)
+def test_failures_and_cleanup(scenario: Scenario, failure: str, cleanup_fails: bool) -> None:
     arguments, client, chaos, _ = scenario
     error = RuntimeError(failure)
     if failure == "inject":
@@ -134,17 +144,17 @@ def test_failures_and_cleanup(scenario: Scenario, failure: str) -> None:
         chaos.cleanup_all.side_effect = error
     else:
         client.multi_model_idle_for_period.side_effect = [None, error]
-    with pytest.raises(RuntimeError, match="coverage" if failure == "coverage" else failure):
+    cleanup_error = RuntimeError("cleanup failed")
+    if cleanup_fails:
+        chaos.cleanup_all.side_effect = cleanup_error
+    with pytest.raises(RuntimeError, match="coverage" if failure == "coverage" else failure) as caught:
         live.test_live_memory_stress_moderate(**arguments)
     chaos.cleanup_all.assert_called_once()
-
-
-def test_preserves_observation_and_cleanup_errors(scenario: Scenario) -> None:
-    arguments, _, chaos, _ = scenario
-    chaos.check_stress.side_effect = RuntimeError("experiment failed")
-    chaos.cleanup_all.side_effect = RuntimeError("cleanup failed")
-    with pytest.raises(RuntimeError, match="experiment failed.*cleanup failed"):
-        live.test_live_memory_stress_moderate(**arguments)
+    if cleanup_fails:
+        assert caught.value.__cause__ is cleanup_error
+        assert "cleanup failed" in str(caught.value)
+    elif failure != "coverage":
+        assert caught.value is error
 
 
 @pytest.mark.parametrize("platform", ["machine", "no-tools", "mesh-without-stress"])
@@ -174,7 +184,9 @@ def test_missing_metadata_fails(scenario: Scenario, field: str) -> None:
         channel=None if field == "channel" else info.channel,
         base=None if field == "base" else info.base,
     )
-    with pytest.raises(pytest.fail.Exception, match="channel and Ubuntu base"):
+    meta = MetaChaosClient([chaos], client.backend, ResourceConstraintsClient())
+    arguments["chaos_tool_for_model"] = Mock(return_value=meta)
+    with pytest.raises(ChaosResourceConstraintsError, match="Incomplete application metadata"):
         live.test_live_memory_stress_moderate(**arguments)
     chaos.stress_memory.assert_not_called()
 
@@ -183,7 +195,7 @@ def test_validator_runtime_counts_toward_observation(scenario: Scenario) -> None
     _, _, chaos, clock = scenario
     validate = Mock(side_effect=lambda: clock.__setitem__(0, clock[0] + 7))
     health = Mock()
-    live.observe_memory_pressure(chaos, MODEL, "target/0", 20, 10, health, validate)
+    live.observe_memory_pressure(chaos, MODEL, "target/0", 20, 10, health, validate, stress_deadline=140)
     assert clock[0] == 24
     assert validate.call_count == 2
     assert health.call_count == 4
@@ -218,3 +230,34 @@ def test_missing_target_unit_fails_before_injection(scenario: Scenario) -> None:
     with pytest.raises(pytest.fail.Exception, match="No target units"):
         live.test_live_memory_stress_moderate(**arguments)
     chaos.stress_memory.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("phase", "elapsed", "expected_clock"),
+    [("injection", 421, 421), ("injection", 130, 420), ("validation", 421, 421)],
+    ids=["startup-exceeds-budget", "startup-consumes-margin", "slow-validator"],
+)
+def test_execution_budget_overrun_fails_and_cleans_up(
+    scenario: Scenario, phase: str, elapsed: float, expected_clock: float
+) -> None:
+    arguments, client, chaos, clock = scenario
+    if phase == "injection":
+        chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, elapsed), timedelta(minutes=5))[
+            1
+        ]
+    else:
+        calls = 0
+
+        def validate(**kwargs: Any) -> dict[str, list[ValidationResult]]:
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                clock[0] += elapsed
+            return {"neighbor/0": [result()]}
+
+        client.validate_model.side_effect = validate
+    with pytest.raises(TimeoutError, match="execution budget"):
+        live.test_live_memory_stress_moderate(**arguments)
+    chaos.cleanup_all.assert_called_once()
+    assert client.multi_model_idle_for_period.call_count == 1
+    assert clock[0] == expected_clock

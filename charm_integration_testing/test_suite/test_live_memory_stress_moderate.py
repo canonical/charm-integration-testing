@@ -6,11 +6,9 @@ from time import monotonic, sleep
 from typing import Callable
 
 import pytest
-from chaos_client import MetaChaosClient, ResourceConstraintsClient
+from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient
-
-from bundle_builder_x.charm import CharmChannel
 
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
@@ -43,15 +41,20 @@ def observe_memory_pressure(
     interval: float,
     check_health: Callable[[], None],
     validate: Callable[[], None],
+    stress_deadline: float,
 ) -> None:
     """Sample health and run validators repeatedly while stress remains active."""
     deadline = monotonic() + seconds
     while True:
+        if monotonic() >= stress_deadline:
+            raise TimeoutError("Memory stress exceeded its execution budget.")
         chaos.check_stress(model, unit)
         check_health()
         validate()
         check_health()
         chaos.check_stress(model, unit)
+        if monotonic() >= stress_deadline:
+            raise TimeoutError("Memory stress exceeded its execution budget.")
         remaining = deadline - monotonic()
         if remaining <= 0:
             return
@@ -79,7 +82,6 @@ def test_live_memory_stress_moderate(
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str,
     neighbor_endpoint: str,
-    resource_constraints_client: ResourceConstraintsClient,
     kubernetes_client: KubernetesClient | None,
     memory_pressure_check_interval: timedelta,
     memory_pressure_recovery_timeout: timedelta,
@@ -91,15 +93,6 @@ def test_live_memory_stress_moderate(
         ChaosTool.LITMUS not in tools and not kubernetes_client.backend.crd_exists("stresschaos.chaos-mesh.org")
     ):
         pytest.skip("Moderate memory stress requires Litmus or Chaos Mesh with StressChaos.")
-    info = juju_client.backend.list_applications(target_model_ref)[target_application]
-    if info.channel is None or info.base is None:
-        pytest.fail("Deployed charm channel and Ubuntu base are required to resolve memory settings.")
-    settings = resource_constraints_client.get_charm_resource_constraints(
-        info.charm, CharmChannel.model_validate(str(info.channel)), info.base
-    )
-    workers = settings.memory_moderate_pressure_workers or 1
-    size_mb = settings.memory_moderate_pressure_size_mb or 128
-    seconds = settings.memory_moderate_pressure_duration_seconds or 300
     interval = memory_pressure_check_interval.total_seconds()
     if interval <= 0 or memory_pressure_recovery_timeout.total_seconds() <= 0:
         raise ValueError("Check interval and recovery timeout must be positive.")
@@ -132,21 +125,33 @@ def test_live_memory_stress_moderate(
         pytest.fail("No target units found for moderate memory stress.")
     unit = sorted(units)[0]
     chaos = chaos_tool_for_model(target_model_ref)
-    juju_client.logger.info(
-        "Moderate memory stress: unit=%s workers=%s size_mb=%s duration=%ss check_interval=%ss",
-        unit,
-        workers,
-        size_mb,
-        seconds,
-        interval,
-    )
-    observation_error: Exception | None = None
+    observation_error: BaseException | None = None
+    margin = timedelta(minutes=2)
+    injection_started = monotonic()
     try:
-        chaos.stress_memory(
-            target_model_ref, unit, workers=workers, size_mb=size_mb, duration=timedelta(seconds=seconds + 120)
+        duration = chaos.stress_memory(
+            target_model_ref,
+            unit,
+            workers=1,
+            size_mb=128,
+            duration=timedelta(minutes=5),
+            scenario="moderate_pressure",
+            duration_margin=margin,
         )
-        observe_memory_pressure(chaos, target_model_ref, unit, seconds, interval, check_health, validate)
-    except Exception as error:
+        juju_client.logger.info(
+            "Observing moderate memory stress on %s/%s for %s.", target_model_ref.uri, unit, duration
+        )
+        observe_memory_pressure(
+            chaos,
+            target_model_ref,
+            unit,
+            duration.total_seconds(),
+            interval,
+            check_health,
+            validate,
+            stress_deadline=injection_started + (duration + margin).total_seconds(),
+        )
+    except BaseException as error:
         observation_error = error
         raise
     finally:

@@ -16,9 +16,21 @@ class ChaosClient(ABC):
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Report known errors; allow completion only after independent fault confirmation.
 
-        This optional check is not proof of sustained stress. Allowing completion
+        This check is not proof of sustained stress. Allowing completion
         must not suppress experiment errors or cleanup verification.
         """
+
+        raise NotImplementedError("Stress status checks are not supported by this client.")
+
+    @abstractmethod
+    def supports(self, operation: str) -> bool:
+        """Report whether this client can currently run the named experiment operation.
+
+        Must be side-effect free and consistent with whether the matching method would
+        raise NotImplementedError, so callers can check support before resolving data
+        (e.g. resource constraints) needed only to actually run the experiment.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
@@ -29,7 +41,9 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
+    def stress_memory(
+        self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta
+    ) -> timedelta | None:
         raise NotImplementedError
 
     @abstractmethod
