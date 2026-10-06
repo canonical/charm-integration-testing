@@ -207,6 +207,9 @@ class JujuCmdBackend(JujuBackend):
 
         raise JujuWaitTimeoutError
 
+    def wait_for_unit_disruption(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     def juju_status_text(self, model: JujuModelHandle) -> str:
         return self._call_juju(
             CmdArg(value="status"),
