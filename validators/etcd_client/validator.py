@@ -1407,7 +1407,9 @@ class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValida
     def _build_ssl_credentials(self, ca_pem: str, cert_bytes: bytes, key_bytes: bytes) -> grpc.ChannelCredentials:
         try:
             return grpc.ssl_channel_credentials(
-                root_certificates=ca_pem.encode(), private_key=key_bytes, certificate_chain=cert_bytes
+                root_certificates=ca_pem.encode(),
+                private_key=key_bytes,  # gitleaks:allow -- runtime TLS material, not a hardcoded secret
+                certificate_chain=cert_bytes,
             )
         except (ValueError, grpc.RpcError) as exc:
             raise RuntimeError(f"Cannot connect for {self.endpoint}: invalid client identity material: {exc}") from exc
