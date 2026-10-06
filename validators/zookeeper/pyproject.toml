@@ -2,37 +2,33 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-mysql-client"
+name = "validators-zookeeper"
 version = "0.1.0"
-description = "Validator for mysql_client interface"
+description = "Persistence validator for the zookeeper interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "pymysql>=1.1.0",
+    "kazoo[sasl]>=2.10.0,<3",
     "validators-base",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "types-PyMySQL>=1.1.0.20250516,<2",
     "validators-test-utils",
 ]
 
-[project.entry-points."endpoint_validators"]
-mysql_client = "validators.mysql_client:MySQLClientValidator"
-
 [project.entry-points."endpoint_persistence_validators"]
-mysql_client = "validators.mysql_client:MySQLClientPersistenceValidator"
+zookeeper = "validators.zookeeper:ZookeeperPersistenceValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.mysql_client"]
+packages = ["validators.zookeeper"]
 
 [tool.setuptools.package-dir]
-"validators.mysql_client" = "."
+"validators.zookeeper" = "."
