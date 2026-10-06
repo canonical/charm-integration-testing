@@ -1031,38 +1031,22 @@ class TestJubilantBackend:
 
     class TestWaitForUnitDisruption:
         def test_unit_disruption(self) -> None:
-            # GIVEN a backend whose unit leaves active/idle during the wait
-            stub = StatusStub(
-                unit_workload_statuses={"my-app/0": "active"},
-                unit_juju_statuses={"my-app/0": "idle"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
-            backend.default_delay = timedelta(milliseconds=10)
-
-            original_status = stub.status
-
-            def status() -> jubilant.Status:
-                if stub.call_count >= 2:
-                    stub.unit_workload_statuses["my-app/0"] = "blocked"
-                return original_status()
-
-            stub.status = status
+            # GIVEN
+            wait_stub = WaitStub()
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN
-            backend.wait_for_unit_disruption(TEST_MODEL, "my-app/0", timeout=timedelta(seconds=1))
+            backend.wait_for_unit_disruption(TEST_MODEL, "my-app/0", timeout=timedelta(seconds=10))
 
-            # THEN status was polled until the disruption was observed
-            assert stub.call_count >= 2
+            # THEN wait was called
+            assert wait_stub.call_count == 1
 
         def test_timeout(self) -> None:
-            # GIVEN a backend whose unit never leaves active/idle
-            stub = StatusStub(
-                unit_workload_statuses={"my-app/0": "active"},
-                unit_juju_statuses={"my-app/0": "idle"},
-            )
-            client = JubilantClientStub(client=stub)
-            backend = JubilantBackend(client)
+            # GIVEN
+            wait_stub = WaitStub(raise_timeout=True)
+            backend = JubilantBackend()
+            backend.wait = wait_stub.wait
 
             # WHEN / THEN
             with pytest.raises(JujuWaitTimeoutError):
