@@ -94,6 +94,7 @@ class Backend(NullJujuBackend):
         self, model: JujuModelHandle, application: str, level: str
     ) -> dict[str, list[ValidationResult]]:
         assert level == "simple"
+        assert model == (NEIGHBOR if application == "neighbor" and self.cross_model else MODEL)
         self.events.append(f"validate:{application}")
         round_number = self.rounds.get(application, 0)
         self.rounds[application] = round_number + 1
@@ -228,6 +229,35 @@ def test_lifecycle(harness: Harness, cross_model: bool) -> None:
     assert harness.backend.idle_calls == [[MODEL, NEIGHBOR] if cross_model else [MODEL]] * 2
     assert harness.backend.rounds == {"target": 5, "neighbor": 5}
     assert (NEIGHBOR if cross_model else MODEL, "neighbor") in harness.backend.health_calls
+
+
+@pytest.mark.parametrize("cross_model", [False, True], ids=["same-model", "cross-model"])
+@pytest.mark.parametrize("status", ["FAIL", "ERROR"])
+def test_unrelated_validation_failure_is_excluded(
+    harness: Harness, cross_model: bool, status: Literal["FAIL", "ERROR"]
+) -> None:
+    # GIVEN an unrelated failing application alongside the selected endpoints
+    harness.backend.cross_model = cross_model
+    harness.backend.results["unrelated"] = [{"unrelated/0": [result(status)]}]
+
+    # WHEN running preflight, observation and recovery through the real JujuClient
+    harness.run()
+
+    # THEN only target and neighbor validators run in every phase
+    assert harness.backend.rounds == {"target": 5, "neighbor": 5}
+    assert harness.events.count("cleanup") == 1
+
+
+def test_duplicate_endpoints_validate_application_once(harness: Harness) -> None:
+    # GIVEN two endpoints belonging to the same application
+    harness.backend.results["target"] = [{UNIT: [result(), result(endpoint="other")]}]
+    client = JujuClient(harness.backend, logging.getLogger(__name__))
+
+    # WHEN collecting coverage, THEN both endpoints share one application validation
+    passed = cpu.validate_service(client, [(MODEL, "target", "db"), (MODEL, "target", "other")])
+
+    assert passed == {(MODEL, UNIT, endpoint, "database", 1) for endpoint in ("db", "other")}
+    assert harness.backend.rounds == {"target": 1}
 
 
 @dataclass(frozen=True)

@@ -20,7 +20,8 @@ def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHan
     """Identify passing simple checks on the tested endpoints through the Juju facade."""
     passed: set[ValidationKey] = set()
     for model in dict.fromkeys(model for model, _, _ in endpoints):
-        results = juju_client.validate_model(model=model, level="simple")
+        applications = list(dict.fromkeys(app for selected_model, app, _ in endpoints if selected_model == model))
+        results = juju_client.validate_model(model=model, level="simple", applications=applications)
         selected = {(app, endpoint) for selected_model, app, endpoint in endpoints if selected_model == model}
         for unit, validations in results.items():
             for result in validations:
