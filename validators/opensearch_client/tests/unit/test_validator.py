@@ -16,6 +16,7 @@ from validators.opensearch_client.validator import (
     OpenSearchClientPersistenceValidator,
     OpenSearchClientValidator,
     _exact_match_filter,
+    _hit_matches_exactly,
 )
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import (
@@ -613,6 +614,33 @@ class TestExactMatchFilter:
         # documents even though they exist. The sentinel must therefore contain none of those
         # characters.
         assert re.fullmatch(r"[a-z0-9]+", _KIND_VALUE)
+
+
+class TestHitMatchesExactly:
+    def test_rejects_a_text_analyzer_token_level_match(self) -> None:
+        # GIVEN a hit whose `_source` field is a longer string that merely *contains* the target
+        # value as one analyzed token - the shape of false positive a `term` query on an
+        # analyzed "text"-mapped field (rather than plain "keyword") would return, since the
+        # credentials can't read the index's mapping to know which shape applies (see
+        # _hit_matches_exactly's docstring).
+        hit = {"_source": {"validator_scope": f"some sentence containing {TEST_SCOPE} as a word"}}
+
+        # THEN it is not treated as an exact match, even though a `term` query would have hit it
+        assert not _hit_matches_exactly(hit, {"validator_scope": TEST_SCOPE})
+
+    def test_accepts_a_true_exact_match(self) -> None:
+        # GIVEN
+        hit = {"_source": {"validator_scope": TEST_SCOPE, "validator_kind": _KIND_VALUE}}
+
+        # THEN
+        assert _hit_matches_exactly(hit, {"validator_scope": TEST_SCOPE, "validator_kind": _KIND_VALUE})
+
+    def test_rejects_when_any_one_of_several_expected_fields_mismatches(self) -> None:
+        # GIVEN only one of two required fields exactly matches
+        hit = {"_source": {"validator_scope": TEST_SCOPE, "validator_kind": "not-the-sentinel"}}
+
+        # THEN
+        assert not _hit_matches_exactly(hit, {"validator_scope": TEST_SCOPE, "validator_kind": _KIND_VALUE})
 
 
 class TestOpenSearchClientPersistenceValidatorRole:

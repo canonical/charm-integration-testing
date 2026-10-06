@@ -83,6 +83,26 @@ def _exact_match_filter(field: str, value: str) -> dict[str, Any]:
     }
 
 
+def _hit_matches_exactly(hit: dict[str, Any], expected: dict[str, str]) -> bool:
+    """Return whether ``hit``'s ``_source`` holds *exactly* ``expected``'s field/value pairs.
+
+    ``_exact_match_filter()``'s ``term`` clause is only an exact match when the target field
+    happens to be mapped as plain ``keyword``. If the shared, charm-granted index's dynamic
+    mapping instead resolved it to analyzed ``text`` (its ``.keyword`` multi-field absent), a
+    ``term`` query matches *any* document whose tokenized field value contains the queried token,
+    not only a document whose field value equals it - e.g. an unrelated application document whose
+    own ``validator_scope``-named field happens to be a longer sentence that merely contains this
+    scope's hex token as one word would otherwise be misidentified as validator-owned and could be
+    deleted by ``cleanup()`` or counted by ``checkpoint()``. Since the granted credentials can't
+    read the index's mapping (``indices:admin/mappings/get`` is forbidden - see the validator's
+    class docstring) the query can't be restricted to only ever hit on an exact ``keyword`` shape,
+    so every hit the query returns is re-checked here against its retrieved ``_source`` for true
+    string equality before being trusted.
+    """
+    source = hit.get("_source", {})
+    return all(source.get(field) == value for field, value in expected.items())
+
+
 class _OpenSearchConnectionMixin:
     """Shared credential-resolution and connection helpers for opensearch_client validators.
 
@@ -569,9 +589,14 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         documents to be skipped at a page boundary. Returns raw (possibly non-int) values rather
         than filtering them out, so a malformed ``_REF_FIELD`` (e.g. a string) is reported back to
         checkpoint() instead of being silently ignored.
+
+        Every hit is re-checked against ``_hit_matches_exactly()`` before its ref is trusted: see
+        that helper's docstring for why a ``term``-query hit alone isn't sufficient proof of an
+        exact field match.
         """
         refs: list[Any] = []
         scroll_id: str | None = None
+        expected_fields = {_SCOPE_FIELD: scope, _MARKER_FIELD: token, _KIND_FIELD: _KIND_VALUE}
         try:
             body: dict[str, Any] = {
                 "query": {
@@ -602,9 +627,19 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                 if not hits:
                     return refs
                 for hit in hits:
-                    refs.append(hit.get("_source", {}).get(_REF_FIELD))
-                if len(hits) < _CLEANUP_SEARCH_SIZE or scroll_id is None:
+                    if _hit_matches_exactly(hit, expected_fields):
+                        refs.append(hit.get("_source", {}).get(_REF_FIELD))
+                if len(hits) < _CLEANUP_SEARCH_SIZE:
                     return refs
+                if scroll_id is None:
+                    # A full page with no scroll_id means there may be more matching documents
+                    # this method has no way to retrieve - silently returning here (as a prior
+                    # version did) could let checkpoint() report a false PASS despite unseen,
+                    # possibly-missing canary documents beyond this page.
+                    raise RuntimeError(
+                        f"Searching for canary documents in '{index_name}': received a full page "
+                        "with no scroll_id; cannot verify there are no further matching documents."
+                    )
                 response = client.scroll(scroll_id=scroll_id, scroll=_SCROLL_KEEPALIVE)
         finally:
             if scroll_id is not None:
@@ -638,6 +673,16 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         # could otherwise let OpenSearch silently return only the healthy shards' matches, leaving
         # this method converge on "zero remaining hits" while a validator-owned document on the
         # failed shard is still orphaned in the index.
+        #
+        # A hit surviving `_hit_matches_exactly()`'s re-check (see that helper's docstring) is left
+        # alone rather than deleted - it's some other application document that merely shares a
+        # `term`-tokenized word with our scope/kind, not validator-owned data. Since such a
+        # document is never deleted, it would otherwise keep reappearing in every subsequent page's
+        # search and spin this loop forever; `skipped_ids` excludes already-considered-and-rejected
+        # documents from mattering towards progress, and the loop stops once a page yields no new
+        # deletions, rather than only when the search returns zero hits.
+        expected_fields = {_SCOPE_FIELD: scope, _KIND_FIELD: _KIND_VALUE}
+        skipped_ids: set[str] = set()
         while True:
             try:
                 response = client.search(
@@ -662,14 +707,21 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
                 return
+            deleted_this_page = 0
             for hit in hits:
                 doc_id = hit.get("_id")
-                if not doc_id:
+                if not doc_id or doc_id in skipped_ids:
+                    continue
+                if not _hit_matches_exactly(hit, expected_fields):
+                    skipped_ids.add(doc_id)
                     continue
                 try:
                     client.delete(index=index_name, id=doc_id, refresh=True, request_timeout=_REQUEST_TIMEOUT)
+                    deleted_this_page += 1
                 except NotFoundError:
                     pass
+            if deleted_this_page == 0:
+                return
 
     def _canary_scope_token(self) -> str:
         """Fixed-width hash scoping canary documents to this model, relation and unit.
