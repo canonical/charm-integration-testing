@@ -69,9 +69,12 @@ class JujuSpy(JujuClient):
         if self.failure == phase:
             raise self.error
 
-    def validate_model(self, model: JujuModelHandle, level: str | None = "simple") -> dict[str, list[ValidationResult]]:
+    def validate_model(
+        self, model: JujuModelHandle, level: str | None = "simple", *, applications: list[str] | None = None
+    ) -> dict[str, list[ValidationResult]]:
         assert model == MODEL
         assert level == "deep"
+        assert applications is None
         self.events.append("validate")
         if self.failure == "validation":
             raise RuntimeError("validation failed")

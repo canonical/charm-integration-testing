@@ -341,6 +341,21 @@ class TestJujuClientValidateModel:
         # WHEN / THEN (no exception)
         client.validate_model(self._model())
 
+    def test_selected_application_runs_backend_and_extension_validators(self, logger: LoggerStub) -> None:
+        # GIVEN an unrelated failure and a target interface failure from an extension
+        backend = BackendStub(
+            app_list={"target": _app_info(), "neighbor": _app_info()},
+            validate_results={"target": {"target/0": [_pass()]}, "neighbor": {"neighbor/0": [_fail()]}},
+        )
+        extension = ExtensionStub({"target": {"target/0": [_fail()]}})
+        client = self._client(logger, backend, [extension])
+        # WHEN only the target is selected, THEN its extension failure still propagates.
+        with pytest.raises(JujuValidationError) as error:
+            client.validate_model(self._model(), level="deep", applications=["target"])
+        assert set(error.value.failed_validations) == {"target/0"}
+        # With the extension removed, the unrelated backend failure is excluded.
+        self._client(logger, backend).validate_model(self._model(), level="deep", applications=["target"])
+
     def test_raises_when_backend_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN the backend returns a FAIL result
         backend = BackendStub(
