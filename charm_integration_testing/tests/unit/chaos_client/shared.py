@@ -19,7 +19,8 @@ from kubernetes.client import (  # type: ignore[import-untyped]
 
 
 class FakeCustomObjectsApi:
-    def __init__(self, raise_on_delete: ApiException | None = None) -> None:
+    def __init__(self, raise_on_delete: ApiException | None = None, *, inject_stress: bool = True) -> None:
+        self.inject_stress = inject_stress
         self.create_calls: list[dict[str, Any]] = []
         self.delete_calls: list[dict[str, object]] = []
         self.raise_on_delete = raise_on_delete
@@ -53,7 +54,7 @@ class FakeCustomObjectsApi:
         )
         stored: dict[str, Any] = deepcopy(body)
         stored["metadata"]["uid"] = uuid4().hex
-        if plural == "stresschaos":
+        if plural == "stresschaos" and self.inject_stress:
             stored["status"] = deepcopy(self.stress_status)
         self.objects[(plural, namespace, stored["metadata"]["name"])] = stored
         return deepcopy(stored)
