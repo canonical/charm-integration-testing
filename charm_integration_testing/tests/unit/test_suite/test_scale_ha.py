@@ -23,6 +23,7 @@ class RecordingJujuClient:
         self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None
+        self.fail_next_multi_model_idle = False
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -52,6 +53,9 @@ class RecordingJujuClient:
 
     def multi_model_idle_for_period(self, models: list[JujuModelHandle], timeout: timedelta | None = None) -> None:
         self.calls.append(("multi_model_idle_for_period", models, timeout))
+        if self.fail_next_multi_model_idle:
+            self.fail_next_multi_model_idle = False
+            raise TimeoutError("model failed to become idle")
 
     def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
         self.calls.append(("validate_model", model, level))
@@ -304,6 +308,25 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
     validations = [call for call in client.calls if call[0] == "validate_model"]
     assert validations == [("validate_model", MODEL, "simple")] * 3
     assert client.units == ["target/3", "target/4", "target/5"]
+
+
+def test_unit_rotation_removes_machine_surge_after_failure() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_multi_model_idle = True
+
+    with pytest.raises(TimeoutError, match="model failed to become idle"):
+        scale_ha.test_unit_rotation(
+            cast(JujuClient, client),
+            RecordingJujuBackend(k8s_model=False),
+            None,
+            MODEL,
+            None,
+            "target",
+            _charm(),
+        )
+
+    assert [call for call in client.calls if call[0] == "remove_unit"] == [("remove_unit", "target/3", MODEL)]
+    assert client.units == ["target/0", "target/1", "target/2"]
 
 
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
