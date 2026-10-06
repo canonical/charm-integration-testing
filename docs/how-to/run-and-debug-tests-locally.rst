@@ -154,13 +154,14 @@ After confirmed injection, the test repeatedly checks experiment status,
 workload health and simple validators. Error/blocked workloads, disconnected
 agents, lost validation coverage, experiment errors and early completion fail.
 Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
-Startup and final validation share a two-minute allowance; calls exceeding the
-execution budget fail when they return.
+Startup and the last validation round under stress share a two-minute allowance;
+calls exceeding the stress execution budget fail when they return.
 
 Cleanup runs on failure too; failed cleanup remains registered for retry.
 Chaos Mesh memory cleanup waits for resource deletion. After successful
-observation and cleanup, models must recover to active/idle within fifteen
-minutes and pass simple validation without additional restarts.
+observation and cleanup, a separate fifteen-minute timeout applies to the
+active/idle wait, followed by simple validation without additional restarts.
+These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Install the repository dependencies
