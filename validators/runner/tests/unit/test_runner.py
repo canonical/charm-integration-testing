@@ -351,18 +351,6 @@ class TestParseCliArgs:
         assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
         assert endpoints is None
 
-    def test_prepare_missing_requires_checkpoint(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse_cli_args(["--persistence", "prepare", "--prepare-missing"])
-
-    def test_checkpoint_accepts_prepare_missing(self) -> None:
-        refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
-
-        args, refs, _ = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json, "--prepare-missing"])
-
-        assert args.prepare_missing is True
-        assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
-
     def test_invalid_refs_json_exits(self) -> None:
         # WHEN --refs is not valid JSON
         with pytest.raises(SystemExit):
@@ -703,7 +691,7 @@ class TestValidatorRunnerPersistence:
         refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
         # WHEN
-        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs, prepare_missing=True)
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
         # THEN the existing relation is checkpointed and the new relation is seeded
         assert [result.relation_id for result in results.results] == [5]
@@ -742,10 +730,10 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN
+        # THEN the stale ref is an error, and the currently live untracked relation is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_reports_error_for_non_integer_relation_ids(self) -> None:
         # GIVEN a malformed ref key
@@ -757,12 +745,12 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN no crash, and the malformed entry is reported as an ERROR rather than silently
-        # discarded, so a real durability check can't pass without ever running
+        # THEN the malformed entry is reported as an ERROR rather than silently discarded, while
+        # the valid live relation without a usable ref is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "Invalid relation_id" in (results.results[0].error or "")
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_does_not_resolve_a_ref_to_a_colliding_peer_relation(self) -> None:
         # Regression test for: _find_relation_by_id() (used by checkpoint_all) previously did not
