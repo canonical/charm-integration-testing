@@ -167,16 +167,20 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
         if uri_database and data.get("database") and uri_database != data["database"]:
             raise _IncompleteConnectionConfig("Kyuubi URI database does not match the relation 'database' field.")
 
-        username = data.get("username") or _DEFAULT_USERNAME
+        username = data.get("username", "")
         password = data.get("password", "")
-        if password and not data.get("username"):
-            raise _IncompleteConnectionConfig("Cannot connect to Kyuubi: a password requires a relation username.")
+        username = username if username.strip() else ""
+        password = password if password.strip() else ""
+        if bool(username) != bool(password):
+            raise _IncompleteConnectionConfig(
+                "Cannot connect to Kyuubi: username and password must be provided together."
+            )
 
         return {
             "host": host,
             "port": port,
             "database": database,
-            "username": username,
+            "username": username or _DEFAULT_USERNAME,
             "password": password,
             "auth": "LDAP" if password else "NONE",
         }
@@ -188,7 +192,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             port=int(config["port"]),
             database=str(config["database"]),
             username=str(config["username"]),
-            password=str(config["password"]),
+            password=str(config["password"]) if config["auth"] == "LDAP" else None,
             auth=str(config["auth"]),
         )
 

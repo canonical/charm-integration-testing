@@ -125,12 +125,14 @@ class TestPrepare:
         assert first.ref == 1
         assert sum(query.startswith("DROP TABLE IF EXISTS") for query in conn.cursor_stub.executed_queries) == 2
 
-    def test_connects_using_jdbc_uri_without_authentication(self) -> None:
+    @pytest.mark.parametrize("placeholder", ["", " ", "\t\n"], ids=["empty", "space", "whitespace"])
+    def test_connects_using_jdbc_uri_without_authentication(self, placeholder: str) -> None:
         validator = _make_validator(
             databag={
                 "uris": "jdbc:kyuubi://kyuubi.example:10010/test_db",
                 "database": "test_db",
-                "username": "canary-user",
+                "username": placeholder,
+                "password": placeholder,
             }
         )
 
@@ -141,8 +143,8 @@ class TestPrepare:
             host="kyuubi.example",
             port=10010,
             database="test_db",
-            username="canary-user",
-            password="",
+            username="validator",
+            password=None,
             auth="NONE",
         )
 
@@ -167,11 +169,39 @@ class TestPrepare:
             auth="LDAP",
         )
 
-    def test_rejects_password_without_username(self) -> None:
-        validator = _make_validator(databag={**VALID_DATABAG, "password": "secret"})
+    @pytest.mark.parametrize(
+        ("username", "password"),
+        [("", "secret"), (" ", "secret"), ("user", ""), ("user", " ")],
+        ids=["missing-username", "blank-username", "missing-password", "blank-password"],
+    )
+    def test_rejects_one_sided_credentials(self, username: str, password: str) -> None:
+        # GIVEN a genuinely incomplete credential pair.
+        validator = _make_validator(databag={**VALID_DATABAG, "username": username, "password": password})
 
-        with pytest.raises(RuntimeError, match="username"):
-            validator._open_connection()
+        # WHEN / THEN no connection is attempted.
+        with patch("validators.kyuubi_client.validator.hive.Connection") as connection:
+            with pytest.raises(RuntimeError, match="provided together"):
+                validator._open_connection()
+        connection.assert_not_called()
+
+    def test_preserves_nonblank_credentials_verbatim(self) -> None:
+        # GIVEN credentials whose whitespace is part of the value, not a placeholder.
+        validator = _make_validator(databag={**VALID_DATABAG, "username": " user ", "password": " secret "})
+
+        # WHEN / THEN only whitespace-only credentials are normalized.
+        config = validator._connection_config()
+        assert config["username"] == " user "
+        assert config["password"] == " secret "
+        assert config["auth"] == "LDAP"
+
+    def test_unauthenticated_options_pass_pyhive_argument_validation(self) -> None:
+        # GIVEN provider placeholders and the real PyHive constructor.
+        validator = _make_validator(databag={**VALID_DATABAG, "username": " ", "password": " "})
+
+        # WHEN / THEN PyHive reaches transport opening rather than rejecting NONE with a password.
+        with patch("thrift_sasl.TSaslClientTransport.open", side_effect=RuntimeError("transport reached")):
+            with pytest.raises(RuntimeError, match="transport reached"):
+                validator._open_connection()
 
 
 class TestCheckpoint:
