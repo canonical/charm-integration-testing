@@ -146,8 +146,8 @@ class ChaosMeshChaosClient(ChaosClient):
             self._uids.pop(name, None)
             self._cpu_stress.discard(name)
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
-        """Require controller-confirmed active injection for every tracked stress resource."""
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active injection or explicitly allowed normal completion for tracked stress."""
         resources = [
             (namespace, name)
             for plural, namespace, name in self._created
@@ -156,7 +156,7 @@ class ChaosMeshChaosClient(ChaosClient):
         if not resources:
             raise RuntimeError(f"No tracked Chaos Mesh stress for {model.uri}/{unit}.")
         for namespace, name in resources:
-            if not self._stress_injected(namespace, name, self._request_timeout):
+            if not self._stress_injected(namespace, name, self._request_timeout, allow_completed=allow_completed):
                 raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active.")
 
     def _read_resource(self, plural: str, namespace: str, name: str, timeout: float) -> dict[str, Any] | None:
@@ -182,7 +182,7 @@ class ChaosMeshChaosClient(ChaosClient):
             raise RuntimeError(f"Cannot verify UID of {plural} {namespace}/{name}.")
         return current
 
-    def _stress_injected(self, namespace: str, name: str, timeout: float) -> bool:
+    def _stress_injected(self, namespace: str, name: str, timeout: float, *, allow_completed: bool = False) -> bool:
         current = self._read_resource("stresschaos", namespace, name, timeout)
         if current is None:
             raise RuntimeError(f"StressChaos {namespace}/{name} disappeared during stress.")
@@ -200,8 +200,16 @@ class ChaosMeshChaosClient(ChaosClient):
             metadata.get("deletionTimestamp")
             or (metadata.get("annotations") or {}).get("experiment.chaos-mesh.org/pause") == "true"
             or conditions.get("Paused") == "True"
-            or experiment.get("desiredPhase") == "Stop"
         ):
+            raise RuntimeError(f"StressChaos {namespace}/{name} stopped or was interrupted during stress.")
+        if experiment.get("desiredPhase") == "Stop":
+            if (
+                allow_completed
+                and conditions.get("AllRecovered") == "True"
+                and records
+                and all(record.get("phase") == "Not Injected" for record in records)
+            ):
+                return True
             raise RuntimeError(f"StressChaos {namespace}/{name} stopped or was interrupted during stress.")
         return (
             experiment.get("desiredPhase") == "Run"

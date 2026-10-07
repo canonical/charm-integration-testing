@@ -517,6 +517,40 @@ def test_startup_waits_for_injection_not_engine_creation(context: ClientContext)
 
 
 class TestCheckStress:
+    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+    @pytest.mark.parametrize("state", ["completed", "failed", "empty", "stopped", "injected"])
+    def test_completion_contract_through_meta(self, context: ClientContext, operation: str, state: str) -> None:
+        chaos = context.chaos_client()
+        meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
+        if operation == "stress_cpu":
+            meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
+        else:
+            meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        meta.check_stress(MODEL, UNIT)
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+        engine = next(iter(context.engines.values()))
+        engine["status"]["engineStatus"] = "completed"
+        result = context.results[0]
+        result["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+        result["metadata"]["annotations"] = {"pod/postgresql-random-pod": "reverted"}
+        if state == "failed":
+            result["status"]["experimentStatus"]["verdict"] = "Fail"
+        elif state == "empty":
+            context.results.clear()
+        elif state == "stopped":
+            engine["spec"]["engineState"] = "stop"
+        elif state == "injected":
+            result["metadata"]["annotations"] = {"pod/postgresql-random-pod": "injected"}
+
+        with pytest.raises(RuntimeError):
+            meta.check_stress(MODEL, UNIT)
+        if state == "completed":
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT, allow_completed=True)
+        assert len(chaos._created) == 1
+
     @dataclass(frozen=True)
     class Params:
         change: str

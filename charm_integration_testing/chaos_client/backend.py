@@ -31,8 +31,11 @@ class ChaosClient(ABC):
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> timedelta | None:
         raise NotImplementedError
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
-        """Raise if tracked stress is not active; unsupported clients may omit this method."""
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active stress unless independent fault evidence permits normal completion.
+
+        Allowing completion must not suppress experiment errors or cleanup checks.
+        """
         raise NotImplementedError
 
     @abstractmethod

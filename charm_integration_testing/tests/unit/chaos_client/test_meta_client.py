@@ -96,8 +96,8 @@ class ClientStub(ChaosClient):
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
         self._call("stress_cpu", model, unit, workers, duration)
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
-        self._call("check_stress", model, unit)
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        self._call("check_stress", model, unit, allow_completed)
 
     def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
         self._call("stress_memory", model, unit, workers, size_mb, duration)
@@ -761,7 +761,7 @@ def test_check_stress_uses_only_selected_owner_and_does_not_resolve_again() -> N
 
     # WHEN observing, THEN only the selected tool is consulted
     meta.check_stress(TEST_MODEL, UNIT)
-    assert selected.calls[-1] == ("check_stress", (TEST_MODEL, UNIT))
+    assert selected.calls[-1] == ("check_stress", (TEST_MODEL, UNIT, False))
     assert len(unsupported.calls) == 1
     assert unused.calls == []
     assert len(constraints.calls) == 1
@@ -844,4 +844,4 @@ def test_stress_checks_respect_controller_unit_and_path_scopes() -> None:
     # WHEN IO is cleaned, THEN stress remains observable
     meta.cleanup(TEST_MODEL, UNIT, "/data")
     meta.check_stress(TEST_MODEL, UNIT)
-    assert tool.calls[-1] == ("check_stress", (TEST_MODEL, UNIT))
+    assert tool.calls[-1] == ("check_stress", (TEST_MODEL, UNIT, False))

@@ -118,7 +118,7 @@ class MetaChaosClient(ChaosClient):
         )
         return merged_duration
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Check only successful stress owners, retaining them until cleanup succeeds."""
         tools = {
             id(action.stress_tool): action.stress_tool
@@ -128,7 +128,7 @@ class MetaChaosClient(ChaosClient):
         if not tools:
             raise RuntimeError(f"No successfully started stress for {model.uri}/{unit}.")
         for tool in tools.values():
-            tool.check_stress(model, unit)
+            tool.check_stress(model, unit, allow_completed=allow_completed)
 
     def stress_memory(
         self,

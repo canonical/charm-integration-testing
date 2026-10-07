@@ -432,6 +432,44 @@ class TestStressCpu:
 
 
 class TestStressObservation:
+    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+    @pytest.mark.parametrize("state", ["completed", "failed", "empty", "paused", "partial"])
+    def test_completion_contract_through_meta(self, operation: str, state: str) -> None:
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        meta = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
+        if operation == "stress_cpu":
+            meta.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
+        else:
+            meta.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        meta.check_stress(TEST_MODEL, UNIT)
+        meta.check_stress(TEST_MODEL, UNIT, allow_completed=True)
+        current = next(iter(backend.custom_objects_api.objects.values()))
+        status = current["status"]
+        status["experiment"]["desiredPhase"] = "Stop"
+        status["conditions"][2]["status"] = "True"
+        record: dict[str, Any] = {"phase": "Not Injected", "events": []}
+        status["experiment"]["containerRecords"] = [record]
+        if state == "failed":
+            record["events"] = [{"type": "Failed"}]
+        elif state == "empty":
+            status["experiment"]["containerRecords"] = []
+        elif state == "paused":
+            status["conditions"].append({"type": "Paused", "status": "True"})
+        elif state == "partial":
+            record["phase"] = "Injected"
+
+        # Moderate stress rejects completion; independent fault evidence only permits normal completion.
+        with pytest.raises(RuntimeError):
+            meta.check_stress(TEST_MODEL, UNIT)
+        if state == "completed":
+            meta.check_stress(TEST_MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(TEST_MODEL, UNIT, allow_completed=True)
+        assert len(mesh._created) == 1
+        assert backend.custom_objects_api.delete_calls == []
+
     @pytest.mark.parametrize(
         "state",
         [

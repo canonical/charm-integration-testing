@@ -95,13 +95,13 @@ class LitmusChaosClient(ChaosClient):
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
-        """Verify that each tracked experiment still reports injection for its target."""
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active injection or explicitly allowed normal completion for tracked stress."""
         engines = [engine for engine in self._created if engine.scope == (model.uri, unit)]
         if not engines:
             raise RuntimeError(f"No tracked Litmus stress for {model.uri}/{unit}.")
         for engine in engines:
-            if not self._started(engine):
+            if not self._started(engine, allow_completed=allow_completed):
                 raise RuntimeError(f"Litmus experiment {engine.name} is no longer confirmed active.")
 
     def io_latency(
@@ -238,13 +238,27 @@ class LitmusChaosClient(ChaosClient):
                 engine.injected = True
         return results
 
-    def _started(self, engine: _ExperimentRun) -> bool:
+    def _started(self, engine: _ExperimentRun, *, allow_completed: bool = False) -> bool:
         current = self._read_engine(engine)
         results = self._observe(engine)
         if engine.execution_error is not None:
             raise engine.execution_error
         if current is None:
             raise RuntimeError(f"Litmus Engine {engine.name} disappeared before stress started.")
+        if (
+            allow_completed
+            and not current.get("metadata", {}).get("deletionTimestamp")
+            and current.get("spec", {}).get("engineState") != "stop"
+            and current.get("status", {}).get("engineStatus") == "completed"
+            and results
+            and all(
+                result.get("status", {}).get("experimentStatus", {}).get("phase") == "Completed"
+                and result.get("status", {}).get("experimentStatus", {}).get("verdict") == "Pass"
+                and self._target_status(result, engine.pod) == "reverted"
+                for result in results
+            )
+        ):
+            return True
         if (
             current.get("metadata", {}).get("deletionTimestamp")
             or current.get("spec", {}).get("engineState") == "stop"

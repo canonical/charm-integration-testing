@@ -131,12 +131,12 @@ class CpuTool(ClientStub):
         self.clock.now += self.startup_seconds
         super().stress_cpu(model, unit, workers, duration)
 
-    def check_stress(self, model: JujuModelHandle, unit: str) -> None:
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         self.events.append("stress")
         self.check_times.append(self.clock.now)
         if len(self.check_times) == self.check_error_at:
             raise RuntimeError("stress ended")
-        super().check_stress(model, unit)
+        super().check_stress(model, unit, allow_completed=allow_completed)
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         self.events.append("cleanup")
