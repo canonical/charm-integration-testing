@@ -917,3 +917,21 @@ class TestCassandraClientPersistenceValidatorKeyspaceReplication:
         assert "'class': 'NetworkTopologyStrategy'" in create_keyspace_query
         assert "'dc1': 2" in create_keyspace_query
         assert "'dc2': 1" in create_keyspace_query
+
+    def test_escapes_a_datacenter_name_containing_a_single_quote(self) -> None:
+        # GIVEN a datacenter name (as reported by cluster metadata) containing a single quote.
+        # Regression test for: interpolating it unescaped into the replication map produces
+        # invalid CQL (and a crafted metadata value could otherwise alter the statement). CQL
+        # escapes an embedded "'" by doubling it, the same rule PostgreSQL uses for literals.
+        validator = _make_legacy_persistence_validator({"cassandra/0": LEGACY_UNIT_DATABAG})
+        hosts = MetadataStub(hosts=[HostStub(datacenter="dc-o'brien")])
+        session = SessionStub(cluster=ClusterStub(metadata=hosts))
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            mock_cluster_cls.return_value.connect.return_value = session
+            # WHEN
+            validator.prepare()
+
+        # THEN the embedded quote is escaped by doubling it, keeping the statement valid CQL
+        create_keyspace_query = next(q for q in session.executed_queries if "CREATE KEYSPACE" in q)
+        assert "'dc-o''brien': 1" in create_keyspace_query

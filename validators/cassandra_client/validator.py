@@ -53,6 +53,18 @@ def _quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _quote_literal(value: str) -> str:
+    """Safely quote a CQL string literal for interpolation into a query string.
+
+    Doubling embedded single quotes is CQL's standard escaping for string literals (the same
+    rule PostgreSQL uses). Needed anywhere a value from outside this validator's own control -
+    e.g. a datacenter name reported by cluster metadata - is interpolated into a query, since an
+    unescaped ``'`` would either produce invalid CQL or, worse, let a crafted value alter the
+    statement being built.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 class _CassandraConnectionMixin:
     """Shared credential-resolution and connection helpers for cassandra validators.
 
@@ -488,7 +500,7 @@ class CassandraClientPersistenceValidator(_CassandraConnectionMixin, BasePersist
         if not host_counts_by_dc:
             host_counts_by_dc["datacenter1"] = 1
         factors = ", ".join(
-            f"'{datacenter}': {max(1, min(host_count, 3))}"
+            f"{_quote_literal(datacenter)}: {max(1, min(host_count, 3))}"
             for datacenter, host_count in sorted(host_counts_by_dc.items())
         )
         return f"{{'class': 'NetworkTopologyStrategy', {factors}}}"
