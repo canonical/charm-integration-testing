@@ -14,10 +14,11 @@ Before implementing, ask clarifying questions to understand the actual goal, con
 When the user explicitly authorizes a push, use the GitHub CLI credential helper with the GitHub token over HTTPS, for example:
 
 ```bash
-git -c credential.helper='!gh auth git-credential' push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
+GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
+  push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
 ```
 
-Use the repository and branch the user authorized. This command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for the HTTPS Git operation without persisting credentials or changing the configured remote. If a push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with `gh`, another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
+Use the repository and branch the user authorized. Setting `GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (for example, HTTPS-to-SSH) from changing the transport for this command; it does not modify Git configuration. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
 
 ## Tone and Style
 
