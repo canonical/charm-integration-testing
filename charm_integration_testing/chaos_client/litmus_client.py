@@ -315,19 +315,7 @@ class LitmusChaosClient(ChaosClient):
                 # A result API failure must not leave stress running. Preserve evidence for retry.
                 observation_error = error
         if current is not None:
-            self._backend.custom_objects_api.patch_namespaced_custom_object(
-                group=_GROUP,
-                version=_VERSION,
-                namespace=engine.namespace,
-                plural="chaosengines",
-                name=engine.name,
-                body={
-                    "metadata": {"uid": engine.uid, "resourceVersion": current["metadata"]["resourceVersion"]},
-                    "spec": {"engineState": "stop"},
-                },
-                _request_timeout=REQUEST_TIMEOUT,
-            )
-            engine.stop_requested = True
+            self._wait(lambda: self._request_stop(engine), deadline, engine.name, "stop request")
             self._wait(lambda: self._stopped(engine), deadline, engine.name)
         if engine.uid is None:
             return
@@ -341,6 +329,32 @@ class LitmusChaosClient(ChaosClient):
         if self._read_engine(engine) is not None:
             self._delete_custom("chaosengines", engine.namespace, engine.name, engine.uid)
             self._wait(lambda: self._read_engine(engine) is None, deadline, engine.name)
+
+    def _request_stop(self, engine: _ExperimentRun) -> bool:
+        # Operator status writes can race with our stop patch. Read the latest
+        # version on every retry, checking ownership and the original UID again.
+        current = self._read_engine(engine)
+        if current is None:
+            return True
+        try:
+            self._backend.custom_objects_api.patch_namespaced_custom_object(
+                group=_GROUP,
+                version=_VERSION,
+                namespace=engine.namespace,
+                plural="chaosengines",
+                name=engine.name,
+                body={
+                    "metadata": {"uid": engine.uid, "resourceVersion": current["metadata"]["resourceVersion"]},
+                    "spec": {"engineState": "stop"},
+                },
+                _request_timeout=REQUEST_TIMEOUT,
+            )
+        except ApiException as error:
+            if error.status == 409:
+                return False
+            raise
+        engine.stop_requested = True
+        return True
 
     def _stopped(self, engine: _ExperimentRun) -> bool:
         current = self._read_engine(engine)
