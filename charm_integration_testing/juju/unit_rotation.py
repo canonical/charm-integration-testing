@@ -91,7 +91,15 @@ def _rotate_kubernetes_units(
             juju_client.multi_model_idle_for_period(models, timeout=timeout)
             for model_ref in models:
                 juju_client.validate_model(model=model_ref, level="simple")
-    finally:
+    except BaseException as rotation_error:
+        try:
+            _restore_kubernetes_unit_count(
+                juju_client, kubernetes_client, application, model, len(units), models, timeout
+            )
+        except BaseException as cleanup_error:
+            raise rotation_error from cleanup_error
+        raise
+    else:
         _restore_kubernetes_unit_count(juju_client, kubernetes_client, application, model, len(units), models, timeout)
 
     _wait_for_rotated_kubernetes_pods(kubernetes_client, application, model.model, len(units), original_uids, timeout)
@@ -176,8 +184,13 @@ def _rotate_machine_units(
                 raise RuntimeError(f"Unit {unit} was not removed after rotation.")
             for model_ref in models:
                 juju_client.validate_model(model=model_ref, level="simple")
-        except BaseException:
-            _cleanup_machine_surge(juju_client, application, model, original_units, len(units), models, unit, timeout)
+        except BaseException as rotation_error:
+            try:
+                _cleanup_machine_surge(
+                    juju_client, application, model, original_units, len(units), models, unit, timeout
+                )
+            except BaseException as cleanup_error:
+                raise rotation_error from cleanup_error
             raise
 
 
