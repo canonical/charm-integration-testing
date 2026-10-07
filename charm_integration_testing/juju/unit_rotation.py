@@ -76,7 +76,7 @@ def _rotate_kubernetes_units(
             if pod.metadata.uid not in existing_uids:
                 raise RuntimeError(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
 
-            kubernetes_client.delete_pod(namespace=model.model, pod_name=pod.metadata.name)
+            juju_client.delete_kubernetes_pod(kubernetes_client, namespace=model.model, pod_name=pod.metadata.name)
             replacement_pod = kubernetes_client.wait_for_new_pod(
                 application_name=application,
                 namespace=model.model,
