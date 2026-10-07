@@ -19,8 +19,9 @@
 #   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
 #                              Required; falls back to the host's
 #                              `gh auth token` only with your consent.
-#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Override for Copilot AI auth inside the
-#                              VM (default: gh auth token)
+#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Token for Copilot AI auth inside the VM.
+#                              Required; falls back to the host's
+#                              `gh auth token` only with your consent.
 #   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT               VM-side mount path (default: /project)
 #   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
