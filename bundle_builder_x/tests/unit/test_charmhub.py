@@ -117,14 +117,18 @@ _METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF = CharmMetadata(
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
-def _refresh_response_with_charm(name: str, revision: int, metadata: CharmMetadata) -> RefreshResponse:
+def _refresh_response_with_charm(
+    name: str, revision: int, metadata: CharmMetadata, bases: list[CharmhubBase] | None = None
+) -> RefreshResponse:
     """Build a successful RefreshResponse carrying charm metadata.
 
     Bypasses the metadata-yaml/config-yaml string parsing (used to decode the real
     Charmhub API response) via model_construct, since the fields here are already the
     typed values that parsing would produce.
     """
-    charm = RefreshResponse.Charm.model_construct(revision=revision, metadata=metadata, config=_EMPTY_CONFIG)
+    charm = RefreshResponse.Charm.model_construct(
+        bases=bases, revision=revision, metadata=metadata, config=_EMPTY_CONFIG
+    )
     return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
 
 
@@ -407,8 +411,10 @@ class TestCharmhubClient:
         with a hand-built Charm (see TestEnsureCompatibility above).
         """
 
-        def _client_and_stub(self, raw_overrides: dict[str, object]) -> CharmhubClient:
-            response = _refresh_response_with_charm("ceph-mon", revision=5, metadata=_METADATA_REQUIRES)
+        def _client_and_stub(
+            self, raw_overrides: dict[str, object], bases: list[CharmhubBase] | None = None
+        ) -> CharmhubClient:
+            response = _refresh_response_with_charm("ceph-mon", revision=5, metadata=_METADATA_REQUIRES, bases=bases)
 
             class _StubClient(_NullHttpClient):
                 def refresh(self, action: RefreshAction) -> RefreshResponse:
@@ -452,6 +458,20 @@ class TestCharmhubClient:
             # THEN it succeeds and carries the overridden platform
             assert charm.platforms == ["machine"]
 
+        def test_preserves_existing_positional_arguments(self) -> None:
+            # GIVEN a client called with the original positional argument order
+            client = self._client_and_stub(
+                {"platforms": ["machine"]},
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            )
+
+            # WHEN resolving a charm with positional revision and base arguments
+            charm = client.charm_from_store("ceph-mon", "amd64", None, "machine", "latest", "stable", 5, "22.04")
+
+            # THEN those arguments still select the requested revision and base
+            assert charm.revision == 5
+            assert charm.ubuntu_version == "22.04"
+
         def test_passes_when_no_platform_overrides_exist(self) -> None:
             # GIVEN an overrides client with no platform override, and metadata for a
             # machine charm (no `containers` block)
@@ -470,6 +490,64 @@ class TestCharmhubClient:
 
             # THEN it succeeds
             assert charm.platforms == ["machine"]
+
+        def test_preserves_requested_channel_branch(self) -> None:
+            # GIVEN a charm requested from a channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with the branch included
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                charm_branch="candidate-build",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains that branch
+            assert charm.channel.branch == "candidate-build"
+
+        def test_preserves_branch_on_trackless_channel(self) -> None:
+            # GIVEN a charm requested from a trackless channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with only risk and branch
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_risk="stable",
+                charm_branch="feature",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains the trackless channel branch
+            assert str(charm.channel) == "stable/feature"
+
+        def test_preserves_trackless_channel_during_revision_compatibility_lookup(self) -> None:
+            # GIVEN a revision pinned to a trackless channel branch
+            client = self._client_and_stub(
+                {"platforms": ["machine"]},
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            )
+
+            # WHEN validating the revision against that exact channel and base
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                charm_track=None,
+                charm_risk="stable",
+                charm_branch="feature",
+                charm_revision=5,
+                ubuntu_version="22.04",
+                platform="machine",
+            )
+
+            # THEN the trackless channel remains unqualified by a synthetic latest track
+            assert charm.channel.track == ""
+            assert str(charm.channel) == "stable/feature"
 
     # ---------------------------------------------------------------------------
     # TestBundleBuilderPlatformMismatch

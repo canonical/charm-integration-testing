@@ -14,11 +14,11 @@ class TestResolveDeployedCharmBase:
     base, rather than ``CharmhubClient`` silently picking the first base a revision supports.
     """
 
-    def _application_info(self, base: str | None) -> JujuApplicationInfo:
+    def _application_info(self, base: str | None, branch: str = "") -> JujuApplicationInfo:
         return JujuApplicationInfo(
             charm="my-charm",
             revision=1,
-            channel=CharmChannel(track="1.0", risk="stable", branch=""),
+            channel=CharmChannel(track="1.0", risk="stable", branch=branch),
             base=base,
         )
 
@@ -30,11 +30,25 @@ class TestResolveDeployedCharmBase:
         charmhub_client = MagicMock()
 
         # WHEN resolving the deployed charm for that application
-        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={})
+        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={}, arch="amd64")
 
         # THEN the resolved base is threaded through as ubuntu_version
         charmhub_client.charm_from_store.assert_called_once()
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_version"] == "22.04"
+        assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_arch"] == "amd64"
+
+    def test_passes_deployed_channel_branch_to_charm_from_store(self) -> None:
+        # GIVEN an application deployed from a channel branch
+        model_ref = JujuModelHandle(model="my-model", controller="my-controller")
+        juju_client = MagicMock()
+        juju_client.list_applications.return_value = {"my-app": self._application_info(base="22.04", branch="feature")}
+        charmhub_client = MagicMock()
+
+        # WHEN resolving the deployed charm for that application
+        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={}, arch="amd64")
+
+        # THEN Charmhub receives the branch along with the other channel selectors
+        assert charmhub_client.charm_from_store.call_args.kwargs["charm_branch"] == "feature"
 
     def test_passes_none_when_base_is_unknown(self) -> None:
         # GIVEN an application with no resolvable base
@@ -44,8 +58,9 @@ class TestResolveDeployedCharmBase:
         charmhub_client = MagicMock()
 
         # WHEN resolving the deployed charm for that application
-        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={})
+        _resolve_deployed_charm(charmhub_client, juju_client, model_ref, "my-app", cache={}, arch="arm64")
 
         # THEN ubuntu_version is explicitly None rather than omitted
         charmhub_client.charm_from_store.assert_called_once()
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_version"] is None
+        assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_arch"] == "arm64"
