@@ -326,8 +326,8 @@ class TestValidatorInjectorExtension:
 
             # THEN each unit's run command only includes its own refs
             run_cmds = {call[1]: call[2] for call in juju.exec_calls if "--persistence" in call[2]}
-            refs_0_json = run_cmds["myapp/0"].split("--refs ", 1)[1].split(" --prepare-missing", 1)[0]
-            refs_1_json = run_cmds["myapp/1"].split("--refs ", 1)[1].split(" --prepare-missing", 1)[0]
+            refs_0_json = run_cmds["myapp/0"].split("--refs ", 1)[1]
+            refs_1_json = run_cmds["myapp/1"].split("--refs ", 1)[1]
             refs_0 = json.loads(refs_0_json.strip("'"))
             refs_1 = json.loads(refs_1_json.strip("'"))
             assert refs_0 == {"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}}
@@ -354,10 +354,10 @@ class TestValidatorInjectorExtension:
             # WHEN
             extension.post_persistence(TEST_MODEL, "myapp")
 
-            # THEN the checkpoint includes the mixed-operation flag and returns state for both refs
+            # THEN checkpointing returns updated state for both tracked and newly prepared refs
             run_cmd = juju.exec_calls[-1][2]
             assert "--persistence checkpoint" in run_cmd
-            assert "--prepare-missing" in run_cmd
+            assert "--refs" in run_cmd
             assert extension.persistence_state == {
                 existing_key: PersistenceState(id=1, ref=3, token=TEST_TOKEN),
                 PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 9): new_state,
