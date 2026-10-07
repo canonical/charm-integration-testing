@@ -35,6 +35,7 @@ class RecordingJujuClient:
         self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None
+        self.fail_next_scale_before_mutation = False
         self.fail_next_scale_after_callback = False
         self.fail_scale_after_callback_on_call: int | None = None
         self.fail_next_multi_model_idle = False
@@ -51,6 +52,9 @@ class RecordingJujuClient:
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.calls.append(("scale_application", application, num, model))
         scale_calls = len([call for call in self.calls if call[0] == "scale_application"])
+        if self.fail_next_scale_before_mutation:
+            self.fail_next_scale_before_mutation = False
+            raise RuntimeError("scale failed before mutation")
         if num > len(self.units):
             next_index = max((int(unit.rsplit("/", maxsplit=1)[-1]) for unit in self.units), default=-1) + 1
             self.units.extend(
@@ -125,6 +129,7 @@ class RecordingKubernetesClient:
         self.defer_next_scale_down = False
         self.fail_wait_for_new_pod = False
         self.fail_wait_for_pod_ready = False
+        self.unready_pod_uids: set[str] = set()
 
     def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
         pod = K8sClient.V1Pod()
@@ -218,6 +223,8 @@ class RecordingKubernetesClient:
             self.scale_down_uid = None
         if len(self.pods) != expected_count:
             raise TimeoutError(f"expected {expected_count} ready pods")
+        if any(pod.metadata is not None and pod.metadata.uid in self.unready_pod_uids for pod in self.pods):
+            raise TimeoutError("a charm pod is not ready")
         return list(self.pods)
 
     def wait(
