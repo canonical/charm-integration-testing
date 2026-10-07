@@ -418,19 +418,49 @@ class TestCharmhubClient:
 
             client = CharmhubClient(
                 http_client=cast(CharmhubHttpClient, _StubClient()),
-                overrides_client=_StubOverridesClient({"default_channel": "1.29/candidate"}),
+                overrides_client=_StubOverridesClient({"default_channel": "2.5/stable"}),
             )
 
             # WHEN fetching without an explicit track, risk, or revision
-            client.charm_from_store(
+            charm = client.charm_from_store(
                 charm_name="istio-ingress-k8s",
                 ubuntu_arch="amd64",
                 ubuntu_version="24.04",
             )
 
-            # THEN Charmhub is queried using the configured default channel
+            # THEN Charmhub is queried using and returns the configured default channel
             assert len(captured) == 1
-            assert captured[0].charm_channel == "1.29/candidate"
+            assert captured[0].charm_channel == "2.5/stable"
+            assert charm.channel == CharmChannel(track="2.5", risk="stable", branch="")
+
+        def test_explicit_channel_takes_precedence_over_default_channel(self) -> None:
+            # GIVEN a charm with a 2.5/stable default-channel override
+            captured: list[RefreshAction] = []
+            response = _refresh_response_with_charm("istio-ingress-k8s", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    captured.append(action)
+                    return response
+
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient({"default_channel": "2.5/stable"}),
+            )
+
+            # WHEN fetching the charm with an explicit channel
+            charm = client.charm_from_store(
+                charm_name="istio-ingress-k8s",
+                ubuntu_arch="amd64",
+                ubuntu_version="24.04",
+                charm_track="2.16",
+                charm_risk="stable",
+            )
+
+            # THEN the explicitly requested channel is used
+            assert len(captured) == 1
+            assert captured[0].charm_channel == "2.16/stable"
+            assert charm.channel == CharmChannel(track="2.16", risk="stable", branch="")
 
     # ---------------------------------------------------------------------------
     # TestCharmFromStorePlatformOverrides
