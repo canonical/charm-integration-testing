@@ -135,19 +135,17 @@ CLI and wire format
   A JSON dict mapping relation IDs to their current ``PersistenceState``, required when
   ``--persistence checkpoint`` is used (``checkpoint()`` needs the state ``prepare()`` returned).
 
-``--prepare-missing``
-  Optional with ``--persistence checkpoint``. In addition to checkpointing relations with
-  supplied refs, prepares each active relation that has no ref. The test harness uses this when
-  a model already has canary state but a new relation is established; existing relations keep
-  their checkpoint behavior while the new relation is seeded.
+During ``--persistence checkpoint``, each active relation with a supplied ref is checked;
+each applicable relation without a ref is prepared and its state is returned. This handles a
+relation added after other relations in the model already have tracked canary state.
 
 The runner's JSON output includes an ``updated_refs`` field alongside the usual functional
 ``results``: a dict of the same shape as ``--refs``, containing each relation's new
 ``PersistenceState`` after the requested operation. Callers (the ``ValidatorInjectorExtension``,
 via its ``post_persistence`` hook) are responsible for persisting ``updated_refs`` across test
 steps (e.g. in ``persistence_state``, keyed by controller/model/unit) and passing the relevant
-entries back in via ``--refs`` on the next ``checkpoint`` call. When ``--prepare-missing`` is
-used, the returned refs also include state for newly prepared relations.
+entries back in via ``--refs`` on the next ``checkpoint`` call. The returned refs also include
+state for newly prepared relations.
 
 For ``--persistence cleanup``, the output also includes a ``cleaned_relation_ids`` field: the
 relation IDs that cleanup actually visited (i.e. had a live relation with a registered
