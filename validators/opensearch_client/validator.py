@@ -691,10 +691,12 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         while True:
             query: dict[str, Any] = {
                 "bool": {
-                    "filter": [
-                        _exact_match_filter(_SCOPE_FIELD, scope),
-                        _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
-                    ]
+                "filter": [
+                    _exact_match_filter(_SCOPE_FIELD, scope),
+                    _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
+                    {"exists": {"field": _MARKER_FIELD}},
+                    {"exists": {"field": _REF_FIELD}},
+                ]
                 }
             }
             if skipped_ids:
