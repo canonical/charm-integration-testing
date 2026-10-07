@@ -381,7 +381,7 @@ JSON
 
     _ENV_FILE="$DEV_DIR/.env"
     if ! grep -q '^SANDBOX_SIGNING_KEY=' "$_ENV_FILE" 2>/dev/null; then
-        echo "==> Generating VM signing key..."
+        echo "==> No SANDBOX_SIGNING_KEY found in $_ENV_FILE; generating a VM signing key..."
         _tmp_key=$(mktemp)
         rm -f "$_tmp_key"
         ssh-keygen -t ed25519 -C "sandbox-vm-signing" -N "" -f "$_tmp_key" -q
@@ -473,7 +473,11 @@ JSON
         elif grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")" <<< "$_existing_keys"; then
             echo "==> Signing key already registered with GitHub."
         elif [ -t 0 ]; then
-            read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
+            echo "==> Since you did not provide a signing key (SANDBOX_SIGNING_KEY in $_ENV_FILE),"
+            echo "    we can create and register one for you. It signs commits the AI agent"
+            echo "    makes on your behalf so GitHub shows them as Verified."
+            echo "    Skip this if you don't intend to author commits in the sandbox."
+            read -r -p "  Register the generated signing key with your GitHub account? [y/N] " _register_key
             if [[ "$_register_key" =~ ^[Yy]$ ]]; then
                 _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null)
                 _register_rc=$?
