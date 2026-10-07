@@ -1,8 +1,9 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import stat
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 import pytest
 import yaml
@@ -61,6 +62,12 @@ class TestLocalCharm:
         assert bundle_app.charm.channel is None
         assert bundle_app.charm.revision is None
         assert bundle_app.charm.ubuntu_version == "26.04"
+        local_charm_data = bundle_app.charm.model_dump()
+        del local_charm_data["channel"]
+        del local_charm_data["revision"]
+        charm_with_default_source = Charm.model_validate(local_charm_data)
+        assert charm_with_default_source.channel is None
+        assert charm_with_default_source.revision is None
         with pytest.raises(ValidationError, match="Local charm cannot have a Charmhub channel or revision"):
             Charm.model_validate({**bundle_app.charm.model_dump(), "revision": 1})
         exported = yaml.safe_load(solution.bundles[0].export())
@@ -87,6 +94,17 @@ class TestLocalCharm:
             archive.writestr("../metadata.yaml", "name: unsafe\n")
 
         with pytest.raises(ValueError, match="unsafe path"):
+            unpack_charm_artifact(artifact, tmp_path / "unpacked")
+
+    def test_unpack_rejects_symbolic_links(self, tmp_path: Path) -> None:
+        artifact = tmp_path / "symlink.charm"
+        symlink = ZipInfo("dispatch")
+        symlink.create_system = 3
+        symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with ZipFile(artifact, "w") as archive:
+            archive.writestr(symlink, "target")
+
+        with pytest.raises(ValueError, match="symbolic link"):
             unpack_charm_artifact(artifact, tmp_path / "unpacked")
 
     def test_unpack_charmcraft_artifact(self, tmp_path: Path) -> None:

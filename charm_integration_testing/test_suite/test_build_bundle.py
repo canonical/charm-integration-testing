@@ -45,9 +45,6 @@ def test_build_bundle(
     neighbor_platform: str,
     neighbor_arch: str,
 ) -> None:
-    if local_target_charm is not None and (target_channel is not None or target_revision is not None):
-        pytest.fail("--target-channel and --target-revision cannot be used with --target-charm-file.")
-
     target_app_spec = AppSpec(
         charm=target_charm,
         channel=target_channel,

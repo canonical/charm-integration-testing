@@ -164,8 +164,8 @@ CharmResourceValue = str | None
 
 class Charm(BaseModel):
     name: str
-    channel: CharmChannel | None
-    revision: int | None
+    channel: CharmChannel | None = None
+    revision: int | None = None
     ubuntu_version: str
     ubuntu_arch: str
     source_path: Path | None = None

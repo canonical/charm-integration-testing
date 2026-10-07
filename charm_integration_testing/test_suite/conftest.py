@@ -530,6 +530,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    if config.getoption("--target-charm-file") and (
+        config.getoption("--target-channel") != "default" or config.getoption("--target-revision") != "default"
+    ):
+        raise pytest.UsageError("--target-channel and --target-revision cannot be used with --target-charm-file.")
+
+
 @pytest.fixture
 def target_bundle(request: pytest.FixtureRequest, local_target_charm: Path | None) -> Path:
     """Path to the target model's bundle YAML. Defaults to ``generated-target-bundle.yaml``."""
@@ -639,7 +646,8 @@ def local_target_charm(request: pytest.FixtureRequest) -> Iterator[Path | None]:
         pytest.fail("--target-charm-file must point to a packed .charm artifact.")
     juju_snap_common = Path.home() / "snap/juju/common"
     # Juju installed as a snap cannot read pytest's usual /tmp-based fixture directories.
-    temp_root = juju_snap_common if juju_snap_common.is_dir() else Path.home()
+    temp_root = juju_snap_common if Path("/snap/juju/current").exists() else Path.home()
+    temp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="cit-target-charm-", dir=temp_root) as temp_dir:
         destination = Path(temp_dir) / "charm"
         try:
@@ -691,8 +699,6 @@ def target_resolved_charm(request: pytest.FixtureRequest, local_target_charm: Pa
     when the target cannot be resolved on the requested series.
     """
     target_charm: str = request.getfixturevalue("target_charm")
-    if local_target_charm is not None:
-        pytest.skip("Charmhub release resolution is not applicable when testing a local charm artifact.")
     target_channel: str | None = request.getfixturevalue("target_channel")
     target_revision: int | None = request.getfixturevalue("target_revision")
     target_series: str | None = request.getfixturevalue("target_series")
@@ -701,6 +707,16 @@ def target_resolved_charm(request: pytest.FixtureRequest, local_target_charm: Pa
     juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
     bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+
+    if local_target_charm is not None:
+        return charmhub_client.charm_from_local(
+            charm_path=local_target_charm,
+            charm_name=target_charm,
+            ubuntu_arch=target_arch,
+            juju_version=bundle_juju_version,
+            platform=target_platform,
+            ubuntu_version=target_series,
+        )
 
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
     channel_track = channel.track or None if channel else None
