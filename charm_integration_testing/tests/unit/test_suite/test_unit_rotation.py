@@ -87,9 +87,11 @@ def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> 
     client.fail_next_remove_after_callback = True
     client.extra_units_on_scale_up = 1
 
-    with pytest.raises(RuntimeError, match="unit removal hook failed"):
+    with pytest.raises(TimeoutError, match="model failed to become idle") as error:
         _rotate_units(client, k8s_model=False)
 
+    assert isinstance(error.value.__cause__, RuntimeError)
+    assert str(error.value.__cause__) == "unit removal hook failed"
     assert [call[1] for call in client.calls if call[0] == "remove_unit"] == [
         "target/3",
         "target/surge-extra-0",
@@ -109,6 +111,18 @@ def test_unit_rotation_waits_for_async_machine_removal_before_cleaning_surge() -
     assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0"]
     assert client.units == ["target/1", "target/2", "target/3"]
     assert not client.pending_unit_removals
+
+
+def test_unit_rotation_preserves_machine_error_when_surge_cleanup_fails() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_remove_after_callback = True
+    client.fail_multi_model_idle_on_call = 2
+
+    with pytest.raises(RuntimeError, match="unit removal hook failed") as error:
+        _rotate_units(client, k8s_model=False)
+
+    assert isinstance(error.value.__cause__, TimeoutError)
+    assert str(error.value.__cause__) == "cleanup idle wait failed"
 
 
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
@@ -161,6 +175,21 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
+    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+
+
+def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    kubernetes_client.fail_wait_for_new_pod = True
+    client.fail_multi_model_idle_on_call = 2
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(TimeoutError, match="replacement pod did not appear") as error:
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
+
+    assert isinstance(error.value.__cause__, TimeoutError)
+    assert str(error.value.__cause__) == "cleanup idle wait failed"
     assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
 
 
