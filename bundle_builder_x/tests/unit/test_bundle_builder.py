@@ -102,6 +102,7 @@ class _FakeCharmhubClient(CharmhubClient):
         charm_risk: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
     ) -> Charm:
         self.charm_from_store_calls.append(
             {
@@ -113,6 +114,7 @@ class _FakeCharmhubClient(CharmhubClient):
                 "charm_risk": charm_risk,
                 "charm_revision": charm_revision,
                 "ubuntu_version": ubuntu_version,
+                "charm_branch": charm_branch,
             }
         )
         resp = next(self._responses)
@@ -344,6 +346,34 @@ class TestGetCharmsForEndpoint:
 
         # AND charm_from_store is called with ubuntu_version=None (base irrelevant for global scope)
         assert fake.charm_from_store_calls[0]["ubuntu_version"] is None
+
+    def test_forwards_trackless_channel_branch(self) -> None:
+        # GIVEN an application pinned to a trackless branched channel
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(
+            arch="amd64",
+            platform="machine",
+            juju_version=_JUJU,
+            applications={
+                "app": DomainApplication(
+                    charm="my-charm",
+                    channel=CharmChannel.model_validate("stable/feature"),
+                    revision=5,
+                    base="22.04",
+                )
+            },
+        )
+        charm = _make_charm("my-charm", {})
+        fake = _FakeCharmhubClient(charm_responses=charm)
+        builder = BundleBuilder(charmhub_client=fake)
+
+        # WHEN resolving the application charm
+        result = builder._get_charm_for_application("app", domain, model_ref)
+
+        # THEN the branch is forwarded with the channel selectors
+        assert result is charm
+        assert fake.charm_from_store_calls[0]["charm_branch"] == "feature"
 
     def test_adds_all_compatible_candidates(self) -> None:
         # GIVEN two compatible candidates for one unresolved endpoint
