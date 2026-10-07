@@ -133,11 +133,11 @@ class _CassandraConnectionMixin:
         entries. ``Cluster`` expects bare contact points (no brackets) for IPv6 literals, so the
         brackets are stripped after splitting.
         """
-        endpoints = data.get("endpoints")
-        if not endpoints:
+        if "endpoints" not in data:
             host = data.get("host", "").strip()
             port = int(data["native_transport_port"]) if data.get("native_transport_port") else 9042
             return ([host] if host else [], port)
+        endpoints = data["endpoints"]
 
         hosts: list[str] = []
         port = 9042
