@@ -121,9 +121,11 @@ class _CassandraConnectionMixin:
         Prefers a modern, comma-separated "endpoints" field ("host:port, host:port, ..."); falls
         back to the legacy ``cassandra`` interface's single ``host``/``native_transport_port``
         fields when "endpoints" isn't present. ``Cluster`` takes one ``port`` shared by every
-        contact point (unlike a list of "host:port" pairs), so for "endpoints" the port from the
-        last entry that specifies one wins; every entry is expected to share the same port in
-        practice.
+        contact point (unlike a list of "host:port" pairs), so every "endpoints" entry that
+        specifies a port must agree on the same value; a provider advertising inconsistent or
+        malformed (empty) per-entry ports is a misconfiguration this validator must reject rather
+        than silently resolve by picking one value, since that could have this validator connect
+        to - and validate - a different service than the one the provider actually advertised.
 
         An entry may be a bracketed IPv6 literal, e.g. "[::1]:9042" - ``partition(":")`` would
         split that on the *first* colon (inside the address itself) rather than the one
@@ -135,28 +137,38 @@ class _CassandraConnectionMixin:
         """
         if "endpoints" not in data:
             host = data.get("host", "").strip()
-            port = int(data["native_transport_port"]) if data.get("native_transport_port") else 9042
-            return ([host] if host else [], port)
+            legacy_port = int(data["native_transport_port"]) if data.get("native_transport_port") else 9042
+            return ([host] if host else [], legacy_port)
         endpoints = data["endpoints"]
 
         hosts: list[str] = []
-        port = 9042
+        port: int | None = None
         for entry in (e.strip() for e in endpoints.split(",")):
             if not entry:
                 continue
             if ":" in entry:
                 host, _, port_str = entry.rpartition(":")
+                if not port_str:
+                    raise RuntimeError(f"endpoint {entry!r} in 'endpoints' has a malformed, empty port")
+                try:
+                    entry_port = int(port_str)
+                except ValueError:
+                    raise RuntimeError(f"endpoint {entry!r} in 'endpoints' has a malformed, non-numeric port") from None
+                if port is not None and entry_port != port:
+                    raise RuntimeError(
+                        f"'endpoints' specifies inconsistent ports ({port} vs {entry_port}); "
+                        "every contact point must share one port"
+                    )
+                port = entry_port
             else:
                 # No colon at all: a bare host with no explicit port, not an empty host with an
                 # explicit one - rpartition(":") can't distinguish the two (both yield host="",
                 # non-empty remainder), so check for a colon up front instead.
-                host, port_str = entry, ""
+                host = entry
             host = host.removeprefix("[").removesuffix("]")
             if host:
                 hosts.append(host)
-            if port_str:
-                port = int(port_str)
-        return hosts, port
+        return hosts, port if port is not None else 9042
 
     def _build_ssl_context(self, ca_content: str) -> ssl.SSLContext:
         """Build an SSLContext from PEM CA content without leaving a temp file behind.

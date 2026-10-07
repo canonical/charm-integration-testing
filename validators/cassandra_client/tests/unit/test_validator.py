@@ -280,6 +280,48 @@ class TestCassandraClientPersistenceValidatorConnection:
         assert kwargs["contact_points"] == ["cassandra-0.example", "2001:db8::1"]
         assert kwargs["port"] == 9042
 
+    def test_rejects_endpoints_with_inconsistent_ports(self) -> None:
+        # GIVEN two "endpoints" entries that disagree on their port. Regression test for: the
+        # port from the last entry that specified one silently won, so this validator could
+        # connect to - and validate - a different service than the one the provider actually
+        # advertised. Cluster only accepts one shared port, so this must be rejected outright.
+        databag = {**VALID_DATABAG, "endpoints": "node-a:9042,node-b:9142"}
+        validator = _make_persistence_validator(databag)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="inconsistent ports"):
+                validator.prepare()
+
+        # THEN no connection was even attempted.
+        mock_cluster_cls.assert_not_called()
+
+    def test_rejects_an_endpoint_with_a_malformed_empty_port(self) -> None:
+        # GIVEN an "endpoints" entry with a trailing colon but no port digits at all.
+        databag = {**VALID_DATABAG, "endpoints": "node-a:"}
+        validator = _make_persistence_validator(databag)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="malformed, empty port"):
+                validator.prepare()
+
+        # THEN no connection was even attempted.
+        mock_cluster_cls.assert_not_called()
+
+    def test_rejects_an_endpoint_with_a_non_numeric_port(self) -> None:
+        # GIVEN an "endpoints" entry whose port isn't a number.
+        databag = {**VALID_DATABAG, "endpoints": "node-a:native"}
+        validator = _make_persistence_validator(databag)
+
+        with patch("validators.cassandra_client.validator.Cluster") as mock_cluster_cls:
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="malformed, non-numeric port"):
+                validator.prepare()
+
+        # THEN no connection was even attempted.
+        mock_cluster_cls.assert_not_called()
+
     def test_shuts_down_the_cluster_when_the_initial_connect_fails(self) -> None:
         # GIVEN Cluster.connect() raises (e.g. the service is still restarting). Regression test
         # for: this previously left the newly constructed cluster running - connect() raising
