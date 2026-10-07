@@ -176,8 +176,9 @@ def _rotate_machine_units(
                 raise RuntimeError(f"Unit {unit} was not removed after rotation.")
             for model_ref in models:
                 juju_client.validate_model(model=model_ref, level="simple")
-        finally:
+        except BaseException:
             _cleanup_machine_surge(juju_client, application, model, original_units, len(units), models, unit, timeout)
+            raise
 
 
 def _cleanup_machine_surge(
@@ -190,6 +191,7 @@ def _cleanup_machine_surge(
     rotated_unit: str,
     timeout: timedelta,
 ) -> None:
+    juju_client.multi_model_idle_for_period(models, timeout=timeout)
     current_units = juju_client.application_units(application, model=model)
     if len(current_units) <= unit_count:
         return
