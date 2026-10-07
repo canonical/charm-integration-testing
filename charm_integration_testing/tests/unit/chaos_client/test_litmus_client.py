@@ -670,6 +670,61 @@ def test_rejected_stop_does_not_suppress_later_execution_failure(context: Client
     context.setups[0].cleanup.assert_called_once()
 
 
+def test_stop_retries_operator_version_conflict(context: ClientContext) -> None:
+    # GIVEN an operator update between reading the Engine and sending its stop patch
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    versions: list[str] = []
+
+    def patch(*, name: str, body: dict[str, Any], **kwargs: Any) -> None:
+        versions.append(body["metadata"]["resourceVersion"])
+        if len(versions) == 1:
+            context.engines[name]["metadata"]["resourceVersion"] = "2"
+            raise ApiException(status=409)
+        context.stop(name=name, body=body)
+
+    api.patch_namespaced_custom_object.side_effect = patch
+    # WHEN cleanup runs, THEN it retries using the updated resourceVersion.
+    chaos.cleanup(MODEL, UNIT, "")
+    assert versions == ["1", "2"]
+    assert not context.engines
+    context.setups[0].cleanup.assert_called_once()
+
+
+def test_stop_conflict_retry_refuses_replaced_engine(context: ClientContext) -> None:
+    # GIVEN the original Engine is replaced during the failed patch
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+
+    def patch(*, name: str, **kwargs: Any) -> None:
+        context.engines[name]["metadata"]["uid"] = "replacement"
+        raise ApiException(status=409)
+
+    api.patch_namespaced_custom_object.side_effect = patch
+    # WHEN retrying, THEN the replacement is never patched or deleted.
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert "was replaced" in str(error.value.errors[0])
+    api.patch_namespaced_custom_object.assert_called_once()
+    api.delete_namespaced_custom_object.assert_not_called()
+    context.setups[0].cleanup.assert_not_called()
+
+
+def test_persistent_stop_conflict_is_bounded(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    api = context.backend.custom_objects_api
+    api.patch_namespaced_custom_object.side_effect = ApiException(status=409)
+    with pytest.raises(ChaosCleanupError) as error:
+        chaos.cleanup(MODEL, UNIT, "")
+    assert isinstance(error.value.errors[0], TimeoutError)
+    assert "stop request" in str(error.value.errors[0])
+    assert api.patch_namespaced_custom_object.call_count == 3
+    context.setups[0].cleanup.assert_not_called()
+
+
 @pytest.mark.parametrize("kind", ["jobs", "pods", "chaosresults"])
 @pytest.mark.parametrize("failure_status", [409, 503])
 def test_cleanup_retry_does_not_adopt_replacement_uid(context: ClientContext, kind: str, failure_status: int) -> None:
