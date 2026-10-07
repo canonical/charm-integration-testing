@@ -1,7 +1,7 @@
 CassandraClientPersistenceValidator — verification summary
 ============================================================
-Date: 2026-10-05
-Commit base: 6dbd88fa839b43e0507f50c8ee53788210a74193
+Date: 2026-10-07 (updated; see STEP 9 for this run's fresh evidence)
+Commit base: 0f61d83ef44280c968d85e283f4d8c4184be5fc5 (branch SQT-928, PR #1110)
 Scope: validators/cassandra_client/ (CassandraClientPersistenceValidator)
 
 ORIGINAL CLAIM UNDER INVESTIGATION
@@ -218,5 +218,69 @@ hadn't changed since the previous review ("previously missed"):
 
 All fixes were re-verified with the full suite: 46/46 cassandra_client tests, 66/66 runner tests,
 format.sh and lint.sh all clean.
+
+STEP 9 — FRESH RE-VERIFICATION AFTER FIFTH REVIEW ROUND + MERGE WITH main (this run)
+-------------------------------------------------------------------------------------
+Since STEP 8, two more substantive changes landed on this branch and were re-verified end-to-end
+against a brand-new live deployment (not reused from the prior run):
+
+1. (High, 5th Copilot review round) `_canary_keyspace_replication()` interpolated the
+   datacenter name returned by `system.local`/`system.peers` directly into a CQL string literal
+   when building the per-DC `NetworkTopologyStrategy` replication map. A datacenter name
+   containing a single quote (a value under the Cassandra operator's control, not attacker input,
+   but still a CQL-injection-shaped correctness bug) would break out of the literal and produce
+   invalid/malicious CQL. Fixed by adding `_quote_literal()` (doubles embedded single quotes,
+   mirroring the existing `_quote_identifier()` helper) and using it for the datacenter name.
+   Test: test_escapes_a_datacenter_name_containing_a_single_quote.
+2. Merged `main` into this branch to resolve a merge conflict blocking the PR (`mergeable:
+   CONFLICTING`). Only `poetry.lock` conflicted (pure metadata: Poetry version string and
+   content-hash); resolved by regenerating the lock file via `poetry lock`. `poetry install` and
+   the full test suite were re-run post-merge with no regressions.
+3. Picked up an upstream commit (0f61d83e, "Refactor endpoint retrieval from data", landed
+   directly on this branch, not from a review cycle) that changed `_parse_endpoints()`'s
+   modern/legacy discriminator from `data.get("endpoints")` truthiness to `"endpoints" not in
+   data` key-presence — a stricter form of the same STEP 7 fix (#2 above), now applied directly
+   rather than only guarded by a test.
+
+STATIC RE-VERIFICATION (this run)
+  - poetry run pytest validators/cassandra_client/tests/unit -q   -> 48/48 passed
+    (46 from STEP 8 + 2 added for the datacenter-literal-escaping fix in this round)
+  - poetry run mypy --explicit-package-bases validators/cassandra_client -> clean
+  - ./scripts/format.sh -> clean (318 files checked, 0 changed)
+  - ./scripts/lint.sh (bulk, whole repo) -> fails only on pre-existing, unrelated
+    validators/zookeeper mypy errors (missing `kazoo` type stubs / stale `type: ignore` comments).
+    Confirmed via `git stash`/direct inspection that these same errors are present on `main`
+    itself, i.e. inherited, not introduced by this branch's changes. The scoped mypy run above
+    confirms cassandra_client itself is clean.
+
+LIVE END-TO-END RE-VERIFICATION (this run, brand-new deployment)
+  A fresh LXD/Juju model (`cassandra-verify-2`) was stood up from scratch: the real `cassandra`
+  charm (CharmHub `latest/stable`, revision 65) and a freshly rebuilt `cassandra-tester` throwaway
+  requirer charm, related over the `cassandra` interface. The same install_sources/GPG-key
+  workaround documented in STEP 2/CAVEATS above was required again (confirms this is a property
+  of the charm, reproducible independently of the specific deployment).
+
+  Run via `development-sandbox/bin/verify-persistence-validator.sh --down-cmd "... systemctl stop
+  cassandra" --restore-cmd "... systemctl start cassandra"` (the same real, in-place disruption
+  documented in STEP 6/CAVEATS, now wired through the script's generic --down-cmd/--restore-cmd
+  mechanism instead of a manual dev-persistence.py sequence):
+
+  1. prepare() -> state: {"id": 2825069330712113919, "ref": 1, "token": "25bae786..."}
+  2. REAL DISRUPTION: `sudo systemctl stop cassandra` then `sudo systemctl start cassandra` on
+     cassandra/0. The script's unit/idle wait (juju-status-based) returned before the Cassandra
+     JVM had finished re-opening its native transport port; the first checkpoint attempt correctly
+     surfaced `ConnectionRefusedError` on 10.x.x.x:9042 rather than falsely passing. After
+     confirming port 9042 was listening again (`ss -tlnp`), checkpoint was re-run.
+  3. checkpoint(expected) -> PASS
+     "Found expected 1 marked row(s) in 'canary_a65c1f52a837_2825069330712113919'."
+  4. cleanup() -> ran cleanly; independently confirmed via `cqlsh -e "DESCRIBE KEYSPACES;"` on the
+     cassandra/0 node directly that no `canary_*` keyspace remained afterward.
+
+CONCLUSION (this run)
+  The fifth-round fix and the main-branch merge are both genuinely re-verified against a fresh,
+  real deployment: the full prepare -> real service-level disruption -> checkpoint -> cleanup
+  lifecycle still passes, and cleanup's effect was independently confirmed on the live node rather
+  than taken on trust from the validator's own exit code. No regressions were introduced by the
+  merge or the datacenter-escaping fix.
 
 
