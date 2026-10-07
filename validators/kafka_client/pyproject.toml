@@ -11,12 +11,15 @@ authors = [
 
 requires-python = ">=3.10"
 dependencies = [
-    "kafka-python>=2.0.0",
+    "kafka-python>=2.2.0",
     "validators-base",
 ]
 
 [project.entry-points."endpoint_validators"]
 kafka_client = "validators.kafka_client:KafkaClientValidator"
+
+[project.entry-points."endpoint_persistence_validators"]
+kafka_client = "validators.kafka_client:KafkaClientPersistenceValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
