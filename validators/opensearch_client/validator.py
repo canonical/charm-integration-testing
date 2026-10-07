@@ -132,11 +132,8 @@ class _OpenSearchConnectionMixin:
             if not ep:
                 continue
             if ":" in ep:
-                host, port_str = ep.rsplit(":", 1)
-                try:
-                    hosts.append({"host": host, "port": int(port_str)})
-                except ValueError:
-                    hosts.append({"host": host, "port": 9200})
+                except ValueError as exc:
+                    raise RuntimeError(f"Invalid port in OpenSearch endpoint '{ep}'.") from exc
             else:
                 hosts.append({"host": ep, "port": 9200})
 
