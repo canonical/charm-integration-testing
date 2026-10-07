@@ -69,7 +69,7 @@ Writing a new validator
 The runner will discover and invoke the validator automatically for any relation whose interface matches the key.
 
 Data integrity and persistence validation
-------------------------------------------
+-----------------------------------------
 
 Persistence validators check that data survives disruptive operations (e.g. restarting a
 controller, upgrading/downgrading a charm, scaling, migrating a model) rather than just checking
@@ -165,7 +165,7 @@ See the ``develop-persistence-validator`` skill
 ``validators/postgresql_client`` as the reference implementation.
 
 Kyuubi connection requirements
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``KyuubiClientPersistenceValidator`` uses the ``kyuubi_client`` relation's
 ``uris`` or ``endpoints`` and requires usable ``username`` and ``password``
