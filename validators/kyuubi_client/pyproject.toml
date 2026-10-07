@@ -2,31 +2,35 @@
 # See LICENSE file for licensing details.
 
 [project]
-name = "validators-kafka-client"
+name = "validators-kyuubi-client"
 version = "0.1.0"
-description = "Validator for kafka_client interface"
+description = "Persistence validator for the kyuubi_client interface"
 authors = [
     {name = "SQA Team", email = "solutionsqa@canonical.com"}
 ]
 
 requires-python = ">=3.10"
 dependencies = [
-    "kafka-python>=2.2.0",
+    "PyHive[hive_pure_sasl]>=0.7.0,<0.8.0",
+    "thrift>=0.16.0,<1.0.0",
+    "thrift-sasl>=0.4.3,<0.5.0",
     "validators-base",
 ]
 
-[project.entry-points."endpoint_validators"]
-kafka_client = "validators.kafka_client:KafkaClientValidator"
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
 
 [project.entry-points."endpoint_persistence_validators"]
-kafka_client = "validators.kafka_client:KafkaClientPersistenceValidator"
+kyuubi_client = "validators.kyuubi_client:KyuubiClientPersistenceValidator"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["validators.kafka_client"]
+packages = ["validators.kyuubi_client"]
 
 [tool.setuptools.package-dir]
-"validators.kafka_client" = "."
+"validators.kyuubi_client" = "."

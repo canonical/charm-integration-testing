@@ -50,6 +50,7 @@ dependencies = [
     "validators-certificate-transfer",
     "validators-trino-client",
     "validators-trino-catalog",
+    "validators-kyuubi-client",
     "validators-cross-model-mesh",
     "validators-smtp",
     "validators-saml",
