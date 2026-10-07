@@ -213,12 +213,10 @@ class _KafkaConnectionMixin:
             return 1
         return max(1, min(3, broker_count))
 
-    def _ensure_topic_exists(self, data: dict[str, str], topic: str, match_application_topology: bool = False) -> None:
-        """Create the topic if it does not already exist.
+    def _ensure_topic_exists(self, data: dict[str, str], topic: str, match_application_topology: bool = False) -> bool:
+        """Create the topic if it does not already exist. Returns whether it already existed.
 
-        kafka-k8s sets auto.create.topics.enable=false, so the topic must be
-        created explicitly. Errors are swallowed — if creation fails the produce
-        step will surface a meaningful error instead.
+        kafka-k8s sets auto.create.topics.enable=false, so the topic must be created explicitly.
 
         ``match_application_topology`` is ``False`` by default, preserving this method's original
         single-replica functional-probe behavior for ``KafkaClientValidator._validate_deep()``'s own
@@ -227,6 +225,16 @@ class _KafkaConnectionMixin:
         to the application topic's own topology (see ``_resolve_canary_replica_assignment``) - a
         functional probe run without that opt-in must keep working on a cluster/credentials set up
         only for a single-replica topic, exactly as it did before persistence support existed.
+
+        For the functional probe, a non-``TopicAlreadyExistsError`` creation failure is still
+        swallowed — the subsequent produce step surfaces a meaningful error instead, and the probe
+        doesn't care what topology an implicit, broker-side auto-create would use. For persistence
+        (``match_application_topology=True``), the same failure is **not** swallowed: silently
+        proceeding to ``producer.send()`` on a broker with ``auto.create.topics.enable=true`` would
+        let the topic come into existence with cluster defaults instead of the replica
+        assignment/replication factor just resolved above, so a later durability check could pass
+        against a canary topic with different durability guarantees than the application's own
+        topic. Raising here instead lets the caller (``prepare()``) fail loudly.
         """
         admin: KafkaAdminClient | None = None
         try:
@@ -244,10 +252,13 @@ class _KafkaConnectionMixin:
             else:
                 new_topic = NewTopic(topic, num_partitions=1, replication_factor=1)
             admin.create_topics([new_topic])
+            return False
         except TopicAlreadyExistsError:
-            pass
-        except Exception:  # nosec B110 - best-effort; produce step will catch real failures
-            pass
+            return True
+        except Exception:
+            if match_application_topology:
+                raise
+            return False  # nosec B110 - functional probe: produce step will catch real failures
         finally:
             self._close_admin(admin)
 
@@ -591,7 +602,17 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
         token = uuid.uuid4().hex
         try:
             data = self._connection_data()
-            self._ensure_topic_exists(data, topic, match_application_topology=True)
+            topic_already_existed = self._ensure_topic_exists(data, topic, match_application_topology=True)
+            if topic_already_existed:
+                # The topic can only already exist here if an earlier prepare() call for this
+                # same identifier created and wrote it, but its result never reached the caller
+                # (e.g. the caller retried after an ambiguous failure). Blindly producing another
+                # ref=1 message would leave two records at the same ref with different tokens,
+                # which the next checkpoint()'s exact-set check would then reject as corruption -
+                # so adopt that earlier call's already-written canary instead of duplicating it.
+                reconciled_token = self._reconcile_existing_canary(data, topic)
+                if reconciled_token is not None:
+                    return PersistenceState(id=identifier, ref=1, token=reconciled_token)
             self._produce_canary_message(data, topic, token, 1)
         finally:
             # _build_kafka_client_kwargs() writes the TLS CA to a temp file and reuses it across
@@ -599,6 +620,27 @@ class KafkaClientPersistenceValidator(_KafkaConnectionMixin, BasePersistenceVali
             # a PEM file (and a stale cached path) to disk on every prepare() call.
             self._remove_temp_ca_file()
         return PersistenceState(id=identifier, ref=1, token=token)
+
+    def _reconcile_existing_canary(self, data: dict[str, str], topic: str) -> str | None:
+        """Return the token of a pre-existing, single, well-formed ref=1 record in *topic*.
+
+        Only a topic holding **exactly one** record, with a valid (non-bool) ``ref`` of ``1``, is
+        treated as a clean, adoptable canary from an earlier, ambiguously-acknowledged prepare()
+        call for this same identifier. Anything else - no records, more than one, or a malformed
+        ref - is not safely reconcilable (it could be genuine corruption, not just a retried
+        write), so this returns ``None`` and the caller proceeds to write its own fresh canary.
+        """
+        records = self._read_canary_messages(data, topic)
+        if records is None or len(records) != 1:
+            return None
+        record = records[0]
+        if not isinstance(record, dict):
+            return None
+        ref = record.get("ref")
+        token = record.get("token")
+        if isinstance(ref, int) and not isinstance(ref, bool) and ref == 1 and isinstance(token, str) and token:
+            return token
+        return None
 
     def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
         self._require_requires_role()

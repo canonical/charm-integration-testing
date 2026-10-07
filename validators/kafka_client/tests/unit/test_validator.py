@@ -12,6 +12,7 @@ import ops
 import pytest
 from kafka import TopicPartition  # type: ignore[import-untyped]
 from kafka.errors import (  # type: ignore[import-untyped]
+    KafkaError,
     TopicAlreadyExistsError,
     TopicAuthorizationFailedError,
     UnknownTopicOrPartitionError,
@@ -1207,9 +1208,10 @@ class TestKafkaClientPersistenceValidatorPrepare:
         assert not os.path.exists(created_paths[0])
 
     def test_prepare_is_idempotent_for_an_existing_topic(self) -> None:
-        # GIVEN a resumed run reuses the same UUID-derived identifier (e.g. a restored RNG seed):
-        # the second prepare() must hit the already-exists path and still return a usable state,
-        # not fail or silently corrupt the canary chain.
+        # GIVEN a resumed run reuses the same UUID-derived identifier (e.g. a restored RNG seed)
+        # and the topic already holds the single, clean canary record the first call wrote: the
+        # second prepare() must hit the already-exists path, adopt that record's token instead of
+        # writing a duplicate ref=1 message, and still return a usable state.
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
         admin = PersistenceKafkaAdminClientStub()
         producer = KafkaProducerStub()
@@ -1223,17 +1225,79 @@ class TestKafkaClientPersistenceValidatorPrepare:
             # WHEN prepare() is called twice with the same underlying identifier
             first = validator.prepare()
             admin.create_error = TopicAlreadyExistsError()
-            second = validator.prepare()
+            expected_topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{first.id:020d}"
+            # The reconciliation read sees exactly what the first call actually produced - not a
+            # stub hand-built to hide a duplicate write.
+            consumer = PersistenceKafkaConsumerStub(records_by_topic={expected_topic: [_canary_record(first.token, 1)]})
+            with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer):
+                second = validator.prepare()
 
-        # THEN both calls target the same topic, the second tolerates the already-exists error,
-        # and its returned state still checkpoints cleanly against what it actually wrote.
+        # THEN both calls target the same topic and the same (adopted, not re-minted) token, and
+        # only the first call's message was ever produced - no duplicate ref=1 record was written.
         assert first.id == second.id
-        expected_topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{second.id:020d}"
-        consumer = PersistenceKafkaConsumerStub(records_by_topic={expected_topic: [_canary_record(second.token, 1)]})
-        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer):
+        assert first.token == second.token
+        assert len(producer.sent) == 1
+
+        # AND the resulting state still checkpoints cleanly against the complete topic history.
+        checkpoint_consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={expected_topic: [_canary_record(second.token, 1)]}
+        )
+        with patch("validators.kafka_client.validator.KafkaConsumer", return_value=checkpoint_consumer):
             with patch("validators.kafka_client.validator.KafkaProducer", return_value=producer):
                 result, _ = validator.checkpoint(second)
         assert result.status == "PASS"
+
+    def test_prepare_writes_a_fresh_canary_when_existing_topic_is_not_reconcilable(self) -> None:
+        # GIVEN the topic already exists but holds something other than a single, clean ref=1
+        # record (e.g. leftover corruption, or a topic some other process created) - this can't be
+        # safely adopted, so prepare() must fall back to writing its own fresh canary rather than
+        # silently returning a token for data it never verified.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        admin.create_error = TopicAlreadyExistsError()
+        producer = KafkaProducerStub()
+        topic = f"validator_canary_{TEST_SCOPE_TOKEN}_{0:020d}"
+        consumer = PersistenceKafkaConsumerStub(
+            records_by_topic={topic: [_canary_record("stale-token", 1), _canary_record("stale-token", 2)]}
+        )
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+            patch("validators.kafka_client.validator.KafkaConsumer", return_value=consumer),
+            patch("validators.kafka_client.validator.uuid.uuid4", return_value=uuid.UUID(int=0)),
+        ):
+            # WHEN
+            state = validator.prepare()
+
+        # THEN a brand-new canary message was produced rather than adopting the unreconcilable
+        # existing content.
+        assert len(producer.sent) == 1
+        _, _, value = producer.sent[0]
+        assert value is not None
+        assert json.loads(value.decode())["token"] == state.token
+        assert state.token != "stale-token"
+
+    def test_persistence_prepare_propagates_a_genuine_topic_creation_failure(self) -> None:
+        # GIVEN topic creation fails for a reason other than the topic already existing (e.g. an
+        # authorization or broker-config error): silently proceeding to produce() could let a
+        # broker with auto.create.topics.enable=true implicitly create the canary topic with
+        # cluster-default durability settings instead of the resolved application topology,
+        # masking a real admin failure behind an apparently successful persistence run.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()
+        admin.create_error = KafkaError("broker rejected topic creation")
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN / THEN
+            with pytest.raises(KafkaError):
+                validator.prepare()
+        # AND no canary message was ever sent for this failed creation.
+        assert producer.sent == []
 
     def test_canary_messages_use_a_unique_key_per_ref(self) -> None:
         # GIVEN a topic that could be configured with cleanup.policy=compact: a constant message
