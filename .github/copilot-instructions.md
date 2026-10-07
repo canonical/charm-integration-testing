@@ -14,13 +14,22 @@ These principles come from recurring, substantive criticism on past PRs (not rou
 Apply them both when writing code and when reviewing it.
 
 ### 1. Fixes must be evidence-based, not speculative
-- Never present a change as "the fix" when it was not reproduced end-to-end. Phrases like "not
-  reproducible in this environment" or "not credibly testable" next to a proposed fix have been
-  repeatedly rejected (e.g. raising a timeout, loosening a status check, relaxing a wait condition).
-- If a failure cannot be reproduced, say so explicitly, and prefer adding diagnostics/instrumentation
-  or a way to validate against real infrastructure over guessing at a change.
-- Timeout increases, retries, and relaxed conditions are not acceptable default responses to a flaky
-  or hard-to-reproduce failure. Explain precisely why the change addresses the actual root cause.
+- Ground implementation and review conclusions in observable evidence: a reproduced failure,
+  focused tests, logs, traces, or other relevant measurements. Explain how the evidence supports
+  the identified cause and why the proposed change addresses it; do not present a plausible theory
+  as a confirmed root-cause fix.
+- Match validation to the behavior and risk. Unit tests are valuable for isolated logic, but for
+  complex changes or behavior involving Juju, charms, controllers, models, or other live
+  infrastructure, prefer a local end-to-end reproduction or integration test when the environment
+  allows it. Such validation complements unit tests; do not require live testing for every change
+  or claim it was done without evidence.
+- When a failure or behavior cannot be reproduced, state what was and was not verified. Prefer
+  gathering diagnostics or adding a way to validate against the relevant infrastructure over
+  speculative changes. Reviewers should distinguish missing evidence from a proven defect and
+  raise validation gaps in proportion to the change's risk.
+- Timeout increases, retries, and relaxed conditions are not acceptable default responses to a
+  flaky or hard-to-reproduce failure. Require evidence that they address the actual cause rather
+  than masking it.
 
 ### 2. Fix problems at the correct architectural layer
 - Fix the root cause at its source instead of compensating downstream (e.g. a charm-metadata/listing
@@ -68,6 +77,10 @@ Apply them both when writing code and when reviewing it.
 - Also check every PR against the "Lessons From Past PR Reviews" principles above; these are
   process/correctness issues, not style, but have caused repeated `CHANGES_REQUESTED` reviews and
   must be raised as findings alongside style feedback.
+- Assess whether the validation evidence is appropriate to the scope and risk. Unit tests may
+  establish isolated behavior; complex or infrastructure-dependent changes should include a live
+  reproduction or integration evidence when feasible. Do not assume validation from test code
+  alone, and do not overstate what the reported evidence proves.
 - Treat style issues as actionable review feedback, not optional comments.
 - Prefer concrete suggestions that align with established patterns in this repo.
 
