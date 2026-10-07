@@ -27,10 +27,10 @@ def test_remove_and_restore_integration(
     if not integration_endpoints_removable:
         pytest.skip(f"This integration is declared non-removable in {charm_overrides}.")
 
-    # Re-adding the relation assigns a brand new relation_id in every model taking part in it
-    # (both sides, for a CMR), so the extension's pre_remove_integration hook drops the tracked
-    # canary state for this integration before the relation is removed below; the re-add then
-    # seeds fresh canary data under the new relation_id on the next validate.
+    # Re-adding the relation assigns a brand new relation_id in every model taking part in it.
+    # For CMRs, the pre_remove_integration hook clears tracked state on the consuming side, where
+    # the current client persistence validators seed canaries; the re-add then seeds fresh canary
+    # data under the new relation_id on the next validate.
 
     # Break relation
     juju_client.remove_integration(
@@ -63,7 +63,8 @@ def test_remove_and_restore_integration(
 
     juju_client.multi_model_idle_for_period(sorted_model_refs, timeout=timedelta(minutes=15))
 
-    # The pre_remove_integration hook cleaned up the affected models' canary state, so each
-    # validate auto-decides "prepare" and seeds fresh canary data under the new relation_id.
+    # The pre_remove_integration hook cleaned up the consuming side's tracked canary state, so its
+    # validate auto-decides "prepare" and seeds fresh canary data under the new relation_id. The
+    # provider side has no tracked state for the current client persistence validators.
     for model_ref in sorted_model_refs:
         juju_client.validate_model(model=model_ref, level="simple")

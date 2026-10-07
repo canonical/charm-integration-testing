@@ -10,8 +10,10 @@ class SecretStub:
     """Stub for ops.Secret"""
 
     _content: dict[str, str]
+    refresh_calls: list[bool] = field(default_factory=list, init=False)
 
-    def get_content(self) -> dict[str, str]:
+    def get_content(self, *, refresh: bool = False) -> dict[str, str]:
+        self.refresh_calls.append(refresh)
         return self._content
 
 

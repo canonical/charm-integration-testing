@@ -9,7 +9,16 @@ Explicit user requests are non-negotiable. When a user explicitly requests an ac
 
 Before implementing, ask clarifying questions to understand the actual goal, constraints, and expected outcomes.
 
-**Never `git push` unless you have explicit permission to push.** Permission is not implied by having a working `GH_TOKEN`, being asked to "fix", "commit", or "open a PR", or by the push command simply succeeding. If the user has not explicitly told you to push, stop after committing locally and say so. When you do push: try `git push` first; if that fails for a permission-related reason, you may try once via the `gh` CLI as a fallback, then stop either way. Do not go further, e.g. by retrying with different remotes, tokens, or forced flags; report the outcome.
+**Never `git push` unless the user explicitly authorizes pushing.** A configured `GH_TOKEN`/`GITHUB_TOKEN`, or a request to fix, commit, or open a PR, is not permission. Without explicit permission, leave commits local and report that they were not pushed. Do not work around missing permission or a failed push by switching credentials, remotes, protocols, or using force.
+
+When the user explicitly authorizes a push, use the GitHub CLI credential helper with the GitHub token over HTTPS, for example:
+
+```bash
+GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
+  push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
+```
+
+Use the repository and branch the user authorized. Setting `GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (for example, HTTPS-to-SSH) from changing the transport for this command; it does not modify Git configuration. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
 
 ## Tone and Style
 

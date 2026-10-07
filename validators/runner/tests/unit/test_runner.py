@@ -351,6 +351,18 @@ class TestParseCliArgs:
         assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
         assert endpoints is None
 
+    def test_prepare_missing_requires_checkpoint(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_cli_args(["--persistence", "prepare", "--prepare-missing"])
+
+    def test_checkpoint_accepts_prepare_missing(self) -> None:
+        refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
+
+        args, refs, _ = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json, "--prepare-missing"])
+
+        assert args.prepare_missing is True
+        assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+
     def test_invalid_refs_json_exits(self) -> None:
         # WHEN --refs is not valid JSON
         with pytest.raises(SystemExit):
@@ -671,6 +683,35 @@ class TestValidatorRunnerPersistence:
         assert results.results[0].status == "PASS"
         assert results.updated_refs["5"].ref == 2
         assert results.updated_refs["5"].id == 105
+
+    def test_checkpoint_all_prepares_new_relation_without_reseeding_existing_relation(self) -> None:
+        # GIVEN a model with one previously prepared and one newly established relation
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        existing_relation = RelationStub(name="db", id=5)
+        new_relation = RelationStub(name="db", id=6)
+        charm = CharmBaseStub(
+            meta=CharmMetaStub(
+                relations={
+                    "db": RelationMetaStub(
+                        relation_name="db", role=RelationRoleStub.requires, interface_name="test-interface"
+                    )
+                }
+            ),
+            model=ModelStub(relations={"db": [existing_relation, new_relation]}),
+            app=ApplicationStub(),
+        )
+        refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs, prepare_missing=True)
+
+        # THEN the existing relation is checkpointed and the new relation is seeded
+        assert [result.relation_id for result in results.results] == [5]
+        assert results.results[0].status == "PASS"
+        assert results.updated_refs == {
+            "5": PersistenceState(id=105, ref=2, token=TEST_TOKEN),
+            "6": PersistenceState(id=106, ref=1, token=TEST_TOKEN),
+        }
 
     def test_checkpoint_all_does_not_advance_state_on_fail(self) -> None:
         # Regression test for: checkpoint_all() previously recorded the new state returned
