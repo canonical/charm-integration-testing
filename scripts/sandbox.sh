@@ -17,6 +17,8 @@
 #                              the signing key). Falls back to the host's
 #                              `gh auth token` if not set.
 #   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
+#                              Required; falls back to the host's
+#                              `gh auth token`.
 #   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Override for Copilot AI auth inside the
 #                              VM (default: gh auth token)
 #   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
@@ -91,6 +93,57 @@ _collect_sandbox_vars() {
     done < <(compgen -e)
 }
 
+# Resolved GitHub credentials, populated by _require_github_auth.
+VM_GH_TOKEN=""
+COPILOT_TOKEN=""
+
+# Fail fast when no GitHub credentials are resolvable. A sandbox started
+# without them cannot clone, push, open PRs or run Copilot, so there is no
+# point provisioning the VM first.
+_require_github_auth() {
+    VM_GH_TOKEN="${SANDBOX_VAR_GITHUB_TOKEN:-$_gh_token}"
+    COPILOT_TOKEN="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
+
+    local _missing=()
+    [ -n "$VM_GH_TOKEN" ] || _missing+=("SANDBOX_VAR_GITHUB_TOKEN  (gh CLI inside the VM)")
+    [ -n "$COPILOT_TOKEN" ] || _missing+=("SANDBOX_VAR_COPILOT_GITHUB_TOKEN  (Copilot CLI auth)")
+
+    if [ "${#_missing[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    {
+        echo "ERROR: No GitHub credentials available; the sandbox would start unable to do any work."
+        echo "Missing:"
+        printf '  - %s\n' "${_missing[@]}"
+        echo ""
+        echo "Fix with either of:"
+        echo "  1. Authenticate on the host (used as the fallback for both):"
+        echo "       gh auth login -s admin:ssh_signing_key"
+        echo "  2. Set explicit tokens in $DEV_DIR/.env:"
+        echo "       SANDBOX_VAR_GITHUB_TOKEN=<fine-grained PAT>"
+        echo "       SANDBOX_VAR_COPILOT_GITHUB_TOKEN=<token with Copilot access>"
+    } >&2
+    exit 1
+}
+
+# Log the VM's gh CLI in with the resolved token. Piped over stdin so the token
+# never lands in the VM's process list; GH_TOKEN/GITHUB_TOKEN are unset because
+# `gh auth login` refuses to run while they are present.
+_vm_gh_auth_login() {
+    echo "==> Authenticating gh inside the VM..."
+    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc '
+        unset GH_TOKEN GITHUB_TOKEN
+        gh auth login --hostname github.com --with-token
+    '; then
+        {
+            echo "ERROR: 'gh auth login' failed inside the VM; the token is likely invalid or expired."
+            echo "       Set SANDBOX_VAR_GITHUB_TOKEN in $DEV_DIR/.env, or re-run 'gh auth login' on the host."
+        } >&2
+        exit 1
+    fi
+}
+
 _usage() {
     cat <<'EOF'
 Usage:
@@ -112,7 +165,8 @@ Environment (.env keys):
   GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
                          when provisioning the VM (default: gh auth token)
   SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
-  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (default: gh auth token)
+                         (required; default: gh auth token)
+  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (required; default: gh auth token)
   SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
@@ -173,6 +227,8 @@ _cmd_up() {
             *) break ;;
         esac
     done
+
+    _require_github_auth
 
     echo "==> Checking VM state..."
     state=$(_vm_state)
@@ -255,6 +311,8 @@ _cmd_up() {
             echo '==> gh: found.'
         fi
     "
+
+    _vm_gh_auth_login
 
     # Trust all folders in Copilot so it never prompts for folder confirmation.
     echo "==> Configuring Copilot trusted folders..."
@@ -464,7 +522,6 @@ _cmd_shell() {
 # ---------------------------------------------------------------------------
 _cmd_run() {
     COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
-    _copilot_token="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
 
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
@@ -498,6 +555,8 @@ EOF
 
     TASK="${*:-}"
 
+    _require_github_auth
+
     # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         # Resolve relative paths against the project root for consistency.
@@ -519,6 +578,8 @@ EOF
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
     fi
+
+    _vm_gh_auth_login
 
     # All prerequisites met. Copy MCP config into the VM now.
     _mcp_vm_file=""
@@ -548,7 +609,7 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
@@ -563,7 +624,7 @@ EOF
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
