@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from pyhive import hive  # type: ignore[import-untyped]
-from thrift.transport import TSSLSocket  # type: ignore[import-untyped]
+from thrift.transport import TSocket, TSSLSocket  # type: ignore[import-untyped]
 from thrift_sasl import TSaslClientTransport  # type: ignore[import-untyped]
 
 from validators.base import (
@@ -24,6 +24,7 @@ _CANARY_TABLE_PREFIX = "validator_canary_"
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _MAX_CHECKPOINT_REF = (1 << 63) - 1
 _DEFAULT_PORT = 10009
+_SOCKET_TIMEOUT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -92,15 +93,19 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
                 table_exists = any(table_name in {str(value) for value in row} for row in tables)
                 if table_exists:
                     cur.execute(
-                        f"SELECT COUNT(*) FROM {table} WHERE marker = %s",  # nosec B608 - generated, quoted identifier
-                        (expected.token,),
+                        f"SELECT COUNT(*), "  # nosec B608 - generated, quoted identifier
+                        "COUNT(DISTINCT CASE WHEN checkpoint_ref BETWEEN 1 AND %s THEN checkpoint_ref END) "
+                        f"FROM {table} WHERE marker = %s",
+                        (expected.ref, expected.token),
                     )
                     row = cur.fetchone()
                     matching = int(row[0]) if row else 0
+                    distinct_refs = int(row[1]) if row else 0
                 else:
                     matching = 0
+                    distinct_refs = 0
 
-                passed = matching == expected.ref
+                passed = matching == distinct_refs == expected.ref
                 if passed:
                     next_ref = expected.ref + 1
                     cur.execute(
@@ -114,9 +119,12 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             name="row_count",
             passed=passed,
             message=(
-                f"Found expected {matching} canary row(s) in '{table_name}'."
+                f"Found {matching} canary row(s) with references 1..{expected.ref} in '{table_name}'."
                 if passed
-                else f"Expected {expected.ref} canary row(s) with matching identity in '{table_name}', found {matching}."
+                else (
+                    f"Expected {expected.ref} canary row(s) with references 1..{expected.ref} in '{table_name}', "
+                    f"found {matching} row(s) and {distinct_refs} distinct in-range reference(s)."
+                )
             ),
         )
         result = self._make_result(level="deep", checks=[check])
@@ -206,28 +214,23 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
         if config.tls_ca is not None:
             context = ssl.create_default_context(cadata=config.tls_ca)
             socket = _TLSSocket(config.host, config.port, ssl_context=context)
-            transport = TSaslClientTransport(
-                lambda: hive.get_installed_sasl(
-                    host=config.host,
-                    sasl_auth="PLAIN",
-                    username=config.username,
-                    password=config.password,
-                ),
-                "PLAIN",
-                socket,
-            )
-            return hive.Connection(
-                database=config.database,
+        else:
+            socket = TSocket.TSocket(config.host, config.port)
+        socket.setTimeout(_SOCKET_TIMEOUT_SECONDS * 1000)
+        transport = TSaslClientTransport(
+            lambda: hive.get_installed_sasl(
+                host=config.host,
+                sasl_auth="PLAIN",
                 username=config.username,
-                thrift_transport=transport,
-            )
+                password=config.password,
+            ),
+            "PLAIN",
+            socket,
+        )
         return hive.Connection(
-            host=config.host,
-            port=config.port,
             database=config.database,
             username=config.username,
-            password=config.password,
-            auth="CUSTOM",
+            thrift_transport=transport,
         )
 
     def _canary_table_prefix(self) -> str:

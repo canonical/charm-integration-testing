@@ -170,7 +170,7 @@ Kyuubi connection requirements
 ``KyuubiClientPersistenceValidator`` uses the ``kyuubi_client`` relation's
 ``uris`` or ``endpoints`` and requires usable ``username`` and ``password``
 credentials, resolved from ``secret-user`` when present. Supplied credentials
-use PyHive's ``CUSTOM`` mode with SASL PLAIN for Kyuubi's JDBC authentication.
+use SASL PLAIN, matching PyHive's ``CUSTOM`` mode for Kyuubi's JDBC authentication.
 The provider's LDAP whitespace placeholders are not login credentials and are
 rejected; external LDAP credential provisioning is not supported.
 
@@ -178,3 +178,8 @@ When ``tls`` is ``True``, the validator requires ``tls-ca`` (resolved from
 ``secret-tls`` when present) and verifies both the certificate chain and endpoint
 hostname. Canary operations also require a working storage backend and permission
 to create, read, insert into, and drop tables.
+
+Both plain and TLS transports use a five-second connection and socket I/O timeout.
+Checkpoint validation requires exactly one token-bearing row for every reference
+from 1 through the expected reference, rejecting duplicate or out-of-range references
+before writing another row.

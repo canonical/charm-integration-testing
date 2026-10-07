@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import sqlite3
 import ssl
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -158,17 +159,20 @@ class TestPrepare:
             }
         )
 
-        with patch("validators.kyuubi_client.validator.hive.Connection") as connection:
+        with (
+            patch("validators.kyuubi_client.validator.TSocket.TSocket") as socket,
+            patch("validators.kyuubi_client.validator.hive.Connection") as connection,
+        ):
             validator._open_connection()
 
-        connection.assert_called_once_with(
-            host="kyuubi.example",
-            port=10009,
-            database="test_db",
-            username="canary-user",
-            password="canary-password",
-            auth="CUSTOM",
-        )
+        socket.assert_called_once_with("kyuubi.example", 10009)
+        socket.return_value.setTimeout.assert_called_once_with(5000)
+        options = connection.call_args.kwargs
+        assert options.keys() == {"database", "username", "thrift_transport"}
+        assert options["database"] == "test_db"
+        assert options["username"] == "canary-user"
+        sasl = options["thrift_transport"].sasl_client_factory()
+        assert sasl.start("PLAIN") == (True, "PLAIN", b"\x00canary-user\x00canary-password")
 
     @pytest.mark.parametrize(
         ("username", "password"),
@@ -242,6 +246,7 @@ class TestTLS:
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname
         assert socket.call_args.args == ("kyuubi.example", 10010)
+        socket.return_value.setTimeout.assert_called_once_with(5000)
         actual_transport = connection.call_args.kwargs["thrift_transport"]
         assert actual_transport.mechanism == "PLAIN"
         sasl = actual_transport.sasl_client_factory()
@@ -279,10 +284,44 @@ class TestTLS:
 
     def test_false_tls_flag_ignores_stale_ca(self) -> None:
         validator = _make_validator(databag={**VALID_DATABAG, "tls": "False", "tls-ca": "stale-ca"})
-        with patch("validators.kyuubi_client.validator.hive.Connection") as connection:
+        with (
+            patch("validators.kyuubi_client.validator._TLSSocket") as tls_socket,
+            patch("validators.kyuubi_client.validator.TSocket.TSocket") as plain_socket,
+            patch("validators.kyuubi_client.validator.hive.Connection"),
+        ):
             validator._open_connection()
-        assert connection.call_args.kwargs["auth"] == "CUSTOM"
-        assert "thrift_transport" not in connection.call_args.kwargs
+        tls_socket.assert_not_called()
+        plain_socket.assert_called_once_with("kyuubi.example", 10009)
+
+    def test_advertised_ca_does_not_load_platform_roots(self) -> None:
+        # GIVEN an advertised CA and the real SSL context constructor.
+        validator = _make_validator(databag={**VALID_DATABAG, "tls": "True", "tls-ca": "test-ca"})
+        with (
+            patch("ssl.SSLContext.load_verify_locations") as load_ca,
+            patch("ssl.SSLContext.load_default_certs") as load_defaults,
+            patch("validators.kyuubi_client.validator._TLSSocket") as socket,
+            patch("validators.kyuubi_client.validator.hive.Connection"),
+        ):
+            validator._open_connection()
+
+        # THEN explicit cadata loads only the relation CA, not the default trust store.
+        load_ca.assert_called_once_with(None, None, "test-ca")
+        load_defaults.assert_not_called()
+        context = socket.call_args.kwargs["ssl_context"]
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname
+
+    @pytest.mark.parametrize("tls", ["False", "True"], ids=["plain", "tls"])
+    def test_real_socket_has_bounded_connect_and_io_timeout(self, tls: str) -> None:
+        validator = _make_validator(databag={**VALID_DATABAG, "tls": tls, "tls-ca": "test-ca"})
+        with (
+            patch("ssl.SSLContext.load_verify_locations"),
+            patch("validators.kyuubi_client.validator.hive.Connection") as connection,
+        ):
+            validator._open_connection()
+
+        transport = connection.call_args.kwargs["thrift_transport"]
+        assert transport._trans._timeout == 5
 
     def test_tls_options_pass_real_pyhive_and_socket_argument_validation(self) -> None:
         validator = _make_validator(databag={**VALID_DATABAG, "tls": "True", "tls-ca": "test-ca"})
@@ -299,7 +338,7 @@ class TestCheckpoint:
     def test_passes_and_advances_state_when_count_matches(self) -> None:
         validator = _make_validator()
         table_name = f"{validator._canary_table_prefix()}{42:020d}"
-        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(2,)])
+        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(2, 2)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch.object(validator, "_open_connection", return_value=conn):
@@ -309,15 +348,15 @@ class TestCheckpoint:
         assert new_state == PersistenceState(id=42, ref=3, token=TEST_TOKEN)
         count_query = next(query for query in cursor.executed_queries if query.startswith("SELECT COUNT(*)"))
         assert count_query.endswith("WHERE marker = %s")
-        assert cursor.executed_parameters[1] == (TEST_TOKEN,)
-        assert "BETWEEN" not in count_query
+        assert cursor.executed_parameters[1] == (2, TEST_TOKEN)
+        assert "checkpoint_ref BETWEEN 1 AND %s" in count_query
         assert cursor.executed_queries[-1].endswith("VALUES (%s, %s)")
         assert cursor.executed_parameters[-1] == (TEST_TOKEN, 3)
 
     def test_fails_without_writing_when_count_does_not_match(self) -> None:
         validator = _make_validator()
         table_name = f"{validator._canary_table_prefix()}{42:020d}"
-        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(1, 1)])
         conn = ConnStub(cursor_stub=cursor)
         expected = PersistenceState(id=42, ref=2, token=TEST_TOKEN)
 
@@ -331,7 +370,7 @@ class TestCheckpoint:
     def test_fails_when_table_was_recreated_without_the_original_token(self) -> None:
         validator = _make_validator()
         table_name = f"{validator._canary_table_prefix()}{42:020d}"
-        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(0,)])
+        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(0, 0)])
         conn = ConnStub(cursor_stub=cursor)
         expected = PersistenceState(id=42, ref=1, token=TEST_TOKEN)
 
@@ -342,7 +381,7 @@ class TestCheckpoint:
         assert new_state == expected
         count_query = next(query for query in cursor.executed_queries if query.startswith("SELECT COUNT(*)"))
         assert count_query.endswith("WHERE marker = %s")
-        assert cursor.executed_parameters[1] == (TEST_TOKEN,)
+        assert cursor.executed_parameters[1] == (1, TEST_TOKEN)
         assert not any("INSERT INTO TABLE" in query for query in cursor.executed_queries)
 
     def test_fails_when_table_is_missing(self) -> None:
@@ -388,7 +427,7 @@ class TestCheckpoint:
     def test_binds_restored_token_for_both_read_and_write(self, token: str) -> None:
         validator = _make_validator()
         table_name = validator._canary_table_name(42)
-        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(1,)])
+        cursor = CursorStub(fetchall_rows=[(table_name,)], fetchone_rows=[(1, 1)])
         conn = ConnStub(cursor_stub=cursor)
 
         with patch.object(validator, "_open_connection", return_value=conn):
@@ -396,8 +435,59 @@ class TestCheckpoint:
 
         assert result.status == "PASS"
         assert new_state.token == token
-        assert cursor.executed_parameters == [None, (token,), (token, 2)]
+        assert cursor.executed_parameters == [None, (1, token), (token, 2)]
         assert all(token not in query for query in cursor.executed_queries)
+
+    @dataclass(frozen=True)
+    class ReferenceParams:
+        refs: tuple[int | None, ...]
+        passed: bool
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            ReferenceParams((1, 2, 3), True),
+            ReferenceParams((3, 1, 2), True),
+            ReferenceParams((1, 1, 3), False),
+            ReferenceParams((1, 2, 4), False),
+            ReferenceParams((0, 2, 3), False),
+            ReferenceParams((1, 2, None), False),
+            ReferenceParams((1, 3), False),
+            ReferenceParams((1, 2, 3, 4), False),
+        ],
+        ids=["contiguous", "reordered", "duplicate", "above-range", "below-range", "null", "missing", "extra"],
+    )
+    def test_verifies_actual_reference_set(self, params: ReferenceParams) -> None:
+        # GIVEN token-bearing rows whose count alone may conceal reference corruption.
+        validator = _make_validator()
+        table_name = validator._canary_table_name(42)
+        cursor = CursorStub(fetchall_rows=[(table_name,)])
+        conn = ConnStub(cursor_stub=cursor)
+        expected = PersistenceState(id=42, ref=3, token=TEST_TOKEN)
+        with sqlite3.connect(":memory:") as database:
+            database.execute(f"CREATE TABLE `{table_name}` (marker TEXT, checkpoint_ref INTEGER)")
+            database.executemany(
+                f"INSERT INTO `{table_name}` VALUES (?, ?)", [(TEST_TOKEN, ref) for ref in params.refs]
+            )
+            original_execute = cursor.execute
+
+            def execute(query: str, parameters: tuple[str | int, ...] | None = None) -> None:
+                original_execute(query, parameters)
+                if query.startswith("SELECT"):
+                    cursor.fetchone_rows.append(database.execute(query.replace("%s", "?"), parameters or ()).fetchone())
+
+            # WHEN the real aggregate SQL runs against the seeded reference set.
+            with (
+                patch.object(cursor, "execute", side_effect=execute),
+                patch.object(validator, "_open_connection", return_value=conn),
+            ):
+                result, state = validator.checkpoint(expected)
+
+        # THEN corrupt sets fail without writes or state advancement.
+        assert result.status == ("PASS" if params.passed else "FAIL")
+        assert state == (PersistenceState(id=42, ref=4, token=TEST_TOKEN) if params.passed else expected)
+        assert any(query.startswith("INSERT") for query in cursor.executed_queries) == params.passed
+        assert conn.closed
 
 
 class TestCleanup:
