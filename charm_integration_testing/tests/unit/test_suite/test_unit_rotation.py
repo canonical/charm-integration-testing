@@ -94,8 +94,21 @@ def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> 
         "target/3",
         "target/surge-extra-0",
     ]
-    assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 2
+    assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 3
     assert client.units == ["target/0", "target/1", "target/2"]
+
+
+def test_unit_rotation_waits_for_async_machine_removal_before_cleaning_surge() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.defer_next_remove = True
+    client.fail_next_remove_after_callback = True
+
+    with pytest.raises(RuntimeError, match="unit removal hook failed"):
+        _rotate_units(client, k8s_model=False)
+
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0"]
+    assert client.units == ["target/1", "target/2", "target/3"]
+    assert not client.pending_unit_removals
 
 
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])

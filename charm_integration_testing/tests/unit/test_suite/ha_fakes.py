@@ -40,6 +40,8 @@ class RecordingJujuClient:
         self.fail_next_multi_model_idle = False
         self.fail_multi_model_idle_on_call: int | None = None
         self.fail_next_remove_after_callback = False
+        self.defer_next_remove = False
+        self.pending_unit_removals: list[str] = []
         self.extra_units_on_scale_up = 0
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -71,7 +73,11 @@ class RecordingJujuClient:
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
-        self.units.remove(unit)
+        if self.defer_next_remove:
+            self.defer_next_remove = False
+            self.pending_unit_removals.append(unit)
+        else:
+            self.units.remove(unit)
         if self.fail_next_remove_after_callback:
             self.fail_next_remove_after_callback = False
             raise RuntimeError("unit removal hook failed")
@@ -87,6 +93,9 @@ class RecordingJujuClient:
             raise TimeoutError("model failed to become idle")
         if self.fail_multi_model_idle_on_call == idle_calls:
             raise TimeoutError("cleanup idle wait failed")
+        for unit in self.pending_unit_removals:
+            self.units.remove(unit)
+        self.pending_unit_removals.clear()
 
     def validate_model(self, model: JujuModelHandle, level: str = "simple") -> None:
         self.calls.append(("validate_model", model, level))
