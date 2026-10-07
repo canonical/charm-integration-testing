@@ -1,4 +1,6 @@
 ---
+# The namespace-name gate was removed in canonical/kubeflow-dashboard-operator#310.
+default_channel: 2.0/stable
 # Kubeflow Central Dashboard - main UI entry point
 overrides:
     # Track 1.7: provides is empty in charm metadata; do not declare grafana-dashboard

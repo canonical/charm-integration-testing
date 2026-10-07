@@ -1,4 +1,5 @@
 ---
+default_channel: 2.5/stable
 overrides:
   - criteria:
       - track: '2.16'

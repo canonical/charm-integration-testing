@@ -1,6 +1,7 @@
 ---
 # KFP Metadata Writer - records pipeline execution metadata to MLMD
 listed: true
+default_channel: 2.5/stable
 overrides:
   - requires:
       grpc:

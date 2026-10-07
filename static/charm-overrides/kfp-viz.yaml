@@ -1,4 +1,5 @@
 ---
+default_channel: 2.5/stable
 # KFP Visualization Server - renders pipeline graphs and metrics
 overrides:
   - provides:

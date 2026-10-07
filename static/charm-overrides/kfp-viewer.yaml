@@ -1,0 +1,3 @@
+---
+# The namespace-name gate was removed in canonical/kfp-operators#900.
+default_channel: 2.5/stable
