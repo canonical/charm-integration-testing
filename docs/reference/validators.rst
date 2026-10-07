@@ -163,3 +163,18 @@ Writing a new persistence validator
 See the ``develop-persistence-validator`` skill
 (``.agents/skills/develop-persistence-validator/SKILL.md``) for a full walkthrough, using
 ``validators/postgresql_client`` as the reference implementation.
+
+Kyuubi connection requirements
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``KyuubiClientPersistenceValidator`` uses the ``kyuubi_client`` relation's
+``uris`` or ``endpoints`` and requires usable ``username`` and ``password``
+credentials, resolved from ``secret-user`` when present. Supplied credentials
+use PyHive's ``CUSTOM`` mode with SASL PLAIN for Kyuubi's JDBC authentication.
+The provider's LDAP whitespace placeholders are not login credentials and are
+rejected; external LDAP credential provisioning is not supported.
+
+When ``tls`` is ``True``, the validator requires ``tls-ca`` (resolved from
+``secret-tls`` when present) and verifies both the certificate chain and endpoint
+hostname. Canary operations also require a working storage backend and permission
+to create, read, insert into, and drop tables.

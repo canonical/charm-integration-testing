@@ -3,10 +3,14 @@
 
 import hashlib
 import re
+import ssl
 import urllib.parse
 import uuid
+from dataclasses import dataclass, field
 
 from pyhive import hive  # type: ignore[import-untyped]
+from thrift.transport import TSSLSocket  # type: ignore[import-untyped]
+from thrift_sasl import TSaslClientTransport  # type: ignore[import-untyped]
 
 from validators.base import (
     BasePersistenceValidator,
@@ -20,15 +24,27 @@ _CANARY_TABLE_PREFIX = "validator_canary_"
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _MAX_CHECKPOINT_REF = (1 << 63) - 1
 _DEFAULT_PORT = 10009
-_DEFAULT_USERNAME = "validator"
+
+
+@dataclass(frozen=True)
+class _ConnectionConfig:
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str = field(repr=False)
+    tls_ca: str | None = None
+
+
+class _TLSSocket(TSSLSocket.TSSLSocket):  # type: ignore[misc]
+    def close(self) -> None:
+        # Thrift's SSL socket cannot close an unopened socket after a failed handshake.
+        if self.handle is not None:
+            super().close()
 
 
 def _quote_identifier(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
-
-
-def _quote_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
 
 
 class _IncompleteConnectionConfig(RuntimeError):
@@ -51,7 +67,8 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
                 cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - generated, quoted identifier
                 cur.execute(f"CREATE TABLE {table} (marker STRING NOT NULL, checkpoint_ref BIGINT NOT NULL)")  # nosec B608
                 cur.execute(
-                    f"INSERT INTO TABLE {table} (marker, checkpoint_ref) " f"VALUES ({_quote_literal(token)}, 1)"  # nosec B608 - generated and escaped token
+                    f"INSERT INTO TABLE {table} (marker, checkpoint_ref) VALUES (%s, %s)",  # nosec B608
+                    (token, 1),
                 )
         finally:
             conn.close()
@@ -67,7 +84,6 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
 
         table_name = self._canary_table_name(expected.id)
         table = _quote_identifier(table_name)
-        token = _quote_literal(expected.token)
         conn = self._open_connection()
         try:
             with conn.cursor() as cur:
@@ -76,8 +92,8 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
                 table_exists = any(table_name in {str(value) for value in row} for row in tables)
                 if table_exists:
                     cur.execute(
-                        f"SELECT COUNT(*) FROM {table} "  # nosec B608 - generated, quoted identifier
-                        f"WHERE marker = {token}"  # nosec B608 - token is SQL-literal escaped
+                        f"SELECT COUNT(*) FROM {table} WHERE marker = %s",  # nosec B608 - generated, quoted identifier
+                        (expected.token,),
                     )
                     row = cur.fetchone()
                     matching = int(row[0]) if row else 0
@@ -88,8 +104,8 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
                 if passed:
                     next_ref = expected.ref + 1
                     cur.execute(
-                        f"INSERT INTO TABLE {table} (marker, checkpoint_ref) "  # nosec B608
-                        f"VALUES ({token}, {next_ref})"  # nosec B608 - token is SQL-literal escaped
+                        f"INSERT INTO TABLE {table} (marker, checkpoint_ref) VALUES (%s, %s)",  # nosec B608
+                        (expected.token, next_ref),
                     )
         finally:
             conn.close()
@@ -139,9 +155,10 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
         if self.role != "requires":
             raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
 
-    def _connection_config(self) -> dict[str, str | int]:
+    def _connection_config(self) -> _ConnectionConfig:
         credentials = {
             **self.resolve_secret("secret-user", "username", "password", "uris", "endpoints", "database"),
+            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
         }
         data = self.databag | credentials
         target = data.get("uris") or data.get("endpoints", "")
@@ -169,31 +186,48 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
 
         username = data.get("username", "")
         password = data.get("password", "")
-        username = username if username.strip() else ""
-        password = password if password.strip() else ""
-        if bool(username) != bool(password):
+        if not username.strip() or not password.strip():
             raise _IncompleteConnectionConfig(
-                "Cannot connect to Kyuubi: username and password must be provided together."
+                "Cannot connect to Kyuubi: usable username and password are required; "
+                "LDAP placeholders do not supply login credentials."
             )
 
-        return {
-            "host": host,
-            "port": port,
-            "database": database,
-            "username": username or _DEFAULT_USERNAME,
-            "password": password,
-            "auth": "LDAP" if password else "NONE",
-        }
+        tls = data.get("tls", "false").strip().lower()
+        if tls not in {"true", "false"}:
+            raise _IncompleteConnectionConfig("Cannot connect to Kyuubi: 'tls' must be True or False.")
+        tls_ca = data.get("tls-ca", "") if tls == "true" else None
+        if tls == "true" and not (tls_ca and tls_ca.strip()):
+            raise _IncompleteConnectionConfig("Cannot connect to Kyuubi: TLS is enabled but 'tls-ca' is missing.")
+
+        return _ConnectionConfig(host, port, database, username, password, tls_ca)
 
     def _open_connection(self) -> "hive.Connection":
         config = self._connection_config()
+        if config.tls_ca is not None:
+            context = ssl.create_default_context(cadata=config.tls_ca)
+            socket = _TLSSocket(config.host, config.port, ssl_context=context)
+            transport = TSaslClientTransport(
+                lambda: hive.get_installed_sasl(
+                    host=config.host,
+                    sasl_auth="PLAIN",
+                    username=config.username,
+                    password=config.password,
+                ),
+                "PLAIN",
+                socket,
+            )
+            return hive.Connection(
+                database=config.database,
+                username=config.username,
+                thrift_transport=transport,
+            )
         return hive.Connection(
-            host=str(config["host"]),
-            port=int(config["port"]),
-            database=str(config["database"]),
-            username=str(config["username"]),
-            password=str(config["password"]) if config["auth"] == "LDAP" else None,
-            auth=str(config["auth"]),
+            host=config.host,
+            port=config.port,
+            database=config.database,
+            username=config.username,
+            password=config.password,
+            auth="CUSTOM",
         )
 
     def _canary_table_prefix(self) -> str:
