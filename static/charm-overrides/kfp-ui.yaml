@@ -1,5 +1,5 @@
 ---
-default_channel: 2.5/stable
+default_channel: 2.5/stable  # Align the UI with its API peer on the current stable KFP release line.
 # Source: https://github.com/canonical/kfp-operators/tree/main/charms/kfp-ui
 #
 # 2.0-alpha.7/2.0-beta predate dashboard-links; 2.5 omits the kfp-ui provider, and 2.15-2.16/edge published transient endpoint sets.

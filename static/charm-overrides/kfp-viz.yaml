@@ -1,5 +1,5 @@
 ---
-default_channel: 2.5/stable
+default_channel: 2.5/stable  # Use the stable KFP release line required by the KFP API deployment.
 # KFP Visualization Server - renders pipeline graphs and metrics
 overrides:
   - provides:

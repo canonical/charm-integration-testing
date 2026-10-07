@@ -1,3 +1,2 @@
 ---
-# The namespace-name gate was removed in canonical/kfp-operators#900.
-default_channel: 2.5/stable
+default_channel: 2.5/stable  # Contains the model-name fix from canonical/kfp-operators#900.
