@@ -368,8 +368,10 @@ class JujuClient:
         self,
         model: JujuModelHandle,
         level: str | None = "simple",
+        *,
+        applications: list[str] | None = None,
     ) -> None:
-        """Validate all applications in the model, and run the persistence lifecycle.
+        """Validate selected or all applications, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
@@ -378,12 +380,14 @@ class JujuClient:
             model: Juju model reference
             level: Validation level ("simple" or "deep"), or None to skip functional validation
                 entirely (e.g. when only running a persistence op).
+            applications: Application names to validate; None selects all applications.
 
         Raises:
             JujuValidationError: If any validation or persistence checks fail.
         """
         # Collect applications for validators
-        applications = self.backend.list_applications(model)
+        if applications is None:
+            applications = list(self.backend.list_applications(model))
         self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
 
         # Run validators on each application
