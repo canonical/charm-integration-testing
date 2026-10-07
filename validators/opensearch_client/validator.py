@@ -131,6 +131,7 @@ class _OpenSearchConnectionMixin:
             ep = ep.strip()
             if not ep:
                 continue
+            if ":" in ep:
                 host, port_str = ep.rsplit(":", 1)
                 try:
                     hosts.append({"host": host, "port": int(port_str)})
@@ -138,7 +139,6 @@ class _OpenSearchConnectionMixin:
                     hosts.append({"host": host, "port": 9200})
             else:
                 hosts.append({"host": ep, "port": 9200})
-
         if not hosts:
             # A non-blank but unusable "endpoints" value (e.g. ", " or a bare comma) would
             # otherwise leave hosts empty; opensearch-py silently defaults an empty host list to
