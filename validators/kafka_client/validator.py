@@ -199,6 +199,42 @@ class _KafkaConnectionMixin:
         except Exception:  # nosec B110 - best-effort; fall back to the broker-count heuristic
             return None
 
+    def _reject_unsupported_multi_partition_topology(
+        self, admin: KafkaAdminClient, application_topic: str | None
+    ) -> None:
+        """Raise if *application_topic* has more than one partition.
+
+        This validator's canary topic always has exactly one partition, pinned (via
+        ``_resolve_canary_replica_assignment``) to the same brokers as the application topic's own
+        partition 0. For a multi-partition application topic, Kafka can place other partitions
+        (e.g. partition 1) on different brokers with their own, independently-lost replicas - a
+        disruption destroying only those partitions' data would leave this single-partition canary
+        (and partition 0) unaffected, so ``checkpoint()`` would report PASS despite real
+        application data loss. Rather than silently provide that incomplete guarantee, refuse to
+        prepare a canary for a topology this validator cannot fully cover.
+
+        Unlike ``_resolve_canary_replica_assignment``'s best-effort fallback, a describe failure
+        here is *not* treated as "single partition, proceed": that would just reintroduce the gap
+        this check exists to close. It's only safe to skip the check (return without raising) when
+        the partition count genuinely can't be determined yet (e.g. the application topic isn't
+        describable/doesn't exist yet) - the same case ``_resolve_canary_replica_assignment`` falls
+        back from - since there's then no known multi-partition topology to reject.
+        """
+        if not application_topic:
+            return
+        try:
+            topics = admin.describe_topics([application_topic])
+            partitions = topics[0]["partitions"] if topics else []
+        except Exception:  # nosec B110 - best-effort; undeterminable partition count isn't a known-unsupported topology
+            return
+        if len(partitions) > 1:
+            raise RuntimeError(
+                f"Application topic '{application_topic}' has {len(partitions)} partitions; "
+                f"{type(self).__name__} only supports single-partition topics, since a canary "
+                "pinned to partition 0's brokers cannot detect data loss confined to another "
+                "partition."
+            )
+
     def _resolve_replication_factor(self, admin: KafkaAdminClient) -> int:
         """Pick a fallback replication factor from the live broker count, capped at 3.
 
@@ -235,10 +271,17 @@ class _KafkaConnectionMixin:
         assignment/replication factor just resolved above, so a later durability check could pass
         against a canary topic with different durability guarantees than the application's own
         topic. Raising here instead lets the caller (``prepare()``) fail loudly.
+
+        For persistence, this also rejects a multi-partition application topic up front via
+        ``_reject_unsupported_multi_partition_topology`` - see that method's docstring for why a
+        single-partition canary can't be trusted to detect data loss confined to another
+        partition.
         """
         admin: KafkaAdminClient | None = None
         try:
             admin = self._build_admin_client(data)
+            if match_application_topology:
+                self._reject_unsupported_multi_partition_topology(admin, data.get("topic"))
             replica_assignment = (
                 self._resolve_canary_replica_assignment(admin, data.get("topic"))
                 if match_application_topology

@@ -201,6 +201,7 @@ class PersistenceKafkaAdminClientStub:
     broker_count: int = 1
     describe_cluster_error: Exception | None = None
     application_topic_replica_count: int | None = None
+    application_topic_partition_count: int = 1
     deleted: list[list[str]] = field(default_factory=list, init=False, repr=False)
     created_replication_factors: list[int] = field(default_factory=list, init=False, repr=False)
     created_replica_assignments: list[dict[int, list[int]]] = field(default_factory=list, init=False, repr=False)
@@ -230,9 +231,10 @@ class PersistenceKafkaAdminClientStub:
                 "name": topics[0],
                 "partitions": [
                     {
-                        "partition_index": 0,
+                        "partition_index": partition_index,
                         "replica_nodes": list(range(self.application_topic_replica_count)),
                     }
+                    for partition_index in range(self.application_topic_partition_count)
                 ],
             }
         ]
@@ -1140,6 +1142,48 @@ class TestKafkaClientPersistenceValidatorPrepare:
         # THEN the canary topic's partition 0 is explicitly pinned to the same broker IDs as the
         # application topic's partition 0, not just given a matching replication factor
         assert admin.created_replica_assignments == [{0: [0, 1]}]
+
+    def test_rejects_a_multi_partition_application_topic(self) -> None:
+        # GIVEN the related application topic has more than one partition. Regression test for:
+        # this validator's canary always has exactly one partition, pinned to the same brokers as
+        # the application topic's own partition 0. A disruption confined to another partition
+        # (e.g. partition 1, possibly on different brokers) could destroy application data while
+        # leaving partition 0 and this canary untouched, letting checkpoint() report a false PASS.
+        # Since the canary can't cover every partition, prepare() must refuse this topology rather
+        # than silently provide an incomplete guarantee.
+        databag = PERSISTENCE_VALID_DATABAG | {"topic": "app-topic"}
+        validator = _make_persistence_validator(databag)
+        admin = PersistenceKafkaAdminClientStub(application_topic_replica_count=1, application_topic_partition_count=2)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="partitions"):
+                validator.prepare()
+        # AND no canary topic/message was created for this unsupported topology.
+        assert admin.topics == []
+        assert producer.sent == []
+
+    def test_proceeds_when_the_application_topic_partition_count_cannot_be_determined(self) -> None:
+        # GIVEN the application topic isn't describable yet (e.g. the relation was just
+        # established): an unknown partition count must not be treated as a known-unsupported
+        # multi-partition topology - that would block every prepare() call on a brand-new
+        # relation, the same transient state _resolve_canary_replica_assignment already falls
+        # back from.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        admin = PersistenceKafkaAdminClientStub()  # application_topic_replica_count=None (default)
+        producer = KafkaProducerStub()
+
+        with (
+            patch("validators.kafka_client.validator.KafkaAdminClient", return_value=admin),
+            patch("validators.kafka_client.validator.KafkaProducer", return_value=producer),
+        ):
+            # WHEN / THEN
+            state = validator.prepare()
+        assert isinstance(state, PersistenceState)
 
     def test_falls_back_to_a_replication_factor_of_one_when_describe_cluster_fails(self) -> None:
         # GIVEN describe_cluster() fails (e.g. the credentials lack cluster-describe authority):
