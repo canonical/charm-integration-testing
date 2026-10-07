@@ -330,10 +330,8 @@ class ValidatorRunner:
         logger.info(f"Finished preparing persistence validators: {len(updated_refs)} relation(s) seeded")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
-    def checkpoint_all(
-        self, charm: CharmBase, refs: dict[str, PersistenceState], prepare_missing: bool = False
-    ) -> ValidatorRunnerResults:
-        """Checkpoint refs and optionally prepare live targets without tracked state."""
+    def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
+        """Checkpoint tracked refs and prepare live targets without tracked state."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
@@ -446,14 +444,13 @@ class ValidatorRunner:
                     # baseline, so a later retry could checkpoint against post-failure state.
                     if result.status == "PASS":
                         updated_refs[relation_id_str] = new_state
-        if prepare_missing:
-            for integration, interface_name, role in self._iter_persistence_targets(charm):
-                if integration.id in tracked_relation_ids:
-                    continue
-                state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
-                results.extend(target_results)
-                if state is not None:
-                    updated_refs[str(integration.id)] = state
+        for integration, interface_name, role in self._iter_persistence_targets(charm):
+            if integration.id in tracked_relation_ids:
+                continue
+            state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
+            results.extend(target_results)
+            if state is not None:
+                updated_refs[str(integration.id)] = state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
@@ -589,11 +586,6 @@ def _parse_cli_args(
         ),
     )
     parser.add_argument(
-        "--prepare-missing",
-        action="store_true",
-        help="Prepare live persistence relations without a ref during a checkpoint.",
-    )
-    parser.add_argument(
         "--endpoints",
         default=None,
         help='JSON list of local endpoint names to clean. Only valid for "--persistence cleanup".',
@@ -608,9 +600,6 @@ def _parse_cli_args(
         # argument). Without this check, a typo such as "--persistence prepare --refs ..." would
         # parse and validate the JSON but then silently ignore it.
         parser.error("--refs is only valid when --persistence checkpoint is used")
-
-    if args.prepare_missing and args.persistence != "checkpoint":
-        parser.error("--prepare-missing is only valid when --persistence checkpoint is used")
 
     if args.endpoints is not None and args.persistence != "cleanup":
         parser.error("--endpoints is only valid when --persistence cleanup is used")
@@ -673,7 +662,7 @@ def main() -> None:
         if args.persistence == "prepare":
             persistence_results = runner.prepare_all(charm)
         elif args.persistence == "checkpoint":
-            persistence_results = runner.checkpoint_all(charm, refs, prepare_missing=args.prepare_missing)
+            persistence_results = runner.checkpoint_all(charm, refs)
         elif args.persistence == "cleanup":
             persistence_results = runner.cleanup_all(charm, endpoints=endpoints)
         else:
