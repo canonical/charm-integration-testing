@@ -402,6 +402,37 @@ class TestCharmhubClient:
             assert result is charm
 
     # ---------------------------------------------------------------------------
+    # TestCharmFromStoreDefaultChannelOverride
+    # ---------------------------------------------------------------------------
+
+    class TestCharmFromStoreDefaultChannelOverride:
+        def test_uses_default_channel_when_no_channel_is_requested(self) -> None:
+            # GIVEN a default channel override and a stub that captures refresh actions
+            captured: list[RefreshAction] = []
+            response = _refresh_response_with_charm("istio-ingress-k8s", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    captured.append(action)
+                    return response
+
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient({"default_channel": "1.29/candidate"}),
+            )
+
+            # WHEN fetching without an explicit track, risk, or revision
+            client.charm_from_store(
+                charm_name="istio-ingress-k8s",
+                ubuntu_arch="amd64",
+                ubuntu_version="24.04",
+            )
+
+            # THEN Charmhub is queried using the configured default channel
+            assert len(captured) == 1
+            assert captured[0].charm_channel == "1.29/candidate"
+
+    # ---------------------------------------------------------------------------
     # TestCharmFromStorePlatformOverrides
     # ---------------------------------------------------------------------------
 
