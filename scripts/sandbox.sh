@@ -104,20 +104,24 @@ COPILOT_TOKEN=""
 _confirm_host_token_use() {
     [ "$#" -gt 0 ] || return 0
 
+    local _bold="" _reset=""
+    if [ -t 2 ]; then _bold=$'\033[1m'; _reset=$'\033[0m'; fi
+
     {
-        echo "WARNING: no dedicated token is set for:"
+        echo "${_bold}WARNING: no dedicated token is set for:${_reset}"
         printf '  - %s\n' "$@"
-        echo "The sandbox would use your host 'gh auth token' instead. That token has all"
-        echo "the permissions of your host gh login, and anything running in the VM"
-        echo "(including the AI agent and code from the repos it works on) could use it"
-        echo "to act as you on GitHub: push code, open or merge PRs, change workflows,"
-        echo "or reach private repos and orgs. For gh it is also stored in the VM at"
-        echo "~/.config/gh/hosts.yml and persists until removed."
         echo ""
-        echo "Safer alternative: create fine-grained PATs limited to the repositories you"
-        echo "need (Contents: read, Pull requests: read and write) and set"
-        echo "SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN in"
-        echo "$DEV_DIR/.env."
+        echo "If you continue, the sandbox will use your host 'gh auth token', which"
+        echo "carries every permission your host gh login has. Anything running in the VM,"
+        echo "including the AI agent, can use it to act as you on GitHub. gh also stores it"
+        echo "in the VM (~/.config/gh/hosts.yml) until it is removed."
+        echo ""
+        echo "You are responsible for your own actions. If you proceed without configuring"
+        echo "$DEV_DIR/.env, you accept these risks. To avoid them, set"
+        echo "SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN there to"
+        echo "fine-grained PATs limited to the repositories you need (Contents: read,"
+        echo "Pull requests: read and write)."
+        echo ""
     } >&2
 
     if [ ! -t 0 ]; then
