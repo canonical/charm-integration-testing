@@ -40,7 +40,7 @@ def observe_memory_stress(
 
 @pytest.fixture
 def memory_limit() -> str:
-    """Temporary workload container limit, independent of chaos parameters."""
+    """Default workload limit when no per-charm limit is configured."""
     return "1Gi"
 
 
@@ -79,8 +79,10 @@ def test_live_memory_stress_total(
     workers = settings.memory_exhaustion_workers or 1
     size_mb = settings.memory_exhaustion_size_mb or 2048
     memory_stress_duration = timedelta(seconds=settings.memory_exhaustion_duration_seconds or 600)
+    if settings.memory_exhaustion_limit is not None:
+        memory_limit = settings.memory_exhaustion_limit
     limit_bytes = parse_quantity(memory_limit)
-    if memory_recovery_timeout.total_seconds() <= 0 or limit_bytes <= 0:
+    if memory_recovery_timeout.total_seconds() <= 0 or not limit_bytes.is_finite() or limit_bytes <= 0:
         raise ValueError("Memory limit and recovery timeout must be positive.")
     # Require the size parameter to cover the limit, treating MB conservatively as decimal.
     if size_mb * 1_000_000 < limit_bytes:

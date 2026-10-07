@@ -249,7 +249,9 @@ Defaults are one worker, ``2048`` MB and ``600`` seconds of observation after
 confirmed injection. Per-charm ``memory_exhaustion_workers``,
 ``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` override
 these values. The experiment receives an additional two minutes after settings
-are resolved. Override ``memory_limit`` separately; stress size must cover it.
+are resolved. Set ``memory_exhaustion_limit`` to a positive Kubernetes memory
+quantity (for example, ``2Gi``) to override the ``1Gi`` default; stress size must
+cover the configured limit.
 
 A new out-of-memory termination in the target container after confirmed injection
 ends observation early, even before restart. Neither termination nor a status

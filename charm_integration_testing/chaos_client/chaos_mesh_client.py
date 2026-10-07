@@ -114,6 +114,8 @@ class ChaosMeshChaosClient(ChaosClient):
             ]
             if failures:
                 raise RuntimeError(f"StressChaos {namespace}/{name} failed during observation: {failures}")
+            if not records:
+                raise RuntimeError(f"StressChaos {namespace}/{name} has no container records during observation.")
             if (
                 metadata.get("deletionTimestamp")
                 or annotations.get("experiment.chaos-mesh.org/pause") == "true"

@@ -225,7 +225,10 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
 
 
 @pytest.mark.parametrize("match", [True, False])
-def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, match: bool) -> None:
+@pytest.mark.parametrize("configured_limit", [None, "2Gi"])
+def test_yaml_settings_reach_stress_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, match: bool, configured_limit: str | None
+) -> None:
     (tmp_path / "postgresql-k8s.yaml").write_text(
         "constraints:\n"
         "  - criteria:\n"
@@ -234,6 +237,7 @@ def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.Mon
         "    memory_exhaustion_workers: 2\n"
         "    memory_exhaustion_size_mb: 3072\n"
         "    memory_exhaustion_duration_seconds: 30\n"
+        + (f"    memory_exhaustion_limit: '{configured_limit}'\n" if configured_limit is not None else "")
     )
     juju, kubernetes, chaos = MagicMock(), MagicMock(), MagicMock()
     juju.backend.list_applications.return_value = {
@@ -242,10 +246,18 @@ def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.Mon
         )
     }
     kubernetes.get_charm_pods.return_value = [pod()]
+    limits: list[object] = []
 
     @contextmanager
     def limit(*args: object) -> Iterator[None]:
-        yield
+        limits.append(args[-1])
+        resources = kubernetes.get_charm_pods.return_value[0].spec.containers[0].resources
+        original = resources.limits["memory"]
+        resources.limits["memory"] = args[-1]
+        try:
+            yield
+        finally:
+            resources.limits["memory"] = original
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
     hold = MagicMock()
@@ -273,6 +285,33 @@ def test_yaml_settings_reach_stress_call(tmp_path: Path, monkeypatch: pytest.Mon
         timedelta(seconds=150 if match else 720),
     )
     hold.assert_called_once_with(30 if match else 600)
+    assert limits == [configured_limit if match and configured_limit is not None else "1Gi"]
+
+
+@pytest.mark.parametrize("configured_limit", ["", "0", "-1Gi", "invalid", "NaN", "Infinity", "4Gi"])
+def test_invalid_yaml_limit_fails_before_mutation(tmp_path: Path, configured_limit: str) -> None:
+    # GIVEN an invalid limit or one exceeding the default stress size
+    (tmp_path / "postgresql-k8s.yaml").write_text(f"constraints:\n  - memory_exhaustion_limit: '{configured_limit}'\n")
+    juju, kubernetes, factory = MagicMock(), MagicMock(), MagicMock()
+    juju.backend.list_applications.return_value = {
+        "target": JujuApplicationInfo("postgresql-k8s", 495, CharmChannel.parse("14/stable"), "22.04")
+    }
+
+    # WHEN resolving configuration, THEN fail before touching workload resources
+    with pytest.raises(ValueError):
+        module.test_live_memory_stress_total(
+            juju,
+            factory,
+            MODEL,
+            "target",
+            "1Gi",
+            ResourceConstraintsClient(tmp_path),
+            timedelta(minutes=15),
+            kubernetes,
+            None,
+        )
+    kubernetes.get_charm_pods.assert_not_called()
+    factory.return_value.stress_memory.assert_not_called()
 
 
 @pytest.mark.parametrize("kind", ["machine", "unsupported"])

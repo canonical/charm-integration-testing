@@ -738,6 +738,12 @@ class TestStressObservation:
             "recovery-unknown",
             "recovered-while-running",
             "completed",
+            "running-empty-records",
+            "completed-empty-records",
+            "running-missing-records",
+            "completed-missing-records",
+            "running-null-records",
+            "completed-null-records",
             "stopped",
             "paused",
             "pause-requested",
@@ -769,11 +775,17 @@ class TestStressObservation:
         conditions.append({"type": "AllRecovered", "status": "False"})
         record: dict[str, Any] = {"phase": "Injected", "events": []}
         obj["status"]["experiment"]["containerRecords"] = [record]
-        if state in {"completed", "stopped", "recover-failed"}:
+        if state in {"completed", "stopped", "recover-failed"} or state.startswith("completed-"):
             obj["status"]["experiment"]["desiredPhase"] = "Stop"
             if state != "stopped":
                 conditions[-1]["status"] = "True"
                 record["phase"] = "Not Injected"
+        if state.endswith("empty-records"):
+            obj["status"]["experiment"]["containerRecords"] = []
+        elif state.endswith("missing-records"):
+            del obj["status"]["experiment"]["containerRecords"]
+        elif state.endswith("null-records"):
+            obj["status"]["experiment"]["containerRecords"] = None
         if state in {"apply-failed", "recover-failed"}:
             record["events"] = [
                 {
@@ -820,7 +832,8 @@ class TestStressObservation:
             meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
         else:
             expected = ApiException if state in {"missing-resource", "api-error"} else RuntimeError
-            with pytest.raises(expected):
+            message = "no container records" if state.endswith("records") else None
+            with pytest.raises(expected, match=message):
                 meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
         assert mesh._created == [resource]
         assert not api.delete_calls
