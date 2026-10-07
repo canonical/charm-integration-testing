@@ -174,3 +174,10 @@ sqa
 checkpointing
 walkthrough
 Juju's
+hostname
+JDBC
+Kyuubi
+Kyuubi's
+PyHive
+PyHive's
+SASL
