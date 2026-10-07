@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from juju import JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient
 
 from bundle_builder_x import Charm, CharmChannel
 
@@ -92,11 +93,15 @@ class RecordingJujuClient:
 
 
 class RecordingJujuBackend(NullJujuBackend):
-    def __init__(self, *, k8s_model: bool) -> None:
+    def __init__(self, *, k8s_model: bool, kubernetes_client: KubernetesClient | None = None) -> None:
         self.is_k8s = k8s_model
+        self.kubernetes_client = kubernetes_client
 
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.is_k8s
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        return self.kubernetes_client
 
 
 class RecordingKubernetesClient:
