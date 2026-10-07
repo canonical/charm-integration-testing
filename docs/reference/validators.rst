@@ -135,7 +135,7 @@ CLI and wire format
   A JSON dict mapping relation IDs to their current ``PersistenceState``, required when
   ``--persistence checkpoint`` is used (``checkpoint()`` needs the state ``prepare()`` returned).
 
-During ``--persistence checkpoint``, each active relation with a supplied ref is checkpointed;
+During ``--persistence checkpoint``, each active relation with a supplied ref is checked;
 each applicable relation without a ref is prepared and its state is returned. This handles a
 relation added after other relations in the model already have tracked canary state.
 
