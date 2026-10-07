@@ -40,9 +40,9 @@ STEP 1 — STATIC VERIFICATION (code, tests, wiring)
 STEP 2 — INDEPENDENTLY RE-CHECKING THE "NO CHARM" CLAIM
 ----------------------------------------------------------
 - Queried CharmHub directly (bundle_builder_x CharmhubClient.find_charms and the raw
-  https://api.charmhub.io/v2/charms/find API) for any charm providing/requiring
-  `cassandra_client`: zero results, both ways. The claim of "no `cassandra_client` charm" was
-  correct.
+  https://api.charmhub.io/v2/charms/find API) and found no provider compatible with
+  `cassandra_client`; `data-integrator` does declare a requires-side endpoint using that
+  interface, so the original blocker is the absence of a matching provider, not the absence of requirers.
 - However, exactly one Cassandra-related charm exists on CharmHub: `cassandra` (reactive
   framework, machine charm, last published 2021, revision 65, channel latest/stable), which
   provides the interface `cassandra` (NOT `cassandra_client`) on a `database`/`database-admin`
