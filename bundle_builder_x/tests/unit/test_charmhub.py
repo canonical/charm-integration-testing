@@ -507,6 +507,7 @@ class TestCharmhubClient:
             )
 
             # THEN the resolved charm retains that branch
+            assert charm.channel is not None
             assert charm.channel.branch == "candidate-build"
 
         def test_preserves_branch_on_trackless_channel(self) -> None:
@@ -546,6 +547,7 @@ class TestCharmhubClient:
             )
 
             # THEN the trackless channel remains unqualified by a synthetic latest track
+            assert charm.channel is not None
             assert charm.channel.track == ""
             assert str(charm.channel) == "stable/feature"
 

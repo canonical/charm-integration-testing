@@ -3,6 +3,8 @@
 
 """Unit tests for Bundle.export() and Solution.export_mermaid()."""
 
+from pathlib import Path
+
 import yaml
 
 from bundle_builder_x.bundle import (
@@ -61,6 +63,18 @@ class TestBundleExport:
         assert app["base"] == "ubuntu@22.04"
         assert app["scale"] == 1
         assert app["trust"] is True
+
+    def test_local_charm_uses_artifact_path_without_store_release_fields(self, tmp_path: Path) -> None:
+        charm_path = tmp_path / "unpacked-charm"
+        charm = _make_charm("my-app").model_copy(update={"channel": None, "revision": None, "source_path": charm_path})
+        bundle = _make_bundle(applications={"my-app": Application(charm=charm)})
+
+        app = yaml.safe_load(bundle.export())["applications"]["my-app"]
+
+        assert app["charm"] == str(charm_path)
+        assert app["base"] == "ubuntu@22.04"
+        assert "channel" not in app
+        assert "revision" not in app
 
     def test_kubernetes_uses_scale_key(self) -> None:
         # GIVEN a kubernetes bundle

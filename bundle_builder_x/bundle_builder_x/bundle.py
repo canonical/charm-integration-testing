@@ -120,13 +120,16 @@ class Bundle(BaseModel):
         applications_dict: dict[str, dict[str, object]] = {}
         for application, info in self.applications.items():
             app_dict: dict[str, object] = {
-                "charm": info.charm.name,
-                "channel": str(info.charm.channel),
-                "revision": info.charm.revision,
+                "charm": str(info.charm.source_path) if info.charm.source_path else info.charm.name,
                 "base": f"ubuntu@{info.charm.ubuntu_version}",
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
+            if info.charm.source_path is None:
+                if info.charm.channel is None or info.charm.revision is None:
+                    raise ValueError(f"Charm {info.charm.name!r} has no source path or Charmhub release identity")
+                app_dict["channel"] = str(info.charm.channel)
+                app_dict["revision"] = info.charm.revision
             if not info.charm.subordinate:
                 app_dict[scale_key] = info.num_units
             if len(info.resources) > 0:
@@ -203,7 +206,11 @@ def _mermaid_subgraph_lines(bundle: Bundle, model_name: str, model_id: str) -> l
     for application in sorted(bundle.applications):
         info = bundle.applications[application]
         node_id = _mermaid_node_id(model_id, application)
-        charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
+        charm_info = (
+            "local artifact"
+            if info.charm.source_path is not None
+            else f"{info.charm.channel} rev:{info.charm.revision}"
+        )
         if application == info.charm.name:
             lines.append(f'{_IND * 2}{node_id}["{application}<br/>{charm_info}"]:::app')
         else:

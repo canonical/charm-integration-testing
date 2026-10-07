@@ -23,6 +23,7 @@ def test_build_bundle(
     bundle_builder: BundleBuilder,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
+    local_target_charm: Path | None,
     juju_cli_version: JujuVersion,
     target_application: str,
     target_bundle: Path,
@@ -44,11 +45,15 @@ def test_build_bundle(
     neighbor_platform: str,
     neighbor_arch: str,
 ) -> None:
+    if local_target_charm is not None and (target_channel is not None or target_revision is not None):
+        pytest.fail("--target-channel and --target-revision cannot be used with --target-charm-file.")
+
     target_app_spec = AppSpec(
         charm=target_charm,
         channel=target_channel,
         revision=target_revision,
         base=target_series,
+        local_charm=local_target_charm,
     )
     neighbor_app_spec = AppSpec(charm=neighbor_charm)
 

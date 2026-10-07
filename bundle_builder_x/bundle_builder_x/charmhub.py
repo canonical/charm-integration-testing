@@ -3,7 +3,10 @@
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .charm import (
     ASSUMES_OPS,
@@ -54,6 +57,7 @@ _PLATFORM_FEATURES: dict[str, frozenset[str]] = {
     "kubernetes": frozenset(["juju", "k8s-api"]),
     "machine": frozenset(["juju"]),
 }
+_LOCAL_CHARM_CHANNEL = CharmChannel(track="", risk="local", branch="")
 
 
 class CharmhubClient:
@@ -184,6 +188,70 @@ class CharmhubClient:
             self.timeline.off(token)
         return result
 
+    def charm_from_local(
+        self,
+        charm_path: Path,
+        charm_name: str,
+        ubuntu_arch: str,
+        juju_version: JujuVersion | None = None,
+        platform: str | None = None,
+        ubuntu_version: str | None = None,
+    ) -> Charm:
+        """Build charm metadata from an unpacked local charm artifact."""
+        charm_path = charm_path.resolve()
+        if not charm_path.is_dir():
+            raise ValueError(f"Local charm path is not a directory: {charm_path}")
+
+        metadata_path = charm_path / "metadata.yaml"
+        manifest_path = charm_path / "manifest.yaml"
+        config_path = charm_path / "config.yaml"
+        for required_path in (metadata_path, manifest_path):
+            if not required_path.is_file():
+                raise ValueError(f"Local charm is missing required file: {required_path}")
+
+        metadata_contents = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        if metadata_contents.get("name") != charm_name:
+            raise ValueError(
+                f"Local charm metadata name {metadata_contents.get('name')!r} "
+                f"does not match --target-charm {charm_name!r}"
+            )
+        metadata = CharmMetadata.model_validate(metadata_contents)
+        config_contents = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        config_schema = CharmConfigSchema.model_validate(config_contents or {})
+
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        bases = manifest.get("bases", [])
+        supported_bases = [
+            base for base in bases if base.get("name") == "ubuntu" and ubuntu_arch in base.get("architectures", [])
+        ]
+        requested_base = ubuntu_version.removeprefix("ubuntu@") if ubuntu_version else None
+        selected_base = next(
+            (base for base in supported_bases if base.get("channel") == requested_base),
+            None,
+        )
+        if selected_base is None and requested_base is None and supported_bases:
+            selected_base = supported_bases[0]
+        if selected_base is None:
+            available_bases = sorted({base.get("channel", "unknown") for base in supported_bases})
+            detail = (
+                f" does not support requested base {requested_base!r};"
+                if requested_base
+                else " has no Ubuntu base for the requested architecture;"
+            )
+            raise ValueError(f"Local charm {charm_name!r}{detail} available bases for {ubuntu_arch}: {available_bases}")
+
+        charm = self._build_charm(
+            charm_name=charm_name,
+            channel=None,
+            revision=None,
+            ubuntu_version=selected_base["channel"],
+            ubuntu_arch=ubuntu_arch,
+            metadata=metadata,
+            config_schema=config_schema,
+            source_path=charm_path,
+        )
+        return self._ensure_compatibility(charm, juju_version, platform)
+
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
     ) -> set[str]:
@@ -268,31 +336,34 @@ class CharmhubClient:
     def _build_charm(
         self,
         charm_name: str,
-        channel: CharmChannel,
-        revision: int,
+        channel: CharmChannel | None,
+        revision: int | None,
         ubuntu_version: str,
         ubuntu_arch: str,
         metadata: CharmMetadata,
         config_schema: CharmConfigSchema,
+        source_path: Path | None = None,
     ) -> Charm:
+        override_channel = channel or _LOCAL_CHARM_CHANNEL
         return Charm(
             name=charm_name,
             channel=channel,
             revision=revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
+            source_path=source_path,
             subordinate=metadata.subordinate,
-            endpoints=self._get_charm_endpoints(charm_name, metadata, channel, ubuntu_version),
-            proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, channel, ubuntu_version),
+            endpoints=self._get_charm_endpoints(charm_name, metadata, override_channel, ubuntu_version),
+            proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, override_channel, ubuntu_version),
             priority=self.overrides_client.get_charm_priority(charm_name),
-            configs=self._get_charm_configs(charm_name, channel, config_schema, ubuntu_version),
+            configs=self._get_charm_configs(charm_name, override_channel, config_schema, ubuntu_version),
             config_defaults={k: v.default for k, v in config_schema.options.items()},
-            resources=self._get_charm_resources(charm_name, channel, metadata, ubuntu_version),
-            assumes=self._get_charm_assumes(charm_name, metadata, channel, ubuntu_version),
-            constraints=self._get_charm_constraints(charm_name, channel, ubuntu_version),
-            ha_units=self.overrides_client.get_charm_ha_units(charm_name, channel, ubuntu_version),
-            scale_down=self.overrides_client.get_charm_scale_down(charm_name, channel, ubuntu_version),
-            platforms=self._get_charm_platforms(charm_name, channel, metadata, ubuntu_version),
+            resources=self._get_charm_resources(charm_name, override_channel, metadata, ubuntu_version),
+            assumes=self._get_charm_assumes(charm_name, metadata, override_channel, ubuntu_version),
+            constraints=self._get_charm_constraints(charm_name, override_channel, ubuntu_version),
+            ha_units=self.overrides_client.get_charm_ha_units(charm_name, override_channel, ubuntu_version),
+            scale_down=self.overrides_client.get_charm_scale_down(charm_name, override_channel, ubuntu_version),
+            platforms=self._get_charm_platforms(charm_name, override_channel, metadata, ubuntu_version),
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:

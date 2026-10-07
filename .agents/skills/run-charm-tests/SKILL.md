@@ -69,6 +69,36 @@ This installs:
   --log-cli-level "INFO"
 ```
 
+### Test a locally built target charm
+
+Build the charm in its source repository, then pass the artifact path and
+matching CharmHub charm name. The target application is deployed from that
+artifact; neighbor charms continue to resolve from CharmHub.
+
+```bash
+./scripts/run-tests.sh \
+  --target-cloud "localhost" \
+  --target-platform "machine" \
+  --target-charm "<charm-name>" \
+  --target-charm-file "<path-to-charm>.charm" \
+  --target-application "<target-app>" \
+  --target-endpoint "<target-endpoint>" \
+  --neighbor-charm "<neighbor-charm>" \
+  --neighbor-application "<neighbor-app>" \
+  --neighbor-endpoint "<neighbor-endpoint>" \
+  --current-state "no_bundle" \
+  --mermaid-output "./local-charm-bundle.mmd" \
+  --log-dir "./local-charm-test-logs"
+```
+
+Use the substrate and endpoints that fit the charm. Do not set
+`--target-channel` or `--target-revision` for a local artifact. Tests requiring
+published CharmHub release history are skipped; they do not apply to the
+unpublished local artifact. The test suite unpacks the artifact and writes its
+default bundle to a temporary directory under the current user's home directory
+so a confined Juju snap can read both. If you set `--target-bundle`, choose a
+path Juju can access.
+
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
 ```bash
 # Reproduce Issue #693 test execution 509067

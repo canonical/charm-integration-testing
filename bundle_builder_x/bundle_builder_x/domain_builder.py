@@ -106,6 +106,7 @@ def applications_from_spec(model_spec: ModelSpec) -> dict[str, DomainApplication
             channel=app.channel,
             revision=app.revision,
             base=app.base,
+            local_charm=app.local_charm.resolve() if app.local_charm else None,
         )
         for name, app in model_spec.applications.items()
     }

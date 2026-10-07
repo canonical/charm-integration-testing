@@ -4,6 +4,7 @@
 import operator
 from enum import Enum
 from functools import total_ordering
+from pathlib import Path
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_serializer, model_validator
@@ -163,10 +164,11 @@ CharmResourceValue = str | None
 
 class Charm(BaseModel):
     name: str
-    channel: CharmChannel
-    revision: int
+    channel: CharmChannel | None
+    revision: int | None
     ubuntu_version: str
     ubuntu_arch: str
+    source_path: Path | None = None
     subordinate: bool = False
     endpoints: dict[str, CharmEndpoint]
     proxies: list[CharmEndpointProxy] = Field(default_factory=list)
@@ -183,6 +185,14 @@ class Charm(BaseModel):
     # (a non-empty `containers` block means "kubernetes", its absence means "machine").
     # No default is provided: every Charm must state which platform(s) it supports.
     platforms: list[str]
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "Charm":
+        if self.source_path is None and (self.channel is None or self.revision is None):
+            raise ValueError("Charmhub charm requires both a channel and revision")
+        if self.source_path is not None and (self.channel is not None or self.revision is not None):
+            raise ValueError("Local charm cannot have a Charmhub channel or revision")
+        return self
 
     def __repr__(self) -> str:
         return self.name
