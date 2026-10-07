@@ -181,6 +181,9 @@ def _query_matches(clause: dict[str, Any], doc: dict[str, Any], doc_id: str | No
         return bool(doc.get(field_name.removesuffix(".keyword")) == value)
     if "ids" in clause:
         return doc_id in clause["ids"]["values"]
+    if "exists" in clause:
+        field = clause["exists"]["field"]
+        return field in doc and doc[field] is not None
     bool_clause = clause["bool"]
     if "filter" in bool_clause:
         matches = all(_query_matches(c, doc, doc_id) for c in bool_clause["filter"])
