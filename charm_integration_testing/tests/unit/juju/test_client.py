@@ -17,6 +17,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
+from kubernetes_client import KubernetesClient, KubernetesExtension
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -156,6 +157,14 @@ class PersistenceExtensionStub(JujuExtension):
         for key in self.keys_to_drop:
             self.persistence_state.pop(key, None)
         return self.results.get(application, {})
+
+
+class PodDeleteExtensionStub(JujuExtension, KubernetesExtension):
+    def __init__(self) -> None:
+        self.deleted_pods: list[tuple[str, str]] = []
+
+    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
+        self.deleted_pods.append((namespace, pod_name))
 
 
 class PreRemoveIntegrationExtensionStub(JujuExtension):
@@ -314,6 +323,21 @@ class TestJujuClientUnitOperations:
         assert units == ["app/0", "app/1"]
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
+
+    def test_delete_kubernetes_pod_dispatches_juju_kubernetes_extensions(self) -> None:
+        backend = UnitOperationsBackendStub()
+        registered_extension = PodDeleteExtensionStub()
+        juju_extension = PodDeleteExtensionStub()
+        kubernetes_client = MagicMock(spec=KubernetesClient)
+        kubernetes_client.extensions = [registered_extension]
+        kubernetes_client.delete_pod.side_effect = lambda **_: registered_extension.post_delete_pod("model", "pod")
+        client = JujuClient(backend, LoggerStub(), [registered_extension, juju_extension])  # type: ignore[arg-type]
+
+        client.delete_kubernetes_pod(kubernetes_client, namespace="model", pod_name="pod")
+
+        kubernetes_client.delete_pod.assert_called_once_with(namespace="model", pod_name="pod")
+        assert registered_extension.deleted_pods == [("model", "pod")]
+        assert juju_extension.deleted_pods == [("model", "pod")]
 
     @patch("juju.client.rotate_application_units")
     def test_rotate_application_units_delegates_cloud_workflow(self, rotate: MagicMock) -> None:

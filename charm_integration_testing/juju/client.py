@@ -5,6 +5,8 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
+from kubernetes_client import KubernetesClient, KubernetesExtension
+
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
@@ -72,6 +74,19 @@ class JujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
+
+    def delete_kubernetes_pod(
+        self,
+        kubernetes_client: KubernetesClient,
+        namespace: str,
+        pod_name: str,
+    ) -> None:
+        """Delete a pod and dispatch each configured Kubernetes hook exactly once."""
+        kubernetes_client.delete_pod(namespace=namespace, pod_name=pod_name)
+        registered_extensions = {id(extension) for extension in kubernetes_client.extensions}
+        for extension in self.extensions:
+            if isinstance(extension, KubernetesExtension) and id(extension) not in registered_extensions:
+                extension.post_delete_pod(namespace, pod_name)
 
     def rotate_application_units(
         self,

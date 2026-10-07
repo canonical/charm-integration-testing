@@ -75,6 +75,15 @@ class RecordingJujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         return list(self.units)
 
+    def delete_kubernetes_pod(
+        self,
+        kubernetes_client: "RecordingKubernetesClient",
+        namespace: str,
+        pod_name: str,
+    ) -> None:
+        self.calls.append(("delete_kubernetes_pod", namespace, pod_name))
+        kubernetes_client.delete_pod(namespace, pod_name)
+
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
         if self.defer_next_remove:
