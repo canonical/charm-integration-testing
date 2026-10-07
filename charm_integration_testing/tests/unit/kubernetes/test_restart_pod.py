@@ -140,6 +140,29 @@ def test_ignores_pods_that_are_not_a_live_replacement(clock: Clock, candidate: s
     assert hook.calls == [("model", "replacement")]
 
 
+@pytest.mark.parametrize("becomes_running", [True, False])
+def test_replacement_without_status_waits_for_running(clock: Clock, becomes_running: bool) -> None:
+    # GIVEN a replacement Pod whose status has not been populated yet
+    replacement = pod("new")
+    replacement.status = None
+    api = PodAPI([[replacement]] * 10, clock)
+    hook = Hook()
+    if becomes_running:
+        api.responses = [[replacement], [pod("new")]]
+
+    # WHEN waiting for replacement, THEN missing status does not complete the restart
+    if becomes_running:
+        restart(api, hook)
+        assert api.reads == 2
+        assert clock.now > 0
+        assert hook.calls == [("model", "target-1")]
+    else:
+        with pytest.raises(TimeoutError, match="was not replaced"):
+            restart(api, hook)
+        assert clock.now == 10
+        assert hook.calls == []
+
+
 def test_ambiguous_replacements_are_not_accepted(clock: Clock) -> None:
     api = PodAPI([[pod("new-1"), pod("new-2")]], clock)
     hook = Hook()

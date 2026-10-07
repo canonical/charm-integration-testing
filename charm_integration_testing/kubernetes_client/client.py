@@ -323,7 +323,11 @@ class KubernetesClient:
                     and pod.metadata.uid not in old_uids
                     and pod.metadata.deletion_timestamp is None
                 ]
-                if len(replacements) == 1 and replacements[0].status.phase == PodStatus.RUNNING.value:
+                if (
+                    len(replacements) == 1
+                    and replacements[0].status is not None
+                    and replacements[0].status.phase == PodStatus.RUNNING.value
+                ):
                     for extension in self.extensions:
                         extension.post_delete_pod(namespace, replacements[0].metadata.name)
                     return
