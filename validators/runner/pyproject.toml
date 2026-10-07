@@ -28,6 +28,7 @@ dependencies = [
     "validators-etcd-client",
     "validators-zookeeper",
     "validators-opensearch-client",
+    "validators-cassandra-client",
     "validators-temporal-host-info",
     "validators-config-server",
     "validators-cve-catalog",

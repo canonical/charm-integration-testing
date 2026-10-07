@@ -29,6 +29,7 @@ validators-kafka-client = { path = "./validators/kafka_client", develop = true }
 validators-etcd-client = { path = "./validators/etcd_client", develop = true, extras = ["dev"] }
 validators-zookeeper = { path = "./validators/zookeeper", develop = true, extras = ["dev"] }
 validators-opensearch-client = { path = "./validators/opensearch_client", develop = true }
+validators-cassandra-client = { path = "./validators/cassandra_client", develop = true, extras = ["dev"] }
 validators-config-server = { path = "./validators/config_server", develop = true }
 validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
 validators-catalogue = { path = "./validators/catalogue", develop = true, extras = ["dev"] }
@@ -109,3 +110,9 @@ warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
 disable_error_code = ["untyped-decorator", "method-assign", "call-arg"]
+
+[[tool.mypy.overrides]]
+# cassandra-driver ships no inline type hints (no py.typed marker) and no third-party stub
+# package exists on PyPI, unlike e.g. psycopg2 (types-psycopg2) or PyMySQL (types-PyMySQL).
+module = "cassandra.*"
+ignore_missing_imports = true
