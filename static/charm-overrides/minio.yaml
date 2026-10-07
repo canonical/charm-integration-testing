@@ -1,5 +1,5 @@
 ---
-# MinIO test plans are obsolete; see https://github.com/canonical/charm-integration-testing/issues/595.
+# All MinIO tests are obsolete per maintainer; see https://github.com/canonical/charm-integration-testing/issues/489.
 listed: false
 overrides:
   - assumes: [unsupported-obsolete]
