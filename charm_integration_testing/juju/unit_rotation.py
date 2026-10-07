@@ -57,6 +57,12 @@ def _rotate_kubernetes_units(
     original_uids = {pod.metadata.uid for pod in pods if pod.metadata is not None and pod.metadata.uid is not None}
     try:
         juju_client.scale_application(application, len(units) + 1, model=model)
+        kubernetes_client.wait_for_charm_pods_ready(
+            application,
+            model.model,
+            expected_count=len(units) + 1,
+            timeout=timeout,
+        )
         juju_client.multi_model_idle_for_period(models, timeout=timeout)
         for unit, pod in zip(units, pods, strict=True):
             if pod.metadata is None or pod.metadata.name is None or pod.metadata.uid is None:
@@ -204,25 +210,36 @@ def _cleanup_machine_surge(
     rotated_unit: str,
     timeout: timedelta,
 ) -> None:
-    juju_client.multi_model_idle_for_period(models, timeout=timeout)
     current_units = juju_client.application_units(application, model=model)
-    if len(current_units) <= unit_count:
-        return
+    cleanup_errors: list[Exception] = []
+    if set(current_units) != original_units:
+        try:
+            juju_client.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            current_units = juju_client.application_units(application, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+            _raise_cleanup_errors(cleanup_errors)
 
     surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
-    cleanup_errors: list[Exception] = []
-    if not surge_units:
+    cleanup_changed_state = False
+    if len(current_units) > unit_count and not surge_units:
         cleanup_errors.append(RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}."))
-    else:
-        for surge_unit in surge_units[: len(current_units) - unit_count]:
+    elif surge_units:
+        surge_unit_count = max(0, len(current_units) - unit_count)
+        for surge_unit in surge_units[:surge_unit_count]:
+            cleanup_changed_state = True
             try:
                 juju_client.remove_unit(surge_unit, model=model)
             except Exception as error:
                 cleanup_errors.append(error)
-    try:
-        juju_client.multi_model_idle_for_period(models, timeout=timeout)
-    except Exception as error:
-        cleanup_errors.append(error)
+    if cleanup_changed_state or set(current_units) != original_units:
+        try:
+            juju_client.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
     _raise_cleanup_errors(cleanup_errors)
 
 

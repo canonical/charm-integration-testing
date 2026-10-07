@@ -81,6 +81,17 @@ def test_unit_rotation_removes_machine_surge_when_post_scale_hook_fails() -> Non
     assert client.units == ["target/0", "target/1", "target/2"]
 
 
+def test_unit_rotation_does_not_wait_during_cleanup_when_scale_did_not_mutate() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_scale_before_mutation = True
+
+    with pytest.raises(RuntimeError, match="scale failed before mutation"):
+        _rotate_units(client, k8s_model=False)
+
+    assert [call for call in client.calls if call[0] == "multi_model_idle_for_period"] == []
+    assert client.units == ["target/0", "target/1", "target/2"]
+
+
 def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> None:
     client = RecordingJujuClient(current_units=3)
     client.fail_next_multi_model_idle = True
@@ -111,6 +122,7 @@ def test_unit_rotation_waits_for_async_machine_removal_before_cleaning_surge() -
     assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0"]
     assert client.units == ["target/1", "target/2", "target/3"]
     assert not client.pending_unit_removals
+    assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 3
 
 
 def test_unit_rotation_preserves_machine_error_when_surge_cleanup_fails() -> None:
@@ -123,6 +135,21 @@ def test_unit_rotation_preserves_machine_error_when_surge_cleanup_fails() -> Non
 
     assert isinstance(error.value.__cause__, TimeoutError)
     assert str(error.value.__cause__) == "cleanup idle wait failed"
+
+
+def test_unit_rotation_continues_machine_cleanup_when_settling_wait_fails() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_scale_after_callback_on_call = 1
+    client.fail_multi_model_idle_on_call = 1
+
+    with pytest.raises(RuntimeError, match="scale cleanup hook failed") as error:
+        _rotate_units(client, k8s_model=False)
+
+    assert isinstance(error.value.__cause__, TimeoutError)
+    assert str(error.value.__cause__) == "cleanup idle wait failed"
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/3"]
+    assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 2
+    assert client.units == ["target/0", "target/1", "target/2"]
 
 
 @pytest.mark.parametrize("statefulset", [True, False], ids=["statefulset", "deployment"])
@@ -152,7 +179,8 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
     assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [
-        ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15))
+        ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
+        ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15)),
     ]
     assert len([call for call in kubernetes_client.calls if call[0] == "wait"]) == 1
     assert not {f"uid-{index}" for index in range(2)} & {
@@ -175,7 +203,26 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+
+
+def test_unit_rotation_waits_for_kubernetes_surge_readiness_before_deleting_originals() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    kubernetes_client.unready_pod_uids.add("scaled-2")
+    client.scale_callback = kubernetes_client.scale_to
+
+    with pytest.raises(TimeoutError, match="a charm pod is not ready"):
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 3, MODEL),
+        ("scale_application", "target", 2, MODEL),
+    ]
+    assert not [call for call in kubernetes_client.calls if call[0] == "delete_pod"]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert client.units == ["target/0", "target/1"]
+    assert len(kubernetes_client.pods) == 2
 
 
 def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
@@ -190,7 +237,7 @@ def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
 
     assert isinstance(error.value.__cause__, TimeoutError)
     assert str(error.value.__cause__) == "cleanup idle wait failed"
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
 
 
 def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
@@ -208,7 +255,7 @@ def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
 
 
 def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
@@ -226,7 +273,7 @@ def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2]
 
 
 def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fails() -> None:
@@ -240,7 +287,7 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fail
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
 
 
 def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails() -> None:
@@ -254,4 +301,4 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails(
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"]) == 1
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
