@@ -11,7 +11,7 @@ authors = [
 
 requires-python = ">=3.10"
 dependencies = [
-    "kafka-python>=2.0.0",
+    "kafka-python>=2.2.0",
     "validators-base",
 ]
 
