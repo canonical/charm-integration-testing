@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
@@ -313,6 +314,26 @@ class TestJujuClientUnitOperations:
         assert units == ["app/0", "app/1"]
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
+
+    @patch("juju.client.rotate_application_units")
+    def test_rotate_application_units_delegates_cloud_workflow(self, rotate: MagicMock) -> None:
+        backend = UnitOperationsBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+        related_model = JujuModelHandle(controller="controller", model="related")
+
+        client.rotate_application_units("app", model, related_models=[related_model], timeout=timedelta(minutes=5))
+
+        rotate.assert_called_once_with(
+            client,
+            backend,
+            "app",
+            model,
+            related_models=[related_model],
+            timeout=timedelta(minutes=5),
+        )
+        assert logger.infos == ["Rotating all units for app."]
 
 
 class TestJujuValidationError:

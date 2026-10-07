@@ -6,30 +6,34 @@ from typing import cast
 
 import pytest
 from juju import JujuClient
+from juju.unit_rotation import rotate_application_units
 from kubernetes_client import KubernetesClient
-from test_suite import test_unit_rotation as unit_rotation
 
-from .ha_fakes import (
-    MODEL,
-    RecordingJujuBackend,
-    RecordingJujuClient,
-    RecordingKubernetesClient,
-    charm,
-)
+from .ha_fakes import MODEL, RecordingJujuBackend, RecordingJujuClient, RecordingKubernetesClient
+
+
+def _rotate_units(
+    client: RecordingJujuClient,
+    *,
+    k8s_model: bool,
+    kubernetes_client: RecordingKubernetesClient | None = None,
+) -> None:
+    backend = RecordingJujuBackend(
+        k8s_model=k8s_model,
+        kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
+    )
+    rotate_application_units(
+        cast(JujuClient, client),
+        backend,
+        "target",
+        MODEL,
+    )
 
 
 def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
     client = RecordingJujuClient(current_units=3)
 
-    unit_rotation.test_unit_rotation(
-        cast(JujuClient, client),
-        RecordingJujuBackend(k8s_model=False),
-        None,
-        MODEL,
-        None,
-        "target",
-        charm(),
-    )
+    _rotate_units(client, k8s_model=False)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
         ("scale_application", "target", 4, MODEL),
@@ -41,20 +45,26 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
     assert client.units == ["target/3", "target/4", "target/5"]
 
 
+def test_rotation_requires_a_kubernetes_client_for_kubernetes_models() -> None:
+    client = RecordingJujuClient(current_units=2)
+
+    with pytest.raises(RuntimeError, match="No KubernetesClient available"):
+        _rotate_units(client, k8s_model=True)
+
+
+def test_rotation_rejects_applications_without_units() -> None:
+    client = RecordingJujuClient(current_units=0)
+
+    with pytest.raises(ValueError, match="it has no units"):
+        _rotate_units(client, k8s_model=False)
+
+
 def test_unit_rotation_removes_machine_surge_after_failure() -> None:
     client = RecordingJujuClient(current_units=3)
     client.fail_next_multi_model_idle = True
 
     with pytest.raises(TimeoutError, match="model failed to become idle"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=False),
-            None,
-            MODEL,
-            None,
-            "target",
-            charm(),
-        )
+        _rotate_units(client, k8s_model=False)
 
     assert [call for call in client.calls if call[0] == "remove_unit"] == [("remove_unit", "target/3", MODEL)]
     assert client.units == ["target/0", "target/1", "target/2"]
@@ -65,15 +75,7 @@ def test_unit_rotation_removes_machine_surge_when_post_scale_hook_fails() -> Non
     client.fail_next_scale_after_callback = True
 
     with pytest.raises(RuntimeError, match="scale extension failed"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=False),
-            None,
-            MODEL,
-            None,
-            "target",
-            charm(),
-        )
+        _rotate_units(client, k8s_model=False)
 
     assert [call for call in client.calls if call[0] == "remove_unit"] == [("remove_unit", "target/3", MODEL)]
     assert client.units == ["target/0", "target/1", "target/2"]
@@ -86,15 +88,7 @@ def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> 
     client.extra_units_on_scale_up = 1
 
     with pytest.raises(RuntimeError, match="unit removal hook failed"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=False),
-            None,
-            MODEL,
-            None,
-            "target",
-            charm(),
-        )
+        _rotate_units(client, k8s_model=False)
 
     assert [call[1] for call in client.calls if call[0] == "remove_unit"] == [
         "target/3",
@@ -112,15 +106,7 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     kubernetes_client.defer_next_scale_down = True
     client.scale_callback = kubernetes_client.scale_to
 
-    unit_rotation.test_unit_rotation(
-        cast(JujuClient, client),
-        RecordingJujuBackend(k8s_model=True),
-        cast(KubernetesClient, kubernetes_client),
-        MODEL,
-        None,
-        "target",
-        charm(ha_units=2),
-    )
+    _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
         ("scale_application", "target", 3, MODEL),
@@ -154,15 +140,7 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="replacement pod did not appear"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=True),
-            cast(KubernetesClient, kubernetes_client),
-            MODEL,
-            None,
-            "target",
-            charm(ha_units=2),
-        )
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
         ("scale_application", "target", 3, MODEL),
@@ -180,15 +158,7 @@ def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="replacement pod did not become ready"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=True),
-            cast(KubernetesClient, kubernetes_client),
-            MODEL,
-            None,
-            "target",
-            charm(ha_units=2),
-        )
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
         ("scale_application", "target", 3, MODEL),
@@ -206,15 +176,7 @@ def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(RuntimeError, match="scale extension failed"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=True),
-            cast(KubernetesClient, kubernetes_client),
-            MODEL,
-            None,
-            "target",
-            charm(ha_units=2),
-        )
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
         ("scale_application", "target", 3, MODEL),
@@ -232,15 +194,7 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fail
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="cleanup idle wait failed"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=True),
-            cast(KubernetesClient, kubernetes_client),
-            MODEL,
-            None,
-            "target",
-            charm(ha_units=2),
-        )
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
@@ -254,15 +208,7 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails(
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(RuntimeError, match="scale cleanup hook failed"):
-        unit_rotation.test_unit_rotation(
-            cast(JujuClient, client),
-            RecordingJujuBackend(k8s_model=True),
-            cast(KubernetesClient, kubernetes_client),
-            MODEL,
-            None,
-            "target",
-            charm(ha_units=2),
-        )
+        _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2

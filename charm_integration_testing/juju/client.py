@@ -17,6 +17,7 @@ from .models import (
     JujuIntegration,
     JujuIntegrationApplication,
 )
+from .unit_rotation import rotate_application_units
 from .version import JujuVersion
 
 
@@ -71,6 +72,29 @@ class JujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
+
+    def rotate_application_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        *,
+        related_models: list[JujuModelHandle] | None = None,
+        timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        """Rotate every application unit while preserving capacity across cloud types.
+
+        Kubernetes workloads use one surge replica while all original pods are replaced,
+        because scale-down may select any pod for Deployment-backed workloads.
+        """
+        self.logger.info(f"Rotating all units for {application}.")
+        rotate_application_units(
+            self,
+            self.backend,
+            application,
+            model,
+            related_models=related_models,
+            timeout=timeout,
+        )
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:
