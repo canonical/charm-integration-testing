@@ -9,7 +9,8 @@ from kubernetes.client import ApiException, V1DeleteOptions, V1NetworkPolicy  # 
 
 
 class FakeCustomObjectsApi:
-    def __init__(self, raise_on_delete: ApiException | None = None) -> None:
+    def __init__(self, raise_on_delete: ApiException | None = None, *, inject_stress: bool = False) -> None:
+        self.inject_stress = inject_stress
         self.create_calls: list[dict[str, object]] = []
         self.delete_calls: list[dict[str, object]] = []
         self.raise_on_delete = raise_on_delete
@@ -25,11 +26,19 @@ class FakeCustomObjectsApi:
         )
         stored: dict[str, Any] = deepcopy(body)
         stored["metadata"]["uid"] = uuid4().hex
+        if plural == "stresschaos" and self.inject_stress:
+            stored["status"] = {
+                "conditions": [
+                    {"type": "Selected", "status": "True"},
+                    {"type": "AllInjected", "status": "True"},
+                ],
+                "experiment": {"desiredPhase": "Run"},
+            }
         self.objects[(plural, namespace, stored["metadata"]["name"])] = stored
         return deepcopy(stored)
 
     def get_namespaced_custom_object(
-        self, *, group: str, version: str, namespace: str, plural: str, name: str
+        self, *, group: str, version: str, namespace: str, plural: str, name: str, _request_timeout: float = 30
     ) -> dict[str, Any]:
         if self.raise_on_read is not None:
             raise self.raise_on_read
