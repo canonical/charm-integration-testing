@@ -57,7 +57,6 @@ _PLATFORM_FEATURES: dict[str, frozenset[str]] = {
     "kubernetes": frozenset(["juju", "k8s-api"]),
     "machine": frozenset(["juju"]),
 }
-_LOCAL_CHARM_CHANNEL = CharmChannel(track="", risk="local", branch="")
 
 
 class CharmhubClient:
@@ -266,7 +265,7 @@ class CharmhubClient:
             raise ValueError(f"Local charm {charm_name!r}{detail} available bases for {ubuntu_arch}: {available_bases}")
 
         raw_default_channel = self.overrides_client.get_charm_default_channel(charm_name)
-        local_override_channel = CharmChannel.model_validate(raw_default_channel) if raw_default_channel else None
+        policy_channel = CharmChannel.model_validate(raw_default_channel) if raw_default_channel else None
         charm = self._build_charm(
             charm_name=charm_name,
             channel=None,
@@ -276,7 +275,7 @@ class CharmhubClient:
             metadata=metadata,
             config_schema=config_schema,
             source_path=charm_path,
-            override_channel=local_override_channel,
+            policy_channel=policy_channel,
         )
         return self._ensure_compatibility(charm, juju_version, platform)
 
@@ -371,9 +370,9 @@ class CharmhubClient:
         metadata: CharmMetadata,
         config_schema: CharmConfigSchema,
         source_path: Path | None = None,
-        override_channel: CharmChannel | None = None,
+        policy_channel: CharmChannel | None = None,
     ) -> Charm:
-        override_channel = override_channel or channel or _LOCAL_CHARM_CHANNEL
+        policy_channel = policy_channel or channel
         return Charm(
             name=charm_name,
             channel=channel,
@@ -382,17 +381,17 @@ class CharmhubClient:
             ubuntu_arch=ubuntu_arch,
             source_path=source_path,
             subordinate=metadata.subordinate,
-            endpoints=self._get_charm_endpoints(charm_name, metadata, override_channel, ubuntu_version),
-            proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, override_channel, ubuntu_version),
+            endpoints=self._get_charm_endpoints(charm_name, metadata, policy_channel, ubuntu_version),
+            proxies=self.overrides_client.get_charm_proxy_overrides(charm_name, policy_channel, ubuntu_version),
             priority=self.overrides_client.get_charm_priority(charm_name),
-            configs=self._get_charm_configs(charm_name, override_channel, config_schema, ubuntu_version),
+            configs=self._get_charm_configs(charm_name, policy_channel, config_schema, ubuntu_version),
             config_defaults={k: v.default for k, v in config_schema.options.items()},
-            resources=self._get_charm_resources(charm_name, override_channel, metadata, ubuntu_version),
-            assumes=self._get_charm_assumes(charm_name, metadata, override_channel, ubuntu_version),
-            constraints=self._get_charm_constraints(charm_name, override_channel, ubuntu_version),
-            ha_units=self.overrides_client.get_charm_ha_units(charm_name, override_channel, ubuntu_version),
-            scale_down=self.overrides_client.get_charm_scale_down(charm_name, override_channel, ubuntu_version),
-            platforms=self._get_charm_platforms(charm_name, override_channel, metadata, ubuntu_version),
+            resources=self._get_charm_resources(charm_name, policy_channel, metadata, ubuntu_version),
+            assumes=self._get_charm_assumes(charm_name, metadata, policy_channel, ubuntu_version),
+            constraints=self._get_charm_constraints(charm_name, policy_channel, ubuntu_version),
+            ha_units=self.overrides_client.get_charm_ha_units(charm_name, policy_channel, ubuntu_version),
+            scale_down=self.overrides_client.get_charm_scale_down(charm_name, policy_channel, ubuntu_version),
+            platforms=self._get_charm_platforms(charm_name, policy_channel, metadata, ubuntu_version),
         )
 
     def _ensure_compatibility(self, charm: Charm, juju_version: JujuVersion | None, platform: str | None) -> Charm:
@@ -959,7 +958,7 @@ class CharmhubClient:
         return refresh_info
 
     def _get_charm_endpoints(
-        self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel, ubuntu_version: str
+        self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel | None, ubuntu_version: str
     ) -> dict[str, CharmEndpoint]:
         # Get overrides
         endpoint_overrides = self.overrides_client.get_charm_endpoint_overrides(charm_name, channel, ubuntu_version)
@@ -1051,7 +1050,7 @@ class CharmhubClient:
         return endpoints
 
     def _get_charm_configs(
-        self, charm_name: str, channel: CharmChannel, config_schema: CharmConfigSchema, ubuntu_version: str
+        self, charm_name: str, channel: CharmChannel | None, config_schema: CharmConfigSchema, ubuntu_version: str
     ) -> dict[str, list[CharmConfigValue]]:
         config_overrides = self.overrides_client.get_charm_config_overrides(charm_name, channel, ubuntu_version)
         stale_configs = sorted(set(config_overrides) - set(config_schema.options))
@@ -1063,7 +1062,7 @@ class CharmhubClient:
         return config_overrides
 
     def _get_charm_resources(
-        self, charm_name: str, channel: CharmChannel, metadata: CharmMetadata, ubuntu_version: str
+        self, charm_name: str, channel: CharmChannel | None, metadata: CharmMetadata, ubuntu_version: str
     ) -> dict[str, list[CharmResourceValue]]:
         resource_overrides = self.overrides_client.get_charm_resource_overrides(charm_name, channel, ubuntu_version)
         stale_resources = sorted(set(resource_overrides) - set(metadata.resources))
@@ -1074,7 +1073,9 @@ class CharmhubClient:
             )
         return resource_overrides
 
-    def _get_charm_constraints(self, charm_name: str, channel: CharmChannel, ubuntu_version: str) -> list[AnyExpr]:
+    def _get_charm_constraints(
+        self, charm_name: str, channel: CharmChannel | None, ubuntu_version: str
+    ) -> list[AnyExpr]:
         """Parse raw DSL constraint strings from overrides into typed AST nodes."""
         result: list[AnyExpr] = []
         for text in self.overrides_client.get_charm_constraints_overrides(charm_name, channel, ubuntu_version):
@@ -1088,7 +1089,7 @@ class CharmhubClient:
         return result
 
     def _get_charm_assumes(
-        self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel, ubuntu_version: str
+        self, charm_name: str, metadata: CharmMetadata, channel: CharmChannel | None, ubuntu_version: str
     ) -> CharmAssumesEntry:
         # Get overrides
         assumes_overrides = self.overrides_client.get_charm_assumes_overrides(charm_name, channel, ubuntu_version)
@@ -1101,7 +1102,7 @@ class CharmhubClient:
         return CharmAssumesEntry(all_of=frozenset(self._get_assumes_entry(e) for e in assumes))
 
     def _get_charm_platforms(
-        self, charm_name: str, channel: CharmChannel, metadata: CharmMetadata, ubuntu_version: str
+        self, charm_name: str, channel: CharmChannel | None, metadata: CharmMetadata, ubuntu_version: str
     ) -> list[str]:
         """Return the platform(s) this charm may be deployed to.
 

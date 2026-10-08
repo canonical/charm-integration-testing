@@ -46,6 +46,14 @@ class TestCharmOverridesCriteriaUbuntuVersion:
         assert criteria.meets(_ch("latest"), ubuntu_version="18.04") is True
         assert criteria.meets(_ch("latest"), ubuntu_version="22.04") is False
 
+    def test_release_scoped_criteria_do_not_match_artifacts_without_a_channel(self) -> None:
+        track_criteria = CharmOverridesCriteria(track="3.0")
+        base_criteria = CharmOverridesCriteria(ubuntu_version="26.04")
+
+        assert track_criteria.meets(None, ubuntu_version="26.04") is False
+        assert base_criteria.meets(None, ubuntu_version="26.04") is True
+        assert base_criteria.meets(None, ubuntu_version="24.04") is False
+
 
 class TestResourceTrackingOverrides:
     def test_skips_are_scoped_to_the_matching_version(self, tmp_path: Path) -> None:

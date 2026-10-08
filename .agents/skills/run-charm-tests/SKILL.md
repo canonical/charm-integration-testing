@@ -73,8 +73,8 @@ This installs:
 
 Build the charm in its source repository, then pass the artifact path and
 matching CharmHub charm name. The target application is deployed from that
-artifact; neighbor charms continue to resolve from Charmhub and are resolved
-for the local target's selected base.
+artifact; neighbor charms continue to resolve from Charmhub using their own
+Charmhub default base.
 
 ```bash
 ./scripts/run-tests.sh \
@@ -103,9 +103,13 @@ test against a second local build with
 exclusive). The cycle is skipped when the chosen CharmHub revision does not
 support the target's base.
 
-Artifacts are unpacked by content hash so bundles generated in one session
-remain valid when a later session resumes with `--current-state`. With
-snap-installed Juju, the cache is under
+Artifacts are unpacked by content hash. Generated bundles are kept separately
+in a project-scoped directory keyed by controller and model, so they remain
+available when a later session resumes with `--current-state` without different
+models overwriting each other's bundles. With snap-installed Juju, these
+directories are under `~/snap/juju/common/charm-integration-testing/`; without
+the Juju snap, they are under the project's `.pytest_cache/`. The artifact cache
+with snap-installed Juju is under
 `~/snap/juju/common/charm-artifacts/`, scoped to the mounted project path so
 separate project checkouts do not share cache entries. Without the Juju snap,
 artifacts are stored under the project's `.pytest_cache/charm-artifacts/`.

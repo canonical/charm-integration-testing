@@ -400,9 +400,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help=(
-            "File path for the target model's bundle YAML. With --target-charm-file, the default is stored beside "
-            "the unpacked charm under Juju's snap-accessible common directory; otherwise it is stored under "
-            "pytest's root path. Explicit paths must also be accessible to Juju."
+            "File path for the target model's bundle YAML. By default, generated bundles are stored in a "
+            "project-scoped directory keyed by controller and model so they remain available when resuming with "
+            "--current-state. Explicit paths must also be accessible to Juju."
         ),
     )
     parser.addoption(
@@ -551,12 +551,18 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture
-def target_bundle(request: pytest.FixtureRequest, local_target_charm: Path | None) -> Path:
-    """Path to the target model's bundle YAML. Defaults to ``generated-target-bundle.yaml``."""
+def target_bundle(request: pytest.FixtureRequest, target_model_ref: JujuModelHandle) -> Path:
+    """Path to the target model's bundle YAML."""
     value = request.config.getoption("--target-bundle")
     if not value:
-        root = local_target_charm.parent if local_target_charm is not None else Path(request.config.rootpath)
-        path = root / "generated-target-bundle.yaml"
+        path = (
+            _generated_bundle_directory(
+                Path(request.config.rootpath),
+                target_model_ref,
+                Path.home() / "snap/juju/common" if Path("/snap/juju/current").exists() else None,
+            )
+            / "generated-target-bundle.yaml"
+        )
     else:
         assert isinstance(value, str)
         path = Path(value).resolve()
@@ -565,7 +571,11 @@ def target_bundle(request: pytest.FixtureRequest, local_target_charm: Path | Non
 
 
 @pytest.fixture
-def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool, local_target_charm: Path | None) -> Path | None:
+def neighbor_bundle(
+    request: pytest.FixtureRequest,
+    is_cmr_test: bool,
+    target_model_ref: JujuModelHandle,
+) -> Path | None:
     """Path to the neighbor model's bundle YAML for CMR tests.
 
     Returns ``None`` when neighbor routing options are absent (non-CMR test).
@@ -576,13 +586,36 @@ def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool, local_tar
 
     value = request.config.getoption("--neighbor-bundle")
     if not value:
-        root = local_target_charm.parent if local_target_charm is not None else Path(request.config.rootpath)
-        ppath = root / "generated-neighbor-bundle.yaml"
+        ppath = (
+            _generated_bundle_directory(
+                Path(request.config.rootpath),
+                target_model_ref,
+                Path.home() / "snap/juju/common" if Path("/snap/juju/current").exists() else None,
+            )
+            / "generated-neighbor-bundle.yaml"
+        )
     else:
         assert isinstance(value, str)
         ppath = Path(value).resolve()
     ppath.parent.mkdir(parents=True, exist_ok=True)
     return ppath
+
+
+def _generated_bundle_directory(
+    project_root: Path,
+    model_ref: JujuModelHandle,
+    juju_snap_common: Path | None,
+) -> Path:
+    """Return a project-scoped, model-specific bundle directory stable across resumed runs."""
+    project_root = project_root.resolve()
+    project_name = project_root.name or "project"
+    project_hash = hashlib.sha256(str(project_root).encode()).hexdigest()[:16]
+    project_namespace = f"{project_name}-{project_hash}"
+    if juju_snap_common is not None:
+        root = juju_snap_common / "charm-integration-testing" / "generated-bundles"
+    else:
+        root = project_root / ".pytest_cache" / "charm-integration-testing" / "generated-bundles"
+    return root / project_namespace / model_ref.path_segment
 
 
 @pytest.fixture

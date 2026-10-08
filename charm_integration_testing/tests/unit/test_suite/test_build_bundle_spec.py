@@ -8,7 +8,7 @@ from test_suite.bundle_specs import application_specs
 from bundle_builder_x import Charm, CharmChannel
 
 
-def test_local_target_base_is_used_for_target_and_neighbor() -> None:
+def test_local_target_base_does_not_constrain_neighbor_base() -> None:
     target = Charm(
         name="my-charm",
         source_path=Path("/charms/my-charm"),
@@ -29,7 +29,7 @@ def test_local_target_base_is_used_for_target_and_neighbor() -> None:
     )
 
     assert target_spec.base == "26.04"
-    assert neighbor_spec.base == "26.04"
+    assert neighbor_spec.base is None
 
 
 def test_charmhub_target_keeps_neighbor_base_unset() -> None:

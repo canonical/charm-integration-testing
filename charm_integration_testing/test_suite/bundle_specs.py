@@ -15,7 +15,7 @@ def application_specs(
     target_resolved_charm: Charm,
     neighbor_charm: str,
 ) -> tuple[AppSpec, AppSpec]:
-    """Create app specs, pinning local-target neighbors to its resolved base."""
+    """Create app specs, using the resolved base for local targets."""
     target_base = target_resolved_charm.ubuntu_version if local_target_charm is not None else target_series
     target_app_spec = AppSpec(
         charm=target_charm,
@@ -24,5 +24,4 @@ def application_specs(
         base=target_base,
         local_charm=local_target_charm,
     )
-    neighbor_base = target_base if local_target_charm is not None else None
-    return target_app_spec, AppSpec(charm=neighbor_charm, base=neighbor_base)
+    return target_app_spec, AppSpec(charm=neighbor_charm)

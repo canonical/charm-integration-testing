@@ -139,6 +139,32 @@ class TestLocalCharm:
         assert charm.revision is None
         assert charm.ha_units == 5
 
+    def test_local_charm_matches_base_policy_without_release_channel(self, tmp_path: Path) -> None:
+        charm_path = _write_charm(tmp_path / "local-test")
+        overrides_path = tmp_path / "overrides"
+        overrides_path.mkdir()
+        (overrides_path / "local-test.yaml").write_text(
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '3.0'\n"
+            "    ha_units: 4\n"
+            "  - criteria:\n"
+            "      - ubuntu_version: '26.04'\n"
+            "    ha_units: 6\n",
+            encoding="utf-8",
+        )
+
+        charm = CharmhubClient(overrides_client=OverridesClient(overrides=overrides_path)).charm_from_local(
+            charm_path=charm_path,
+            charm_name="local-test",
+            ubuntu_arch="amd64",
+            platform="machine",
+        )
+
+        assert charm.channel is None
+        assert charm.revision is None
+        assert charm.ha_units == 6
+
     def test_local_charm_rejects_malformed_manifest(self, tmp_path: Path) -> None:
         charm_path = _write_charm(tmp_path / "local-test")
         (charm_path / "manifest.yaml").write_text("bases: invalid\n", encoding="utf-8")
