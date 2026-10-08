@@ -77,8 +77,8 @@ class TestInitializeGlobalDomain:
 
 
 class TestAddCharmBaseMapping:
-    def test_ubuntu_base_selector_matches_resolved_charm_version(self) -> None:
-        # GIVEN an application pinned to Juju's ubuntu@ base syntax
+    def test_normalized_ubuntu_base_matches_resolved_charm_version(self) -> None:
+        # GIVEN an application pinned to a normalized Ubuntu base
         model_ref = ModelRef(name="m")
         domain = _make_domain(
             {
@@ -87,7 +87,7 @@ class TestAddCharmBaseMapping:
                     platform="kubernetes",
                     juju_version=_JUJU,
                     applications={
-                        "app": DomainApplication(charm="test-charm", base="ubuntu@26.04"),
+                        "app": DomainApplication(charm="test-charm", base="26.04"),
                     },
                 ),
             }
@@ -97,7 +97,7 @@ class TestAddCharmBaseMapping:
         # WHEN the resolved charm is added to the domain
         charm_id = add_charm_to_domain(charm, domain, model_ref)
 
-        # THEN the application maps to the charm with the normalized base
+        # THEN the application maps to the charm
         assert charm_id in domain.models[model_ref].applications["app"].charm_ids
 
 

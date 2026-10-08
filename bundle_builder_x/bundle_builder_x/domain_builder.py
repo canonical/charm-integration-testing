@@ -105,7 +105,7 @@ def applications_from_spec(model_spec: ModelSpec) -> dict[str, DomainApplication
             charm=app.charm,
             channel=app.channel,
             revision=app.revision,
-            base=app.base,
+            base=app.base.removeprefix("ubuntu@") if app.base is not None else None,
             local_charm=app.local_charm.resolve() if app.local_charm else None,
         )
         for name, app in model_spec.applications.items()

@@ -684,7 +684,7 @@ class TestApplicationsFromSpec:
         assert constraints["my-app"].charm == "my-charm"
         assert str(constraints["my-app"].channel) == "1/stable"
         assert constraints["my-app"].revision == 42
-        assert constraints["my-app"].base == "ubuntu@22.04"
+        assert constraints["my-app"].base == "22.04"
         assert constraints["db"].charm == "postgresql-k8s"
         assert constraints["db"].channel is None
         assert constraints["db"].revision is None
@@ -1149,7 +1149,7 @@ class TestSpecFileEdgeCases:
         assert constraints["my-app"].charm == "my-charm"
         assert str(constraints["my-app"].channel) == "1/stable"
         assert constraints["my-app"].revision == 42
-        assert constraints["my-app"].base == "ubuntu@22.04"
+        assert constraints["my-app"].base == "22.04"
         assert constraints["db"].charm == "postgresql-k8s"
         assert constraints["db"].channel is None
         assert constraints["db"].revision is None
