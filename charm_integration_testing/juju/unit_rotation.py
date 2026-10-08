@@ -178,9 +178,11 @@ def _rotate_machine_units(
 ) -> None:
     for unit in units:
         original_units = set(juju_client.application_units(application, model=model))
+        unit_removal_attempted = False
         try:
             juju_client.scale_application(application, len(units) + 1, model=model)
             juju_client.multi_model_idle_for_period(models, timeout=timeout)
+            unit_removal_attempted = True
             juju_client.remove_unit(unit, model=model)
             juju_client.multi_model_idle_for_period(models, timeout=timeout)
             current_units = juju_client.application_units(application, model=model)
@@ -193,7 +195,15 @@ def _rotate_machine_units(
         except BaseException as rotation_error:
             try:
                 _cleanup_machine_surge(
-                    juju_client, application, model, original_units, len(units), models, unit, timeout
+                    juju_client,
+                    application,
+                    model,
+                    original_units,
+                    len(units),
+                    models,
+                    unit,
+                    timeout,
+                    unit_removal_attempted,
                 )
             except BaseException as cleanup_error:
                 raise rotation_error from cleanup_error
@@ -209,19 +219,25 @@ def _cleanup_machine_surge(
     models: list[JujuModelHandle],
     rotated_unit: str,
     timeout: timedelta,
+    unit_removal_attempted: bool,
 ) -> None:
     current_units = juju_client.application_units(application, model=model)
     cleanup_errors: list[Exception] = []
+    settling_wait_succeeded = True
     if set(current_units) != original_units:
         try:
             juju_client.multi_model_idle_for_period(models, timeout=timeout)
         except Exception as error:
             cleanup_errors.append(error)
+            settling_wait_succeeded = False
         try:
             current_units = juju_client.application_units(application, model=model)
         except Exception as error:
             cleanup_errors.append(error)
             _raise_cleanup_errors(cleanup_errors)
+
+    if not settling_wait_succeeded and unit_removal_attempted and rotated_unit in current_units:
+        _raise_cleanup_errors(cleanup_errors)
 
     surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
     cleanup_changed_state = False
