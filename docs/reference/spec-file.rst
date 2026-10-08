@@ -119,14 +119,14 @@ Application
      - --
      - Channel override (e.g. ``14/stable``). With ``local_charm``, this is the
        release context used to select channel-scoped overrides and evaluate DSL
-       constraints; it does not select a Charmhub artifact. When omitted, the
+       constraints; it does not select a Charmhub release. When omitted, the
        default channel is read from charm overrides or resolved from Charmhub.
    * - ``revision``
      - no
      - --
      - Pin to a specific Charmhub revision. With ``local_charm``, this is the
        intended test context for revision-scoped DSL constraints, not the revision
-       Juju assigns to the local artifact. When omitted, the default revision is
+       Juju assigns when deploying the local charm. When omitted, the default revision is
        read from charm overrides or resolved from Charmhub.
    * - ``base``
      - no

@@ -15,7 +15,7 @@ This guide will reference variables that need to contain values specific to your
   ``metadata.yaml``. For example, ``grafana-k8s``.
 ``TARGET_CHARM_FILE``:
   Optional path to a locally packed ``.charm`` file for the target. When set,
-  tests deploy this artifact instead of fetching the target from Charmhub.
+  tests deploy this package instead of fetching the target from Charmhub.
 ``TARGET_ENDPOINT``:
   Endpoint of the charm being tested. For example, ``grafana-dashboard``.
 ``NEIGHBOR_CHARM``:
@@ -23,13 +23,13 @@ This guide will reference variables that need to contain values specific to your
 ``NEIGHBOR_ENDPOINT``:
   Endpoint for the neighbor charm being tested. For example, ``grafana-dashboard``.
 ``REVISION``:
-  Optional Charmhub revision to use as test context. For a local artifact, this
+  Optional Charmhub revision to use as test context. For a local build, this
   selects release-specific overrides and constraints; it does not change the
-  artifact deployed or the revision Juju assigns to it.
+  package deployed or the revision Juju assigns to it.
 ``CHANNEL``:
   Optional Charmhub channel to use as test context, for example ``2/edge``.
-  For a local artifact, this selects channel-specific overrides and constraints;
-  it does not select a Charmhub artifact.
+  For a local build, this selects channel-specific overrides and constraints;
+  it does not select a Charmhub release.
 ``SERIES``:
   Ubuntu base to test, such as ``20.04``, ``22.04``, ``24.04`` or ``26.04``.
 ``SUBSTRATE``:
@@ -206,19 +206,30 @@ The contents of the output file will look something like the following:
     - target:grafana-dashboard
 
 Test a local charm on Juju 4 or Ubuntu 26.04
--------------------------------------------
+----------------------------------------------
 
 Build the charm in its source repository and keep the resulting ``.charm``
 file. For example, run ``charmcraft pack`` and set ``TARGET_CHARM_FILE`` to
-the path of the output file. The test suite unpacks the archive and deploys that
-artifact; the neighbor charm continues to resolve from Charmhub.
+the path of the output file. The test suite unpacks the archive and deploys that local charm; the
+neighbor charm continues to resolve from Charmhub.
 
 To test with Juju 4, install or switch the Juju CLI in the sandbox to the
-desired channel before running tests:
+desired channel before running tests. If Juju is not installed, run:
+
+.. code:: bash
+
+   sudo snap install juju --channel 4/stable
+
+If Juju is already installed, switch channels with:
 
 .. code:: bash
 
    sudo snap refresh juju --channel 4/stable
+
+Confirm the selected version:
+
+.. code:: bash
+
    juju version
 
 Set ``TARGET_CHARM``, ``TARGET_CHARM_FILE``, ``TARGET_ENDPOINT``,
@@ -248,7 +259,7 @@ Set ``TARGET_CHARM``, ``TARGET_CHARM_FILE``, ``TARGET_ENDPOINT``,
 Change ``2/edge`` to the release context you want to test, or omit
 ``--target-channel`` and ``--target-revision`` to use the resolved defaults.
 The selectors choose test context for overrides and version constraints; the
-local artifact remains the deployment source. Choose a substrate and neighbor
+local charm remains the deployment source. Choose a substrate and neighbor
 that support the charm's endpoint and base. The charm archive must declare the
 requested base in its runtime metadata. To test only one lifecycle step, append
 a pytest selector such as
