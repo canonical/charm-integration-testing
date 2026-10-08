@@ -25,7 +25,7 @@ Structure
            base: ubuntu@22.04     # optional, pin to a specific base
          local-app:
            charm: charm-name
-           local_charm: ./build/charm-name.charm
+           local_charm: ./build/unpacked-charm
            channel: 2/edge         # optional test context; defaults to resolved default channel
            revision: 42            # optional test context; defaults to resolved default revision
        integrations:
@@ -135,8 +135,9 @@ Application
    * - ``local_charm``
      - no
      - --
-     - Path to a local charm directory, such as one unpacked from a ``.charm``
-       artifact. It is deployed as a local charm; any ``channel`` or ``revision``
+     - Path to a local charm directory containing ``metadata.yaml`` and
+       ``manifest.yaml``. Unpack a ``.charm`` archive before using it here. The
+       directory is deployed as a local charm; any ``channel`` or ``revision``
        fields describe test context only and are not emitted as Charmhub source
        fields in the generated bundle.
 
