@@ -45,6 +45,11 @@ class RecordingJujuClient:
     def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
         self.calls.append(("ssh", unit, command, model))
 
+    def wait_for_unit_unavailable(
+        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
+    ) -> None:
+        self.calls.append(("wait_for_unit_unavailable", unit, model, timeout))
+
     def validate_model(
         self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
     ) -> None:
@@ -113,6 +118,7 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
         ("ssh", "target/1", "sudo reboot", MODEL),
+        ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
     ]

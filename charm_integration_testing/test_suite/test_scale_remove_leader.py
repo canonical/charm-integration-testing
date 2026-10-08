@@ -17,10 +17,14 @@ def test_scale_remove_leader(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     target_application: str,
+    target_platform: str,
     target_deployed_charm: Charm | None,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str | None,
 ) -> None:
+    if target_platform == "kubernetes":
+        pytest.skip("Juju does not support removing a specific unit from a Kubernetes model.")
+
     charm = require_principal_charm(target_deployed_charm)
     if not charm.scale_down:
         pytest.skip(f"{charm.name} does not support scaling down from HA.")

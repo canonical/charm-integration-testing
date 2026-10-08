@@ -74,6 +74,7 @@ def test_scale_remove_leader_validates_during_removal_and_restores_ha() -> None:
         cast(JujuClient, client),
         MODEL,
         "target",
+        "machine",
         _charm(),
         None,
         None,
@@ -101,6 +102,7 @@ def test_scale_remove_leader_restores_ha_when_validation_fails() -> None:
             cast(JujuClient, client),
             MODEL,
             "target",
+            "machine",
             _charm(),
             None,
             None,
@@ -108,3 +110,20 @@ def test_scale_remove_leader_restores_ha_when_validation_fails() -> None:
 
     assert client.current_units == 3
     assert ("scale_application", "target", 3, MODEL) in client.calls
+
+
+def test_scale_remove_leader_skips_kubernetes_models() -> None:
+    client = RecordingJujuClient()
+
+    with pytest.raises(pytest.skip.Exception, match="does not support removing a specific unit"):
+        scale_remove_leader.test_scale_remove_leader(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            "kubernetes",
+            _charm(),
+            None,
+            None,
+        )
+
+    assert client.calls == []
