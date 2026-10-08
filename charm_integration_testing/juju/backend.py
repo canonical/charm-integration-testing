@@ -362,7 +362,6 @@ class JujuBackend(ABC):
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
-    @abstractmethod
     def application_leader(self, model: JujuModelHandle, application: str) -> str:
         raise NotImplementedError
 

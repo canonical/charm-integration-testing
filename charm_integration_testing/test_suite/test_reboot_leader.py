@@ -55,9 +55,6 @@ def test_reboot_leader(
         if leader_pod_uid is None:
             pytest.fail(f"Leader Pod for {leader} has no UID.")
 
-    validation_model = neighbor_model_ref or target_model_ref
-    validation_application = neighbor_application or target_application
-
     models = [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
 
     def restart_leader() -> None:
@@ -84,12 +81,25 @@ def test_reboot_leader(
     def wait_for_recovery() -> None:
         if target_platform == "kubernetes":
             assert kubernetes_client is not None
-            replacement = kubernetes_client.wait_for_new_pod(
-                application_name=target_application,
-                namespace=target_model_ref.model,
-                existing_uids=old_pod_uids,
+            replacement = kubernetes_client.wait(
+                check=lambda: next(
+                    (
+                        pod
+                        for pod in kubernetes_client.get_charm_pods(
+                            target_application, model=target_model_ref.model
+                        )
+                        if (pod.metadata.annotations or {}).get("unit.juju.is/id") == leader
+                        and pod.metadata.uid is not None
+                        and pod.metadata.uid not in old_pod_uids
+                        and pod.metadata.deletion_timestamp is None
+                    ),
+                    None,
+                ),
+                timeout_message=f"Replacement Pod for leader {leader} did not appear.",
                 timeout=timedelta(minutes=15),
             )
+            if replacement.metadata.name is None:
+                pytest.fail(f"Replacement Pod for leader {leader} has no name.")
             kubernetes_client.wait_for_pod_status(
                 pod_name=replacement.metadata.name,
                 namespace=target_model_ref.model,
@@ -100,7 +110,9 @@ def test_reboot_leader(
 
     try:
         restart_leader()
-        juju_client.validate_model(model=validation_model, level="deep", applications=[validation_application])
+        juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
+        if neighbor_model_ref is not None and neighbor_application is not None:
+            juju_client.validate_model(model=neighbor_model_ref, level="deep", applications=[neighbor_application])
     except Exception as operation_error:
         try:
             wait_for_recovery()
