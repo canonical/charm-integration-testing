@@ -535,17 +535,21 @@ class CharmhubClient:
             refresh_info.charm.bases, ubuntu_arch, charm_name, charm_revision, ubuntu_version
         )
 
-        # Find suitable channel (must support base)
-        default_refresh_info = self._default_refresh_info(
-            charm_name,
-            CharmhubBase(
-                channel=ubuntu_version,
-                architecture=ubuntu_arch,
-            ),
-        )
+        # The revision lookup reports the channel where this revision was released. Prefer it
+        # over the charm's current default channel, which may be on another track.
+        channel = refresh_info.effective_channel
+        if channel is None:
+            default_refresh_info = self._default_refresh_info(
+                charm_name,
+                CharmhubBase(
+                    channel=ubuntu_version,
+                    architecture=ubuntu_arch,
+                ),
+            )
+            channel = default_refresh_info.effective_channel
 
         # Return Charm from refresh info
-        if default_refresh_info.effective_channel is None:
+        if channel is None:
             raise ReleaseUnavailableError(
                 kind=ReleaseUnavailableKind.NO_SUITABLE_CHANNEL,
                 request=ReleaseRequest(
@@ -564,7 +568,7 @@ class CharmhubClient:
         return self._ensure_compatibility(
             charm=self._build_charm(
                 charm_name=charm_name,
-                channel=CharmChannel.model_validate(default_refresh_info.effective_channel),
+                channel=CharmChannel.model_validate(channel),
                 revision=charm_revision,
                 ubuntu_version=ubuntu_version,
                 ubuntu_arch=ubuntu_arch,

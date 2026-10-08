@@ -147,6 +147,45 @@ def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> Charmhu
 
 
 class TestCharmhubClient:
+    class TestCharmFromStoreByRevision:
+        def test_uses_revision_effective_channel_instead_of_current_default(self) -> None:
+            # GIVEN a Charmhub revision whose published track differs from the current default
+            response = _refresh_response_with_charm(
+                "juju-qa-test",
+                revision=27,
+                metadata=_METADATA_REQUIRES,
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            ).model_copy(update={"effective_channel": "3.0/stable"})
+
+            class _RevisionHttpClient(_NullHttpClient):
+                def __init__(self) -> None:
+                    self.actions: list[RefreshAction] = []
+
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    self.actions.append(action)
+                    return response
+
+            http_client = _RevisionHttpClient()
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, http_client),
+                overrides_client=_StubOverridesClient({}),
+            )
+
+            # WHEN resolving the pinned revision without a caller-supplied channel
+            charm = client.charm_from_store(
+                charm_name="juju-qa-test",
+                ubuntu_arch="amd64",
+                platform="machine",
+                charm_revision=27,
+                ubuntu_version="22.04",
+            )
+
+            # THEN the revision's own effective channel is retained without a default lookup
+            assert charm.revision == 27
+            assert charm.channel == CharmChannel.model_validate("3.0/stable")
+            assert len(http_client.actions) == 1
+            assert http_client.actions[0].charm_revision == 27
+
     class TestBuildCharmHa:
         def test_build_charm_uses_ha_defaults(self) -> None:
             client = _client({})
