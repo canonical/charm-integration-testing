@@ -26,6 +26,9 @@ class UnitOperationsBackend(NullJujuBackend):
     def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         self.calls.append(("wait_for_unit_removal", model, unit, timeout))
 
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.calls.append(("wait_for_unit_unavailable", model, unit, timeout))
+
     def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
         self.calls.append(("ssh", model, application, command))
 
@@ -38,11 +41,13 @@ def test_unit_operations_delegate_to_backend() -> None:
     assert client.application_leader("target", model=MODEL) == "target/1"
     client.remove_unit("target/1", model=MODEL)
     client.wait_for_unit_removal("target/1", model=MODEL, timeout=timeout)
+    client.wait_for_unit_unavailable("target/1", model=MODEL, timeout=timeout)
     client.ssh("target/1", "sudo reboot", model=MODEL)
 
     assert backend.calls == [
         ("application_leader", MODEL, "target"),
         ("remove_unit", MODEL, "target/1"),
         ("wait_for_unit_removal", MODEL, "target/1", timeout),
+        ("wait_for_unit_unavailable", MODEL, "target/1", timeout),
         ("ssh", MODEL, "target/1", "sudo reboot"),
     ]

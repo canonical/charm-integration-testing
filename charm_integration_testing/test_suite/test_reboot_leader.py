@@ -77,6 +77,7 @@ def test_reboot_leader(
             )
         else:
             juju_client.ssh(leader, "sudo reboot", model=target_model_ref)
+            juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
 
     def wait_for_recovery() -> None:
         if target_platform == "kubernetes":

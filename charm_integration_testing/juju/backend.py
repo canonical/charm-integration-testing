@@ -338,6 +338,9 @@ class JujuBackend(ABC):
     def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     @abstractmethod
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError

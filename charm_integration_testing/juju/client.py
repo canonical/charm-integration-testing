@@ -72,6 +72,10 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of unit {unit}.")
         self.backend.wait_for_unit_removal(model, unit, timeout)
 
+    def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become unavailable.")
+        self.backend.wait_for_unit_unavailable(model, unit, timeout)
+
     def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
         self.logger.info(f"Running command on unit {unit}: {command}")
         self.backend.ssh(model, unit, command)

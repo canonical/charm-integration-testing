@@ -58,9 +58,12 @@ def test_remove_unit_delegates_to_juju_cli() -> None:
 
 
 def test_unit_operations_do_not_add_abstract_requirements_to_legacy_backend() -> None:
-    assert not {"application_leader", "remove_unit", "wait_for_unit_removal"}.intersection(
-        JujuCmdBackend.__abstractmethods__
-    )
+    assert not {
+        "application_leader",
+        "remove_unit",
+        "wait_for_unit_removal",
+        "wait_for_unit_unavailable",
+    }.intersection(JujuCmdBackend.__abstractmethods__)
 
 
 def test_wait_for_unit_removal_checks_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,3 +80,23 @@ def test_wait_for_unit_removal_checks_status(monkeypatch: pytest.MonkeyPatch) ->
     assert len(ready_checks) == 1
     assert ready_checks[0][0] is True
     assert ready_checks[0][1].message == "waiting for removal of unit 'target/1'"
+
+
+@pytest.mark.parametrize(("agent_status", "expected"), [("down", True), ("lost", True), ("idle", False)])
+def test_wait_for_unit_unavailable_checks_agent_status(
+    monkeypatch: pytest.MonkeyPatch, agent_status: str, expected: bool
+) -> None:
+    client = UnitOperationsClient(
+        units={"target/1": SimpleNamespace(juju_status=SimpleNamespace(current=agent_status))}
+    )
+    backend = JubilantBackend(client=cast(JubilantClient, client))
+    ready_checks: list[tuple[bool, JujuWaitState]] = []
+
+    def record_wait(model: JujuModelHandle, ready: Any, timeout: Any = None) -> None:
+        ready_checks.append(ready(client.status()))
+
+    monkeypatch.setattr(backend, "wait", record_wait)
+    backend.wait_for_unit_unavailable(MODEL, "target/1", timeout=None)
+
+    assert ready_checks[0][0] is expected
+    assert ready_checks[0][1].message == "waiting for unit 'target/1' to become unavailable"
