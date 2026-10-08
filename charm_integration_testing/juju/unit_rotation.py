@@ -38,6 +38,9 @@ def rotate_application_units(
     current_units = juju_client.application_units(application, model=model)
     if len(current_units) != len(units):
         raise RuntimeError(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
+    juju_client.multi_model_idle_for_period(models, timeout=timeout)
+    for model_ref in models:
+        juju_client.validate_model(model=model_ref, level="deep")
 
 
 def _rotate_kubernetes_units(
@@ -109,8 +112,6 @@ def _rotate_kubernetes_units(
         _restore_kubernetes_unit_count(juju_client, kubernetes_client, application, model, len(units), models, timeout)
 
     _wait_for_rotated_kubernetes_pods(kubernetes_client, application, model.model, len(units), original_uids, timeout)
-    for model_ref in models:
-        juju_client.validate_model(model=model_ref, level="simple")
 
 
 def _restore_kubernetes_unit_count(
