@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 from juju import JujuClient, JujuModelHandle
+from juju.bundle_utils import application_unit_count_from_bundle
 
 from bundle_builder_x import Charm
 
-from .ha_helpers import bundle_application_units, require_principal_charm
+from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
 
 
@@ -43,7 +44,9 @@ def test_scale_from_ha(
     if not charm.scale_down:
         pytest.skip(f"{charm.name} does not support scaling down from HA.")
 
-    original_units = bundle_application_units(target_bundle, target_application, target_platform)
+    original_units = application_unit_count_from_bundle(
+        target_bundle.read_text(encoding="utf-8"), target_application, target_platform
+    )
     juju_client.scale_application(target_application, original_units, model=target_model_ref)
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
     juju_client.validate_model(model=target_model_ref, level="simple")

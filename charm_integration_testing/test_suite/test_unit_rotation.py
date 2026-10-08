@@ -6,7 +6,7 @@ from juju import JujuClient, JujuModelHandle
 
 from bundle_builder_x import Charm
 
-from .ha_helpers import require_principal_charm
+from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
 
 
