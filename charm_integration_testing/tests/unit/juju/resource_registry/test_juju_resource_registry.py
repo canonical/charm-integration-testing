@@ -55,7 +55,7 @@ class BootstrapKillBackendStub(NullJujuBackend):
     def kill_controller(self, controller: str) -> None:
         self.killed.append(controller)
 
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         self.models_added.append((controller, model))
 
     def juju_status_text(self, model: JujuModelHandle) -> str:
