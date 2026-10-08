@@ -207,5 +207,6 @@ class Charm(BaseModel):
         """Bundle application fields that select this charm artifact."""
         if self.source_path is not None:
             return {"charm": str(self.source_path)}
-        assert self.channel is not None and self.revision is not None
+        if self.channel is None or self.revision is None:
+            raise ValueError("Charmhub charm must have both a channel and revision")
         return {"charm": self.name, "channel": str(self.channel), "revision": self.revision}

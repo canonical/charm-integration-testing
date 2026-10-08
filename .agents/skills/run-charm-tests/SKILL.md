@@ -102,10 +102,14 @@ test against a second local build with
 exclusive). The cycle is skipped when the chosen CharmHub revision does not
 support the target's base.
 
-Artifacts are unpacked to `~/snap/juju/common/cit-local-charms/<sha256>/`
-(or `~/cit-local-charms/` without the Juju snap) so a confined Juju can read
-them and bundles generated in one session remain valid when a later session
-resumes with `--current-state`.
+Artifacts are unpacked by content hash so bundles generated in one session
+remain valid when a later session resumes with `--current-state`. With
+snap-installed Juju, the cache is under
+`~/snap/juju/common/charm-artifacts/`, scoped to the mounted project path so
+separate project checkouts do not share cache entries. Without the Juju snap,
+artifacts are stored under the project's `.pytest_cache/charm-artifacts/`.
+Concurrent runs of the same project and artifact reuse the immutable unpacked
+content.
 
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
 ```bash

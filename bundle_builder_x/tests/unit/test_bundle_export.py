@@ -5,6 +5,7 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from bundle_builder_x.bundle import (
@@ -76,6 +77,12 @@ class TestBundleExport:
         assert "channel" not in app
         assert "revision" not in app
 
+    def test_invalid_charmhub_source_fails_explicitly(self) -> None:
+        charm = Charm.model_construct(name="my-app", channel=None, revision=None, source_path=None)
+
+        with pytest.raises(ValueError, match="Charmhub charm must have both a channel and revision"):
+            charm.bundle_source()
+
     def test_kubernetes_uses_scale_key(self) -> None:
         # GIVEN a kubernetes bundle
         bundle = _make_bundle(
@@ -112,8 +119,6 @@ class TestBundleExport:
         )
 
         # WHEN/THEN exporting raises
-        import pytest
-
         with pytest.raises(ValueError, match="Unsupported platform"):
             bundle.export()
 
