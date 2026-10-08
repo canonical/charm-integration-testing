@@ -1,7 +1,8 @@
 ---
+default_channel: 2.5/stable  # Align the UI with its API peer on the current stable KFP release line.
 # Source: https://github.com/canonical/kfp-operators/tree/main/charms/kfp-ui
 #
-# 2.0-alpha.7/2.0-beta predate dashboard-links; 2.5/edge and 2.15-2.16/edge published transient endpoint sets.
+# 2.0-alpha.7/2.0-beta predate dashboard-links; 2.5 omits the kfp-ui provider, and 2.15-2.16/edge published transient endpoint sets.
 #
 # kfp-api (requires): REQUIRED - MlPipelineUiPebbleService depends_on relation:kfp-api and reads service-name/service-port.
 # object-storage (requires): REQUIRED - MlPipelineUiPebbleService depends_on relation:object-storage and reads MinIO credentials.
@@ -105,7 +106,6 @@ overrides:
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
       - track: '2.5'
-      - risk: edge
     requires:
       dashboard-links:
         optional: true

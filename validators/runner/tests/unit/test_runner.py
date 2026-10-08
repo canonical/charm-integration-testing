@@ -672,6 +672,35 @@ class TestValidatorRunnerPersistence:
         assert results.updated_refs["5"].ref == 2
         assert results.updated_refs["5"].id == 105
 
+    def test_checkpoint_all_prepares_new_relation_without_reseeding_existing_relation(self) -> None:
+        # GIVEN a model with one previously prepared and one newly established relation
+        runner = self._runner_with("test-interface", PreparingPersistenceValidator)
+        existing_relation = RelationStub(name="db", id=5)
+        new_relation = RelationStub(name="db", id=6)
+        charm = CharmBaseStub(
+            meta=CharmMetaStub(
+                relations={
+                    "db": RelationMetaStub(
+                        relation_name="db", role=RelationRoleStub.requires, interface_name="test-interface"
+                    )
+                }
+            ),
+            model=ModelStub(relations={"db": [existing_relation, new_relation]}),
+            app=ApplicationStub(),
+        )
+        refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
+
+        # WHEN
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
+
+        # THEN the existing relation is checkpointed and the new relation is seeded
+        assert [result.relation_id for result in results.results] == [5]
+        assert results.results[0].status == "PASS"
+        assert results.updated_refs == {
+            "5": PersistenceState(id=105, ref=2, token=TEST_TOKEN),
+            "6": PersistenceState(id=106, ref=1, token=TEST_TOKEN),
+        }
+
     def test_checkpoint_all_does_not_advance_state_on_fail(self) -> None:
         # Regression test for: checkpoint_all() previously recorded the new state returned
         # alongside a FAIL result unconditionally, overwriting the last-known-good baseline before
@@ -701,10 +730,10 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN
+        # THEN the stale ref is an error, and the currently live untracked relation is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_reports_error_for_non_integer_relation_ids(self) -> None:
         # GIVEN a malformed ref key
@@ -716,12 +745,12 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN no crash, and the malformed entry is reported as an ERROR rather than silently
-        # discarded, so a real durability check can't pass without ever running
+        # THEN the malformed entry is reported as an ERROR rather than silently discarded, while
+        # the valid live relation without a usable ref is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "Invalid relation_id" in (results.results[0].error or "")
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_does_not_resolve_a_ref_to_a_colliding_peer_relation(self) -> None:
         # Regression test for: _find_relation_by_id() (used by checkpoint_all) previously did not

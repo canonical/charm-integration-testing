@@ -33,8 +33,10 @@ install_env = " ".join(
     ]
 )
 remote_validators_path = "/var/lib/juju/validators"
+remote_packages_path = f"{remote_validators_path}/packages"
 venv_runner = f"{remote_validators_path}/venv/bin/run_validators"
 uv_bin = f"{remote_validators_path}/uv"
+validators_ready_cmd = f"test -x {venv_runner} && test -x {uv_bin}"
 uv_url = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz"
 
 # The ops run_validators' --persistence flag accepts (see validators/runner/runner.py).
@@ -72,11 +74,8 @@ class ValidatorInjectorExtension(JujuExtension):
         return results
 
     def persistence_operation(self, model: JujuModelHandle) -> str:
-        # Auto-decide the op from tracked state: any state for this model means a previous
-        # "prepare" seeded canary data, so this run must verify it ("checkpoint"); otherwise
-        # seed it ("prepare"). This is selected once per validate_model() call, not per
-        # application, so one application's prepare updates do not make later applications in the
-        # same model switch to checkpoint before they have seeded their own state.
+        # Select once per model validation so each application uses the same lifecycle phase.
+        # Checkpoint also prepares any newly-added relations that have no tracked state yet.
         if any(key.controller == model.controller and key.model == model.model for key in self.persistence_state):
             return "checkpoint"
         return "prepare"
@@ -122,7 +121,7 @@ class ValidatorInjectorExtension(JujuExtension):
                 # distinct from "ran and found nothing to report", which returns ([], {}) below.
                 results[unit] = []
                 continue
-            unit_results, updated_refs, _ = outcome
+            unit_results, updated_refs, cleaned_relation_ids = outcome
             results[unit] = unit_results
 
             try:
@@ -152,6 +151,20 @@ class ValidatorInjectorExtension(JujuExtension):
                 ]
                 continue
             self.persistence_state.update(new_entries)
+            if op == "cleanup":
+                failed_relation_ids = {
+                    result.relation_id for result in unit_results if result.status in ("FAIL", "ERROR")
+                }
+                cleaned_relation_id_set = set(cleaned_relation_ids) - failed_relation_ids
+                for key in [
+                    key
+                    for key in self.persistence_state
+                    if key.controller == model.controller
+                    and key.model == model.model
+                    and key.unit == unit
+                    and key.relation_id in cleaned_relation_id_set
+                ]:
+                    del self.persistence_state[key]
         return results
 
     def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
@@ -168,6 +181,10 @@ class ValidatorInjectorExtension(JujuExtension):
     ) -> None:
         # For a CMR teardown the integration is removed before the applications, so cleanup
         # must run here (relations still exist) rather than in pre_remove.
+        # This hook only receives the model that owns the integration. Current client persistence
+        # validators seed canaries only on the requires side, which is the consuming model for a
+        # CMR. If a validator starts seeding provider-side canaries, this lifecycle must be extended
+        # to identify and clean the other model before the integration is removed.
         endpoint_filters: dict[str, set[str]] = {}
         for endpoint in (endpoint_1, endpoint_2):
             endpoint_filters.setdefault(endpoint.application, set()).add(endpoint.endpoint)
@@ -199,7 +216,21 @@ class ValidatorInjectorExtension(JujuExtension):
                 # Without a live unit, cleanup cannot run; keep the tracked state so the orphaned
                 # canary data is not silently forgotten.
                 continue
-            outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s, endpoints=endpoints)
+            try:
+                outcome = self._run_persistence_on_unit(model, unit, "cleanup", {}, model_is_k8s, endpoints=endpoints)
+            except Exception as exc:
+                failed_validations[unit] = [
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint="",
+                        interface="",
+                        role="requires",
+                        level="deep",
+                        relation_id=-1,
+                        error=f"Persistence cleanup failed on {unit}: {exc}",
+                    )
+                ]
+                continue
             if outcome is None:
                 # No validators_path configured: nothing was cleaned, so keep the state so
                 # orphaned canary data isn't forgotten.
@@ -230,7 +261,7 @@ class ValidatorInjectorExtension(JujuExtension):
         self, model: JujuModelHandle, unit: str, level: str, is_k8s: bool = True
     ) -> list[ValidationResult]:
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 self.logger.warning(f"Validators path not provided, skipping injection on {unit}")
                 return []
@@ -258,7 +289,7 @@ class ValidatorInjectorExtension(JujuExtension):
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
 
         # Inject validators
-        if self.juju.exec_unit(model, unit, f"test -f {venv_runner}", operator=is_k8s).return_code != 0:
+        if self.juju.exec_unit(model, unit, validators_ready_cmd, operator=is_k8s).return_code != 0:
             if not self.validators_path:
                 # An unconfigured validators_path means no validators are being tested at all, so
                 # this must be a silent skip rather than a hard failure. Return None (not the
@@ -294,11 +325,15 @@ class ValidatorInjectorExtension(JujuExtension):
 
         # Copy validators
         self.logger.debug(f"[{unit}] copying validators to {remote_validators_path}")
-        mkdir = f"mkdir -p {remote_validators_path}"
+        mkdir = f"rm -rf {remote_packages_path} && mkdir -p {remote_validators_path}"
         if not is_k8s:
-            mkdir = f"sudo {mkdir} && sudo chown -R $(id -u) {remote_validators_path}"
+            mkdir = (
+                f"sudo rm -rf {remote_packages_path} && "
+                f"sudo mkdir -p {remote_validators_path} && "
+                f"sudo chown -R $(id -u) {remote_validators_path}"
+            )
         self.juju.ssh(model, unit, mkdir)
-        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_validators_path}/packages")
+        self.juju.scp(model, str(self.validators_path.resolve()), f"{unit}:{remote_packages_path}")
 
         # Copy uv binary
         uv_file = self._get_uv_file()
@@ -309,7 +344,7 @@ class ValidatorInjectorExtension(JujuExtension):
         for cmd, desc in [
             (f"chmod +x {uv_bin}", "make uv executable"),
             (
-                f"{install_env} {uv_bin} venv --python '>=3.10' {remote_validators_path}/venv",
+                f"{install_env} {uv_bin} venv --clear --python '>=3.10' {remote_validators_path}/venv",
                 "create venv with python 3.10+",
             ),
             (

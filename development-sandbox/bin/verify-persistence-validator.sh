@@ -41,7 +41,8 @@ Required:
 
 Optional:
   --interface <name>     Endpoint interface name (default: same as --validator)
-  --provider-units <n>   Units to restore provider to (default: auto from juju status)
+  --provider-units <n>   Expected restored provider units (default: auto from Juju status;
+                         required with custom --down-cmd/--restore-cmd)
   --down-cmd <cmd>       Override the disruption command entirely (e.g. for k8s-only backends).
                          When set, --restore-cmd must also be provided.
   --restore-cmd <cmd>    Override the restore command (paired with --down-cmd).
@@ -127,6 +128,14 @@ if [ -n "$DOWN_CMD" ] && [ -z "$RESTORE_CMD" ]; then
 fi
 if [ -z "$DOWN_CMD" ] && [ -n "$RESTORE_CMD" ]; then
     echo "--restore-cmd requires --down-cmd to also be set" >&2
+    exit 1
+fi
+if [ "$PROVIDER_UNITS" != "auto" ] && ! [[ "$PROVIDER_UNITS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--provider-units must be 'auto' or a positive integer" >&2
+    exit 1
+fi
+if [ -n "$DOWN_CMD" ] && [ "$PROVIDER_UNITS" = "auto" ]; then
+    echo "Custom --down-cmd/--restore-cmd require an explicit --provider-units count" >&2
     exit 1
 fi
 
@@ -232,48 +241,119 @@ run_step status_prepared "juju status -m $MODEL --relations"
 # checkpointing. Checkpointing while the disruption is still in flight would
 # test the wrong thing (and can produce ERROR/skipped results rather than a
 # genuine data-survival verdict).
+if [ -z "$DOWN_CMD" ]; then
+    # juju snap cannot redirect output to files directly, so capture via pipe.
+    _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
+    juju status -m "$MODEL" --format=json | cat > "$_status_file"
+    read -r discovered_provider_units orig_app_units < <(python3 - "$PROVIDER" "$APP" "$_status_file" <<'PY'
+import json, sys
+provider, app_name, status_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(status_file) as f:
+    data = json.load(f)
+applications = data.get("applications", {})
+provider_app = applications.get(provider, {})
+provider_scale = provider_app.get("scale")
+provider_units = provider_app.get("units", {})
+if isinstance(provider_scale, int):
+    expected_provider_units = provider_scale
+else:
+    expected_provider_units = len(provider_units) if isinstance(provider_units, dict) else 1
+app_units = applications.get(app_name, {}).get("units", {})
+expected_app_units = len(app_units) if isinstance(app_units, dict) else 0
+print(expected_provider_units, expected_app_units)
+PY
+    )
+    rm -f "$_status_file"
+    if [ "$PROVIDER_UNITS" = "auto" ]; then
+        orig_units="$discovered_provider_units"
+    else
+        orig_units="$PROVIDER_UNITS"
+    fi
+else
+    orig_units="$PROVIDER_UNITS"
+    # Custom disruption commands do not trigger provider-count discovery, but the validator
+    # application still needs to return to its original unit count before checkpointing.
+    _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
+    juju status -m "$MODEL" --format=json | cat > "$_status_file"
+    orig_app_units=$(python3 - "$APP" "$_status_file" <<'PY'
+import json, sys
+app_name, status_file = sys.argv[1], sys.argv[2]
+with open(status_file) as f:
+    data = json.load(f)
+app_units = data.get("applications", {}).get(app_name, {}).get("units", {})
+print(len(app_units) if isinstance(app_units, dict) else 0)
+PY
+    )
+    rm -f "$_status_file"
+fi
+
+if [ -z "$DOWN_CMD" ] && { [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; }; then
+    orig_units=1
+fi
+
 if [ -n "$DOWN_CMD" ]; then
     run_step provider_down "$DOWN_CMD"
     run_step status_down "juju status -m $MODEL --relations"
     run_step provider_restore "$RESTORE_CMD"
 else
-    if [ "$PROVIDER_UNITS" = "auto" ]; then
-        # juju snap cannot redirect output to files directly, so capture via pipe.
-        _status_file=$(mktemp /tmp/juju-status-XXXXXX.json)
-        juju status -m "$MODEL" --format=json | cat > "$_status_file"
-        orig_units=$(python3 - "$PROVIDER" "$_status_file" <<'PY'
-import json, sys
-provider, status_file = sys.argv[1], sys.argv[2]
-with open(status_file) as f:
-    data = json.load(f)
-app = data.get("applications", {}).get(provider, {})
-scale = app.get("scale")
-if isinstance(scale, int):
-    print(scale)
-else:
-    units = app.get("units", {})
-    print(len(units) if isinstance(units, dict) else 1)
-PY
-        )
-        rm -f "$_status_file"
-    else
-        orig_units="$PROVIDER_UNITS"
-    fi
-
-    if [ -z "$orig_units" ] || [ "$orig_units" -lt 1 ]; then
-        orig_units=1
-    fi
-
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
 fi
 
 run_step status_restored "juju status -m $MODEL --relations"
-run_step wait_settled "juju wait-for application $APP -m $MODEL --timeout 15m"
+# Wait for the provider and validator units to actually exist, be active, and be idle.
+# Juju can report an application as active while replacing a unit, and `wait-for unit` may then
+# finish when the original unit disappears. Polling status avoids checkpointing during that gap.
+read -r -d '' wait_cmd <<EOF || true
+for attempt in \$(seq 1 180); do
+    if juju status -m "$MODEL" --format=json | cat | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+apps = d.get("applications", {})
+provider = apps.get(sys.argv[1], {})
+app = apps.get(sys.argv[2], {})
+expected_provider = int(sys.argv[3])
+expected_app = int(sys.argv[4])
+provider_units = provider.get("units", {})
+app_units = app.get("units", {})
+good_provider = (
+    provider.get("application-status", {}).get("current") == "active"
+    and bool(provider_units)
+    and (expected_provider == 0 or len(provider_units) == expected_provider)
+    and all(
+        u.get("juju-status", {}).get("current") == "idle"
+        and u.get("workload-status", {}).get("current") == "active"
+        for u in provider_units.values()
+    )
+)
+good_app = (
+    app.get("application-status", {}).get("current") == "active"
+    and bool(app_units)
+    and (expected_app == 0 or len(app_units) == expected_app)
+    and all(
+        u.get("juju-status", {}).get("current") == "idle"
+        and u.get("workload-status", {}).get("current") == "active"
+        for u in app_units.values()
+    )
+)
+sys.exit(0 if good_provider and good_app else 1)
+' "$PROVIDER" "$APP" "$orig_units" "$orig_app_units"; then
+        exit 0
+    fi
+    sleep 5
+done
+exit 1
+EOF
+run_step wait_settled "$wait_cmd"
 
 # Verify the canary data survived the disruption.
-run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+if [ "${STEP_RC[wait_settled]:-1}" -eq 0 ]; then
+    run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+else
+    printf "[checkpoint] skipped because wait_settled failed\n  rc=1\n\n" >> "$summary"
+    STEP_RC[checkpoint]=1
+fi
 
 # Drop the canary data.
 run_step cleanup "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op cleanup --state-file $state_file"

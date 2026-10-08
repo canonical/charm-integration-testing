@@ -378,6 +378,8 @@ jobs:
           neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
           neighbor_metadata_source: ${{ steps.neighbor_env_info.outputs.metadata-source }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
+          target_arch: ${{ steps.target_env_info.outputs.arch }}
+          neighbor_arch: ${{ steps.neighbor_env_info.outputs.arch }}
           run_id: ${{ github.run_id }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
@@ -404,9 +406,11 @@ jobs:
             --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
             --target-platform "${platform}" \
+            --target-arch "${target_arch}" \
             \
             --neighbor-charm "${neighbor}" \
             --neighbor-platform "${neighbor_platform}" \
+            --neighbor-arch "${neighbor_arch}" \
             \
             --target-application "target" \
             --target-endpoint "${charm_endpoint}" \
@@ -443,6 +447,7 @@ jobs:
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
           metadata_source: ${{ steps.target_env_info.outputs.metadata-source }}
+          target_arch: ${{ steps.target_env_info.outputs.arch }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
           ./scripts/run-tests.sh \
@@ -460,6 +465,7 @@ jobs:
             --target-downgrade-revision "${downgrade_revision}" \
             --target-series "${series}" \
             --target-platform "${platform}" \
+            --target-arch "${target_arch}" \
             \
             --neighbor-charm "${neighbor}" \
             \

@@ -69,7 +69,7 @@ Writing a new validator
 The runner will discover and invoke the validator automatically for any relation whose interface matches the key.
 
 Data integrity and persistence validation
-------------------------------------------
+-----------------------------------------
 
 Persistence validators check that data survives disruptive operations (e.g. restarting a
 controller, upgrading/downgrading a charm, scaling, migrating a model) rather than just checking
@@ -135,12 +135,17 @@ CLI and wire format
   A JSON dict mapping relation IDs to their current ``PersistenceState``, required when
   ``--persistence checkpoint`` is used (``checkpoint()`` needs the state ``prepare()`` returned).
 
+During ``--persistence checkpoint``, each active relation with a supplied ref is checked;
+each applicable relation without a ref is prepared and its state is returned. This handles a
+relation added after other relations in the model already have tracked canary state.
+
 The runner's JSON output includes an ``updated_refs`` field alongside the usual functional
 ``results``: a dict of the same shape as ``--refs``, containing each relation's new
 ``PersistenceState`` after the requested operation. Callers (the ``ValidatorInjectorExtension``,
 via its ``post_persistence`` hook) are responsible for persisting ``updated_refs`` across test
 steps (e.g. in ``persistence_state``, keyed by controller/model/unit) and passing the relevant
-entries back in via ``--refs`` on the next ``checkpoint`` call.
+entries back in via ``--refs`` on the next ``checkpoint`` call. The returned refs also include
+state for newly prepared relations.
 
 For ``--persistence cleanup``, the output also includes a ``cleaned_relation_ids`` field: the
 relation IDs that cleanup actually visited (i.e. had a live relation with a registered
@@ -156,3 +161,23 @@ Writing a new persistence validator
 See the ``develop-persistence-validator`` skill
 (``.agents/skills/develop-persistence-validator/SKILL.md``) for a full walkthrough, using
 ``validators/postgresql_client`` as the reference implementation.
+
+Kyuubi connection requirements
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``KyuubiClientPersistenceValidator`` uses the ``kyuubi_client`` relation's
+``uris`` or ``endpoints`` and requires usable ``username`` and ``password``
+credentials, resolved from ``secret-user`` when present. Supplied credentials
+use SASL PLAIN, matching PyHive's ``CUSTOM`` mode for Kyuubi's JDBC authentication.
+The provider's LDAP whitespace placeholders are not login credentials and are
+rejected; external LDAP credential provisioning is not supported.
+
+When ``tls`` is ``True``, the validator requires ``tls-ca`` (resolved from
+``secret-tls`` when present) and verifies both the certificate chain and endpoint
+hostname. Canary operations also require a working storage backend and permission
+to create, read, insert into, and drop tables.
+
+Both plain and TLS transports use a five-second connection and socket I/O timeout.
+Checkpoint validation requires exactly one token-bearing row for every reference
+from 1 through the expected reference, rejecting duplicate or out-of-range references
+before writing another row.

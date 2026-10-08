@@ -6,7 +6,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
-from typing import Callable, Collection, Sequence, TypeVar
+from typing import Any, Callable, Collection, Sequence, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
@@ -400,18 +400,23 @@ class KubernetesClient:
         body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": now}}}}}
         self.logger.info(f"Rollout restart initiated for Statefulset: '{statefulset_name}' in namespace '{namespace}'")
         try:
-            self.backend.apps_v1_api.patch_namespaced_stateful_set(
-                name=statefulset_name, namespace=namespace, body=body
-            )
+            self.patch_statefulset_template(namespace, statefulset_name, body)
         except ApiException as e:
             self.logger.error(
                 f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
             )
             raise
 
-        # Call extensions
         for extension in self.extensions:
             extension.post_restart_statefulset(namespace, statefulset_name)
+
+    def patch_statefulset_template(
+        self, namespace: str, statefulset_name: str, body: dict[str, Any] | list[dict[str, Any]]
+    ) -> None:
+        """Patch a Pod template without invoking explicit restart hooks."""
+        self.backend.apps_v1_api.patch_namespaced_stateful_set(
+            name=statefulset_name, namespace=namespace, body=body, _request_timeout=30
+        )
 
     def wait_for_statefulset_restart(self, namespace: str, statefulset_name: str, timeout_seconds: int = 300) -> None:
         """

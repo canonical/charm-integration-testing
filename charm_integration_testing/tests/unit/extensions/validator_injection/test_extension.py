@@ -11,6 +11,8 @@ import pytest
 from extensions.validator_injection.extension import (
     ValidatorInjectorExtension,
     remote_validators_path,
+    uv_bin,
+    venv_runner,
 )
 from juju import JujuIntegrationApplication, JujuModelHandle, JujuValidationError, PersistenceKey
 from juju.backend import JujuExecOutput
@@ -140,8 +142,8 @@ def _persistence_runner_json(
 
 
 # Exec responses for a full injection + clean run cycle:
-#   1. test -f venv_runner → rc=1 (not present)
-#   2-4. three install commands (chmod, venv, pip install) → rc=0 each
+#   1. validator readiness check → rc=1 (not present)
+#   2-4. three install commands → rc=0 each
 #   5. run_validators       → rc=0 with PASS JSON
 def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -150,7 +152,7 @@ def _inject_and_pass_responses(run_stdout: str | None = None) -> list[JujuExecOu
 
 
 # Exec responses when the venv is already installed:
-#   1. test -f venv_runner → rc=0 (present)
+#   1. validator readiness check → rc=0 (present)
 #   2. run_validators      → rc=0 with PASS JSON
 def _preinstalled_responses(run_stdout: str | None = None) -> list[JujuExecOutput]:
     if run_stdout is None:
@@ -244,6 +246,7 @@ class TestValidatorInjectorExtension:
             # THEN the venv was installed - i.e. more than just the readiness check and the run
             # command were executed - and the op still succeeded afterwards
             run_cmds = [call[2] for call in juju.exec_calls if "--persistence" in call[2]]
+            assert juju.exec_calls[0][2] == f"test -x {venv_runner} && test -x {uv_bin}"
             assert len(run_cmds) == 1
             assert len(juju.exec_calls) > 2
 
@@ -323,10 +326,42 @@ class TestValidatorInjectorExtension:
 
             # THEN each unit's run command only includes its own refs
             run_cmds = {call[1]: call[2] for call in juju.exec_calls if "--persistence" in call[2]}
-            refs_0 = json.loads(run_cmds["myapp/0"].split("--refs ", 1)[1].strip("'"))
-            refs_1 = json.loads(run_cmds["myapp/1"].split("--refs ", 1)[1].strip("'"))
+            refs_0_json = run_cmds["myapp/0"].split("--refs ", 1)[1]
+            refs_1_json = run_cmds["myapp/1"].split("--refs ", 1)[1]
+            refs_0 = json.loads(refs_0_json.strip("'"))
+            refs_1 = json.loads(refs_1_json.strip("'"))
             assert refs_0 == {"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}}
             assert refs_1 == {"5": {"id": 2, "ref": 3, "token": TEST_TOKEN}}
+
+        def test_checkpoint_prepares_untracked_relations(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN one tracked and one newly established relation on the unit
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            existing_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            existing_state = PersistenceState(id=1, ref=2, token=TEST_TOKEN)
+            new_state = PersistenceState(id=2, ref=1, token=TEST_TOKEN)
+            extension.persistence_state = {existing_key: existing_state}
+            juju.exec_responses.extend(
+                _preinstalled_responses(
+                    _persistence_runner_json(
+                        results=[_pass_result(relation_id=4)],
+                        updated_refs={"4": PersistenceState(id=1, ref=3, token=TEST_TOKEN), "9": new_state},
+                    )
+                )
+            )
+
+            # WHEN
+            extension.post_persistence(TEST_MODEL, "myapp")
+
+            # THEN checkpointing returns updated state for both tracked and newly prepared refs
+            run_cmd = juju.exec_calls[-1][2]
+            assert "--persistence checkpoint" in run_cmd
+            assert "--refs" in run_cmd
+            assert extension.persistence_state == {
+                existing_key: PersistenceState(id=1, ref=3, token=TEST_TOKEN),
+                PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 9): new_state,
+            }
 
         def test_cleanup_drops_state_for_the_unit_and_omits_refs(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -346,6 +381,21 @@ class TestValidatorInjectorExtension:
             run_cmd = juju.exec_calls[-1][2]
             assert "--persistence cleanup" in run_cmd
             assert "--refs" not in run_cmd
+
+        def test_post_persistence_cleanup_drops_cleaned_state(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN persistence state loaded by the standalone sandbox helper
+            juju.units_by_app["myapp"] = ["myapp/0"]
+            key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            extension.persistence_state = {key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[4])))
+
+            # WHEN the explicit cleanup operation completes successfully
+            extension.post_persistence(TEST_MODEL, "myapp", "cleanup")
+
+            # THEN the helper's persisted state no longer tracks the removed canary
+            assert extension.persistence_state == {}
 
         def test_cleanup_keeps_state_for_a_relation_cleanup_never_visited(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
@@ -497,6 +547,31 @@ class TestValidatorInjectorExtension:
             extension.persistence_state = persistence_state
             with pytest.raises(JujuValidationError):
                 extension.pre_remove(TEST_MODEL, "myapp")
+
+        def test_cleanup_continues_after_a_unit_command_failure(
+            self, extension: ValidatorInjectorExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN two units with tracked canaries and cleanup fails on the first unit
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            failed_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/0", 4)
+            cleaned_key = PersistenceKey(TEST_MODEL.controller, TEST_MODEL.model, "myapp/1", 5)
+            extension.persistence_state = {
+                failed_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN),
+                cleaned_key: PersistenceState(id=2, ref=3, token=TEST_TOKEN),
+            }
+            juju.exec_responses.extend([_ok(), _fail(stderr="transport failed")])
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json(cleaned_relation_ids=[5])))
+
+            # WHEN cleanup runs
+            with pytest.raises(JujuValidationError):
+                extension.pre_remove(TEST_MODEL, "myapp")
+
+            # THEN the second unit was still cleaned while failed-unit state remains tracked
+            assert [call[1] for call in juju.exec_calls if "--persistence cleanup" in call[2]] == [
+                "myapp/0",
+                "myapp/1",
+            ]
+            assert extension.persistence_state == {failed_key: PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
 
         def test_returns_results_keyed_by_unit(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN one unit whose checkpoint run returns a FAIL result
@@ -670,6 +745,18 @@ class TestValidatorInjectorExtension:
                 assert len(juju.scp_calls) == 2  # validators + uv
                 assert len(juju.exec_calls) == 5  # test-f + 3 installs + run
 
+            def test_reinjects_when_uv_is_missing(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+                # GIVEN the validator runner remains but uv was lost after pod rescheduling
+                juju.exec_responses.extend(_inject_and_pass_responses())
+
+                # WHEN
+                extension._run_validators_on_unit(TEST_MODEL, "myapp/0", "simple")
+
+                # THEN the missing uv triggers a complete reinjection
+                assert juju.exec_calls[0][2] == f"test -x {venv_runner} && test -x {uv_bin}"
+                assert len(juju.scp_calls) == 2
+                assert len(juju.exec_calls) == 5
+
         class TestResultHandling:
             def test_does_not_raise_when_all_pass(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
                 # GIVEN two endpoints both pass
@@ -809,7 +896,7 @@ class TestValidatorInjectorExtension:
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
             assert unit == "myapp/0"
-            assert cmd == f"mkdir -p {remote_validators_path}"
+            assert cmd == f"rm -rf {remote_validators_path}/packages && mkdir -p {remote_validators_path}"
 
         def test_calls_ssh_mkdir_before_scp_with_sudo_in_non_k8s_model_and_chowns_it(
             self,
@@ -825,8 +912,9 @@ class TestValidatorInjectorExtension:
             # THEN ssh was called to create the remote directory before copying files
             assert len(juju.ssh_calls) == 1
             _, unit, cmd = juju.ssh_calls[0]
-            mkdir, chown = cmd.split(" && ")
+            remove, mkdir, chown = cmd.split(" && ")
             assert unit == "myapp/0"
+            assert remove == f"sudo rm -rf {remote_validators_path}/packages"
             assert mkdir == f"sudo mkdir -p {remote_validators_path}"
             assert chown == f"sudo chown -R $(id -u) {remote_validators_path}"
 
@@ -854,6 +942,7 @@ class TestValidatorInjectorExtension:
             pip_cmd = juju.exec_calls[2][2]
             assert "UV_NO_CACHE=1" in venv_cmd, f"UV_NO_CACHE not in venv command: {venv_cmd}"
             assert "UV_NO_CACHE=1" in pip_cmd, f"UV_NO_CACHE not in pip install command: {pip_cmd}"
+            assert "--clear" in venv_cmd
 
         def test_raises_when_apt_install_fails(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
             # GIVEN chmod +x uv fails

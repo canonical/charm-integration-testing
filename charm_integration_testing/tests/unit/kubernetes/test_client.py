@@ -118,7 +118,9 @@ class KubernetesBackendStub(KubernetesBackend):
         assert self.get_namespaced_pod_result is not None
         return self.get_namespaced_pod_result
 
-    def patch_namespaced_stateful_set(self, name: str, namespace: str, body: dict[str, Any]) -> None:
+    def patch_namespaced_stateful_set(
+        self, name: str, namespace: str, body: dict[str, Any], _request_timeout: int = 30
+    ) -> None:
         self.patch_stateful_set_call_count += 1
         self.patch_stateful_set_last_body = body
         if self.patch_stateful_set_raises:

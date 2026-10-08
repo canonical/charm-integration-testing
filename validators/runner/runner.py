@@ -323,48 +323,19 @@ class ValidatorRunner:
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
         for integration, interface_name, role in self._iter_persistence_targets(charm):
-            for validator_cls in self.persistence_validators[interface_name]:
-                state, error_result, skipped = self._call_persistence_method(
-                    validator_cls, charm, integration, interface_name, role, lambda v: v.prepare()
-                )
-                if error_result is not None:
-                    results.append(error_result)
-                elif skipped:
-                    continue
-                elif not isinstance(state, PersistenceState):
-                    # The abstract contract requires prepare() to return a PersistenceState; a
-                    # validator returning anything else leaves this relation with no tracked state,
-                    # which would silently skip every later checkpoint for it rather than
-                    # surfacing the broken implementation.
-                    logger.error(
-                        f"Persistence validator '{validator_cls.__name__}' for endpoint "
-                        f"'{integration.name}' returned {state!r} from prepare() instead of a "
-                        "PersistenceState."
-                    )
-                    results.append(
-                        ValidationResult(
-                            status="ERROR",
-                            endpoint=integration.name,
-                            interface=interface_name,
-                            role=role,
-                            level=_PERSISTENCE_RESULT_LEVEL,
-                            relation_id=integration.id,
-                            error=(
-                                f"Persistence validator '{validator_cls.__name__}' returned "
-                                f"{state!r} from prepare() instead of a PersistenceState."
-                            ),
-                        )
-                    )
-                else:
-                    updated_refs[str(integration.id)] = state
+            state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
+            results.extend(target_results)
+            if state is not None:
+                updated_refs[str(integration.id)] = state
         logger.info(f"Finished preparing persistence validators: {len(updated_refs)} relation(s) seeded")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
     def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
-        """Verify all previously-seeded canary data is still present for every ref in *refs*."""
+        """Checkpoint tracked refs and prepare live targets without tracked state."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
+        tracked_relation_ids: set[int] = set()
         for relation_id_str, expected in refs.items():
             try:
                 relation_id = int(relation_id_str)
@@ -385,6 +356,7 @@ class ValidatorRunner:
                     )
                 )
                 continue
+            tracked_relation_ids.add(relation_id)
             found = self._find_relation_by_id(charm, relation_id)
             if found is None:
                 logger.error(f"Relation id {relation_id} not found in model; cannot checkpoint.")
@@ -472,8 +444,56 @@ class ValidatorRunner:
                     # baseline, so a later retry could checkpoint against post-failure state.
                     if result.status == "PASS":
                         updated_refs[relation_id_str] = new_state
+        for integration, interface_name, role in self._iter_persistence_targets(charm):
+            if integration.id in tracked_relation_ids:
+                continue
+            state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
+            results.extend(target_results)
+            if state is not None:
+                updated_refs[str(integration.id)] = state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
+
+    def _prepare_persistence_target(
+        self,
+        charm: CharmBase,
+        integration: Relation,
+        interface_name: str,
+        role: ValidationRole,
+    ) -> tuple[PersistenceState | None, list[ValidationResult]]:
+        results: list[ValidationResult] = []
+        prepared_state: PersistenceState | None = None
+        for validator_cls in self.persistence_validators[interface_name]:
+            state, error_result, skipped = self._call_persistence_method(
+                validator_cls, charm, integration, interface_name, role, lambda v: v.prepare()
+            )
+            if error_result is not None:
+                results.append(error_result)
+            elif skipped:
+                continue
+            elif not isinstance(state, PersistenceState):
+                logger.error(
+                    f"Persistence validator '{validator_cls.__name__}' for endpoint "
+                    f"'{integration.name}' returned {state!r} from prepare() instead of a "
+                    "PersistenceState."
+                )
+                results.append(
+                    ValidationResult(
+                        status="ERROR",
+                        endpoint=integration.name,
+                        interface=interface_name,
+                        role=role,
+                        level=_PERSISTENCE_RESULT_LEVEL,
+                        relation_id=integration.id,
+                        error=(
+                            f"Persistence validator '{validator_cls.__name__}' returned "
+                            f"{state!r} from prepare() instead of a PersistenceState."
+                        ),
+                    )
+                )
+            else:
+                prepared_state = state
+        return prepared_state, results
 
     def cleanup_all(self, charm: CharmBase, endpoints: set[str] | None = None) -> ValidatorRunnerResults:
         """Drop all canary data for every relation with a registered persistence validator."""

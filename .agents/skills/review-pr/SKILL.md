@@ -220,14 +220,22 @@ that threads need manual resolution.
 
 ## Step 6 — Push (if applicable)
 
-Only push if you have confirmed write access to the branch:
+Only push when the user has explicitly authorized it. A configured GitHub token or
+confirmed write access is not permission by itself. If the user has not authorized a
+push, leave the commit local and report that it was not pushed.
 
 ```bash
-git push origin <branch>
+GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
+  push https://github.com/canonical/charm-integration-testing.git HEAD:refs/heads/<branch>
 ```
 
-If push is blocked (SSH key missing, token scope insufficient), commit locally
-and report the commit SHA so a maintainer can cherry-pick or force-push.
+`GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (such as HTTPS-to-SSH)
+from changing the transport for this command; it does not modify Git configuration.
+This uses `gh` authentication (including `GH_TOKEN`/`GITHUB_TOKEN`) for HTTPS without
+persisting credentials or changing the remote. If the HTTPS push returns an authentication
+or authorization error, stop and report it. A permission error may indicate the push is
+not wanted or permitted; do not retry through another `gh` route or work around it with
+another credential, remote, protocol, or force push.
 
 ---
 
