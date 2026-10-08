@@ -135,6 +135,7 @@ def test_unit_rotation_preserves_machine_error_when_surge_cleanup_fails() -> Non
 
     assert isinstance(error.value.__cause__, TimeoutError)
     assert str(error.value.__cause__) == "cleanup idle wait failed"
+    assert client.units == ["target/1", "target/2", "target/3"]
 
 
 def test_unit_rotation_continues_machine_cleanup_when_settling_wait_fails() -> None:
