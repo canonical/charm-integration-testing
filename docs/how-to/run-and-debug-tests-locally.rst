@@ -210,8 +210,8 @@ Test a local charm on Juju 4 or Ubuntu 26.04
 
 Build the charm in its source repository and keep the resulting ``.charm``
 file. For example, run ``charmcraft pack`` and set ``TARGET_CHARM_FILE`` to
-the path of the output file. The test suite unpacks the archive and deploys that local charm; the
-neighbor charm continues to resolve from Charmhub.
+the path of the output file. The test suite unpacks the archive and deploys
+that local charm; the neighbor charm continues to resolve from Charmhub.
 
 To test with Juju 4, install or switch the Juju CLI in the sandbox to the
 desired channel before running tests. If Juju is not installed, run:
@@ -234,13 +234,13 @@ Confirm the selected version:
 
 Set ``TARGET_CHARM``, ``TARGET_CHARM_FILE``, ``TARGET_ENDPOINT``,
 ``NEIGHBOR_CHARM``, ``NEIGHBOR_ENDPOINT``, ``TARGET_CLOUD`` and
-``TARGET_PLATFORM`` to match your charm and sandbox. Then run:
+``SUBSTRATE`` to match your charm and sandbox. Then run:
 
 .. code:: bash
 
    ./scripts/run-tests.sh \
      --target-cloud "${TARGET_CLOUD}" \
-     --target-platform "${TARGET_PLATFORM}" \
+     --target-platform "${SUBSTRATE}" \
      --target-charm "${TARGET_CHARM}" \
      --target-charm-file "${TARGET_CHARM_FILE}" \
      --target-series 26.04 \
