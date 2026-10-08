@@ -400,8 +400,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help=(
-            "File path for the target model's bundle YAML. By default it is written as "
-            "'generated-target-bundle.yaml' under pytest's root path."
+            "File path for the target model's bundle YAML. With --target-charm-file, the default is stored beside "
+            "the unpacked charm under Juju's snap-accessible common directory; otherwise it is stored under "
+            "pytest's root path. Explicit paths must also be accessible to Juju."
         ),
     )
     parser.addoption(
@@ -550,11 +551,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture
-def target_bundle(request: pytest.FixtureRequest) -> Path:
+def target_bundle(request: pytest.FixtureRequest, local_target_charm: Path | None) -> Path:
     """Path to the target model's bundle YAML. Defaults to ``generated-target-bundle.yaml``."""
     value = request.config.getoption("--target-bundle")
     if not value:
-        path = Path(request.config.rootpath) / "generated-target-bundle.yaml"
+        root = local_target_charm.parent if local_target_charm is not None else Path(request.config.rootpath)
+        path = root / "generated-target-bundle.yaml"
     else:
         assert isinstance(value, str)
         path = Path(value).resolve()
@@ -563,7 +565,7 @@ def target_bundle(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture
-def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool) -> Path | None:
+def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool, local_target_charm: Path | None) -> Path | None:
     """Path to the neighbor model's bundle YAML for CMR tests.
 
     Returns ``None`` when neighbor routing options are absent (non-CMR test).
@@ -574,7 +576,8 @@ def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool) -> Path |
 
     value = request.config.getoption("--neighbor-bundle")
     if not value:
-        ppath = Path(request.config.rootpath) / "generated-neighbor-bundle.yaml"
+        root = local_target_charm.parent if local_target_charm is not None else Path(request.config.rootpath)
+        ppath = root / "generated-neighbor-bundle.yaml"
     else:
         assert isinstance(value, str)
         ppath = Path(value).resolve()
