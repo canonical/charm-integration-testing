@@ -35,16 +35,22 @@ def test_scale_remove_leader(
 
     leader = juju_client.application_leader(target_application, model=target_model_ref)
     models = [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
+    removal_requested = False
+    removal_settled = False
 
     def restore_application() -> None:
-        current_units = juju_client.num_units(target_application, model=target_model_ref)
-        if current_units != original_units:
-            juju_client.scale_application(target_application, original_units, model=target_model_ref)
+        nonlocal removal_settled
+        if removal_requested and not removal_settled:
+            juju_client.wait_for_unit_removal(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+            removal_settled = True
+        juju_client.scale_application(target_application, original_units, model=target_model_ref)
         juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
 
     try:
         juju_client.remove_unit(leader, model=target_model_ref)
+        removal_requested = True
         juju_client.wait_for_unit_removal(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+        removal_settled = True
         juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
         if neighbor_application is not None:
