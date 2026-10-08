@@ -4,8 +4,8 @@ Per-charm chaos test parameters (e.g. how much memory or CPU a stress
 experiment should apply, and for how long), read by
 `ResourceConstraintsClient`
 (`charm_integration_testing/chaos_client/resource_constraints.py`) and
-applied automatically by `MetaChaosClient` before it dispatches a chaos
-experiment to the underlying implementation.
+applied by `MetaChaosClient` when dispatching experiments, or by the test
+when configuring workload resource limits.
 
 This is a separate mechanism from `static/charm-overrides/`, which drives
 bundle construction (endpoints, configs, resources, constraints). Resource
@@ -29,6 +29,7 @@ constraints:
     memory_exhaustion_workers: 2
     memory_exhaustion_size_mb: 2048
     memory_exhaustion_duration_seconds: 60
+    memory_exhaustion_limit: "1Gi"
     memory_moderate_pressure_size_mb: 256
   - criteria:
       - track: "16"
@@ -51,6 +52,7 @@ exhaustion" variant of the same underlying stress operation.
 | `memory_exhaustion_workers`                   | int  | `ChaosClient.stress_memory`  |
 | `memory_exhaustion_size_mb`                   | int  | `ChaosClient.stress_memory`  |
 | `memory_exhaustion_duration_seconds`          | int  | `ChaosClient.stress_memory`  |
+| `memory_exhaustion_limit`                     | str  | Total memory test container limit |
 | `memory_moderate_pressure_workers`            | int  | `ChaosClient.stress_memory`  |
 | `memory_moderate_pressure_size_mb`            | int  | `ChaosClient.stress_memory`  |
 | `memory_moderate_pressure_duration_seconds`   | int  | `ChaosClient.stress_memory`  |
@@ -64,6 +66,11 @@ implementation exists yet for I/O saturation, and `isolate_network` takes no
 configurable parameters to override.
 
 ## How experiments consume these fields
+
+The total memory test reads `memory_exhaustion_limit` from the matching block.
+Use a positive Kubernetes memory quantity, such as `512Mi` or `2Gi`. If unset,
+the test uses its `memory_limit` fixture (default `1Gi`). The configured stress
+size must cover the limit. The original container resources are restored afterward.
 
 `MetaChaosClient` resolves the deployed unit's charm, channel and Ubuntu base
 from Juju, loads the first matching block from

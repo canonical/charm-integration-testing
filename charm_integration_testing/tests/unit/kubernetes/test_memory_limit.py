@@ -8,18 +8,18 @@ from unittest.mock import MagicMock
 import pytest
 from kubernetes_client import KubernetesClient
 from kubernetes_client.backend import KubernetesExtension
-from kubernetes_client.cpu_limit import temporary_cpu_limit
+from kubernetes_client.memory_limit import temporary_memory_limit
 
 
-@pytest.mark.parametrize("saved", [{}, {"limits": {"cpu": "2", "memory": "1Gi"}, "requests": {"cpu": "1500m"}}])
-@pytest.mark.parametrize("failure", [None, "body", "patch", "wait", "replacement", "concurrent", "memory"])
-def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: str | None) -> None:
-    # GIVEN a StatefulSet with optional pre-existing CPU and memory resources
+@pytest.mark.parametrize("saved", [{}, {"limits": {"memory": "2Gi", "cpu": "1"}, "requests": {"memory": "2Gi"}}])
+@pytest.mark.parametrize("failure", [None, "body", "patch", "wait", "replacement", "concurrent", "cpu"])
+def test_restores_memory_after_success_or_failure(saved: dict[str, Any], failure: str | None) -> None:
+    # GIVEN a StatefulSet with optional pre-existing memory and CPU resources
     events: list[str] = []
 
     class Extension(KubernetesExtension):
         def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-            raise AssertionError("CPU resource patches must not invoke restart hooks")
+            raise AssertionError("Memory resource patches must not invoke restart hooks")
 
     kubernetes = KubernetesClient(backend=MagicMock(), extensions=[Extension()])
 
@@ -52,22 +52,22 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
     api.patch_namespaced_stateful_set.side_effect = patch
 
     def exercise() -> None:
-        with temporary_cpu_limit(kubernetes, "model", "app", "uid", "workload", 60):
+        with temporary_memory_limit(kubernetes, "model", "app", "uid", "workload", 60, "1Gi"):
             assert events == ["patch", "wait"]
             resources = value["spec"]["template"]["spec"]["containers"][0]["resources"]
-            assert resources["limits"]["cpu"] == "1"
-            assert resources["requests"]["cpu"] == ("1" if saved else "100m")
+            assert resources["limits"]["memory"] == "1Gi"
+            assert resources["requests"]["memory"] == ("1Gi" if saved else "128Mi")
             if failure == "replacement":
                 value["metadata"]["uid"] = "replacement"
             if failure == "concurrent":
-                resources["limits"]["cpu"] = "3"
-            if failure == "memory":
-                resources["limits"]["memory"] = "2Gi"
+                resources["limits"]["memory"] = "3Gi"
+            if failure == "cpu":
+                resources["limits"]["cpu"] = "2"
             if failure == "body":
                 raise TimeoutError("no stress response")
 
     # WHEN execution finishes, or fails after the limit has been applied
-    if failure in (None, "memory"):
+    if failure in (None, "cpu"):
         exercise()
     else:
         error = RuntimeError if failure in ("replacement", "concurrent") else TimeoutError
@@ -76,11 +76,20 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
     if failure in ("replacement", "concurrent"):
         assert patches == 1
         return
-    if failure == "memory":
+    if failure == "cpu":
         saved = deepcopy(saved)
-        saved.setdefault("limits", {})["memory"] = "2Gi"
-    # THEN the original resources are restored, including an absent CPU limit/request
+        saved.setdefault("limits", {})["cpu"] = "2"
+    # THEN the original resources are restored, including an absent memory limit/request
     assert value["spec"]["template"]["spec"]["containers"][0]["resources"] == saved
     assert patches == 2
 
     assert events[-2:] == ["patch", "wait"]
+
+
+@pytest.mark.parametrize("limit", ["0", "-1Gi"])
+def test_non_positive_memory_limit_does_not_access_cluster(limit: str) -> None:
+    kubernetes = MagicMock()
+    with pytest.raises(ValueError, match="Memory limit must be positive"):
+        with temporary_memory_limit(kubernetes, "model", "app", "uid", "workload", 60, limit):
+            pytest.fail("Invalid limit was accepted")
+    assert kubernetes.mock_calls == []

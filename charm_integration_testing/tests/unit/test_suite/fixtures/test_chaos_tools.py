@@ -52,7 +52,14 @@ class KubernetesStub(KubernetesBackend):
         self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
             items=[
                 k8s.V1Pod(
-                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"})
+                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"}),
+                    spec=k8s.V1PodSpec(
+                        containers=[
+                            k8s.V1Container(
+                                name="workload", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")]
+                            )
+                        ]
+                    ),
                 )
             ]
         )
