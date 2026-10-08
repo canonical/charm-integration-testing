@@ -7,11 +7,22 @@ from datetime import timedelta
 from juju import JujuModelHandle
 
 
+class StressEndedEarlyError(RuntimeError):
+    """Stress ended before the requested observation window was verified."""
+
+
 class ChaosClient(ABC):
     """Chaos experiment interface.
 
     Use NotImplementedError only for unsupported operations, before any side effects.
     """
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Report known errors; allow completion only after independent fault confirmation.
+
+        This optional check is not proof of sustained stress. Allowing completion
+        must not suppress experiment errors or cleanup verification.
+        """
 
     @abstractmethod
     def supports(self, operation: str) -> bool:
