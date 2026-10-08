@@ -35,6 +35,17 @@ class TestAppSpec:
         assert spec.revision == 42
         assert spec.base == "ubuntu@22.04"
 
+    def test_local_charm_file(self, tmp_path: Path) -> None:
+        spec = AppSpec(charm="my-charm", local_charm=tmp_path)
+
+        assert spec.local_charm == tmp_path
+
+    def test_local_charm_accepts_test_release_context(self, tmp_path: Path) -> None:
+        spec = AppSpec(charm="my-charm", local_charm=tmp_path, channel="2/edge", revision=42)
+
+        assert spec.channel == "2/edge"
+        assert spec.revision == 42
+
 
 class TestIntegrationSpec:
     def test_local_integration(self) -> None:
@@ -668,7 +679,7 @@ class TestApplicationsFromSpec:
         assert constraints["my-app"].charm == "my-charm"
         assert str(constraints["my-app"].channel) == "1/stable"
         assert constraints["my-app"].revision == 42
-        assert constraints["my-app"].base == "ubuntu@22.04"
+        assert constraints["my-app"].base == "22.04"
         assert constraints["db"].charm == "postgresql-k8s"
         assert constraints["db"].channel is None
         assert constraints["db"].revision is None
@@ -1133,7 +1144,7 @@ class TestSpecFileEdgeCases:
         assert constraints["my-app"].charm == "my-charm"
         assert str(constraints["my-app"].channel) == "1/stable"
         assert constraints["my-app"].revision == 42
-        assert constraints["my-app"].base == "ubuntu@22.04"
+        assert constraints["my-app"].base == "22.04"
         assert constraints["db"].charm == "postgresql-k8s"
         assert constraints["db"].channel is None
         assert constraints["db"].revision is None
