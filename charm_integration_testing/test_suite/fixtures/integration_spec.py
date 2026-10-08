@@ -190,11 +190,16 @@ def _resolve_deployed_charm(
     application: str,
     cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
     arch: str,
+    local_charm: Charm | None = None,
 ) -> Charm | None:
     if model_ref not in cache:
         cache[model_ref] = juju_client.list_applications(model=model_ref)
     info = cache[model_ref].get(application)
-    if info is None or info.channel is None:
+    if info is None:
+        return None
+    if info.origin == "local":
+        return local_charm
+    if info.channel is None:
         return None
     channel = CharmChannel.model_validate(str(info.channel))
     return charmhub_client.charm_from_store(
@@ -216,10 +221,9 @@ def target_deployed_charm(
     target_application: str,
     target_arch: str,
     _applications_cache: dict[JujuModelHandle, dict[str, JujuApplicationInfo]],
+    target_resolved_charm: Charm,
 ) -> Charm | None:
-    """Canonical charm metadata (with overrides merged) for whatever is actually deployed as the
-    target application, or ``None`` if the application isn't found or has no resolvable channel.
-    """
+    """Metadata for the deployed target app, or ``None`` if the application is not found/resolvable."""
     return _resolve_deployed_charm(
         charmhub_client,
         juju_client,
@@ -227,6 +231,7 @@ def target_deployed_charm(
         target_application,
         _applications_cache,
         target_arch,
+        local_charm=target_resolved_charm if target_resolved_charm.source_path is not None else None,
     )
 
 

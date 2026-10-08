@@ -20,7 +20,7 @@ def test_idempotent_redeploy(
     neighbor_bundle: Path | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
-    tmp_path: Path,
+    juju_tmp_path: Path,
 ) -> None:
     all_bundles: list[tuple[Path, JujuModelHandle]] = [(target_bundle, target_model_ref)]
     if is_cmr_test:
@@ -28,7 +28,7 @@ def test_idempotent_redeploy(
         assert neighbor_model_ref is not None
         all_bundles.append((neighbor_bundle, neighbor_model_ref))
 
-    juju_client.deploy_bundles(all_bundles, tmp_path)
+    juju_client.deploy_bundles(all_bundles, juju_tmp_path)
 
     assert juju_client.application_exists(
         target_application, model=target_model_ref

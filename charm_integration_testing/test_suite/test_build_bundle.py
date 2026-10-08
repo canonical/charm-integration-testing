@@ -7,14 +7,9 @@ from pathlib import Path
 import pytest
 from juju import JujuVersion
 
-from bundle_builder_x import (
-    AppSpec,
-    BundleBuilder,
-    IntegrationSpec,
-    ModelSpec,
-    SpecFile,
-)
+from bundle_builder_x import BundleBuilder, Charm, IntegrationSpec, ModelSpec, SpecFile
 
+from .bundle_specs import application_specs
 from .scheduler.states import State
 
 
@@ -23,6 +18,7 @@ def test_build_bundle(
     bundle_builder: BundleBuilder,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
+    local_target_charm: Path | None,
     juju_cli_version: JujuVersion,
     target_application: str,
     target_bundle: Path,
@@ -35,6 +31,7 @@ def test_build_bundle(
     target_arch: str,
     target_revision: int | None,
     target_series: str | None,
+    target_resolved_charm: Charm,
     neighbor_application: str,
     neighbor_bundle: Path | None,
     neighbor_charm: str,
@@ -44,13 +41,15 @@ def test_build_bundle(
     neighbor_platform: str,
     neighbor_arch: str,
 ) -> None:
-    target_app_spec = AppSpec(
-        charm=target_charm,
-        channel=target_channel,
-        revision=target_revision,
-        base=target_series,
+    target_app_spec, neighbor_app_spec = application_specs(
+        target_charm=target_charm,
+        target_channel=target_channel,
+        target_revision=target_revision,
+        target_series=target_series,
+        local_target_charm=local_target_charm,
+        target_resolved_charm=target_resolved_charm,
+        neighbor_charm=neighbor_charm,
     )
-    neighbor_app_spec = AppSpec(charm=neighbor_charm)
 
     if neighbor_bundle is None:
         # Single-model (non-CMR) build
