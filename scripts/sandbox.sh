@@ -499,15 +499,16 @@ JSON
         _list_ok=1
         _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) || _list_ok=0
 
-        # Listing signing keys needs the 'admin:ssh_signing_key' scope. If the
-        # gh token lacks it, offer to grant it via `gh auth refresh` (with the
-        # user's consent) and retry rather than bailing out.
+        # Listing signing keys needs at least 'read:ssh_signing_key'; registering
+        # needs 'write:ssh_signing_key', which also covers reading. Request write
+        # (not admin) via `gh auth refresh`, with the user's consent, and retry.
         if [ "$_list_ok" -eq 0 ] && [ -t 0 ] \
-            && grep -Eqi 'admin:ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
-            echo "==> Your gh token is missing the 'admin:ssh_signing_key' scope, which is"
-            echo "    needed to verify/register the VM signing key with GitHub."
+            && grep -Eqi 'ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
+            echo "==> Your gh token is missing the 'write:ssh_signing_key' scope. It is needed to"
+            echo "    check whether the VM signing key is already registered with your GitHub"
+            echo "    account, and to register it if not. No other permissions are requested."
             read -r -p "  Grant this scope now via 'gh auth refresh'? [y/N] " _refresh_list
-            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s admin:ssh_signing_key; then
+            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s write:ssh_signing_key; then
                 _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) && _list_ok=1
             fi
         fi
@@ -559,7 +560,7 @@ JSON
         fi
     else
         echo "==> Warning: 'gh auth token' returned nothing."
-        echo "==>   Run: gh auth login -s admin:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
+        echo "==>   Run: gh auth login -s write:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
     fi
 
     echo ""
