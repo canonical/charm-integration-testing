@@ -127,6 +127,25 @@ def test_unit_rotation_waits_for_async_machine_removal_before_cleaning_surge() -
     assert len([call for call in client.calls if call[0] == "multi_model_idle_for_period"]) == 3
 
 
+def test_unit_rotation_preserves_surge_when_async_removal_did_not_settle() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.defer_next_remove = True
+    client.fail_next_remove_after_callback = True
+    client.fail_multi_model_idle_on_call = 2
+
+    with pytest.raises(RuntimeError, match="unit removal hook failed") as error:
+        _rotate_units(client, k8s_model=False)
+
+    assert isinstance(error.value.__cause__, TimeoutError)
+    assert client.units == ["target/0", "target/1", "target/2", "target/3"]
+    assert client.pending_unit_removals == ["target/0"]
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0"]
+
+    # Once the deferred Juju removal completes, the retained surge keeps the application at capacity.
+    client.multi_model_idle_for_period([MODEL])
+    assert client.units == ["target/1", "target/2", "target/3"]
+
+
 def test_unit_rotation_preserves_machine_error_when_surge_cleanup_fails() -> None:
     client = RecordingJujuClient(current_units=3)
     client.fail_next_remove_after_callback = True
