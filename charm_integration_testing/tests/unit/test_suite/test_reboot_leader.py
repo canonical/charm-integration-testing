@@ -50,6 +50,9 @@ class RecordingJujuClient:
     ) -> None:
         self.calls.append(("wait_for_unit_unavailable", unit, model, timeout))
 
+    def wait_for_unit_available(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.calls.append(("wait_for_unit_available", unit, model, timeout))
+
     def validate_model(
         self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
     ) -> None:
@@ -120,6 +123,7 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
         ("ssh", "target/1", "sudo reboot", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
+        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
     ]
 
@@ -195,5 +199,6 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
         ("application_leader", "target", MODEL),
         ("validate_model", MODEL, "deep", ["target"]),
         ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
+        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL, NEIGHBOR_MODEL], timedelta(minutes=15)),
     ]

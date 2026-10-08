@@ -545,6 +545,22 @@ class JubilantBackend(JujuCmdBackend):
 
         self.wait(model, unit_is_unavailable, timeout=timeout)
 
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        application = unit.split("/", maxsplit=1)[0]
+
+        def unit_is_available(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
+            if application not in status.apps:
+                raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
+            unit_info = status.apps[application].units.get(unit)
+            available = (
+                unit_info is not None
+                and unit_info.workload_status.current == "active"
+                and unit_info.juju_status.current == "idle"
+            )
+            return available, JujuWaitState(message=f"waiting for unit '{unit}' to become available")
+
+        self.wait(model, unit_is_available, timeout=timeout)
+
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
         if operator:
