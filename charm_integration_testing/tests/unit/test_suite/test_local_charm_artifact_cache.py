@@ -1,9 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from typing import Protocol, cast
 from zipfile import ZipFile
 
 import pytest
@@ -11,6 +13,24 @@ from juju import JujuModelHandle
 from test_suite import conftest
 
 from bundle_builder_x import unpack_charm_artifact
+
+
+class _NeighborBundleFixture(Protocol):
+    __wrapped__: Callable[[pytest.FixtureRequest, bool, JujuModelHandle | None], Path | None]
+
+
+class _RequestConfigStub:
+    def __init__(self, rootpath: Path) -> None:
+        self.rootpath = rootpath
+
+    def getoption(self, option: str) -> None:
+        assert option == "--neighbor-bundle"
+        return None
+
+
+class _RequestStub:
+    def __init__(self, rootpath: Path) -> None:
+        self.config = _RequestConfigStub(rootpath)
 
 
 def _write_charm_artifact(path: Path) -> Path:
@@ -98,3 +118,26 @@ def test_generated_bundle_directory_without_snap_uses_project_cache(tmp_path: Pa
     )
 
     assert output.is_relative_to(project_root / ".pytest_cache" / "charm-integration-testing" / "generated-bundles")
+
+
+def test_neighbor_bundle_path_uses_neighbor_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    neighbor_model = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
+    model_refs: list[JujuModelHandle] = []
+
+    def generated_directory(
+        project_root: Path,
+        model_ref: JujuModelHandle,
+        juju_snap_common: Path | None,
+    ) -> Path:
+        assert project_root == tmp_path
+        model_refs.append(model_ref)
+        return tmp_path / "generated"
+
+    monkeypatch.setattr(conftest, "_generated_bundle_directory", generated_directory)
+    request = cast(pytest.FixtureRequest, _RequestStub(tmp_path))
+    fixture = cast(_NeighborBundleFixture, conftest.neighbor_bundle).__wrapped__
+    bundle_path = fixture(request, True, neighbor_model)
+    assert bundle_path is not None
+
+    assert bundle_path == tmp_path / "generated" / "generated-neighbor-bundle.yaml"
+    assert model_refs == [neighbor_model]

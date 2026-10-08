@@ -10,6 +10,7 @@ import test_suite.conftest as test_suite_conftest
 from test_suite.conftest import target_downgrade_charm
 
 from bundle_builder_x import Charm, CharmChannel
+from bundle_builder_x import JujuVersion as BundleJujuVersion
 
 
 class _RequestConfigStub:
@@ -40,6 +41,8 @@ class _CharmhubClientStub:
         self,
         charm_name: str,
         ubuntu_arch: str,
+        platform: str | None,
+        juju_version: BundleJujuVersion | None,
         charm_track: str | None,
         charm_risk: str | None,
         charm_branch: str | None,
@@ -49,6 +52,8 @@ class _CharmhubClientStub:
         self.call_kwargs = {
             "charm_name": charm_name,
             "ubuntu_arch": ubuntu_arch,
+            "platform": platform,
+            "juju_version": juju_version,
             "charm_track": charm_track,
             "charm_risk": charm_risk,
             "charm_branch": charm_branch,
@@ -85,6 +90,8 @@ def test_resolves_explicit_downgrade_revision_for_local_target() -> None:
                 "target_charm": "my-charm",
                 "target_channel": None,
                 "target_arch": "amd64",
+                "target_platform": "machine",
+                "juju_cli_version": "3.6.1",
                 "charmhub_client": charmhub_client,
             }
         ),
@@ -96,6 +103,8 @@ def test_resolves_explicit_downgrade_revision_for_local_target() -> None:
     assert charmhub_client.call_kwargs is not None
     assert charmhub_client.call_kwargs["charm_revision"] == 27
     assert charmhub_client.call_kwargs["ubuntu_version"] == "24.04"
+    assert charmhub_client.call_kwargs["platform"] == "machine"
+    assert charmhub_client.call_kwargs["juju_version"] == BundleJujuVersion.parse("3.6.1")
 
 
 def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.MonkeyPatch) -> None:

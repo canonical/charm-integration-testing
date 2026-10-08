@@ -643,7 +643,7 @@ def target_bundle(request: pytest.FixtureRequest, target_model_ref: JujuModelHan
 def neighbor_bundle(
     request: pytest.FixtureRequest,
     is_cmr_test: bool,
-    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
 ) -> Path | None:
     """Path to the neighbor model's bundle YAML for CMR tests.
 
@@ -652,13 +652,14 @@ def neighbor_bundle(
     """
     if not is_cmr_test:
         return None
+    assert neighbor_model_ref is not None
 
     value = request.config.getoption("--neighbor-bundle")
     if not value:
         ppath = (
             _generated_bundle_directory(
                 Path(request.config.rootpath),
-                target_model_ref,
+                neighbor_model_ref,
                 Path.home() / "snap/juju/common" if Path("/snap/juju/current").exists() else None,
             )
             / "generated-neighbor-bundle.yaml"
@@ -939,7 +940,10 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
     target_arch: str = request.getfixturevalue("target_arch")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
     target_base = target.ubuntu_version
     channel = CharmChannel.model_validate(target_channel) if target_channel else target.channel
 
@@ -953,6 +957,8 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
                 charm_branch=channel.branch or None if channel else None,
                 charm_revision=revision,
                 ubuntu_version=target_base,
+                platform=target_platform,
+                juju_version=bundle_juju_version,
             )
         except BaseMismatchError:
             return None
