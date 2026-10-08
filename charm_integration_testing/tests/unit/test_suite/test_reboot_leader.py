@@ -151,6 +151,24 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
     assert client.calls[-1] == ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
 
 
+def test_reboot_leader_validates_same_model_neighbor() -> None:
+    client = RecordingJujuClient()
+
+    reboot_leader.test_reboot_leader(
+        cast(JujuClient, client),
+        MODEL,
+        "target",
+        "machine",
+        _charm(),
+        None,
+        "neighbor",
+        None,
+    )
+
+    assert ("validate_model", MODEL, "deep", ["target"]) in client.calls
+    assert ("validate_model", MODEL, "deep", ["neighbor"]) in client.calls
+
+
 def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_recovery() -> None:
     juju = RecordingJujuClient()
     kubernetes = RecordingKubernetesClient()
