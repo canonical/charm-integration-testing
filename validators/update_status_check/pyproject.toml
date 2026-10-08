@@ -1,0 +1,33 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-update-status-check"
+version = "0.1.0"
+description = "Runs endpoint validators at the 'simple' level on every update-status hook"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "ops>=2.0.0",
+    "pydantic>=2.0.0",
+    "validators-base",
+    "validators-engine",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.update_status_check"]
+
+[tool.setuptools.package-dir]
+"validators.update_status_check" = "."
