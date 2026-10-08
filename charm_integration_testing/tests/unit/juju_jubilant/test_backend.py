@@ -2598,6 +2598,10 @@ class TestJubilantBackend:
             switch_calls: int = 0
             add_model_clouds: list[str | None] = field(default_factory=list)
             cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = field(default_factory=list)
+            add_cloud_calls: list[tuple[str, str, bool, str | None]] = field(default_factory=list)
+            add_credential_calls: list[tuple[str, Any, bool, str | None]] = field(default_factory=list)
+            add_cloud_error: str | None = None
+            add_credential_error: str | None = None
 
             def bootstrap(
                 self,
@@ -2624,6 +2628,28 @@ class TestJubilantBackend:
                 if args and args[0] == "switch":
                     self.switch_calls += 1
                 return ""
+
+            def add_cloud(
+                self, cloud: str, definition: Any, *, client: bool = False, controller: str | None = None
+            ) -> None:
+                self.add_cloud_calls.append((cloud, str(definition), client, controller))
+                if self.add_cloud_error is not None:
+                    raise jubilant.CLIError(1, ["juju", "add-cloud"], "", self.add_cloud_error)
+
+            def add_credential(
+                self, cloud: str, credential: Any, *, client: bool = False, controller: str | None = None
+            ) -> None:
+                self.add_credential_calls.append((cloud, credential, client, controller))
+                if self.add_credential_error is not None:
+                    raise jubilant.CLIError(1, ["juju", "add-credential"], "", self.add_credential_error)
+
+        @staticmethod
+        def _generic_cloud_files(tmp_path: Path, cloud: str) -> tuple[Path, Path]:
+            definition = tmp_path / "cloud.yaml"
+            definition.write_text(yaml.safe_dump({"clouds": {cloud: {"type": "lxd"}}}))
+            credentials = tmp_path / "credentials.yaml"
+            credentials.write_text(yaml.safe_dump({"credentials": {cloud: {"test": {"auth-type": "certificate"}}}}))
+            return definition, credentials
 
         def test_bootstrap_controller_retries_then_succeeds(self) -> None:
             stub = self.SetupStub(bootstrap_failures_remaining=2)
@@ -2750,91 +2776,78 @@ class TestJubilantBackend:
 
         def test_add_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
             backend = JubilantBackend(
                 JubilantClientStub(client=stub),
-                cloud_definitions={
-                    "my-openstack": (tmp_path / "cloud.yaml", tmp_path / "credentials.yaml"),
-                },
+                cloud_definitions={"my-openstack": (definition, credentials)},
             )
 
             backend.add_cloud(cloud="my-openstack", controller="test-controller")
 
-            assert stub.cli_calls == [
+            assert stub.add_cloud_calls == [("my-openstack", str(definition), False, "test-controller")]
+            assert stub.add_credential_calls == [
                 (
-                    ("add-cloud", "my-openstack", str(tmp_path / "cloud.yaml"), "--controller", "test-controller"),
-                    {"include_model": False, "stdin": None},
-                ),
-                (
-                    (
-                        "add-credential",
-                        "my-openstack",
-                        "-f",
-                        str(tmp_path / "credentials.yaml"),
-                        "--controller",
-                        "test-controller",
-                    ),
-                    {"include_model": False, "stdin": None},
-                ),
+                    "my-openstack",
+                    {"credentials": {"my-openstack": {"test": {"auth-type": "certificate"}}}},
+                    False,
+                    "test-controller",
+                )
             ]
 
         def test_register_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
             backend = JubilantBackend(
                 JubilantClientStub(client=stub),
-                cloud_definitions={
-                    "my-openstack": (tmp_path / "cloud.yaml", tmp_path / "credentials.yaml"),
-                },
+                cloud_definitions={"my-openstack": (definition, credentials)},
             )
 
             backend.register_cloud(cloud="my-openstack")
 
-            assert stub.cli_calls == [
-                (
-                    ("add-cloud", "my-openstack", str(tmp_path / "cloud.yaml"), "--client"),
-                    {"include_model": False, "stdin": None},
-                ),
-                (
-                    ("add-credential", "my-openstack", "-f", str(tmp_path / "credentials.yaml"), "--client"),
-                    {"include_model": False, "stdin": None},
-                ),
+            assert stub.add_cloud_calls == [("my-openstack", str(definition), True, None)]
+            assert stub.add_credential_calls == [
+                ("my-openstack", {"credentials": {"my-openstack": {"test": {"auth-type": "certificate"}}}}, True, None)
             ]
 
         def test_add_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
             backend = JubilantBackend(
                 JubilantClientStub(client=stub),
-                cloud_definitions={
-                    "my-openstack": (tmp_path / "cloud.yaml", tmp_path / "credentials.yaml"),
-                },
+                cloud_definitions={"my-openstack": (definition, credentials)},
             )
-
-            def already_exists_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
-                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
-                raise jubilant.CLIError(1, list(args), "", 'ERROR cloud "my-openstack" already exists')
-
-            stub.cli = already_exists_cli
+            stub.add_cloud_error = 'ERROR cloud "my-openstack" already exists'
+            stub.add_credential_error = 'ERROR cloud "my-openstack" already exists'
 
             # A pre-existing controller reusing the same cloud (e.g. --current-state
             # reruns) must not fail just because the cloud/credential is already
             # registered.
             backend.add_cloud(cloud="my-openstack", controller="test-controller")
-
-            assert len(stub.cli_calls) == 2
+            backend.add_cloud(cloud="my-openstack", controller="test-controller")
+            assert len(stub.add_cloud_calls) == 2
+            assert len(stub.add_credential_calls) == 2
 
         def test_add_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
             backend = JubilantBackend(
                 JubilantClientStub(client=stub),
-                cloud_definitions={
-                    "my-openstack": (tmp_path / "cloud.yaml", tmp_path / "credentials.yaml"),
-                },
+                cloud_definitions={"my-openstack": (definition, credentials)},
             )
 
-            def failing_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
-                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
-                raise jubilant.CLIError(1, list(args), "", "ERROR unrelated failure")
+            stub.add_cloud_error = "ERROR unrelated failure"
 
-            stub.cli = failing_cli
+            with pytest.raises(jubilant.CLIError, match="unrelated failure"):
+                backend.add_cloud(cloud="my-openstack", controller="test-controller")
+
+        def test_add_credential_reraises_other_errors(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+            stub.add_credential_error = "ERROR unrelated failure"
 
             with pytest.raises(jubilant.CLIError, match="unrelated failure"):
                 backend.add_cloud(cloud="my-openstack", controller="test-controller")

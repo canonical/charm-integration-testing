@@ -791,18 +791,22 @@ class JubilantBackend(JujuCmdBackend):
 
     def _register_generic_cloud(self, cloud: str, controller: str | None = None) -> None:
         cloud_definition, credentials = self._cloud_definitions[cloud]
-        controller_args = ("--controller", controller) if controller else ("--client",)
+        credential_config = yaml.safe_load(credentials.read_text())
+        if not isinstance(credential_config, dict):
+            raise ValueError(f"Credentials file '{credentials}' must contain a YAML mapping.")
         try:
-            self.client.model(None).cli(
-                "add-cloud", cloud, str(cloud_definition), *controller_args, include_model=False
-            )
+            if controller:
+                self.client.model(None).add_cloud(cloud, cloud_definition, controller=controller)
+            else:
+                self.client.model(None).add_cloud(cloud, cloud_definition, client=True)
         except jubilant.CLIError as exc:
             if "already exists" not in str(exc):
                 raise
         try:
-            self.client.model(None).cli(
-                "add-credential", cloud, "-f", str(credentials), *controller_args, include_model=False
-            )
+            if controller:
+                self.client.model(None).add_credential(cloud, credential_config, controller=controller)
+            else:
+                self.client.model(None).add_credential(cloud, credential_config, client=True)
         except jubilant.CLIError as exc:
             if "already exists" not in str(exc):
                 raise
