@@ -251,6 +251,10 @@ class JujuClient:
         self.logger.info(f"Refreshing application {application}{options_suffix}.")
         self.backend.refresh_application(model, application, revision=revision, channel=channel)
 
+    def refresh_application_from_path(self, application: str, path: Path, model: JujuModelHandle) -> None:
+        self.logger.info(f"Refreshing application {application} from local charm {path}.")
+        self.backend.refresh_application_from_path(model, application, path)
+
     def remove_applications(self, *applications: str, model: JujuModelHandle) -> None:
         # Call extensions
         for extension in self.extensions:
@@ -324,12 +328,15 @@ class JujuClient:
         self.logger.info(f"Resolving application behind consumed offer '{offer.url}'.")
         return self.backend.resolve_consumed_offer_application(offer)
 
-    def application_revision(self, application: str, model: JujuModelHandle) -> int:
-        self.logger.info(f"Getting charm revision for application '{application}'.")
+    def application_info(self, application: str, model: JujuModelHandle) -> JujuApplicationInfo:
+        self.logger.info(f"Getting charm information for application '{application}'.")
         applications = self.backend.list_applications(model)
         if application not in applications:
             raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
-        return applications[application].revision
+        return applications[application]
+
+    def application_revision(self, application: str, model: JujuModelHandle) -> int:
+        return self.application_info(application, model).revision
 
     def wait_for_application_revision(
         self,

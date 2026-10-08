@@ -58,6 +58,8 @@ class JujuApplicationInfo:
     channel: CharmChannel | None = None
     # Ubuntu base the application is deployed on (e.g. "22.04"), when known.
     base: str | None = None
+    # Where Juju obtained the charm (e.g. "charmhub" or "local"), when known.
+    origin: str | None = None
 
 
 @dataclass(frozen=True)

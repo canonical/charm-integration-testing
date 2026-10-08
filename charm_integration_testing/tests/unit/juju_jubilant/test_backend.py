@@ -2258,7 +2258,7 @@ class TestJubilantBackend:
             result = JubilantBackend(client).resolve_consumed_offer_application(self.OFFER)
 
             # THEN the resolved application matches the offering model's status
-            assert result == JujuApplicationInfo(charm="postgresql-k8s", revision=495)
+            assert result == JujuApplicationInfo(charm="postgresql-k8s", revision=495, origin="charmhub")
             # AND the offering model was queried qualified with its owner (not just the bare model
             # name), since the offering model's owner may differ from the current user
             assert client.requested_models == [
@@ -3005,3 +3005,73 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
+
+
+class TestJubilantBackendRefreshApplication:
+    class ModelStub:
+        def __init__(self, charm_origin: str) -> None:
+            self.charm_origin = charm_origin
+            self.cli_calls: list[tuple[str, ...]] = []
+            self.refresh_calls: list[dict[str, Any]] = []
+
+        def status(self) -> jubilant.Status:
+            app = jubilant.statustypes.AppStatus(
+                charm="local:my-charm-3",
+                charm_origin=self.charm_origin,
+                charm_name="my-charm",
+                charm_rev=3,
+                exposed=False,
+            )
+            return jubilant.Status(
+                model=jubilant.statustypes.ModelStatus(
+                    name="m",
+                    type="iaas",
+                    controller="c",
+                    cloud="lxd",
+                    version="3.6.0",
+                    model_status=jubilant.statustypes.StatusInfo(),
+                ),
+                machines={},
+                apps={"my-app": app},
+            )
+
+        def cli(self, *args: str, **kwargs: Any) -> str:
+            self.cli_calls.append(args)
+            return ""
+
+        def refresh(self, **kwargs: Any) -> None:
+            self.refresh_calls.append(kwargs)
+
+    def test_refreshes_charmhub_application_by_revision(self) -> None:
+        # GIVEN an application deployed from Charmhub
+        model = self.ModelStub(charm_origin="charmhub")
+
+        # WHEN refreshing to a Charmhub revision
+        JubilantBackend(JubilantClientStub(model)).refresh_application(TEST_MODEL, "my-app", 42, "1/stable")
+
+        # THEN jubilant's refresh is used unchanged
+        assert model.refresh_calls == [{"app": "my-app", "revision": 42, "channel": "1/stable"}]
+        assert model.cli_calls == []
+
+    def test_switches_local_application_to_charmhub_revision(self) -> None:
+        # GIVEN an application running a local charm
+        model = self.ModelStub(charm_origin="local")
+
+        # WHEN refreshing to a Charmhub revision
+        JubilantBackend(JubilantClientStub(model)).refresh_application(TEST_MODEL, "my-app", 42, "1/stable")
+
+        # THEN Juju is asked to switch, pinning the revision in the charm URL
+        assert model.cli_calls == [("refresh", "my-app", "--switch", "ch:my-charm-42", "--channel", "1/stable")]
+        assert model.refresh_calls == []
+
+    def test_refreshes_from_unpacked_charm_directory(self) -> None:
+        # GIVEN any application
+        model = self.ModelStub(charm_origin="charmhub")
+
+        # WHEN refreshing from a local charm directory
+        JubilantBackend(JubilantClientStub(model)).refresh_application_from_path(
+            TEST_MODEL, "my-app", Path("/home/u/charm")
+        )
+
+        # THEN the path is passed straight to Juju without jubilant's file copy
+        assert model.cli_calls == [("refresh", "my-app", "--path", "/home/u/charm")]

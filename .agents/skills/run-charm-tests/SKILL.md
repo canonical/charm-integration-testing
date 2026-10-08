@@ -92,12 +92,20 @@ artifact; neighbor charms continue to resolve from CharmHub.
 ```
 
 Use the substrate and endpoints that fit the charm. Do not set
-`--target-channel` or `--target-revision` for a local artifact. Tests requiring
-published CharmHub release history are skipped; they do not apply to the
-unpublished local artifact. The test suite unpacks the artifact and writes its
-default bundle to a temporary directory under the current user's home directory
-so a confined Juju snap can read both. If you set `--target-bundle`, choose a
-path Juju can access.
+`--target-channel` or `--target-revision` for a local artifact.
+
+The downgrade/upgrade cycle and `test_deploy_target_old_revision` move the
+target between artifacts. By default the other artifact is the charm's default
+CharmHub release; choose another with `--target-downgrade-revision <rev>` or
+test against a second local build with
+`--target-downgrade-charm-file <path>.charm` (the two options are mutually
+exclusive). The cycle is skipped when the chosen CharmHub revision does not
+support the target's base.
+
+Artifacts are unpacked to `~/snap/juju/common/cit-local-charms/<sha256>/`
+(or `~/cit-local-charms/` without the Juju snap) so a confined Juju can read
+them and bundles generated in one session remain valid when a later session
+resumes with `--current-state`.
 
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
 ```bash

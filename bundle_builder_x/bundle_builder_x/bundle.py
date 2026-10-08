@@ -120,16 +120,11 @@ class Bundle(BaseModel):
         applications_dict: dict[str, dict[str, object]] = {}
         for application, info in self.applications.items():
             app_dict: dict[str, object] = {
-                "charm": str(info.charm.source_path) if info.charm.source_path else info.charm.name,
+                **info.charm.bundle_source(),
                 "base": f"ubuntu@{info.charm.ubuntu_version}",
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
-            if info.charm.source_path is None:
-                if info.charm.channel is None or info.charm.revision is None:
-                    raise ValueError(f"Charm {info.charm.name!r} has no source path or Charmhub release identity")
-                app_dict["channel"] = str(info.charm.channel)
-                app_dict["revision"] = info.charm.revision
             if not info.charm.subordinate:
                 app_dict[scale_key] = info.num_units
             if len(info.resources) > 0:

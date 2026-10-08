@@ -164,6 +164,7 @@ class RefreshBackendStub(NullJujuBackend):
     """Backend that records each refresh_application call as a (model, application, revision, channel) tuple."""
 
     refresh_calls: list[tuple[str, str, int | None, str | None]] = field(default_factory=list)
+    path_refresh_calls: list[tuple[str, str, Path]] = field(default_factory=list)
 
     def refresh_application(
         self,
@@ -173,6 +174,9 @@ class RefreshBackendStub(NullJujuBackend):
         channel: str | None = None,
     ) -> None:
         self.refresh_calls.append((model.uri, application, revision, channel))
+
+    def refresh_application_from_path(self, model: JujuModelHandle, application: str, path: Path) -> None:
+        self.path_refresh_calls.append((model.uri, application, path))
 
 
 @dataclass
@@ -618,6 +622,25 @@ class TestJujuClientValidateModel:
 
         # THEN the backend was called with both revision and channel
         assert backend.refresh_calls == [("ctrl:mymodel", "myapp", 42, "latest/stable")]
+
+    def test_delegates_path_refresh_to_backend(self, logger: LoggerStub) -> None:
+        # GIVEN a backend that records refresh calls
+        backend = RefreshBackendStub()
+        client = self._client(logger, backend)
+
+        # WHEN refreshing from a local charm directory
+        client.refresh_application_from_path("myapp", Path("/charms/mycharm"), model=self._model())
+
+        # THEN the backend was asked to refresh from that path
+        assert backend.path_refresh_calls == [("ctrl:mymodel", "myapp", Path("/charms/mycharm"))]
+
+    def test_returns_info_for_known_application(self, logger: LoggerStub) -> None:
+        # GIVEN an application deployed from a local charm
+        info = JujuApplicationInfo(charm="local:mycharm-0", revision=0, origin="local")
+        client = self._client(logger, BackendStub(app_list={"myapp": info}))
+
+        # WHEN / THEN
+        assert client.application_info("myapp", model=self._model()) == info
 
     def test_returns_revision_for_known_application(self, logger: LoggerStub) -> None:
         # GIVEN an application with a known revision

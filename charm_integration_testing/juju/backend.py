@@ -270,6 +270,10 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def refresh_application_from_path(self, model: JujuModelHandle, application: str, path: Path) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         raise NotImplementedError
 

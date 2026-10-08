@@ -196,3 +196,16 @@ class Charm(BaseModel):
 
     def __repr__(self) -> str:
         return self.name
+
+    @property
+    def source_label(self) -> str:
+        if self.source_path is not None:
+            return f"local charm {self.source_path}"
+        return f"{self.name} revision {self.revision} ({self.channel})"
+
+    def bundle_source(self) -> dict[str, str | int]:
+        """Bundle application fields that select this charm artifact."""
+        if self.source_path is not None:
+            return {"charm": str(self.source_path)}
+        assert self.channel is not None and self.revision is not None
+        return {"charm": self.name, "channel": str(self.channel), "revision": self.revision}
