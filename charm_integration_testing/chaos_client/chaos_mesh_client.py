@@ -77,8 +77,8 @@ class ChaosMeshChaosClient(ChaosClient):
             "stressors": {"cpu": {"workers": workers}},
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
         self._cpu_stress.add(name)
+        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
         self._wait(
             lambda timeout: self._stress_injected(model.model, name, timeout),
             self._clock() + self._startup_timeout,
@@ -365,6 +365,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 # A conflicting resource belongs to an earlier create request.
                 self._created.remove(resource)
                 del self._scopes[name]
+                self._cpu_stress.discard(name)
             raise
 
     @staticmethod

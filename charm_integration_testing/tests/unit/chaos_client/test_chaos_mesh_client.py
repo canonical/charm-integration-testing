@@ -125,9 +125,12 @@ class TestCreationFailureCleanup:
     @pytest.mark.parametrize("replaced", [False, True], ids=["original", "replacement"])
     @pytest.mark.parametrize("resource_exists", [True, False], ids=["created", "not-created"])
     @pytest.mark.parametrize("operation", ["stress_cpu", "io_latency"])
-    def test_timeout_retains_resource_for_teardown(self, resource_exists: bool, operation: str, replaced: bool) -> None:
-        # GIVEN a POST that times out, with or without a resource on the server
-        error = TimeoutError("Lost create response")
+    @pytest.mark.parametrize("server_error", [False, True], ids=["timeout", "server-error"])
+    def test_failed_create_retains_resource_for_teardown(
+        self, resource_exists: bool, operation: str, replaced: bool, server_error: bool
+    ) -> None:
+        # GIVEN an ambiguous POST failure, with or without a resource on the server
+        error = ApiException(status=500) if server_error else TimeoutError("Lost create response")
         api = FailedCreateApi(resource_exists=resource_exists, error=error)
         backend = BackendStub()
         backend.custom_objects_api = api
@@ -135,7 +138,7 @@ class TestCreationFailureCleanup:
         client = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
 
         # WHEN execution fails
-        with pytest.raises(TimeoutError) as exc_info:
+        with pytest.raises(type(error)) as exc_info:
             if operation == "stress_cpu":
                 client.stress_cpu(TEST_MODEL, UNIT, workers=1, duration=timedelta(seconds=10))
             else:
@@ -145,6 +148,7 @@ class TestCreationFailureCleanup:
         resource = mesh._created[0]
         expected_path = "" if operation == "stress_cpu" else "/data"
         assert mesh._scopes[resource[2]] == (TEST_MODEL.uri, UNIT, expected_path)
+        assert mesh._cpu_stress == ({resource[2]} if operation == "stress_cpu" else set())
 
         # THEN an existing object cannot be identified, even with the original owner annotation
         if resource_exists:
@@ -155,6 +159,7 @@ class TestCreationFailureCleanup:
                     client.cleanup_all()
                 assert "Creation UID was not recorded" in str(cleanup_error.value.errors[0])
                 assert mesh._created == [resource]
+                assert mesh._cpu_stress == ({resource[2]} if operation == "stress_cpu" else set())
                 assert mesh._uids == {}
                 assert api.delete_calls == []
                 assert resource in api.objects
@@ -164,6 +169,7 @@ class TestCreationFailureCleanup:
         assert api.delete_calls == []
         assert mesh._created == []
         assert mesh._scopes == {}
+        assert mesh._cpu_stress == set()
 
     def test_conflict_does_not_delete_existing_resource(self) -> None:
         # GIVEN a POST rejected because its resource name already exists
@@ -185,6 +191,7 @@ class TestCreationFailureCleanup:
         assert len(api.objects) == 1
         assert mesh._created == []
         assert mesh._scopes == {}
+        assert mesh._cpu_stress == set()
 
 
 class TestConstruction:
