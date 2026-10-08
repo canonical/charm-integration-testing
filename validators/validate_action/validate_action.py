@@ -94,6 +94,9 @@ def run_validate_action(charm: CharmBase, event: ActionEvent) -> None:
         return
 
     action_results = ValidateActionResults(results=run_for_charm(charm, level=level, skip_missing_unvalidated=True))
+    if not action_results.results:
+        event.fail("No validators produced validation results.")
+        return
 
     statuses = [result.status for result in action_results.results]
     event.set_results(

@@ -2,9 +2,10 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional, cast
+from typing import cast
 from unittest.mock import patch
 
 import ops
@@ -18,34 +19,7 @@ from validators.test_utils.stubs import (
     RelationRoleStub,
     RelationStub,
 )
-
-# ---------------------------------------------------------------------------
-# Validator stubs
-# ---------------------------------------------------------------------------
-
-
-class PassingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="PASS",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
-
-
-class FailingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="FAIL",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
+from validators.test_utils.validators import FailingValidator, PassingValidator
 
 
 class ExplodingValidator(BaseValidator):
@@ -78,7 +52,7 @@ class SkippingValidator(BaseValidator):
 class EntryPointStub:
     name: str
     _load_result: type = field(default=PassingValidator)
-    _load_error: Optional[Exception] = field(default=None)
+    _load_error: Exception | None = field(default=None)
 
     def load(self) -> type:
         if self._load_error is not None:
@@ -105,10 +79,12 @@ class TestValidatorRunnerLoadValidators:
         # GIVEN an entry point that raises on load
         entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
-        with caplog.at_level(logging.ERROR, logger="validators"):
-            with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
-                # WHEN
-                validators = ValidatorRunner._load_validators()
+        with (
+            caplog.at_level(logging.ERROR, logger="validators"),
+            patch("validators.engine.engine.entry_points", return_value=[entry_point]),
+        ):
+            # WHEN
+            validators = ValidatorRunner._load_validators()
 
         # THEN validators are skipped and the full traceback is captured, not just the message
         assert validators == {}

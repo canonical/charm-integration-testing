@@ -8,9 +8,10 @@ import ops
 import ops.testing
 import pytest
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult, ValidationResultStatus
+from validators.base import ValidationResult, ValidationResultStatus
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import CharmBaseStub, RelationRoleStub, RelationStub
+from validators.test_utils.validators import FailingValidator, PassingValidator
 from validators.update_status_check import ValidationStatusStore, run_simple_check
 
 
@@ -22,32 +23,6 @@ def _make_charm() -> CharmBaseStub:
     integration = charm.model.relations["database"][0]
     integration.data[integration.app] = {"endpoints": "postgresql:5432"}
     return charm
-
-
-class PassingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="PASS",
-            endpoint=self.endpoint,
-            interface="postgresql_client",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
-
-
-class FailingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="FAIL",
-            endpoint=self.endpoint,
-            interface="postgresql_client",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-            checks=[],
-            error="database not reachable",
-        )
 
 
 class TestRunSimpleCheck:

@@ -10,9 +10,9 @@ import ops
 import ops.testing
 import pytest
 
-from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import CharmBaseStub, RelationRoleStub, RelationStub
+from validators.test_utils.validators import ErroringValidator, PassingValidator
 from validators.validate_action import observe_validate_action, run_validate_action
 
 
@@ -32,31 +32,6 @@ class ActionEventStub:
         self.failure_message = message
 
 
-class PassingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="PASS",
-            endpoint=self.endpoint,
-            interface="postgresql_client",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
-
-
-class ErroringValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="ERROR",
-            endpoint=self.endpoint,
-            interface="postgresql_client",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-            error="boom",
-        )
-
-
 def _make_charm() -> CharmBaseStub:
     relation = RelationStub(name="database", id=1)
     charm = make_charm_from_relation(relation, role=RelationRoleStub.requires, interface_name="postgresql_client")
@@ -68,6 +43,16 @@ def _make_charm() -> CharmBaseStub:
 
 
 class TestRunValidateAction:
+    def test_fails_action_when_no_validators_produce_results(self) -> None:
+        charm = _make_charm()
+        event = ActionEventStub()
+
+        with patch("validators.engine.engine.load_validators", return_value={}):
+            run_validate_action(charm, event)  # type: ignore[arg-type]
+
+        assert event.failure_message == "No validators produced validation results."
+        assert event.results is None
+
     def test_defaults_to_simple_level(self) -> None:
         charm = _make_charm()
         event = ActionEventStub(params={})
@@ -158,18 +143,26 @@ class TestObserveValidateAction:
     def test_wires_the_action_when_declared(self) -> None:
         harness = ops.testing.Harness(
             _CharmWithValidateAction,
-            meta="name: test-charm",
+            meta="name: test-charm\nrequires:\n  database:\n    interface: postgresql_client\n",
             actions="validate:\n  params:\n    level:\n      type: string\n",
         )
+        harness.set_leader(True)
         harness.begin()
         observe_validate_action(harness.charm)
+        relation_id = harness.add_relation("database", "postgresql")
+        harness.update_relation_data(
+            relation_id,
+            "postgresql",
+            {"endpoints": "postgresql:5432"},
+        )
 
         with patch(
             "validators.engine.engine.load_validators",
-            return_value={},
+            return_value={"postgresql_client": [PassingValidator]},
         ):
             output = harness.run_action("validate")
 
         assert "results" in output.results
+        assert output.results["summary"] == "pass=1 fail=0 error=0 skipped=0"
 
         harness.cleanup()

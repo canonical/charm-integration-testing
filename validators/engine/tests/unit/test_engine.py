@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from dataclasses import dataclass, field
-from typing import Optional, cast
+from typing import cast
 
 import ops
 import pytest
@@ -11,30 +11,7 @@ from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.engine.engine import load_validators, run_for_charm
 from validators.test_utils.helpers import make_charm_from_relation
 from validators.test_utils.stubs import RelationRoleStub, RelationStub, UnitStub
-
-
-class PassingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="PASS",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
-
-
-class FailingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="FAIL",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
+from validators.test_utils.validators import FailingValidator, PassingValidator
 
 
 class ExplodingValidator(BaseValidator):
@@ -72,7 +49,7 @@ class SkippingValidator(BaseValidator):
 class EntryPointStub:
     name: str
     _load_result: type = field(default=PassingValidator)
-    _load_error: Optional[Exception] = field(default=None)
+    _load_error: Exception | None = field(default=None)
 
     def load(self) -> type:
         if self._load_error is not None:
