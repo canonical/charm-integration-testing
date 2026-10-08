@@ -107,6 +107,7 @@ def test_reboot_leader(
                 target_status=PodStatus.RUNNING,
                 timeout=timedelta(minutes=15),
             )
+        juju_client.wait_for_unit_available(leader, model=target_model_ref, timeout=timedelta(minutes=15))
         juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
 
     try:
