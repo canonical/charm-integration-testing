@@ -30,7 +30,7 @@ class ValidationResult(BaseModel):
     interface: str
     role: ValidationRole
     level: ValidationLevel
-    relation_id: int
+    relation_id: Optional[int] = None
     checks: list[ValidationCheck] = Field(default_factory=list)
     error: Optional[str] = None
 
