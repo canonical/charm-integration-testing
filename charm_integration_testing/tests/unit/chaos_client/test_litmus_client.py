@@ -913,3 +913,20 @@ def test_failed_experiment_without_reversion_fails_cleanup_immediately_and_is_re
     assert not context.results
     context.setups[0].cleanup.assert_called_once()
     chaos.cleanup(MODEL, UNIT, "")
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_recheck_early_completion_after_oom(context: ClientContext, failed: bool) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    with pytest.raises(RuntimeError, match="requested stress duration"):
+        chaos.check_stress(MODEL, UNIT)
+    if failed:
+        context.results[0]["status"]["experimentStatus"]["verdict"] = "Fail"
+        with pytest.raises(RuntimeError, match="failed"):
+            chaos.check_stress(MODEL, UNIT, allow_completed=True)
+    else:
+        chaos.check_stress(MODEL, UNIT, allow_completed=True)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines

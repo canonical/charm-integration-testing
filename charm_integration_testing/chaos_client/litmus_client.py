@@ -12,7 +12,7 @@ from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient
+from .backend import ChaosClient, StressEndedEarlyError
 from .litmus_detection import LITMUS_CRDS
 from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
@@ -97,6 +97,9 @@ class LitmusChaosClient(ChaosClient):
         for engine in self._created:
             if engine.scope != (model.uri, unit) or engine.uid is None:
                 continue
+            if allow_completed and isinstance(engine.execution_error, StressEndedEarlyError):
+                engine.execution_error = None
+                engine.execution_error_reported = False
             results = self._observe(engine)
             if engine.execution_error is not None:
                 engine.execution_error_reported = True
@@ -115,7 +118,7 @@ class LitmusChaosClient(ChaosClient):
                     for result in results
                 )
             ):
-                engine.execution_error = RuntimeError(
+                engine.execution_error = StressEndedEarlyError(
                     f"Litmus experiment {engine.name} ended before the observation period completed; "
                     "the requested stress duration was not verified."
                 )

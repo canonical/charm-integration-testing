@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from chaos_client import MetaChaosClient, ResourceConstraintsClient
+from chaos_client.backend import StressEndedEarlyError
 from juju import CharmChannel, JujuApplicationInfo, JujuClient, JujuModelHandle
 from kubernetes import client as k8s  # type: ignore[import-untyped]
 from test_suite import test_live_memory_stress_total as module
@@ -150,7 +151,7 @@ def test_lifecycle(failure: str | None, neighbor: JujuModelHandle | None, monkey
             status.state, status.last_state = status.last_state, None
         if failure == "replaced":
             workload.metadata.uid = "new-pod"
-        assert oom_detected() is (failure in {"oom", "terminated-oom"})
+        assert oom_detected() is (failure in {"oom", "terminated-oom", "setup-oom"})
 
     monkeypatch.setattr(module, "temporary_memory_limit", limit)
     monkeypatch.setattr(
@@ -405,3 +406,20 @@ def test_new_oom_ends_observation_without_suppressing_experiment_errors(
         module.observe_memory_stress(chaos, MODEL, "target/0", 600, oom_detected=lambda: True)
     chaos.check_stress.assert_called_once_with(MODEL, "target/0", allow_completed=True)
     pause.assert_not_called()
+
+
+@pytest.mark.parametrize("new_oom", [False, True])
+@pytest.mark.parametrize("helper_error", [False, True])
+def test_oom_between_status_reads(new_oom: bool, helper_error: bool) -> None:
+    chaos = MagicMock()
+    early = StressEndedEarlyError("ended early")
+    chaos.check_stress.side_effect = [early, RuntimeError("helper failed") if helper_error else None]
+    evidence = MagicMock(side_effect=[False, new_oom])
+    if not new_oom or helper_error:
+        with pytest.raises(RuntimeError, match="helper failed" if new_oom else "ended early"):
+            module.observe_memory_stress(chaos, MODEL, "target/0", 600, oom_detected=evidence)
+    else:
+        module.observe_memory_stress(chaos, MODEL, "target/0", 600, oom_detected=evidence)
+    assert chaos.check_stress.call_count == (2 if new_oom else 1)
+    if new_oom:
+        chaos.check_stress.assert_called_with(MODEL, "target/0", allow_completed=True)

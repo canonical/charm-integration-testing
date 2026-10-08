@@ -7,6 +7,7 @@ from typing import Callable
 
 import pytest
 from chaos_client import MetaChaosClient, ResourceConstraintsClient
+from chaos_client.backend import StressEndedEarlyError
 from juju import JujuClient, JujuModelHandle
 from kubernetes.utils.quantity import parse_quantity  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
@@ -29,7 +30,14 @@ def observe_memory_stress(
     deadline = monotonic() + seconds
     while True:
         exhausted = oom_detected()
-        chaos.check_stress(model, unit, allow_completed=exhausted)
+        try:
+            chaos.check_stress(model, unit, allow_completed=exhausted)
+        except StressEndedEarlyError:
+            # The target may OOM between the Pod and experiment status reads.
+            if not oom_detected():
+                raise
+            chaos.check_stress(model, unit, allow_completed=True)
+            return
         if exhausted:
             return
         remaining = deadline - monotonic()
@@ -176,7 +184,7 @@ def test_live_memory_stress_total(
                         and terminated.reason == "OOMKilled"
                         and terminated.exit_code == 137
                         and terminated.finished_at is not None
-                        and terminated.finished_at >= injection_confirmed_at
+                        and terminated.finished_at >= injection_requested_at
                     ):
                         juju_client.logger.info(
                             "Memory exhaustion confirmed: unit=%s container=%s pod_uid=%s; verifying recovery.",
@@ -189,6 +197,8 @@ def test_live_memory_stress_total(
 
         observation_error: Exception | None = None
         try:
+            injection_requested_at = datetime.now(timezone.utc)
+            juju_client.logger.info("Memory stress injection requested at %s", injection_requested_at.isoformat())
             chaos.stress_memory(
                 target_model_ref,
                 unit,
@@ -197,7 +207,7 @@ def test_live_memory_stress_total(
                 duration=memory_stress_duration,
                 duration_margin=timedelta(minutes=2),
             )
-            injection_confirmed_at = datetime.now(timezone.utc)
+            juju_client.logger.info("Memory stress injection confirmed at %s", datetime.now(timezone.utc).isoformat())
             # A new target OOM confirms exhaustion; otherwise observe for the full window.
             observe_memory_stress(
                 chaos=chaos,
