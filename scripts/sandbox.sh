@@ -32,6 +32,14 @@
 
 set -euo pipefail
 
+case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *)
+        echo "NOTICE: the sandbox is only supported on amd64 hosts (detected: $(uname -m)). Exiting." >&2
+        exit 1
+        ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEV_DIR="$PROJECT_DIR/development-sandbox"
