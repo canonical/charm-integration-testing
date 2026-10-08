@@ -45,9 +45,7 @@ class RecordingJujuClient:
     def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
         self.calls.append(("ssh", unit, command, model))
 
-    def wait_for_unit_unavailable(
-        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
-    ) -> None:
+    def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_unavailable", unit, model, timeout))
 
     def wait_for_unit_available(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
@@ -84,9 +82,7 @@ class RecordingKubernetesClient:
         self.pods = [pod for pod in self.pods if pod.metadata.name != pod_name]
         self.pods.append(_pod("target-2", "uid-unrelated", "target/0"))
 
-    def wait(
-        self, check: Callable[[], Any], timeout_message: str, timeout: timedelta | None = None
-    ) -> Any:
+    def wait(self, check: Callable[[], Any], timeout_message: str, timeout: timedelta | None = None) -> Any:
         self.calls.append(("wait", timeout_message, timeout))
         if "was not removed" in timeout_message:
             return check()

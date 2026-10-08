@@ -86,9 +86,7 @@ def test_reboot_leader(
                 check=lambda: next(
                     (
                         pod
-                        for pod in kubernetes_client.get_charm_pods(
-                            target_application, model=target_model_ref.model
-                        )
+                        for pod in kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
                         if (pod.metadata.annotations or {}).get("unit.juju.is/id") == leader
                         and pod.metadata.uid is not None
                         and pod.metadata.uid not in old_pod_uids
