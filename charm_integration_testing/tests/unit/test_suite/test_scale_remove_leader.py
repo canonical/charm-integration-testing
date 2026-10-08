@@ -29,9 +29,15 @@ def _charm(*, ha_units: int = 3, scale_down: bool = True, subordinate: bool = Fa
 
 
 class RecordingJujuClient:
-    def __init__(self, current_units: int = 3, validation_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        current_units: int = 3,
+        validation_error: Exception | None = None,
+        removal_timeout_once: bool = False,
+    ) -> None:
         self.current_units = current_units
         self.validation_error = validation_error
+        self.removal_timeout_once = removal_timeout_once
         self.calls: list[tuple[object, ...]] = []
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -44,10 +50,13 @@ class RecordingJujuClient:
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
-        self.current_units -= 1
 
     def wait_for_unit_removal(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_removal", unit, model, timeout))
+        if self.removal_timeout_once:
+            self.removal_timeout_once = False
+            raise TimeoutError("removal is still pending")
+        self.current_units -= 1
 
     def idle_for_period(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("idle_for_period", model, timeout))
@@ -87,7 +96,6 @@ def test_scale_remove_leader_validates_during_removal_and_restores_ha() -> None:
         ("wait_for_unit_removal", "target/0", MODEL, timedelta(minutes=15)),
         ("idle_for_period", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
-        ("num_units", "target", MODEL),
         ("scale_application", "target", 3, MODEL),
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
     ]
@@ -110,6 +118,27 @@ def test_scale_remove_leader_restores_ha_when_validation_fails() -> None:
 
     assert client.current_units == 3
     assert ("scale_application", "target", 3, MODEL) in client.calls
+
+
+def test_scale_remove_leader_waits_for_pending_removal_before_restoring_scale() -> None:
+    client = RecordingJujuClient(removal_timeout_once=True)
+
+    with pytest.raises(TimeoutError, match="removal is still pending"):
+        scale_remove_leader.test_scale_remove_leader(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            "machine",
+            _charm(),
+            None,
+            None,
+        )
+
+    wait_indices = [i for i, call in enumerate(client.calls) if call[0] == "wait_for_unit_removal"]
+    scale_index = next(i for i, call in enumerate(client.calls) if call[0] == "scale_application")
+    assert len(wait_indices) == 2
+    assert wait_indices[-1] < scale_index
+    assert client.current_units == 3
 
 
 def test_scale_remove_leader_skips_kubernetes_models() -> None:
