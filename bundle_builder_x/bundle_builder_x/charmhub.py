@@ -210,6 +210,8 @@ class CharmhubClient:
                 raise ValueError(f"Local charm is missing required file: {required_path}")
 
         metadata_contents = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(metadata_contents, dict):
+            raise ValueError(f"Local charm metadata must contain a mapping: {metadata_path}")
         if metadata_contents.get("name") != charm_name:
             raise ValueError(
                 f"Local charm metadata name {metadata_contents.get('name')!r} "
@@ -217,17 +219,31 @@ class CharmhubClient:
             )
         metadata = CharmMetadata.model_validate(metadata_contents)
         config_contents = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        if config_contents is not None and not isinstance(config_contents, dict):
+            raise ValueError(f"Local charm config must contain a mapping: {config_path}")
         config_schema = CharmConfigSchema.model_validate(config_contents or {})
 
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-        bases = manifest.get("bases", [])
-        runtime_bases = [
-            runtime_base
-            for base in bases
-            if isinstance(base, dict)
-            for runtime_base in (base.get("run-on") or [base])
-            if isinstance(runtime_base, dict)
-        ]
+        if not isinstance(manifest, dict):
+            raise ValueError(f"Local charm manifest must contain a mapping: {manifest_path}")
+        bases = manifest.get("bases")
+        if not isinstance(bases, list):
+            raise ValueError(f"Local charm manifest must contain a list of bases: {manifest_path}")
+        runtime_bases = []
+        for base in bases:
+            if not isinstance(base, dict):
+                raise ValueError(f"Local charm manifest contains an invalid base entry: {base!r}")
+            run_on = base.get("run-on")
+            if run_on is not None and not isinstance(run_on, list):
+                raise ValueError(f"Local charm manifest run-on must be a list: {run_on!r}")
+            for runtime_base in run_on if run_on is not None else [base]:
+                if not isinstance(runtime_base, dict):
+                    raise ValueError(f"Local charm manifest contains an invalid run-on entry: {runtime_base!r}")
+                if not isinstance(runtime_base.get("architectures"), list) or not isinstance(
+                    runtime_base.get("channel"), str
+                ):
+                    raise ValueError(f"Local charm manifest run-on entry is missing base details: {runtime_base!r}")
+                runtime_bases.append(runtime_base)
         supported_bases = [
             base
             for base in runtime_bases
@@ -249,6 +265,8 @@ class CharmhubClient:
             )
             raise ValueError(f"Local charm {charm_name!r}{detail} available bases for {ubuntu_arch}: {available_bases}")
 
+        raw_default_channel = self.overrides_client.get_charm_default_channel(charm_name)
+        local_override_channel = CharmChannel.model_validate(raw_default_channel) if raw_default_channel else None
         charm = self._build_charm(
             charm_name=charm_name,
             channel=None,
@@ -258,6 +276,7 @@ class CharmhubClient:
             metadata=metadata,
             config_schema=config_schema,
             source_path=charm_path,
+            override_channel=local_override_channel,
         )
         return self._ensure_compatibility(charm, juju_version, platform)
 
@@ -352,8 +371,9 @@ class CharmhubClient:
         metadata: CharmMetadata,
         config_schema: CharmConfigSchema,
         source_path: Path | None = None,
+        override_channel: CharmChannel | None = None,
     ) -> Charm:
-        override_channel = channel or _LOCAL_CHARM_CHANNEL
+        override_channel = override_channel or channel or _LOCAL_CHARM_CHANNEL
         return Charm(
             name=charm_name,
             channel=channel,

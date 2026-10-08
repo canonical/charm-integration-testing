@@ -9,7 +9,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from bundle_builder_x import AppSpec, BundleBuilder, Charm, ModelSpec, SpecFile, unpack_charm_artifact
+from bundle_builder_x import AppSpec, BundleBuilder, Charm, ModelSpec, OverridesClient, SpecFile, unpack_charm_artifact
 from bundle_builder_x.charmhub import CharmhubClient
 
 
@@ -113,6 +113,43 @@ class TestLocalCharm:
         )
 
         assert charm.ubuntu_version == "26.04"
+
+    def test_local_charm_uses_default_channel_for_policy_overrides(self, tmp_path: Path) -> None:
+        charm_path = _write_charm(tmp_path / "local-test")
+        overrides_path = tmp_path / "overrides"
+        overrides_path.mkdir()
+        (overrides_path / "local-test.yaml").write_text(
+            "default_channel: '3.0/stable'\n"
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '3.0'\n"
+            "    ha_units: 5\n",
+            encoding="utf-8",
+        )
+        client = CharmhubClient(overrides_client=OverridesClient(overrides=overrides_path))
+
+        charm = client.charm_from_local(
+            charm_path=charm_path,
+            charm_name="local-test",
+            ubuntu_arch="amd64",
+            platform="machine",
+        )
+
+        assert charm.channel is None
+        assert charm.revision is None
+        assert charm.ha_units == 5
+
+    def test_local_charm_rejects_malformed_manifest(self, tmp_path: Path) -> None:
+        charm_path = _write_charm(tmp_path / "local-test")
+        (charm_path / "manifest.yaml").write_text("bases: invalid\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="manifest must contain a list of bases"):
+            CharmhubClient().charm_from_local(
+                charm_path=charm_path,
+                charm_name="local-test",
+                ubuntu_arch="amd64",
+                platform="machine",
+            )
 
     def test_unpack_rejects_archive_path_traversal(self, tmp_path: Path) -> None:
         artifact = tmp_path / "unsafe.charm"
