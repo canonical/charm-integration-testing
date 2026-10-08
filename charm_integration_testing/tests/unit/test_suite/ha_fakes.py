@@ -44,6 +44,7 @@ class RecordingJujuClient:
         self.defer_next_remove = False
         self.pending_unit_removals: list[str] = []
         self.extra_units_on_scale_up = 0
+        self.workload_pod_deleter: Callable[[JujuModelHandle, str], None] | None = None
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -75,14 +76,11 @@ class RecordingJujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         return list(self.units)
 
-    def delete_kubernetes_pod(
-        self,
-        kubernetes_client: "RecordingKubernetesClient",
-        namespace: str,
-        pod_name: str,
-    ) -> None:
-        self.calls.append(("delete_kubernetes_pod", namespace, pod_name))
-        kubernetes_client.delete_pod(namespace, pod_name)
+    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        self.calls.append(("delete_workload_pod", model, pod_name))
+        if self.workload_pod_deleter is None:
+            raise RuntimeError("No workload pod deleter configured.")
+        self.workload_pod_deleter(model, pod_name)
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
