@@ -11,6 +11,7 @@ from test_suite import test_scale_remove_leader as scale_remove_leader
 from bundle_builder_x import Charm, CharmChannel
 
 MODEL = JujuModelHandle(controller="controller", model="model")
+NEIGHBOR_MODEL = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
 
 
 def _charm(*, ha_units: int = 3, scale_down: bool = True, subordinate: bool = False) -> Charm:
@@ -118,6 +119,26 @@ def test_scale_remove_leader_restores_ha_when_validation_fails() -> None:
 
     assert client.current_units == 3
     assert ("scale_application", "target", 3, MODEL) in client.calls
+
+
+def test_scale_remove_leader_validates_target_and_neighbor_before_restoring() -> None:
+    client = RecordingJujuClient()
+
+    scale_remove_leader.test_scale_remove_leader(
+        cast(JujuClient, client),
+        MODEL,
+        "target",
+        "machine",
+        _charm(),
+        NEIGHBOR_MODEL,
+        "neighbor",
+    )
+
+    assert client.calls[5:8] == [
+        ("validate_model", MODEL, "deep", ["target"]),
+        ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
+        ("scale_application", "target", 3, MODEL),
+    ]
 
 
 def test_scale_remove_leader_waits_for_pending_removal_before_restoring_scale() -> None:
