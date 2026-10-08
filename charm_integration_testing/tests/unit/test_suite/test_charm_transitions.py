@@ -21,6 +21,7 @@ class JujuClientStub:
         self.infos = infos
         self.logger = logging.getLogger("test")
         self.calls: list[tuple[Any, ...]] = []
+        self.deployed_bundle_documents: list[list[Any]] = []
 
     def application_info(self, application: str, model: JujuModelHandle) -> JujuApplicationInfo:
         return self.infos.pop(0)
@@ -35,7 +36,9 @@ class JujuClientStub:
         self.calls.append(("wait_revision", kwargs["expected_revision"]))
 
     def deploy_bundle_file(self, bundle: str, model: JujuModelHandle) -> None:
-        self.calls.append(("deploy", yaml.safe_load(Path(bundle).read_text(encoding="utf-8"))))
+        documents = list(yaml.safe_load_all(Path(bundle).read_text(encoding="utf-8")))
+        self.deployed_bundle_documents.append(documents)
+        self.calls.append(("deploy", documents[0]))
 
     def multi_model_idle_for_period(self, models: list[JujuModelHandle], timeout: timedelta) -> None:
         self.calls.append(("idle",))
@@ -153,3 +156,63 @@ def test_deploys_bundle_with_application_switched_to_local_charm(tmp_path: Path)
 
     # THEN the deployed bundle selects the local path without Charmhub release fields
     assert client.calls[0] == ("deploy", {"applications": {"app": {"charm": "/charms/my-charm"}}})
+
+
+def test_deploys_bundle_with_local_charm_without_dropping_offer_overlay(tmp_path: Path) -> None:
+    # GIVEN a multi-document bundle with a provider offer in its overlay
+    bundle = tmp_path / "bundle.yaml"
+    bundle.write_text(
+        yaml.safe_dump_all(
+            [
+                {
+                    "applications": {
+                        "app": {
+                            "charm": "my-charm",
+                            "channel": "1/stable",
+                            "revision": 7,
+                        }
+                    }
+                },
+                {
+                    "applications": {
+                        "app": {
+                            "offers": {
+                                "app-offer": {
+                                    "endpoints": ["database"],
+                                }
+                            }
+                        }
+                    }
+                },
+            ],
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    client = JujuClientStub([JujuApplicationInfo(charm="local:my-charm-0", revision=0, origin="local")])
+
+    # WHEN the application is switched to a local charm
+    deploy_bundle_with_charm_and_validate(
+        cast(JujuClient, client),
+        bundle=bundle,
+        destination_bundle=tmp_path / "deploy.yaml",
+        application="app",
+        charm=_local_charm(Path("/charms/my-charm")),
+        target_model=MODEL,
+        neighbor_model=None,
+    )
+
+    # THEN the base selects the local charm and the provider-offer overlay is preserved
+    base, overlay = client.deployed_bundle_documents[0]
+    assert base["applications"]["app"] == {"charm": "/charms/my-charm"}
+    assert overlay == {
+        "applications": {
+            "app": {
+                "offers": {
+                    "app-offer": {
+                        "endpoints": ["database"],
+                    }
+                }
+            }
+        }
+    }

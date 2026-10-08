@@ -50,9 +50,10 @@ def deploy_bundle_with_charm_and_validate(
 ) -> None:
     """Deploy *bundle* with *application* switched to *charm*, then verify it and the models are healthy."""
     with bundle.open("r", encoding="utf-8") as file:
-        bundle_data = next(yaml.safe_load_all(file))
-    if not isinstance(bundle_data, dict):
+        bundle_documents = list(yaml.safe_load_all(file))
+    if not bundle_documents or not isinstance(bundle_documents[0], dict):
         raise ValueError(f"Invalid bundle file: {bundle}")
+    bundle_data = bundle_documents[0]
     applications = bundle_data.get("applications")
     if not isinstance(applications, dict) or not isinstance(applications.get(application), dict):
         raise ValueError(f"Application '{application}' not found in bundle: {bundle}")
@@ -61,7 +62,7 @@ def deploy_bundle_with_charm_and_validate(
         application_data.pop(source_field, None)
     application_data.update(charm.bundle_source())
     with destination_bundle.open("w", encoding="utf-8") as file:
-        yaml.safe_dump(bundle_data, file, sort_keys=False)
+        yaml.safe_dump_all(bundle_documents, file, sort_keys=False)
 
     juju_client.logger.info(f"Deploying {application} from {charm.source_label}.")
     juju_client.deploy_bundle_file(str(destination_bundle), model=target_model)
