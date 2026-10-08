@@ -794,9 +794,9 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
             charmhub_client.charm_from_store(
                 charm_name=target_charm,
                 ubuntu_arch=target_arch,
-                charm_track=resolved_channel.track,
-                charm_risk=resolved_channel.risk,
-                charm_branch=resolved_channel.branch or None,
+                charm_track=resolved_channel.track if resolved_channel else None,
+                charm_risk=resolved_channel.risk if resolved_channel else None,
+                charm_branch=resolved_channel.branch or None if resolved_channel else None,
                 charm_revision=revision,
                 ubuntu_version=target_base,
             )
@@ -813,11 +813,14 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
                 "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
+    if resolved_channel is None:
+        pytest.skip("Cannot select a historical Charmhub revision without a resolved channel.")
     if resolved_channel.branch:
         pytest.skip(
             f"Unable to select a historical revision for branched channel '{resolved_channel}': "
             "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
         )
+    assert target.revision is not None
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(

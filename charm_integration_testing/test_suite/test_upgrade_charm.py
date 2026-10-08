@@ -24,6 +24,8 @@ def test_upgrade_charm(
     # The resolved charm carries the concrete revision and channel even in a "latest release" run,
     # where --target-revision/--target-channel are left at their defaults.
     target_revision = target_resolved_charm.revision
+    assert target_revision is not None
+    assert target_resolved_charm.channel is not None
     resolved_target_channel = target_channel or str(target_resolved_charm.channel)
 
     # Upgrading the charm to the target revision specified by the fixture
