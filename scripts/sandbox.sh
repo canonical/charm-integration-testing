@@ -103,6 +103,17 @@ _collect_sandbox_vars() {
     done < <(compgen -e)
 }
 
+# True if the VM is running and its gh CLI already holds a valid login (e.g.
+# from a previous `up`/`run`). GH_TOKEN/GITHUB_TOKEN are unset so only stored
+# credentials are checked.
+_vm_gh_logged_in() {
+    [ "$(_vm_state)" = "Running" ] || return 1
+    multipass exec "$VM_NAME" -- bash -lc '
+        unset GH_TOKEN GITHUB_TOKEN
+        gh auth status --hostname github.com
+    ' &>/dev/null
+}
+
 # Resolved GitHub credentials, populated by _require_github_auth.
 VM_GH_TOKEN=""
 COPILOT_TOKEN=""
@@ -156,14 +167,26 @@ _confirm_host_token_use() {
 
 # Resolve GitHub credentials. They are optional: without them the sandbox still
 # runs, but gh and Copilot inside the VM are unauthenticated. The host's
-# `gh auth token` is only used with the user's consent.
+# `gh auth token` is only used with the user's consent. With --gh-only, the
+# Copilot token is not resolved (for commands that don't run Copilot).
 _require_github_auth() {
+    local _gh_only=false
+    [ "${1:-}" = "--gh-only" ] && _gh_only=true
+
     VM_GH_TOKEN="${SANDBOX_VAR_GITHUB_TOKEN:-}"
     COPILOT_TOKEN="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}"
 
     local _unset=()
-    [ -n "$VM_GH_TOKEN" ] || _unset+=("gh CLI inside the VM")
-    [ -n "$COPILOT_TOKEN" ] || _unset+=("Copilot CLI inside the VM")
+    if [ -z "$VM_GH_TOKEN" ]; then
+        if _vm_gh_logged_in; then
+            echo "==> gh inside the VM is already authenticated; keeping the existing login."
+        else
+            _unset+=("gh CLI inside the VM")
+        fi
+    fi
+    if [ "$_gh_only" = "false" ] && [ -z "$COPILOT_TOKEN" ]; then
+        _unset+=("Copilot CLI inside the VM")
+    fi
     [ "${#_unset[@]}" -gt 0 ] || return 0
 
     if [ -z "$_gh_token" ]; then
@@ -178,7 +201,9 @@ _require_github_auth() {
 
     if _confirm_host_token_use "${_unset[@]}"; then
         [ -n "$VM_GH_TOKEN" ] || VM_GH_TOKEN="$_gh_token"
-        [ -n "$COPILOT_TOKEN" ] || COPILOT_TOKEN="$_gh_token"
+        if [ "$_gh_only" = "false" ]; then
+            [ -n "$COPILOT_TOKEN" ] || COPILOT_TOKEN="$_gh_token"
+        fi
     fi
 }
 
@@ -187,7 +212,7 @@ _require_github_auth() {
 # `gh auth login` refuses to run while they are present.
 _vm_gh_auth_login() {
     if [ -z "$VM_GH_TOKEN" ]; then
-        echo "==> No gh token provided; skipping gh authentication inside the VM."
+        echo "==> No gh token provided; leaving gh authentication inside the VM unchanged."
         return 0
     fi
     echo "==> Authenticating gh inside the VM..."
@@ -572,6 +597,8 @@ _cmd_shell() {
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
     fi
+    _require_github_auth --gh-only
+    _vm_gh_auth_login
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
