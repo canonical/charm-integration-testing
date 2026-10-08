@@ -139,7 +139,12 @@ class MetaChaosClient(ChaosClient):
         duration: timedelta,
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
+        duration_margin: timedelta = timedelta(0),
     ) -> None:
+        """Apply memory settings, then add the caller's experiment duration margin."""
+        if duration_margin < timedelta(0):
+            raise ValueError("Memory stress duration margin must not be negative.")
+
         def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
             match scenario:
                 case "exhaustion":
@@ -154,7 +159,9 @@ class MetaChaosClient(ChaosClient):
                     )
                 case _:
                     raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
-            return lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, merged_duration)
+            return lambda tool: tool.stress_memory(
+                model, unit, merged_workers, merged_size_mb, merged_duration + duration_margin
+            )
 
         self._dispatch_constrained(
             "stress_memory",

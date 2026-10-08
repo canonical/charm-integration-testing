@@ -6,10 +6,11 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from importlib.metadata import entry_points
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Callable, TypeVar, get_args
+from typing import TypeVar, get_args
 
 import ops
 from ops.charm import CharmBase
@@ -28,6 +29,7 @@ from validators.base import (
     ValidationRole,
     str_to_validation_role,
 )
+from validators.engine import load_validators, run_for_charm
 
 # Persistence lifecycle operations accepted by --persistence.
 PersistenceOp = str  # "prepare" | "checkpoint" | "cleanup"
@@ -36,13 +38,6 @@ _PERSISTENCE_OPS = ("prepare", "checkpoint", "cleanup")
 # Level assigned to persistence ValidationResults: checkpoint() is a read/write probe, so "deep"
 # is the closest existing fit (there's no separate persistence level in ValidationLevel).
 _PERSISTENCE_RESULT_LEVEL: ValidationLevel = "deep"
-
-# Ordered from highest to lowest; each level falls back to the next entry.
-_LEVEL_FALLBACK: dict[ValidationLevel, ValidationLevel | None] = {
-    "uat": "deep",
-    "deep": "simple",
-    "simple": None,
-}
 
 # Log location on the unit. Deliberately under /var/log so it gets picked up by
 # juju-crashdump / juju-k8s-crashdump collection alongside other unit logs.
@@ -133,17 +128,7 @@ class ValidatorRunner:
 
     @staticmethod
     def _load_validators() -> dict[str, list[type[BaseValidator]]]:
-        validators: dict[str, list[type[BaseValidator]]] = {}
-        for ep in entry_points(group="endpoint_validators"):
-            try:
-                validator_cls = ep.load()
-                if not issubclass(validator_cls, BaseValidator):
-                    logger.warning(f"Entry point '{ep.name}' does not implement BaseValidator. Skipping.")
-                    continue
-                validators.setdefault(ep.name, []).append(validator_cls)
-            except Exception:
-                logger.exception(f"Failed to load validator for '{ep.name}'")
-        return validators
+        return load_validators()
 
     def _load_persistence_validators(self) -> dict[str, list[type[BasePersistenceValidator]]]:
         validators: dict[str, list[type[BasePersistenceValidator]]] = {}
@@ -152,8 +137,7 @@ class ValidatorRunner:
                 validator_cls = ep.load()
                 if not issubclass(validator_cls, BasePersistenceValidator):
                     raise TypeError(
-                        f"entry point '{ep.name}' does not implement BasePersistenceValidator "
-                        f"(got {validator_cls!r})"
+                        f"entry point '{ep.name}' does not implement BasePersistenceValidator (got {validator_cls!r})"
                     )
                 # Unlike functional validators, persistence state (PersistenceState per relation_id
                 # in --refs/updated_refs) has no room to distinguish which validator a state entry
@@ -177,78 +161,9 @@ class ValidatorRunner:
 
     def run(self, charm: CharmBase, level: ValidationLevel) -> ValidatorRunnerResults:
         logger.info(f"Running validators at level '{level}'")
-        # Get the list of endpoints
-        results = []
-        for relation, metadata in charm.meta.relations.items():
-            if (role := str_to_validation_role(metadata.role.name)) == "peer":
-                continue
-            interface_name = metadata.interface_name or relation
-
-            if relation not in charm.model.relations:
-                logger.error(f"Relation '{relation}' defined in metadata but not found in model.")
-                results.append(
-                    ValidationResult(
-                        status="ERROR",
-                        endpoint=relation,
-                        interface=interface_name,
-                        role=role,
-                        level=level,
-                        relation_id=None,
-                        error=f"Relation '{relation}' defined in metadata but not found in model.",
-                    )
-                )
-                continue
-            for integration in charm.model.relations[relation]:
-                results += self._run_for_integration(charm, interface_name, integration, level, role)
+        results = run_for_charm(charm, level=level, validators=self.validators)
         logger.info(f"Finished running validators at level '{level}': {len(results)} result(s)")
         return ValidatorRunnerResults(results=results)
-
-    def _run_for_integration(
-        self,
-        charm: CharmBase,
-        interface_name: str,
-        integration: Relation,
-        level: ValidationLevel,
-        role: ValidationRole,
-    ) -> list[ValidationResult]:
-        results: list[ValidationResult] = []
-        for validator_cls in self.validators.get(interface_name, []):
-            validator = validator_cls(charm, integration)
-            logger.debug(
-                f"Running validator '{validator_cls.__name__}' for endpoint '{integration.name}' "
-                f"(interface='{interface_name}', role='{role}', level='{level}')"
-            )
-            try:
-                result = validator.validate(level=level)
-                # If the validator doesn't support this level, fall back to the
-                # next lower level until we either get a real result or exhaust
-                # all options and surface the final SKIPPED.
-                while result.status == "SKIPPED":
-                    fallback = _LEVEL_FALLBACK[result.level]
-                    if fallback is None:
-                        break
-                    result = validator.validate(level=fallback)
-                logger.debug(
-                    f"Validator '{validator_cls.__name__}' for endpoint '{integration.name}' "
-                    f"finished with status '{result.status}'"
-                )
-                results.append(result)
-            except Exception as exc:
-                logger.exception(
-                    f"Validator '{validator_cls.__name__}' for endpoint '{integration.name}' raised an exception"
-                )
-                results.append(
-                    ValidationResult(
-                        status="ERROR",
-                        endpoint=integration.name,
-                        interface=interface_name,
-                        role=role,
-                        level=level,
-                        relation_id=integration.id,
-                        error=f"Validator '{validator_cls.__name__}' raised an exception: {exc}",
-                    )
-                )
-        return results
 
     def _iter_persistence_targets(self, charm: CharmBase) -> list[tuple[Relation, str, ValidationRole]]:
         """Non-peer (integration, interface_name, role) triples with a registered persistence validator."""
@@ -330,10 +245,8 @@ class ValidatorRunner:
         logger.info(f"Finished preparing persistence validators: {len(updated_refs)} relation(s) seeded")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
-    def checkpoint_all(
-        self, charm: CharmBase, refs: dict[str, PersistenceState], prepare_missing: bool = False
-    ) -> ValidatorRunnerResults:
-        """Checkpoint refs and optionally prepare live targets without tracked state."""
+    def checkpoint_all(self, charm: CharmBase, refs: dict[str, PersistenceState]) -> ValidatorRunnerResults:
+        """Checkpoint tracked refs and prepare live targets without tracked state."""
         logger.info(f"Checkpointing persistence validators for {len(refs)} relation(s)")
         results: list[ValidationResult] = self._persistence_load_error_results(charm)
         updated_refs: dict[str, PersistenceState] = {}
@@ -400,9 +313,20 @@ class ValidatorRunner:
                     )
                 )
                 continue
+
+            def checkpoint(
+                validator: BasePersistenceValidator, expected_state: PersistenceState = expected
+            ) -> tuple[ValidationResult, PersistenceState]:
+                return validator.checkpoint(expected_state)
+
             for validator_cls in registered_validators:
                 outcome, error_result, skipped = self._call_persistence_method(
-                    validator_cls, charm, integration, interface_name, role, lambda v: v.checkpoint(expected)
+                    validator_cls,
+                    charm,
+                    integration,
+                    interface_name,
+                    role,
+                    checkpoint,
                 )
                 if error_result is not None:
                     results.append(error_result)
@@ -446,14 +370,13 @@ class ValidatorRunner:
                     # baseline, so a later retry could checkpoint against post-failure state.
                     if result.status == "PASS":
                         updated_refs[relation_id_str] = new_state
-        if prepare_missing:
-            for integration, interface_name, role in self._iter_persistence_targets(charm):
-                if integration.id in tracked_relation_ids:
-                    continue
-                state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
-                results.extend(target_results)
-                if state is not None:
-                    updated_refs[str(integration.id)] = state
+        for integration, interface_name, role in self._iter_persistence_targets(charm):
+            if integration.id in tracked_relation_ids:
+                continue
+            state, target_results = self._prepare_persistence_target(charm, integration, interface_name, role)
+            results.extend(target_results)
+            if state is not None:
+                updated_refs[str(integration.id)] = state
         logger.info(f"Finished checkpointing persistence validators: {len(results)} result(s)")
         return ValidatorRunnerResults(results=results, updated_refs=updated_refs)
 
@@ -589,11 +512,6 @@ def _parse_cli_args(
         ),
     )
     parser.add_argument(
-        "--prepare-missing",
-        action="store_true",
-        help="Prepare live persistence relations without a ref during a checkpoint.",
-    )
-    parser.add_argument(
         "--endpoints",
         default=None,
         help='JSON list of local endpoint names to clean. Only valid for "--persistence cleanup".',
@@ -608,9 +526,6 @@ def _parse_cli_args(
         # argument). Without this check, a typo such as "--persistence prepare --refs ..." would
         # parse and validate the JSON but then silently ignore it.
         parser.error("--refs is only valid when --persistence checkpoint is used")
-
-    if args.prepare_missing and args.persistence != "checkpoint":
-        parser.error("--prepare-missing is only valid when --persistence checkpoint is used")
 
     if args.endpoints is not None and args.persistence != "cleanup":
         parser.error("--endpoints is only valid when --persistence cleanup is used")
@@ -673,7 +588,7 @@ def main() -> None:
         if args.persistence == "prepare":
             persistence_results = runner.prepare_all(charm)
         elif args.persistence == "checkpoint":
-            persistence_results = runner.checkpoint_all(charm, refs, prepare_missing=args.prepare_missing)
+            persistence_results = runner.checkpoint_all(charm, refs)
         elif args.persistence == "cleanup":
             persistence_results = runner.cleanup_all(charm, endpoints=endpoints)
         else:

@@ -3,9 +3,10 @@
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Optional, cast
+from typing import ClassVar, cast
 from unittest.mock import patch
 
 import ops
@@ -33,6 +34,7 @@ from validators.test_utils.stubs import (
     RelationRoleStub,
     RelationStub,
 )
+from validators.test_utils.validators import FailingValidator, PassingValidator
 
 TEST_TOKEN = "test-token"
 
@@ -40,30 +42,6 @@ TEST_TOKEN = "test-token"
 # ---------------------------------------------------------------------------
 # Validator stubs
 # ---------------------------------------------------------------------------
-
-
-class PassingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="PASS",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
-
-
-class FailingValidator(BaseValidator):
-    def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
-        return ValidationResult(
-            status="FAIL",
-            endpoint=self.endpoint,
-            interface="test-interface",
-            role=self.role,
-            level=level,
-            relation_id=self.relation_id,
-        )
 
 
 class ExplodingValidator(BaseValidator):
@@ -90,7 +68,7 @@ class SkippingValidator(BaseValidator):
 class PreparingPersistenceValidator(BasePersistenceValidator):
     """Persistence validator that succeeds at every lifecycle stage."""
 
-    cleanup_calls: list[int] = []
+    cleanup_calls: ClassVar[list[int]] = []
 
     def prepare(self) -> PersistenceState:
         return PersistenceState(id=self.relation_id + 100, ref=1, token=TEST_TOKEN)
@@ -175,7 +153,7 @@ class MisbehavingPersistenceValidator(BasePersistenceValidator):
 class EntryPointStub:
     name: str
     _load_result: type = field(default=PassingValidator)
-    _load_error: Optional[Exception] = field(default=None)
+    _load_error: Exception | None = field(default=None)
 
     def load(self) -> type:
         if self._load_error is not None:
@@ -191,7 +169,7 @@ class TestValidatorRunnerLoadValidators:
 
         entry_point = EntryPointStub(name="test-interface", _load_result=NotAValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+        with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -202,10 +180,12 @@ class TestValidatorRunnerLoadValidators:
         # GIVEN an entry point that raises on load
         entry_point = EntryPointStub(name="test-interface", _load_error=ImportError("missing dep"))
 
-        with caplog.at_level(logging.ERROR, logger="validators"):
-            with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
-                # WHEN
-                validators = ValidatorRunner._load_validators()
+        with (
+            caplog.at_level(logging.ERROR, logger="validators"),
+            patch("validators.engine.engine.entry_points", return_value=[entry_point]),
+        ):
+            # WHEN
+            validators = ValidatorRunner._load_validators()
 
         # THEN validators are skipped and the full traceback is captured, not just the message
         assert validators == {}
@@ -216,7 +196,7 @@ class TestValidatorRunnerLoadValidators:
         # GIVEN a well-formed entry point
         entry_point = EntryPointStub(name="test-interface", _load_result=PassingValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[entry_point]):
+        with patch("validators.engine.engine.entry_points", return_value=[entry_point]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -229,7 +209,7 @@ class TestValidatorRunnerLoadValidators:
         ep1 = EntryPointStub(name="test-interface", _load_result=PassingValidator)
         ep2 = EntryPointStub(name="test-interface", _load_result=FailingValidator)
 
-        with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
+        with patch("validators.engine.engine.entry_points", return_value=[ep1, ep2]):
             # WHEN
             validators = ValidatorRunner._load_validators()
 
@@ -279,10 +259,12 @@ class TestValidatorRunnerLoadPersistenceValidators:
         ep1 = EntryPointStub(name="test-interface", _load_result=PreparingPersistenceValidator)
         ep2 = EntryPointStub(name="test-interface", _load_result=ExplodingPersistenceValidator)
 
-        with caplog.at_level(logging.WARNING, logger="validators"):
-            with patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]):
-                # WHEN
-                validators = self._runner()._load_persistence_validators()
+        with (
+            caplog.at_level(logging.WARNING, logger="validators"),
+            patch("validators.runner.runner.entry_points", return_value=[ep1, ep2]),
+        ):
+            # WHEN
+            validators = self._runner()._load_persistence_validators()
 
         # THEN both are still registered, but a warning explains the state-overwrite risk
         assert len(validators["test-interface"]) == 2
@@ -345,23 +327,11 @@ class TestParseCliArgs:
         # WHEN --refs is a valid JSON dict of relation_id -> PersistenceState
         refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
 
-        args, refs, endpoints = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
+        _args, refs, endpoints = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json])
 
         # THEN it's decoded into PersistenceState objects keyed by relation_id string
         assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
         assert endpoints is None
-
-    def test_prepare_missing_requires_checkpoint(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse_cli_args(["--persistence", "prepare", "--prepare-missing"])
-
-    def test_checkpoint_accepts_prepare_missing(self) -> None:
-        refs_json = json.dumps({"4": {"id": 1, "ref": 2, "token": TEST_TOKEN}})
-
-        args, refs, _ = _parse_cli_args(["--persistence", "checkpoint", "--refs", refs_json, "--prepare-missing"])
-
-        assert args.prepare_missing is True
-        assert refs == {"4": PersistenceState(id=1, ref=2, token=TEST_TOKEN)}
 
     def test_invalid_refs_json_exits(self) -> None:
         # WHEN --refs is not valid JSON
@@ -703,7 +673,7 @@ class TestValidatorRunnerPersistence:
         refs = {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
         # WHEN
-        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs, prepare_missing=True)
+        results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
         # THEN the existing relation is checkpointed and the new relation is seeded
         assert [result.relation_id for result in results.results] == [5]
@@ -742,10 +712,10 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN
+        # THEN the stale ref is an error, and the currently live untracked relation is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_reports_error_for_non_integer_relation_ids(self) -> None:
         # GIVEN a malformed ref key
@@ -757,12 +727,12 @@ class TestValidatorRunnerPersistence:
         # WHEN
         results = runner.checkpoint_all(cast(ops.CharmBase, charm), refs)
 
-        # THEN no crash, and the malformed entry is reported as an ERROR rather than silently
-        # discarded, so a real durability check can't pass without ever running
+        # THEN the malformed entry is reported as an ERROR rather than silently discarded, while
+        # the valid live relation without a usable ref is prepared.
         assert len(results.results) == 1
         assert results.results[0].status == "ERROR"
         assert "Invalid relation_id" in (results.results[0].error or "")
-        assert results.updated_refs == {}
+        assert results.updated_refs == {"5": PersistenceState(id=105, ref=1, token=TEST_TOKEN)}
 
     def test_checkpoint_all_does_not_resolve_a_ref_to_a_colliding_peer_relation(self) -> None:
         # Regression test for: _find_relation_by_id() (used by checkpoint_all) previously did not

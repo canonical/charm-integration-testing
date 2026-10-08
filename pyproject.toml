@@ -13,7 +13,10 @@ charm-integration-testing = { path = "./charm_integration_testing", develop = tr
 bundle-builder-x = { path = "./bundle_builder_x", develop = true }
 validators-base = { path = "./validators/base", develop = true }
 validators-test-utils = { path = "./validators/test_utils", develop = true }
+validators-engine = { path = "./validators/engine", develop = true, extras = ["dev"] }
 validators-runner = { path = "./validators/runner", develop = true }
+validators-update-status-check = { path = "./validators/update_status_check", develop = true, extras = ["dev"] }
+validators-validate-action = { path = "./validators/validate_action", develop = true, extras = ["dev"] }
 validators-postgresql-client = { path = "./validators/postgresql_client", develop = true, extras = ["dev", "deep", "uat"] }
 validators-pgsql = { path = "./validators/pgsql", develop = true, extras = ["dev"] }
 validators-mongodb-client = { path = "./validators/mongodb_client", develop = true }
@@ -29,6 +32,7 @@ validators-kafka-client = { path = "./validators/kafka_client", develop = true }
 validators-etcd-client = { path = "./validators/etcd_client", develop = true, extras = ["dev"] }
 validators-zookeeper = { path = "./validators/zookeeper", develop = true, extras = ["dev"] }
 validators-opensearch-client = { path = "./validators/opensearch_client", develop = true }
+validators-cassandra-client = { path = "./validators/cassandra_client", develop = true, extras = ["dev"] }
 validators-config-server = { path = "./validators/config_server", develop = true }
 validators-cve-catalog = { path = "./validators/cve_catalog", develop = true }
 validators-catalogue = { path = "./validators/catalogue", develop = true, extras = ["dev"] }
@@ -49,6 +53,7 @@ validators-alertmanager-dispatch = { path = "./validators/alertmanager_dispatch"
 validators-certificate-transfer = { path = "./validators/certificate_transfer", develop = true, extras = ["dev"] }
 validators-trino-client = { path = "./validators/trino_client", develop = true, extras = ["dev"] }
 validators-trino-catalog = { path = "./validators/trino_catalog", develop = true, extras = ["dev"] }
+validators-kyuubi-client = { path = "./validators/kyuubi_client", develop = true, extras = ["dev"] }
 validators-smtp = { path = "./validators/smtp", develop = true, extras = ["dev"] }
 validators-saml = { path = "./validators/saml", develop = true, extras = ["dev"] }
 validators-cross-model-mesh = { path = "./validators/cross_model_mesh", develop = true, extras = ["dev"] }
@@ -108,3 +113,9 @@ warn_unused_ignores = true
 warn_no_return = true
 show_error_codes = true
 disable_error_code = ["untyped-decorator", "method-assign", "call-arg"]
+
+[[tool.mypy.overrides]]
+# cassandra-driver ships no inline type hints (no py.typed marker) and no third-party stub
+# package exists on PyPI, unlike e.g. psycopg2 (types-psycopg2) or PyMySQL (types-PyMySQL).
+module = "cassandra.*"
+ignore_missing_imports = true

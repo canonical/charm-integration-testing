@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from juju import JujuClient
 
+from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
+
 from .scheduler.states import State
 
 
@@ -13,6 +15,7 @@ from .scheduler.states import State
 def test_bootstrap_controller(
     juju_client: JujuClient,
     is_cmr_test: bool,
+    same_controller: bool,
     target_cloud: str,
     target_controller: str,
     target_controller_bootstrap_constraints: dict[str, str],
@@ -24,8 +27,9 @@ def test_bootstrap_controller(
     neighbor_controller_bootstrap_config: dict[str, str] | None,
     neighbor_controller_bootstrap_metadata_source: Path | None,
 ) -> None:
-    # Bootstrap neighbor controller if needed
-    if is_cmr_test:
+    # Bootstrap neighbor controller if needed. In same-controller mode the neighbor model
+    # shares the target controller, so there is nothing extra to bootstrap.
+    if is_cmr_test and not same_controller:
         assert neighbor_cloud is not None
         assert neighbor_controller is not None
         assert neighbor_controller_bootstrap_constraints is not None
@@ -46,3 +50,18 @@ def test_bootstrap_controller(
         bootstrap_configuration=target_controller_bootstrap_config,
         metadata_source=target_controller_bootstrap_metadata_source,
     )
+
+    # Register the neighbor cloud on the target controller when the neighbor model
+    # lives there (same-controller mode) but on a different cloud (SQT-884:
+    # different platforms, same controller). The neighbor model is then created on
+    # that cloud in test_create_model. When --current-state reuses a pre-existing
+    # controller this test does not run at all; register_preexisting_neighbor_cloud
+    # in conftest.py handles that case.
+    if needs_same_controller_cloud_registration(
+        is_cmr_test=is_cmr_test,
+        same_controller=same_controller,
+        neighbor_cloud=neighbor_cloud,
+        target_cloud=target_cloud,
+    ):
+        assert neighbor_cloud is not None
+        juju_client.add_cloud(cloud=neighbor_cloud, controller=target_controller)

@@ -98,9 +98,7 @@ class ValidatorInjectorExtension(JujuExtension):
                 if key.controller == model.controller and key.model == model.model and key.unit == unit
             }
             try:
-                outcome = self._run_persistence_on_unit(
-                    model, unit, op, unit_refs, model_is_k8s, prepare_missing=op == "checkpoint"
-                )
+                outcome = self._run_persistence_on_unit(model, unit, op, unit_refs, model_is_k8s)
             except Exception as exc:
                 # Report a transport/remote-command failure as an ERROR result for this unit
                 # (mirroring how ValidatorRunner turns a validator-level exception into an ERROR
@@ -286,7 +284,6 @@ class ValidatorInjectorExtension(JujuExtension):
         refs: dict[int, PersistenceState],
         is_k8s: bool = True,
         endpoints: set[str] | None = None,
-        prepare_missing: bool = False,
     ) -> tuple[list[ValidationResult], dict[str, PersistenceState], list[int]] | None:
         if persistence not in _PERSISTENCE_OPS:
             raise ValueError(f"Unsupported persistence op '{persistence}'; expected one of {sorted(_PERSISTENCE_OPS)}")
@@ -308,8 +305,6 @@ class ValidatorInjectorExtension(JujuExtension):
         if persistence == "checkpoint":
             refs_json = json.dumps({str(relation_id): state.model_dump() for relation_id, state in refs.items()})
             cmd += f" --refs {shlex.quote(refs_json)}"
-            if prepare_missing:
-                cmd += " --prepare-missing"
         if endpoints is not None:
             cmd += f" --endpoints {shlex.quote(json.dumps(sorted(endpoints)))}"
         run_result = self.juju.exec_unit(model, unit, cmd, operator=is_k8s)

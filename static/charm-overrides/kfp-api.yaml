@@ -1,4 +1,5 @@
 ---
+default_channel: 2.5/stable  # Contains the model-name fix from canonical/kfp-operators#899.
 overrides:
   - criteria:
       - track: '2.16'

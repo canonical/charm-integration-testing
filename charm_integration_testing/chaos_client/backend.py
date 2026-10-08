@@ -7,6 +7,10 @@ from datetime import timedelta
 from juju import JujuModelHandle
 
 
+class StressEndedEarlyError(RuntimeError):
+    """Stress ended before the requested observation window was verified."""
+
+
 class ChaosClient(ABC):
     """Chaos experiment interface.
 

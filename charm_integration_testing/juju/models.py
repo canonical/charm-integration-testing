@@ -25,6 +25,8 @@ class CharmChannel:
                 case 1:
                     return cls(track="", risk=parts[0], branch="")
                 case 2:
+                    if parts[0] in _RISK_ORDER:
+                        return cls(track="", risk=parts[0], branch=parts[1])
                     return cls(track=parts[0], risk=parts[1], branch="")
                 case 3:
                     return cls(track=parts[0], risk=parts[1], branch=parts[2])

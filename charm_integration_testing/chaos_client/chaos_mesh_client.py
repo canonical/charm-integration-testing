@@ -215,7 +215,7 @@ class ChaosMeshChaosClient(ChaosClient):
             experiment.get("desiredPhase") == "Run"
             and conditions.get("Selected") == "True"
             and conditions.get("AllInjected") == "True"
-            and conditions.get("AllRecovered") == "False"
+            and conditions.get("AllRecovered") in (None, "False")
             and bool(records)
             and all(record.get("phase") == "Injected" for record in records)
         )
@@ -276,6 +276,15 @@ class ChaosMeshChaosClient(ChaosClient):
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }
+        if "memory" in stressors:
+            containers = [
+                item.name
+                for item in (matches[0].spec.containers if matches[0].spec else [])
+                if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
+            ]
+            if len(containers) != 1:
+                raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
+            spec["containerNames"] = containers
         name = self._name(label, application)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
         self._wait_for_stress_injection(model.model, name)
@@ -312,7 +321,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 conditions.get("Selected") == "True"
                 and conditions.get("AllInjected") == "True"
                 and experiment.get("desiredPhase") == "Run"
-                and conditions.get("AllRecovered") != "True"
+                and conditions.get("AllRecovered") in (None, "False")
             ):
                 if self._clock() < deadline:
                     return

@@ -57,6 +57,7 @@ class CharmhubClientStub(CharmhubClient):
         charm_risk: str | None = None,
         charm_revision: int | None = None,
         ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
     ) -> Charm:
         candidates = self._by_name.get(charm_name, [])
         if not candidates:

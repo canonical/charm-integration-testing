@@ -1,4 +1,5 @@
 ---
+default_channel: 2.5/stable  # Align persistence with its API peer on the current stable KFP release line.
 # The KFP charms (kfp-api, kfp-persistence, kfp-ui, ...) reuse the same generic
 # interface/feature tag across many published tracks/risks (2.0-alpha.7 through
 # latest/edge). The "kfp-api" feature tag alone only proves the peer is *a* kfp-api

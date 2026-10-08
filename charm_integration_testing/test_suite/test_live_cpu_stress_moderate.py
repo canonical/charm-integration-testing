@@ -13,7 +13,7 @@ from .scheduler.states import State
 
 CPU_PRESSURE_WORKERS = 1
 CPU_PRESSURE_DURATION = timedelta(minutes=5)
-ValidationKey = tuple[JujuModelHandle, str, str, str, int]
+ValidationKey = tuple[JujuModelHandle, str, str, str, int | None]
 
 
 def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHandle, str, str]]) -> set[ValidationKey]:
