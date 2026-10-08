@@ -76,6 +76,31 @@ class TestInitializeGlobalDomain:
         assert len(domain.charms) == 0
 
 
+class TestAddCharmBaseMapping:
+    def test_ubuntu_base_selector_matches_resolved_charm_version(self) -> None:
+        # GIVEN an application pinned to Juju's ubuntu@ base syntax
+        model_ref = ModelRef(name="m")
+        domain = _make_domain(
+            {
+                model_ref: DomainModel(
+                    arch="amd64",
+                    platform="kubernetes",
+                    juju_version=_JUJU,
+                    applications={
+                        "app": DomainApplication(charm="test-charm", base="ubuntu@26.04"),
+                    },
+                ),
+            }
+        )
+        charm = _make_charm("test-charm").model_copy(update={"ubuntu_version": "26.04"})
+
+        # WHEN the resolved charm is added to the domain
+        charm_id = add_charm_to_domain(charm, domain, model_ref)
+
+        # THEN the application maps to the charm with the normalized base
+        assert charm_id in domain.models[model_ref].applications["app"].charm_ids
+
+
 class TestPairCharmsInDomainSelfPairing:
     def test_pairing_a_charm_with_itself_creates_no_integration(self) -> None:
         # GIVEN a mesh-style charm (REQUIRES + PROVIDES on the same interface)

@@ -599,7 +599,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
             or domain_app.local_charm != charm.source_path
             or (domain_app.channel is not None and domain_app.channel != charm.channel)
             or (domain_app.revision is not None and domain_app.revision != charm.revision)
-            or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
+            or (domain_app.base is not None and domain_app.base.removeprefix("ubuntu@") != charm.ubuntu_version)
         ):
             continue
         domain_app.charm_ids[charm_id] = z3.Bool(f"app_{application}_maps_to_charm_{charm.name}_{charm_id}")

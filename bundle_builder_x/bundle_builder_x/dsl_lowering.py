@@ -638,6 +638,9 @@ def _lower_compare(
     ctx: LoweringContext,
 ) -> z3.BoolRef:
     """Lower a CompareExpr to a Z3 Bool."""
+    if ctx.domain_charm.spec.source_path is not None and (_is_self_channel_expr(left) or _is_self_channel_expr(right)):
+        return z3.BoolVal(True)
+
     # Lower features expressions eagerly to detect the features==set special case
     # before attempting to lower the StrLiteralSet, which is only valid inside 'in'.
     l_lowered = _lower(left, ctx)
