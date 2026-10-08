@@ -187,10 +187,15 @@ def test_live_memory_stress_total(
                         and terminated.finished_at >= injection_requested_at
                     ):
                         juju_client.logger.info(
-                            "Memory exhaustion confirmed: unit=%s container=%s pod_uid=%s; verifying recovery.",
+                            "Memory exhaustion confirmed: unit=%s container=%s pod_uid=%s "
+                            "oom_occurred_at=%s detected_at=%s seconds_from_injection_request_to_oom=%.3f; "
+                            "verifying recovery.",
                             unit,
                             containers[0],
                             baseline_uid,
+                            terminated.finished_at.isoformat(),
+                            datetime.now(timezone.utc).isoformat(),
+                            (terminated.finished_at - injection_requested_at).total_seconds(),
                         )
                         return True
             return False
