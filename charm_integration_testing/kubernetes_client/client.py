@@ -6,7 +6,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import sleep
-from typing import Callable, Collection, TypeVar
+from typing import Callable, Collection, Sequence, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
@@ -349,13 +349,20 @@ class KubernetesClient:
             delay=delay,
         )
 
-    def delete_pod(self, namespace: str, pod_name: str) -> None:
+    def delete_pod(
+        self,
+        namespace: str,
+        pod_name: str,
+        *,
+        extension_hooks: Sequence[KubernetesExtension] | None = None,
+    ) -> None:
         """
         Deletes the specified pod.
 
         Args:
             namespace: Namespace where the pod is located
             pod_name: Name of the pod to delete
+            extension_hooks: Hooks to invoke after deletion; defaults to this client's extensions
 
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
@@ -368,7 +375,7 @@ class KubernetesClient:
             raise
 
         # Call extensions
-        for extension in self.extensions:
+        for extension in self.extensions if extension_hooks is None else extension_hooks:
             extension.post_delete_pod(namespace, pod_name)
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:

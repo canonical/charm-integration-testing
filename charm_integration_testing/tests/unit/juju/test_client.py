@@ -335,20 +335,19 @@ class TestJujuClientUnitOperations:
         assert backend.units == ["app/1"]
 
     def test_delete_workload_pod_dispatches_juju_kubernetes_extensions(self) -> None:
-        registered_extension = PodDeleteExtensionStub()
+        kubernetes_extension = PodDeleteExtensionStub()
         juju_extension = PodDeleteExtensionStub()
-        kubernetes_client = MagicMock(spec=KubernetesClient)
-        kubernetes_client.extensions = [registered_extension]
-        kubernetes_client.delete_pod.side_effect = lambda **_: registered_extension.post_delete_pod("model", "pod")
+        kubernetes_backend = MagicMock()
+        kubernetes_client = KubernetesClient(kubernetes_backend, extensions=[kubernetes_extension])
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
-        client = JujuClient(backend, LoggerStub(), [registered_extension, juju_extension])  # type: ignore[arg-type]
+        client = JujuClient(backend, LoggerStub(), [juju_extension])  # type: ignore[arg-type]
         model = JujuModelHandle(controller="controller", model="model")
 
         client.delete_workload_pod(model=model, pod_name="pod")
 
         assert backend.resolved_models == [model]
-        kubernetes_client.delete_pod.assert_called_once_with(namespace="model", pod_name="pod")
-        assert registered_extension.deleted_pods == [("model", "pod")]
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.assert_called_once_with(name="pod", namespace="model")
+        assert kubernetes_extension.deleted_pods == []
         assert juju_extension.deleted_pods == [("model", "pod")]
 
     def test_delete_workload_pod_rejects_machine_models(self) -> None:

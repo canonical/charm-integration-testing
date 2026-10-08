@@ -82,11 +82,12 @@ class JujuClient:
             raise RuntimeError(f"Cannot delete workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
 
         self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
-        kubernetes_client.delete_pod(namespace=model.model, pod_name=pod_name)
-        registered_extensions = {id(extension) for extension in kubernetes_client.extensions}
-        for extension in self.extensions:
-            if isinstance(extension, KubernetesExtension) and id(extension) not in registered_extensions:
-                extension.post_delete_pod(model.model, pod_name)
+        extension_hooks = [extension for extension in self.extensions if isinstance(extension, KubernetesExtension)]
+        kubernetes_client.delete_pod(
+            namespace=model.model,
+            pod_name=pod_name,
+            extension_hooks=extension_hooks,
+        )
 
     def rotate_application_units(
         self,
