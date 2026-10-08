@@ -24,6 +24,8 @@ from .models import (
     JujuIntegration,
     JujuIntegrationApplication,
     ParsedOfferUrl,
+    PersistenceKey,
+    rekey_persistence_state_controller,
 )
 from .version import JujuVersion
 
@@ -50,5 +52,7 @@ __all__ = [
     "JujuWaitState",
     "JujuWaitTimeoutError",
     "ParsedOfferUrl",
+    "PersistenceKey",
+    "rekey_persistence_state_controller",
     "warn_performance",
 ]

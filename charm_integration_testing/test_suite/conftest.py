@@ -6,11 +6,13 @@ import json
 import logging
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+from chaos_client import ResourceConstraintsClient
 from extensions import (
     ConfigureLivepatchServerExtension,
     IstioMeshExtension,
@@ -60,6 +62,8 @@ from bundle_builder_x import (
     BaseMismatchError,
     BundleBuilder,
     BundleDiagnostic,
+    Charm,
+    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -74,6 +78,9 @@ from bundle_builder_x import (
     UnresolvedApplicationDiagnostic,
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
+)
+from bundle_builder_x import (
+    JujuVersion as BundleJujuVersion,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
@@ -256,15 +263,32 @@ def register_preexisting_resources(
         )
 
 
-@pytest.fixture
-def juju_client(
+@pytest.fixture(scope="session")
+def persistence_extension(
+    validators_path: Path | None,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    uv_file: Path | None,
+) -> ValidatorInjectorExtension:
+    """Session-scoped validator injector, and the owner of the canary persistence state.
+
+    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    so the state it holds is the single source of truth. The persistence op is auto-decided from
+    that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
+    (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
+    applications or integrations are torn down. It also re-keys itself on model migration, so
+    tests never touch the state directly.
+    """
+    return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
+
+
+def _build_juju_client(
     juju_backend: JujuBackend,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
-    uv_file: Path | None,
-    validators_path: Path | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -280,10 +304,85 @@ def juju_client(
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
     )
+
+
+@pytest.fixture
+def juju_client(
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
+) -> JujuClient:
+    return _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_persistence_state_for_resumed_run(
+    request: pytest.FixtureRequest,
+    persistence_extension: ValidatorInjectorExtension,
+    juju_backend: JujuBackend,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
+    session_resource_registry: ResourceRegistry,
+    target_model_ref: JujuModelHandle,
+    is_cmr_test: bool,
+    neighbor_model_ref: JujuModelHandle | None,
+    register_preexisting_resources: None,
+) -> None:
+    """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
+
+    The state is normally populated by ``test_deploy`` calling ``prepare()``. When a run resumes
+    directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy`` never runs this
+    session), it would otherwise stay empty: disruptive tests' "checkpoint" calls would then pass
+    no refs at all, which the runner treats as trivially successful, silently skipping persistence
+    validation for the whole run.
+
+    To avoid that silent gap, re-run "prepare" against the already-deployed target application as
+    soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
+    can run from it calls ``prepare()`` itself. Resuming into any other post-deploy state is not
+    handled here (the application topology at those states isn't guaranteed), so persistence
+    validation is skipped for those runs with a loud warning rather than a silent one.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
+        # test_deploy will run this session (or there's no model yet to seed against).
+        return
+
+    if current_state == State.NEIGHBOR_ONLY:
+        # Handled by whichever test transitions out of this state (see the docstring above) -
+        # no seeding and no warning needed.
+        return
+
+    if current_state != State.DEPLOYED:
+        warnings.warn(
+            f"Resuming at --current-state={current_state.value} does not seed persistence state; "
+            "data persistence validation will be skipped for this run since test_deploy did not "
+            "run and no seeding is implemented for this resume point.",
+            UserWarning,
+        )
+        return
+
+    client = _build_juju_client(
+        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+    )
+    models = [target_model_ref]
+    if is_cmr_test and neighbor_model_ref is not None:
+        models.append(neighbor_model_ref)
+    # prepare() writes through relation credentials, which can race hooks still settling when
+    # resuming with --current-state=deployed. test_deploy always waits for the model(s) to go idle
+    # first - match that here.
+    client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+    for model_ref in models:
+        client.validate_model(model=model_ref, level=None)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -386,10 +485,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Platform for the neighbor model in CMR tests: 'kubernetes' or 'machine'. Defaults to --target-platform value.",
     )
     parser.addoption(
+        "--target-arch",
+        type=str,
+        default="amd64",
+        help="Architecture for the target model, e.g. 'amd64' or 'arm64' (default: 'amd64').",
+    )
+    parser.addoption(
+        "--neighbor-arch",
+        type=str,
+        default=None,
+        help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
         "--charm-overrides",
         type=str,
         default="./static/charm-overrides/",
         help="Path to the unified charm overrides directory used by bundle-builder-x.",
+    )
+    parser.addoption(
+        "--charm-resource-constraints",
+        type=str,
+        default="./static/charm-resource-constraints/",
+        help="Path to the per-charm chaos resource constraints directory (e.g. stress amounts).",
     )
     parser.addoption(
         "--juju-upgrade-target-version",
@@ -474,7 +591,7 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def validators_path() -> Path | None:
     file_path_env = os.environ.get("VALIDATORS_PATH")
     if not file_path_env:
@@ -527,46 +644,132 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
 
 
 @pytest.fixture
+def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
+    """Canonical charm metadata for the target revision the cycle refreshes back to.
+
+    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
+    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
+    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
+    when the target cannot be resolved on the requested series.
+    """
+    target_charm: str = request.getfixturevalue("target_charm")
+    target_channel: str | None = request.getfixturevalue("target_channel")
+    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_series: str | None = request.getfixturevalue("target_series")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    channel_track = channel.track or None if channel else None
+    channel_risk = channel.risk or None if channel else None
+    channel_branch = channel.branch or None if channel else None
+
+    try:
+        return charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            ubuntu_arch=target_arch,
+            charm_track=channel_track,
+            charm_risk=channel_risk,
+            charm_branch=channel_branch,
+            charm_revision=target_revision,
+            ubuntu_version=target_series,
+            platform=target_platform,
+            juju_version=bundle_juju_version,
+        )
+    except BaseMismatchError:
+        # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
+        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
+        pytest.skip(
+            f"Charm '{target_charm}' target does not support the requested base "
+            f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
+        )
+    except ReleaseUnavailableError as exc:
+        if (
+            target_revision is None
+            and target_channel is None
+            and target_series is not None
+            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
+        ):
+            pytest.skip(
+                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
+                "the downgrade/upgrade refresh cycle is untestable."
+            )
+        raise
+
+
+@pytest.fixture
 def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
-    returned directly. When the value is ``"default"``, Test Observer is queried
-    for a historical revision with a passing deploy for the target charm.
+    used. When the value is ``"default"``, Test Observer is queried for a
+    historical revision with a passing deploy for the target charm. Either way
+    the selected revision is validated against the base the target is deployed
+    on, and the cycle is skipped when the two are incompatible.
     """
-    value = request.config.getoption("--target-downgrade-revision")
-    if value != "default":
-        return int(value)
-
-    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
-    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target: Charm = request.getfixturevalue("target_resolved_charm")
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
-    if target_revision is None or target_channel is None:
-        pytest.fail(
-            "--target-revision and --target-channel must be provided for this test to select a historical revision."
-        )
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    target_base = target.ubuntu_version
+    resolved_channel = channel or target.channel
 
-    parts = target_channel.split("/", maxsplit=1)
-    track = parts[0]
-    stage = parts[1] if len(parts) > 1 else "stable"
+    def supports_target_base(revision: int) -> bool:
+        try:
+            charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch=target_arch,
+                charm_track=resolved_channel.track,
+                charm_risk=resolved_channel.risk,
+                charm_branch=resolved_channel.branch or None,
+                charm_revision=revision,
+                ubuntu_version=target_base,
+            )
+        except BaseMismatchError:
+            return False
+        return True
 
-    try:
-        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
-            charm_name=target_charm,
-            stage=stage,
-            current_revision=target_revision,
-            track=track,
-        )
-        if previous_revision is None:
-            pytest.fail(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{target_channel}'."
+    value = request.config.getoption("--target-downgrade-revision")
+    if value != "default":
+        previous_revision = int(value)
+        if not supports_target_base(previous_revision):
+            pytest.skip(
+                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
+                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
+    if resolved_channel.branch:
+        pytest.skip(
+            f"Unable to select a historical revision for branched channel '{resolved_channel}': "
+            "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
+        )
+    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+    try:
+        historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
+            charm_name=target_charm,
+            stage=resolved_channel.risk or "stable",
+            current_revision=target.revision,
+            track=resolved_channel.explicit_track,
+        )
+        for candidate_revision in historical_revisions:
+            if supports_target_base(candidate_revision):
+                return candidate_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+
+    # No usable historical revision (e.g. all prior revisions predate a base change and are
+    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
+    # cycle is reported as untestable instead of a test failure.
+    pytest.skip(
+        "Unable to find a historical revision with a passing test_deploy result "
+        f"for charm '{target_charm}' in channel '{resolved_channel}'."
+    )
 
 
 @pytest.fixture
@@ -585,6 +788,13 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-platform")
     if not value:
         pytest.fail("--target-platform is required by this test but was not provided.")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def target_arch(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
     return value
 
@@ -627,6 +837,26 @@ def overrides_client(charm_overrides: Path, logger: logging.Logger) -> Overrides
 
 
 @pytest.fixture
+def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.Logger) -> ResourceConstraintsClient:
+    """Client for reading per-charm chaos resource constraints, tolerating a missing directory.
+
+    Unlike ``--charm-overrides``, an absent or unset ``--charm-resource-constraints`` directory is
+    not an error: it simply means no charm has customized its chaos parameters yet.
+    """
+    value = request.config.getoption("--charm-resource-constraints")
+    constraints_dir: Path | None = None
+    if value:
+        assert isinstance(value, str)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = Path(request.config.rootpath) / candidate
+        candidate = candidate.resolve()
+        if candidate.is_dir():
+            constraints_dir = candidate
+    return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
+
+
+@pytest.fixture
 def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
     """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
     return CharmhubClient(logger=logger, overrides_client=overrides_client)
@@ -649,6 +879,26 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
 
 
 @pytest.fixture
+def neighbor_arch(
+    request: pytest.FixtureRequest,
+    target_arch: str,
+    neighbor_model_ref: JujuModelHandle | None,
+) -> str:
+    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch.
+
+    In non-CMR tests there is no neighbor model: the neighbor application is deployed
+    into the target model, so it necessarily uses ``target_arch``.
+    """
+    if neighbor_model_ref is None:
+        return target_arch
+    value = request.config.getoption("--neighbor-arch")
+    if not value:
+        return target_arch
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
 def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     """Path where the generated bundle Mermaid diagram is written by ``test_build_bundle``."""
     value = request.config.getoption("--mermaid-output")
@@ -661,7 +911,7 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def uv_file() -> Path | None:
     file_path = os.environ.get("UV_FILE")
     if file_path:
@@ -669,7 +919,7 @@ def uv_file() -> Path | None:
     return Path(file_path) if file_path else None
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def ubuntu_pro_token() -> str | None:
     token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:

@@ -4,10 +4,13 @@
 import json
 import logging
 import subprocess  # nosec B404
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from test_suite.log_redaction import prepare_redacted_scan_dir
 
 # TruffleHog exit codes. Without --fail, TruffleHog only returns a non-zero
 # code for *verified* secrets, silently exiting 0 for unverified findings
@@ -95,29 +98,37 @@ def test_logs_privacy_check(
     # Run TruffleHog
     logger.info("Running TruffleHog secret scanner")
 
-    trufflehog_cmd = [
-        "trufflehog",
-        "filesystem",
-        str(log_dir),
-        "--no-update",  # avoid a spurious failure if the binary's install dir isn't writable
-        "--json",  # structured output so findings can be redacted before logging
-        "--fail",  # exit non-zero for any finding, not just verified ones
-    ]
+    with tempfile.TemporaryDirectory(prefix="privacy-check-scan-") as scan_dir_name:
+        scan_dir = Path(scan_dir_name)
+        # Scan a redacted copy of log_dir rather than log_dir itself, so known,
+        # non-sensitive ephemeral Juju bootstrap keys (see issue #1033) don't trigger
+        # TruffleHog's PrivateKey detector. Everything else -- including any other
+        # secret co-located in the same file or archive -- is scanned unmodified.
+        prepare_redacted_scan_dir(log_dir, scan_dir)
 
-    try:
-        # TruffleHog natively decompresses and scans archives (e.g. juju-crashdump
-        # tarballs) alongside plaintext logs. That can surface non-UTF-8 bytes from
-        # binary payloads in its own stdout; `errors="replace"` tolerates those bytes
-        # instead of crashing with a UnicodeDecodeError, without skipping any content.
-        result = subprocess.run(  # nosec B603
-            trufflehog_cmd,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=600,  # 10 minutes timeout for scanning
-        )
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"TruffleHog scan timed out after {e.timeout}s (required for privacy check)") from e
+        trufflehog_cmd = [
+            "trufflehog",
+            "filesystem",
+            str(scan_dir),
+            "--no-update",  # avoid a spurious failure if the binary's install dir isn't writable
+            "--json",  # structured output so findings can be redacted before logging
+            "--fail",  # exit non-zero for any finding, not just verified ones
+        ]
+
+        try:
+            # TruffleHog natively decompresses and scans any remaining archives alongside
+            # plaintext logs. That can surface non-UTF-8 bytes from binary payloads in its
+            # own stdout; `errors="replace"` tolerates those bytes instead of crashing with
+            # a UnicodeDecodeError, without skipping any content.
+            result = subprocess.run(  # nosec B603
+                trufflehog_cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=600,  # 10 minutes timeout for scanning
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"TruffleHog scan timed out after {e.timeout}s (required for privacy check)") from e
 
     # Redact secret values before they ever reach a log line or failure message.
     trufflehog_output = _redact_trufflehog_output(result.stdout + result.stderr)

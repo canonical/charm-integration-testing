@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
 import os
 import re
 import socket
@@ -8,6 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from ipaddress import IPv6Address
+from typing import Callable, TypeVar
 from urllib.parse import urlsplit
 
 import grpc
@@ -16,7 +18,10 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.x509.oid import NameOID
 
 from validators.base import (
+    BasePersistenceValidator,
     BaseValidator,
+    PersistenceNotApplicable,
+    PersistenceState,
     ValidationCheck,
     ValidationLevel,
     ValidationResult,
@@ -128,6 +133,110 @@ def _decode_message(data: bytes) -> dict[int, list[bytes | int]]:
     return fields
 
 
+# etcd's mvccpb.KeyValue message field numbers (the subset this module reads/writes):
+# key = 1, create_revision = 2, mod_revision = 3, version = 4, value = 5, lease = 6.
+_KV_KEY_FIELD = 1
+_KV_VERSION_FIELD = 4
+_KV_VALUE_FIELD = 5
+
+
+def _etcd_put_raw(channel: grpc.Channel, key: bytes, value: bytes) -> None:
+    """Issue a raw KV Put RPC. Raises grpc.RpcError on failure; caller handles failover/retry."""
+    request = _encode_bytes_field(1, key) + _encode_bytes_field(2, value)
+    call = channel.unary_unary(
+        f"/{_KV_SERVICE}/Put", request_serializer=lambda data: data, response_deserializer=lambda data: data
+    )
+    call(request, timeout=_GRPC_TIMEOUT_S)
+
+
+def _etcd_range_raw(channel: grpc.Channel, key: bytes, range_end: bytes | None = None) -> bytes:
+    """Issue a raw KV Range RPC, returning the (still protobuf-encoded) response bytes.
+
+    ``range_end`` requests a prefix-style range (see ``_prefix_range_end``) rather than a
+    single exact-key lookup; omitting it (the default) looks up ``key`` alone, per etcd's
+    own RangeRequest semantics.
+    """
+    request = _encode_bytes_field(1, key)
+    if range_end is not None:
+        request += _encode_bytes_field(2, range_end)
+    call = channel.unary_unary(
+        f"/{_KV_SERVICE}/Range", request_serializer=lambda data: data, response_deserializer=lambda data: data
+    )
+    return call(request, timeout=_GRPC_TIMEOUT_S)
+
+
+def _etcd_delete_range_raw(channel: grpc.Channel, key: bytes, range_end: bytes | None = None) -> int:
+    """Issue a raw KV DeleteRange RPC, returning the number of keys etcd reports deleted."""
+    request = _encode_bytes_field(1, key)
+    if range_end is not None:
+        request += _encode_bytes_field(2, range_end)
+    call = channel.unary_unary(
+        f"/{_KV_SERVICE}/DeleteRange", request_serializer=lambda data: data, response_deserializer=lambda data: data
+    )
+    response = call(request, timeout=_GRPC_TIMEOUT_S)
+    fields = _decode_message(response)
+    deleted = fields.get(2, [0])[0]  # DeleteRangeResponse.deleted (field 2)
+    return deleted if isinstance(deleted, int) else 0
+
+
+def _prefix_range_end(prefix: bytes) -> bytes:
+    """Compute the exclusive upper bound ("range_end") for an etcd "has this prefix" range query.
+
+    Standard etcd convention: increment the last byte that isn't 0xff, discarding everything
+    after it (e.g. prefix ``b"foo"`` -> range_end ``b"fop"``, matching every key starting with
+    ``b"foo"``). A prefix made entirely of 0xff bytes has no such byte to increment; per etcd's
+    own documented RangeRequest semantics, a lone ``b"\\x00"`` range_end denotes "no upper
+    bound" in that case, rather than an arbitrary/incorrect cutoff.
+    """
+    trimmed = bytearray(prefix)
+    while trimmed and trimmed[-1] == 0xFF:
+        trimmed.pop()
+    if not trimmed:
+        return b"\x00"
+    trimmed[-1] += 1
+    return bytes(trimmed)
+
+
+def _decode_single_kv(response: bytes) -> tuple[bytes, bytes, int] | None:
+    """Decode a Range response expected to contain at most one KeyValue.
+
+    Returns ``(key, value, version)`` for the first ``kvs`` entry, or ``None`` if the response
+    contains none (the queried key does not exist). Raises ``ValueError`` for a response that
+    is present but malformed (wrong wire type for a field this caller relies on) - that is a
+    genuinely unexpected/incompatible backend response, not a normal "key not found" outcome,
+    so it is surfaced distinctly rather than folded into the same ``None`` return.
+    """
+    fields = _decode_message(response)
+    kvs = fields.get(2, [])  # RangeResponse.kvs (field 2), repeated KeyValue
+    if not kvs:
+        return None
+    first_kv = kvs[0]
+    if not isinstance(first_kv, bytes):
+        raise ValueError("malformed Range response: kvs[0] has the wrong wire type")
+    kv_fields = _decode_message(first_kv)
+    actual_key = kv_fields.get(_KV_KEY_FIELD, [b""])[0]
+    value = kv_fields.get(_KV_VALUE_FIELD, [b""])[0]
+    version = kv_fields.get(_KV_VERSION_FIELD, [0])[0]
+    if not isinstance(actual_key, bytes) or not isinstance(value, bytes) or not isinstance(version, int):
+        raise ValueError("malformed Range response: unexpected field wire type for key/value/version")
+    return actual_key, value, version
+
+
+def _decode_kv_keys(response: bytes) -> list[bytes]:
+    """Decode a (possibly multi-result) Range response into just its list of raw key bytes."""
+    fields = _decode_message(response)
+    kvs = fields.get(2, [])  # RangeResponse.kvs (field 2), repeated KeyValue
+    keys: list[bytes] = []
+    for kv in kvs:
+        if not isinstance(kv, bytes):
+            continue
+        kv_fields = _decode_message(kv)
+        key = kv_fields.get(_KV_KEY_FIELD, [b""])[0]
+        if isinstance(key, bytes):
+            keys.append(key)
+    return keys
+
+
 # Conventional, out-of-band location for a client cert/private-key pair matching
 # whatever is published on the requirer's own "mtls-cert" field. The etcd_client
 # interface deliberately never transmits private keys over Juju relations (auth is
@@ -212,7 +321,249 @@ def _redact_uri_for_message(uri: str) -> str:
     return re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", sanitized)
 
 
-class EtcdClientValidator(BaseValidator):
+class _EtcdConnectionMixin:
+    """Shared credential-resolution and gRPC-target-selection logic for etcd_client validators.
+
+    Both ``EtcdClientValidator`` (health probe) and ``EtcdClientPersistenceValidator``
+    (durability probe) need to resolve the same relation credentials, read this
+    application's own databag contribution, locate a locally-provisioned client cert/key
+    pair, and validate/parse the same "uris" field into gRPC "host:port" targets, so that
+    logic lives here once instead of being duplicated.
+    """
+
+    def _resolve_requirer_side_credentials(self) -> dict[str, str]:
+        """Resolve provider-published fields, including secret-backed groups."""
+        return {
+            **self.resolve_secret("secret-user", "username", "uris"),  # type: ignore[attr-defined]
+            **self.resolve_secret("secret-tls", "tls", "tls-ca"),  # type: ignore[attr-defined]
+        }
+
+    def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
+        """Locate a client cert/key pair to authenticate as, per the module docstring convention."""
+        cert_path = os.environ.get(ETCD_CLIENT_CERT_PATH_ENV, _DEFAULT_CLIENT_CERT_PATH)
+        key_path = os.environ.get(ETCD_CLIENT_KEY_PATH_ENV, _DEFAULT_CLIENT_KEY_PATH)
+        if not os.path.isfile(cert_path) or not os.path.isfile(key_path):
+            return (
+                cert_path,
+                key_path,
+                ValidationCheck(
+                    name="client_identity",
+                    passed=False,
+                    message=(
+                        f"No client cert/key found at '{cert_path}'/'{key_path}'. The etcd_client "
+                        "interface never conveys a private key over the relation; provision one "
+                        f"out-of-band (see {ETCD_CLIENT_KEY_PATH_ENV}) to run this check."
+                    ),
+                ),
+            )
+        return cert_path, key_path, ValidationCheck(name="client_identity", passed=True, message="OK")
+
+    _SUPPORTED_URI_SCHEMES = ("", "https")
+
+    def _pick_grpc_target(self, uris: str) -> tuple[list[str], ValidationCheck]:
+        """Validate every comma-separated "uris" entry, deriving a gRPC target from each.
+
+        All entries are format-checked (not just the first) so a malformed second/third
+        endpoint fails validation rather than being silently ignored; callers try each
+        returned target in order, since "uris" enumerates cluster members and a single
+        unreachable member shouldn't fail the canary outright.
+        """
+        entries = [e.strip() for e in uris.split(",") if e.strip()]
+        if not entries:
+            return [], ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
+        targets: list[str] = []
+        for entry in entries:
+            target, check = self._parse_single_uri(entry)
+            if not check.passed:
+                return [], check
+            targets.append(target)
+        return targets, ValidationCheck(name="uris_format", passed=True, message=f"Validated {len(entries)} uri(s).")
+
+    def _parse_single_uri(self, entry: str) -> tuple[str, ValidationCheck]:
+        """Parse and format-check a single "uris" entry, deriving a gRPC "host:port" target."""
+        # Diagnostic messages below must never echo `entry` verbatim: a malformed uri can carry
+        # userinfo (e.g. "user:password@host:2379") or a query/fragment (e.g. "?token=secret"),
+        # either of which would otherwise leak a credential into validator output/logs. Sanitize
+        # up front, working purely textually so this is safe even when urlsplit() itself fails.
+        redacted_entry = _redact_uri_for_message(entry)
+        if entry.startswith("//"):
+            # A network-path reference (e.g. "//host:2379", scheme-relative but no scheme) is
+            # neither of this interface's two documented forms (bare "host:port" or
+            # "https://..."); urlsplit() would happily parse it with an empty scheme (which the
+            # allowlist below also accepts, since a bare host:port also parses with an empty
+            # scheme), so it must be rejected explicitly before that ambiguity can let it through.
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' is a network-path reference, which this interface "
+                    "does not use; only a bare host:port or an 'https://' uri is accepted."
+                ),
+            )
+        has_scheme = "://" in entry
+        try:
+            parsed = urlsplit(entry if has_scheme else f"//{entry}")
+            hostname, port = parsed.hostname, parsed.port
+        except ValueError as exc:
+            # exc's own str() can itself embed the raw, unredacted offending substring (e.g.
+            # Python's "Port could not be cast to integer value as 'hunter2'" when a malformed
+            # uri's credential ends up parsed as the port, as with
+            # "https://admin:hunter2?token@host:2379"), so it must never be included verbatim
+            # in this message; only the exception *type* is reported, alongside the
+            # already-redacted uri.
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=f"Could not parse uri '{redacted_entry}': {type(exc).__name__} while parsing.",
+            )
+        if not hostname or not port:
+            return "", ValidationCheck(
+                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}'."
+            )
+        if _INVALID_HOST_CHARS_RE.search(hostname):
+            # urlsplit() is lenient about internal whitespace and control characters (e.g. a
+            # literal NUL byte) in a hostname (e.g. "bad host" or "127.0.0.1\x00" both parse
+            # successfully), but no valid hostname or IP literal ever contains either; a gRPC
+            # channel target built from it would just fail to connect at runtime, so reject
+            # it here as a format error instead.
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=f"uri '{redacted_entry}' has an invalid hostname containing whitespace or control characters.",
+            )
+        if parsed.username is not None or parsed.password is not None:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' contains userinfo, which this interface does not use "
+                    "(authentication is via mTLS and a separate 'username' field); rejecting it "
+                    "rather than silently discarding it."
+                ),
+            )
+        if parsed.path or parsed.query or parsed.fragment:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' has a path/query/fragment component, which a bare "
+                    "etcd client endpoint does not use; rejecting it rather than silently discarding it."
+                ),
+            )
+        if has_scheme and parsed.scheme not in self._SUPPORTED_URI_SCHEMES:
+            return "", ValidationCheck(
+                name="uris_format",
+                passed=False,
+                message=(
+                    f"uri '{redacted_entry}' uses scheme '{parsed.scheme}', which this mTLS-only "
+                    "interface does not support; only a bare host:port or an 'https://' uri is accepted."
+                ),
+            )
+        # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
+        # urlsplit().hostname strips the brackets, so restore them when the hostname
+        # itself contains colons.
+        authority_host = f"[{hostname}]" if ":" in hostname else hostname
+        return f"{authority_host}:{port}", ValidationCheck(name="uris_format", passed=True, message="OK")
+
+    def _local_databag(self) -> dict[str, str]:
+        """Read this application's own contribution to the relation.
+
+        Unlike ``self.databag`` (the remote application's data), the requirer's
+        own ``prefix``/``mtls-cert`` fields live in this application's own
+        databag on the relation, so they must be read directly from
+        ``self.relation.data``.
+
+        Mirrors ``BaseValidator.databag``'s defensive lookup: if this application hasn't
+        published anything on the relation yet, ``self.charm.app`` may not be a key in
+        ``self.relation.data`` at all, and indexing it directly would raise ``KeyError``
+        instead of letting the caller's existing missing-field checks (e.g.
+        ``prefix_present``) report a normal FAIL.
+        """
+        if self.charm.app not in self.relation.data:  # type: ignore[attr-defined]
+            return {}
+        return dict(self.relation.data[self.charm.app])  # type: ignore[attr-defined]
+
+    def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
+        """Resolve this application's own published mtls-cert, secret-backed or plaintext."""
+        if uri := local_data.get("secret-mtls"):
+            content: dict[str, str] = self.charm.model.get_secret(id=uri).get_content()  # type: ignore[attr-defined]
+            return content.get("mtls-cert")
+        return local_data.get("mtls-cert")
+
+    def _parse_mtls_cert(self, mtls_cert_pem: str) -> tuple[ValidationCheck, x509.Certificate | None]:
+        """Parse the requirer's submitted client cert.
+
+        The field may be a bundle of [client_cert, signing_ca] PEM blocks
+        concatenated together; only the first (leaf) certificate is validated here.
+        """
+        return self._parse_mtls_cert_bytes(mtls_cert_pem.encode())
+
+    def _parse_mtls_cert_bytes(self, mtls_cert_pem: bytes) -> tuple[ValidationCheck, x509.Certificate | None]:
+        """Parse a submitted client cert given as raw bytes, without assuming they are UTF-8.
+
+        Accepting bytes here (rather than requiring a decoded ``str``) lets callers
+        report a malformed local cert file as a normal failed check instead of
+        letting ``UnicodeDecodeError`` escape validation.
+        """
+        first_pem = mtls_cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
+        try:
+            cert = x509.load_pem_x509_certificate(first_pem)
+        except ValueError as exc:
+            return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
+        return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert
+
+    def _check_identity_matches_published_cert(
+        self, loaded_cert_bytes: bytes, local_data: dict[str, str]
+    ) -> ValidationCheck:
+        """Verify the locally-provisioned client cert is the one actually published on this relation.
+
+        Without this check, ``ETCD_CLIENT_CERT_PATH_ENV``/``ETCD_CLIENT_KEY_PATH_ENV`` could
+        point at some other valid identity, and a PASS would validate that identity's ACLs
+        rather than this relation's.
+        """
+        published_pem = self._resolve_local_mtls_cert(local_data)
+        if not published_pem:
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="No mtls-cert published on this relation to compare against.",
+            )
+        loaded_check, loaded_cert = self._parse_mtls_cert_bytes(loaded_cert_bytes)
+        if loaded_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
+        published_check, published_cert = self._parse_mtls_cert(published_pem)
+        if published_cert is None:
+            return ValidationCheck(name="identity_match", passed=False, message=published_check.message)
+        if loaded_cert.fingerprint(hashes.SHA256()) != published_cert.fingerprint(hashes.SHA256()):
+            return ValidationCheck(
+                name="identity_match",
+                passed=False,
+                message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
+            )
+        return ValidationCheck(name="identity_match", passed=True, message="OK")
+
+    def _check_username_matches_cert_cn(self, cert_bytes: bytes, expected_username: str) -> ValidationCheck:
+        """Verify the client cert's leaf subject CN matches the provider's published "username".
+
+        The interface contract defines "username" as derived from the client certificate's
+        own common name, so this is a consistency check on the provider's own claim, not a
+        cryptographic identity check (that's ``_check_identity_matches_published_cert``).
+        """
+        cert_check, cert = self._parse_mtls_cert_bytes(cert_bytes)
+        if cert is None:
+            return ValidationCheck(name="username_matches_cert_cn", passed=False, message=cert_check.message)
+        cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        cn = str(cn_attrs[0].value) if cn_attrs else None
+        if cn != expected_username:
+            return ValidationCheck(
+                name="username_matches_cert_cn",
+                passed=False,
+                message=f"Client cert common name '{cn}' does not match the published username '{expected_username}'.",
+            )
+        return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
+
+
+class EtcdClientValidator(_EtcdConnectionMixin, BaseValidator):
     """Validator for the etcd_client interface.
 
     Field names differ from a generic "connection string / client cert / client
@@ -307,13 +658,6 @@ class EtcdClientValidator(BaseValidator):
         checks.append(self._check_latency(elapsed, latency_target))
 
         return self._make_result(level=level, checks=checks)
-
-    def _resolve_requirer_side_credentials(self) -> dict[str, str]:
-        """Resolve provider-published fields, including secret-backed groups."""
-        return {
-            **self.resolve_secret("secret-user", "username", "uris"),
-            **self.resolve_secret("secret-tls", "tls", "tls-ca"),
-        }
 
     def _check_tcp_reachable(self, targets: list[str]) -> tuple[ValidationCheck, float]:
         """Best-effort L1 reachability: open a raw TCP connection to an advertised target.
@@ -532,207 +876,6 @@ class EtcdClientValidator(BaseValidator):
         checks.extend(final_checks)
         return checks, time.monotonic() - target_start
 
-    def _resolve_client_identity(self) -> tuple[str, str, ValidationCheck]:
-        """Locate a client cert/key pair to authenticate as, per the module docstring convention."""
-        cert_path = os.environ.get(ETCD_CLIENT_CERT_PATH_ENV, _DEFAULT_CLIENT_CERT_PATH)
-        key_path = os.environ.get(ETCD_CLIENT_KEY_PATH_ENV, _DEFAULT_CLIENT_KEY_PATH)
-        if not os.path.isfile(cert_path) or not os.path.isfile(key_path):
-            return (
-                cert_path,
-                key_path,
-                ValidationCheck(
-                    name="client_identity",
-                    passed=False,
-                    message=(
-                        f"No client cert/key found at '{cert_path}'/'{key_path}'. The etcd_client "
-                        "interface never conveys a private key over the relation; provision one "
-                        f"out-of-band (see {ETCD_CLIENT_KEY_PATH_ENV}) to run this check."
-                    ),
-                ),
-            )
-        return cert_path, key_path, ValidationCheck(name="client_identity", passed=True, message="OK")
-
-    _SUPPORTED_URI_SCHEMES = ("", "https")
-
-    def _pick_grpc_target(self, uris: str) -> tuple[list[str], ValidationCheck]:
-        """Validate every comma-separated "uris" entry, deriving a gRPC target from each.
-
-        All entries are format-checked (not just the first) so a malformed second/third
-        endpoint fails validation rather than being silently ignored; the L2 probe tries
-        each returned target in order (see ``_check_read_write``), since "uris" enumerates
-        cluster members and a single unreachable member shouldn't fail the canary outright.
-        """
-        entries = [e.strip() for e in uris.split(",") if e.strip()]
-        if not entries:
-            return [], ValidationCheck(name="uris_format", passed=False, message="uris field is empty.")
-        targets: list[str] = []
-        for entry in entries:
-            target, check = self._parse_single_uri(entry)
-            if not check.passed:
-                return [], check
-            targets.append(target)
-        return targets, ValidationCheck(name="uris_format", passed=True, message=f"Validated {len(entries)} uri(s).")
-
-    def _parse_single_uri(self, entry: str) -> tuple[str, ValidationCheck]:
-        """Parse and format-check a single "uris" entry, deriving a gRPC "host:port" target."""
-        # Diagnostic messages below must never echo `entry` verbatim: a malformed uri can carry
-        # userinfo (e.g. "user:password@host:2379") or a query/fragment (e.g. "?token=secret"),
-        # either of which would otherwise leak a credential into validator output/logs. Sanitize
-        # up front, working purely textually so this is safe even when urlsplit() itself fails.
-        redacted_entry = _redact_uri_for_message(entry)
-        if entry.startswith("//"):
-            # A network-path reference (e.g. "//host:2379", scheme-relative but no scheme) is
-            # neither of this interface's two documented forms (bare "host:port" or
-            # "https://..."); urlsplit() would happily parse it with an empty scheme (which the
-            # allowlist below also accepts, since a bare host:port also parses with an empty
-            # scheme), so it must be rejected explicitly before that ambiguity can let it through.
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=(
-                    f"uri '{redacted_entry}' is a network-path reference, which this interface "
-                    "does not use; only a bare host:port or an 'https://' uri is accepted."
-                ),
-            )
-        has_scheme = "://" in entry
-        try:
-            parsed = urlsplit(entry if has_scheme else f"//{entry}")
-            hostname, port = parsed.hostname, parsed.port
-        except ValueError as exc:
-            # exc's own str() can itself embed the raw, unredacted offending substring (e.g.
-            # Python's "Port could not be cast to integer value as 'hunter2'" when a malformed
-            # uri's credential ends up parsed as the port, as with
-            # "https://admin:hunter2?token@host:2379"), so it must never be included verbatim
-            # in this message; only the exception *type* is reported, alongside the
-            # already-redacted uri.
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=f"Could not parse uri '{redacted_entry}': {type(exc).__name__} while parsing.",
-            )
-        if not hostname or not port:
-            return "", ValidationCheck(
-                name="uris_format", passed=False, message=f"Could not parse uri '{redacted_entry}'."
-            )
-        if _INVALID_HOST_CHARS_RE.search(hostname):
-            # urlsplit() is lenient about internal whitespace and control characters (e.g. a
-            # literal NUL byte) in a hostname (e.g. "bad host" or "127.0.0.1\x00" both parse
-            # successfully), but no valid hostname or IP literal ever contains either; a gRPC
-            # channel target built from it would just fail to connect at runtime, so reject
-            # it here as a format error instead.
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=f"uri '{redacted_entry}' has an invalid hostname containing whitespace or control characters.",
-            )
-        if parsed.username is not None or parsed.password is not None:
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=(
-                    f"uri '{redacted_entry}' contains userinfo, which this interface does not use "
-                    "(authentication is via mTLS and a separate 'username' field); rejecting it "
-                    "rather than silently discarding it."
-                ),
-            )
-        if parsed.path or parsed.query or parsed.fragment:
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=(
-                    f"uri '{redacted_entry}' has a path/query/fragment component, which a bare "
-                    "etcd client endpoint does not use; rejecting it rather than silently discarding it."
-                ),
-            )
-        if has_scheme and parsed.scheme not in self._SUPPORTED_URI_SCHEMES:
-            return "", ValidationCheck(
-                name="uris_format",
-                passed=False,
-                message=(
-                    f"uri '{redacted_entry}' uses scheme '{parsed.scheme}', which this mTLS-only "
-                    "interface does not support; only a bare host:port or an 'https://' uri is accepted."
-                ),
-            )
-        # gRPC authorities require bracketed IPv6 literals (e.g. "[::1]:2379"), but
-        # urlsplit().hostname strips the brackets, so restore them when the hostname
-        # itself contains colons.
-        authority_host = f"[{hostname}]" if ":" in hostname else hostname
-        return f"{authority_host}:{port}", ValidationCheck(name="uris_format", passed=True, message="OK")
-
-    def _local_databag(self) -> dict[str, str]:
-        """Read this application's own contribution to the relation.
-
-        Unlike ``self.databag`` (the remote application's data), the requirer's
-        own ``prefix``/``mtls-cert`` fields live in this application's own
-        databag on the relation, so they must be read directly from
-        ``self.relation.data``.
-
-        Mirrors ``BaseValidator.databag``'s defensive lookup: if this application hasn't
-        published anything on the relation yet, ``self.charm.app`` may not be a key in
-        ``self.relation.data`` at all, and indexing it directly would raise ``KeyError``
-        instead of letting the caller's existing missing-field checks (e.g.
-        ``prefix_present``) report a normal FAIL.
-        """
-        if self.charm.app not in self.relation.data:
-            return {}
-        return dict(self.relation.data[self.charm.app])
-
-    def _resolve_local_mtls_cert(self, local_data: dict[str, str]) -> str | None:
-        """Resolve this application's own published mtls-cert, secret-backed or plaintext."""
-        if uri := local_data.get("secret-mtls"):
-            return self.charm.model.get_secret(id=uri).get_content().get("mtls-cert")
-        return local_data.get("mtls-cert")
-
-    def _check_identity_matches_published_cert(
-        self, loaded_cert_bytes: bytes, local_data: dict[str, str]
-    ) -> ValidationCheck:
-        """Verify the locally-provisioned client cert is the one actually published on this relation.
-
-        Without this check, ``ETCD_CLIENT_CERT_PATH_ENV``/``ETCD_CLIENT_KEY_PATH_ENV`` could
-        point at some other valid identity, and a PASS would validate that identity's ACLs
-        rather than this relation's.
-        """
-        published_pem = self._resolve_local_mtls_cert(local_data)
-        if not published_pem:
-            return ValidationCheck(
-                name="identity_match",
-                passed=False,
-                message="No mtls-cert published on this relation to compare against.",
-            )
-        loaded_check, loaded_cert = self._parse_mtls_cert_bytes(loaded_cert_bytes)
-        if loaded_cert is None:
-            return ValidationCheck(name="identity_match", passed=False, message=loaded_check.message)
-        published_check, published_cert = self._parse_mtls_cert(published_pem)
-        if published_cert is None:
-            return ValidationCheck(name="identity_match", passed=False, message=published_check.message)
-        if loaded_cert.fingerprint(hashes.SHA256()) != published_cert.fingerprint(hashes.SHA256()):
-            return ValidationCheck(
-                name="identity_match",
-                passed=False,
-                message="Locally-provisioned client cert does not match the mtls-cert published on this relation.",
-            )
-        return ValidationCheck(name="identity_match", passed=True, message="OK")
-
-    def _check_username_matches_cert_cn(self, cert_bytes: bytes, expected_username: str) -> ValidationCheck:
-        """Verify the client cert's leaf subject CN matches the provider's published "username".
-
-        The interface contract defines "username" as derived from the client certificate's
-        own common name, so this is a consistency check on the provider's own claim, not a
-        cryptographic identity check (that's ``_check_identity_matches_published_cert``).
-        """
-        cert_check, cert = self._parse_mtls_cert_bytes(cert_bytes)
-        if cert is None:
-            return ValidationCheck(name="username_matches_cert_cn", passed=False, message=cert_check.message)
-        cn_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-        cn = str(cn_attrs[0].value) if cn_attrs else None
-        if cn != expected_username:
-            return ValidationCheck(
-                name="username_matches_cert_cn",
-                passed=False,
-                message=f"Client cert common name '{cn}' does not match the published username '{expected_username}'.",
-            )
-        return ValidationCheck(name="username_matches_cert_cn", passed=True, message="OK")
-
     def _etcd_put(self, channel: grpc.Channel, key: str, value: str) -> ValidationCheck:
         request = _encode_bytes_field(1, key.encode()) + _encode_bytes_field(2, value.encode())
         call = channel.unary_unary(
@@ -891,28 +1034,6 @@ class EtcdClientValidator(BaseValidator):
         checks.append(self._check_latency(elapsed, _SIMPLE_LATENCY_TARGET_S))
         return self._make_result(level=level, checks=checks)
 
-    def _parse_mtls_cert(self, mtls_cert_pem: str) -> tuple[ValidationCheck, x509.Certificate | None]:
-        """Parse the requirer's submitted client cert.
-
-        The field may be a bundle of [client_cert, signing_ca] PEM blocks
-        concatenated together; only the first (leaf) certificate is validated here.
-        """
-        return self._parse_mtls_cert_bytes(mtls_cert_pem.encode())
-
-    def _parse_mtls_cert_bytes(self, mtls_cert_pem: bytes) -> tuple[ValidationCheck, x509.Certificate | None]:
-        """Parse a submitted client cert given as raw bytes, without assuming they are UTF-8.
-
-        Accepting bytes here (rather than requiring a decoded ``str``) lets callers
-        report a malformed local cert file as a normal failed check instead of
-        letting ``UnicodeDecodeError`` escape validation.
-        """
-        first_pem = mtls_cert_pem.split(b"-----END CERTIFICATE-----")[0] + b"-----END CERTIFICATE-----"
-        try:
-            cert = x509.load_pem_x509_certificate(first_pem)
-        except ValueError as exc:
-            return ValidationCheck(name="mtls_cert_parseable", passed=False, message=str(exc)), None
-        return ValidationCheck(name="mtls_cert_parseable", passed=True, message="OK"), cert
-
     def _check_not_expired(self, cert: x509.Certificate | None, check_name: str = "validity_period") -> ValidationCheck:
         if cert is None:
             return ValidationCheck(name=check_name, passed=False, message="No certificate to check.")
@@ -1011,3 +1132,386 @@ class EtcdClientValidator(BaseValidator):
                 name="latency", passed=False, message=f"Validation took {elapsed:.2f}s, exceeded {target:.2f}s target."
             )
         return ValidationCheck(name="latency", passed=True, message=f"Validation completed in {elapsed:.2f}s.")
+
+
+# Key prefix for persistence-validator canary keys, scoped further per-instance (see
+# _canary_key_prefix). Kept as a module constant so cleanup() (which has no per-call state to
+# work from) can discover every canary key it may have created by pattern rather than by
+# identifier.
+_CANARY_KEY_PREFIX = "validator-persistence-canary-"
+
+# prepare() masks its identifier to 63 bits (see prepare() below), so a genuine canary
+# identifier never exceeds this value. cleanup()'s discovery regex only checks a candidate
+# key's *shape* (prefix + 20 digits); this bound lets it also reject an out-of-range
+# look-alike with the right shape that prepare() couldn't have produced.
+_MAX_CANARY_IDENTIFIER = (1 << 63) - 1
+
+_OpResultT = TypeVar("_OpResultT")
+
+
+class EtcdClientPersistenceValidator(_EtcdConnectionMixin, BasePersistenceValidator):
+    """Reference-style persistence validator for the etcd_client interface.
+
+    Each validator instance owns a dedicated canary key named
+    ``{local_prefix}validator-persistence-canary-{scope_token}_{identifier}``, where
+    ``local_prefix`` is this application's own granted key-prefix (the requirer's "prefix"
+    field - writing outside it would be denied by the provider's mTLS-cert-scoped ACLs),
+    ``scope_token`` is a fixed-width hash of this model's UUID, relation ID and unit name (see
+    ``_canary_scope_token``), and ``identifier`` is a fixed-width, zero-padded value chosen by
+    ``prepare()`` and carried forward by the caller (the test harness) as
+    ``PersistenceState.id``.
+
+    Unlike a SQL/Kafka-style backend, etcd already maintains a per-key, monotonically
+    increasing ``version`` counter (reset to 1 whenever a key is deleted and recreated) as
+    part of its own KeyValue metadata - ``checkpoint()`` uses that real backend-provided
+    counter as the ``ref`` source of truth directly, rather than fabricating one by counting
+    rows/records. That alone isn't sufficient to detect data loss, though: a key dropped and
+    recreated from scratch (e.g. by a backup/restore that doesn't preserve revision history)
+    resets ``version`` back to 1, which could coincidentally equal a low ``expected.ref`` and
+    report a false PASS. So the key's value also carries a random, unguessable ``token``
+    written by ``prepare()`` and carried forward as ``PersistenceState.token``; ``checkpoint()``
+    requires both the token and the version to match, the same way the SQL reference
+    implementation matches on a random token rather than a bare count. The token must be
+    random rather than derived from ``identifier``/``ref``: those are reproducible, so a
+    backend that lost the canary data and recreated it from scratch would reproduce the same
+    value and pass falsely.
+
+    Persistence only applies to the requirer side of the relation (the side holding mTLS
+    credentials to connect out); the provider side raises ``PersistenceNotApplicable``,
+    mirroring the role check ``EtcdClientValidator.validate()`` performs for the functional
+    probe.
+    """
+
+    def prepare(self) -> PersistenceState:
+        self._require_requires_role()
+        # Masked to 63 bits (rather than the full 128-bit uuid4().int) for the same reason as
+        # the SQL reference implementation: the canary key name also carries a fixed-width
+        # scope token, and a shorter, fixed-width identifier keeps cleanup()'s discovery regex
+        # simple while still leaving far more entropy than a test run could collide on.
+        identifier = uuid.uuid4().int & _MAX_CANARY_IDENTIFIER
+        # Random, unguessable per-run token written as the canary key's value and matched on
+        # by checkpoint(). It must not be derivable from `identifier`/`ref`: those are
+        # reproducible, so a backend that lost the canary data and recreated the key from
+        # scratch would reproduce the same value and pass falsely.
+        token = uuid.uuid4().hex
+        key = self._canary_key(identifier)
+        targets, ca_pem, cert_bytes, key_bytes = self._resolve_connection_material()
+        credentials = self._build_ssl_credentials(ca_pem, cert_bytes, key_bytes)
+        key_encoded = key.encode()
+        token_encoded = token.encode()
+
+        def delete_op(channel: grpc.Channel) -> None:
+            # Delete any leftover key at this identifier first (e.g. prepare() re-run after a
+            # crash, or the same identifier forced twice in a test) so the Put below always
+            # creates the key fresh. This is what makes etcd's own per-key `version` counter
+            # start at exactly 1 - matching the ref=1 this method always returns - rather than
+            # inheriting a leftover key's higher version. A DeleteRange is idempotent (deleting
+            # an already-deleted key is a safe no-op), so it's fine to retry across targets.
+            _etcd_delete_range_raw(channel, key_encoded)
+
+        def put_op(channel: grpc.Channel) -> None:
+            _etcd_put_raw(channel, key_encoded, token_encoded)
+
+        self._run_with_failover(targets, credentials, delete_op)
+        # The Put is not idempotent (each one always increments etcd's `version` counter), so it
+        # must never be retried against another target - see _run_write_without_failover.
+        self._run_write_without_failover(targets, credentials, put_op)
+        return PersistenceState(id=identifier, ref=1, token=token)
+
+    def checkpoint(self, expected: PersistenceState) -> tuple[ValidationResult, PersistenceState]:
+        self._require_requires_role()
+        # expected comes from --refs, a (possibly restored/malformed) PersistenceState rather
+        # than a value prepare() just minted - validate it's in range before any read/write, so
+        # a truncated/different identifier can't silently target the wrong key.
+        if not 0 <= expected.id <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(f"expected.id {expected.id} is out of range (expected 0..{_MAX_CANARY_IDENTIFIER})")
+        if expected.ref < 1:
+            # prepare() always returns ref=1 and a passing checkpoint() only ever advances it
+            # by 1, so a restored/malformed PersistenceState with ref <= 0 can't have come from
+            # a real prior run. Without this check, a freshly (re)created key - whose version
+            # starts at 1 - could satisfy `version == expected.ref` for ref=0... but version is
+            # never 0, so this instead guards against a nonsensical negative/zero expectation
+            # being silently compared at all.
+            raise ValueError(f"expected.ref {expected.ref} is out of range (expected >= 1)")
+
+        key = self._canary_key(expected.id)
+        key_encoded = key.encode()
+        targets, ca_pem, cert_bytes, key_bytes = self._resolve_connection_material()
+        credentials = self._build_ssl_credentials(ca_pem, cert_bytes, key_bytes)
+
+        def read_op(channel: grpc.Channel) -> tuple[bytes, bytes, int] | None:
+            response = _etcd_range_raw(channel, key_encoded)
+            return _decode_single_kv(response)
+
+        decoded = self._run_with_failover(targets, credentials, read_op)
+
+        if decoded is None:
+            passed = False
+            actual_version = 0
+        else:
+            actual_key, actual_value, actual_version = decoded
+            # Require both the token (detects a key dropped and recreated from scratch, which
+            # resets `version` back to 1 and could otherwise coincidentally match a low
+            # expected.ref) and etcd's own `version` counter to match - not just one or the
+            # other. See the class docstring.
+            passed = (
+                actual_key == key_encoded
+                and actual_value == expected.token.encode()
+                and (actual_version == expected.ref)
+            )
+
+        # Only write the next canary value when this checkpoint passed: ValidatorRunner only
+        # carries the advanced PersistenceState forward on a PASS result, so writing here
+        # unconditionally would grow etcd's real `version` past what the harness will ever
+        # compare against again, masking the mismatch behind permanent drift.
+        if passed:
+
+            def write_op(channel: grpc.Channel) -> None:
+                _etcd_put_raw(channel, key_encoded, expected.token.encode())
+
+            # Never retried across targets - see _run_write_without_failover: a Put is not
+            # idempotent, so retrying it after an ambiguous failure could double-increment
+            # etcd's real `version`, permanently drifting it out of sync with `expected.ref`.
+            self._run_write_without_failover(targets, credentials, write_op)
+
+        check = ValidationCheck(
+            name="key_version",
+            passed=passed,
+            message=(
+                f"Canary key '{key}' is at the expected version {expected.ref}."
+                if passed
+                else (
+                    f"Expected canary key '{key}' at version {expected.ref} with a matching token, "
+                    f"found version {actual_version if decoded is not None else 'none (key missing)'}. "
+                    "Data may have been lost, or the key was deleted and recreated without the "
+                    "original canary token."
+                )
+            ),
+        )
+        result = self._make_result(level="deep", checks=[check])
+        new_state = PersistenceState(id=expected.id, ref=expected.ref + 1, token=expected.token) if passed else expected
+        return result, new_state
+
+    def cleanup(self) -> None:
+        """Delete every canary key this validator instance (or a prior instance of it) created.
+
+        ``cleanup()`` takes no state argument (see ``BasePersistenceValidator.cleanup``), so
+        every key matching this instance's canary name pattern is discovered via a prefix Range
+        query and deleted, rather than dropping one key by identifier. This also mops up a key
+        left behind by an interrupted run (e.g. a crash between ``prepare()`` and the next
+        ``cleanup()``).
+
+        Discovery is scoped to a model+relation+unit namespace (see ``_canary_scope_token``) so
+        concurrent relations sharing the same granted key-prefix can't drop each other's keys.
+        It does not sweep up a stray key from a relation removed and re-added under a new ID -
+        an accepted trade-off, since a fresh ``prepare()`` for the new ID starts its own key
+        anyway.
+
+        The prefix Range query only narrows candidates by *prefix*, so every discovered key is
+        re-checked against the exact fixed-width shape ``_canary_key()`` produces (and
+        ``_MAX_CANARY_IDENTIFIER``) before being deleted - this rejects a same-prefixed but
+        unrelated key (e.g. a hand-created key sharing this scope's prefix) that a bare prefix
+        match would otherwise destroy.
+        """
+        self._require_requires_role()
+        # Incomplete credentials, or a relation that hasn't published this application's own
+        # "prefix" yet, mean cleanup can't run: raise PersistenceNotApplicable so the runner
+        # records a skip (not a successful cleanup) and keeps the tracked state, rather than
+        # forgetting orphaned canary data.
+        creds = self._resolve_requirer_side_credentials()
+        schema_ok = self.validate_schema(_REQUIRER_FIELDS, creds).passed
+        local_data = self._local_databag()
+        if not schema_ok or "prefix" not in local_data:
+            raise PersistenceNotApplicable(
+                "Relation credentials are incomplete; cleanup cannot remove canary data yet."
+            )
+
+        prefix = self._canary_key_prefix(local_data)
+        prefix_bytes = prefix.encode()
+        range_end = _prefix_range_end(prefix_bytes)
+        targets, ca_pem, cert_bytes, key_bytes = self._resolve_connection_material()
+        credentials = self._build_ssl_credentials(ca_pem, cert_bytes, key_bytes)
+
+        def list_op(channel: grpc.Channel) -> list[bytes]:
+            response = _etcd_range_raw(channel, prefix_bytes, range_end)
+            return _decode_kv_keys(response)
+
+        discovered_keys = self._run_with_failover(targets, credentials, list_op)
+
+        name_regex = self._canary_key_regex(prefix)
+        keys_to_delete: list[bytes] = []
+        for candidate_bytes in discovered_keys:
+            try:
+                candidate = candidate_bytes.decode()
+            except UnicodeDecodeError:
+                # Every genuine canary key name is pure ASCII (see _canary_key()); a
+                # non-decodable candidate sharing this prefix cannot be one of ours.
+                continue
+            match = name_regex.fullmatch(candidate)
+            if not match or int(match.group("identifier")) > _MAX_CANARY_IDENTIFIER:
+                continue
+            keys_to_delete.append(candidate_bytes)
+
+        for candidate_bytes in keys_to_delete:
+
+            def delete_op(channel: grpc.Channel, key: bytes = candidate_bytes) -> None:
+                _etcd_delete_range_raw(channel, key)
+
+            self._run_with_failover(targets, credentials, delete_op)
+
+    def _require_requires_role(self) -> None:
+        if self.role != "requires":
+            raise PersistenceNotApplicable(f"Role '{self.role}' is not supported by {self.__class__.__name__}.")
+
+    def _resolve_connection_material(self) -> tuple[list[str], str, bytes, bytes]:
+        """Validate relation schema/targets/client identity, returning what's needed to connect.
+
+        Raises ``RuntimeError`` (rather than returning a ``ValidationCheck``, which
+        prepare()/checkpoint()/cleanup() have no mechanism to report through outside of
+        checkpoint()'s own result) the moment any prerequisite is missing or invalid, so a
+        malformed/incomplete relation can't silently proceed to a read/write against the wrong
+        - or no - target.
+        """
+        creds = self._resolve_requirer_side_credentials()
+        schema_check = self.validate_schema(_REQUIRER_FIELDS, creds)
+        if not schema_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {schema_check.message}")
+        data = self.databag | creds
+        targets, target_check = self._pick_grpc_target(data["uris"])
+        if not target_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {target_check.message}")
+        cert_path, key_path, identity_check = self._resolve_client_identity()
+        if not identity_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {identity_check.message}")
+        try:
+            with open(cert_path, "rb") as fh:
+                cert_bytes = fh.read()
+            with open(key_path, "rb") as fh:
+                key_bytes = fh.read()
+        except OSError as exc:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: could not read client identity: {exc}") from exc
+        # Mirrors EtcdClientValidator._check_read_write's identity checks: without these, a
+        # locally-provisioned cert/key pair pointed at by ETCD_CLIENT_CERT_PATH_ENV/
+        # ETCD_CLIENT_KEY_PATH_ENV could belong to an entirely different, unrelated identity,
+        # and prepare()/checkpoint()/cleanup() would silently operate against the wrong ACL
+        # scope while still reporting success.
+        local_data = self._local_databag()
+        identity_match_check = self._check_identity_matches_published_cert(cert_bytes, local_data)
+        if not identity_match_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {identity_match_check.message}")
+        username_check = self._check_username_matches_cert_cn(cert_bytes, data["username"])
+        if not username_check.passed:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: {username_check.message}")
+        return targets, data["tls-ca"], cert_bytes, key_bytes
+
+    def _build_ssl_credentials(self, ca_pem: str, cert_bytes: bytes, key_bytes: bytes) -> grpc.ChannelCredentials:
+        try:
+            return grpc.ssl_channel_credentials(
+                root_certificates=ca_pem.encode(),
+                private_key=key_bytes,  # gitleaks:allow -- runtime TLS material, not a hardcoded secret
+                certificate_chain=cert_bytes,
+            )
+        except (ValueError, grpc.RpcError) as exc:
+            raise RuntimeError(f"Cannot connect for {self.endpoint}: invalid client identity material: {exc}") from exc
+
+    def _run_with_failover(
+        self, targets: list[str], credentials: grpc.ChannelCredentials, operation: Callable[[grpc.Channel], _OpResultT]
+    ) -> _OpResultT:
+        """Try *operation* against each gRPC target in turn, failing over on a connectivity error.
+
+        Mirrors ``EtcdClientValidator``'s own multi-target failover policy: "uris" enumerates
+        cluster members, and a single unreachable/unhealthy member shouldn't fail a persistence
+        operation outright when another target is reachable. Only ``grpc.RpcError`` (a real
+        connectivity/RPC failure) triggers failover; an application-level outcome the operation
+        itself returns (e.g. "key not found") is not an error and is returned as-is without
+        retrying another target.
+        """
+        last_exc: grpc.RpcError | None = None
+        for target in targets:
+            with grpc.secure_channel(target, credentials) as channel:
+                try:
+                    return operation(channel)
+                except grpc.RpcError as exc:
+                    last_exc = exc
+                    continue
+        detail = last_exc.details() if last_exc is not None else "no targets were available"
+        raise RuntimeError(f"etcd operation failed against all {len(targets)} target(s) for {self.endpoint}: {detail}")
+
+    def _run_write_without_failover(
+        self, targets: list[str], credentials: grpc.ChannelCredentials, operation: Callable[[grpc.Channel], _OpResultT]
+    ) -> _OpResultT:
+        """Run a non-idempotent write *operation* against a single target, never retrying it.
+
+        Unlike ``_run_with_failover`` (safe for idempotent reads/deletes), a ``Put`` can
+        succeed on etcd's side even though its response never reaches the caller - e.g. the
+        connection drops right after the write is committed but before the ``grpc.RpcError``
+        is raised here. Retrying that same write against a *different* target would then apply
+        it a second time, incrementing etcd's real ``KeyValue.version`` twice even though
+        ``PersistenceState.ref`` only ever advances by one - a permanent, undetectable drift
+        between the two that would corrupt every later ``checkpoint()`` for this canary key.
+        So a write failure here is surfaced immediately as a ``RuntimeError`` instead of being
+        retried against another target: the caller must re-run ``prepare()`` to establish a
+        fresh baseline, since the write's outcome can't be disambiguated after the fact.
+        """
+        if not targets:
+            raise RuntimeError(f"etcd write failed for {self.endpoint}: no targets were available")
+        target = targets[0]
+        try:
+            with grpc.secure_channel(target, credentials) as channel:
+                return operation(channel)
+        except grpc.RpcError as exc:
+            raise RuntimeError(
+                f"etcd write against '{target}' for {self.endpoint} failed ambiguously ({exc.details()}): "
+                "the write may already have been committed despite this error, so it was not retried "
+                "against another target. Re-run prepare() to establish a fresh baseline before retrying."
+            ) from exc
+
+    def _canary_scope_token(self) -> str:
+        """Fixed-width token derived from the model UUID, relation_id *and* unit name.
+
+        ``relation_id`` is assigned per-model, so two models could otherwise collide on a
+        shared key-prefix; the unit name is needed because the runner runs persistence
+        validators on *every* unit of the application, and two units of one application share
+        both ``model.uuid`` and ``relation_id`` while owning separate canary keys. Hashing
+        (rather than appending the raw values) keeps the token a fixed, predictable length.
+        """
+        unit_name = self.charm.model.unit.name
+        digest_input = f"{self.charm.model.uuid}:{self.relation_id}:{unit_name}".encode()
+        return hashlib.sha256(digest_input).hexdigest()[:16]
+
+    def _canary_key_prefix(self, local_data: dict[str, str]) -> str:
+        """Build this instance's canary key prefix, scoped under its own granted "prefix".
+
+        Writing outside the requirer's own granted "prefix" would be denied by the provider's
+        mTLS-cert-scoped ACLs, so every canary key must live under it. "prefix" is checked by
+        key presence rather than truthiness (mirroring ``EtcdClientValidator``'s own
+        ``prefix_present`` check): an intentionally empty prefix (root of the keyspace) is a
+        valid value.
+        """
+        if "prefix" not in local_data:
+            raise RuntimeError(
+                f"No 'prefix' field on this application's own databag for {self.endpoint}; "
+                "cannot address a canary key."
+            )
+        return f"{local_data['prefix']}{_CANARY_KEY_PREFIX}{self._canary_scope_token()}_"
+
+    def _canary_key_regex(self, prefix: str) -> "re.Pattern[str]":
+        """Exact-shape match for this relation's canary keys: prefix + fixed-width digits.
+
+        Used by ``cleanup()`` to reject a key that merely shares the discovery prefix but
+        doesn't match the fixed-width zero-padded identifier suffix ``_canary_key()`` always
+        produces. Matching this shape alone isn't sufficient - see ``cleanup()``, which also
+        checks the captured ``identifier`` against ``_MAX_CANARY_IDENTIFIER``.
+        """
+        return re.compile(re.escape(prefix) + r"(?P<identifier>[0-9]{20})")
+
+    def _canary_key(self, identifier: int) -> str:
+        # Zero-padded to a fixed 20 digits (prepare() masks identifiers to 63 bits, so never
+        # more than 19) so every canary key has the same shape, which _canary_key_regex()
+        # relies on. checkpoint() passes back an identifier from a possibly restored/malformed
+        # state, so range-check it here too rather than silently addressing the wrong key.
+        if not 0 <= identifier <= _MAX_CANARY_IDENTIFIER:
+            raise ValueError(f"canary identifier {identifier} is out of range (expected 0..{_MAX_CANARY_IDENTIFIER})")
+        local_data = self._local_databag()
+        prefix = self._canary_key_prefix(local_data)
+        return f"{prefix}{identifier:020d}"

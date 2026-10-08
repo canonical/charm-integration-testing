@@ -10,8 +10,10 @@ class SecretStub:
     """Stub for ops.Secret"""
 
     _content: dict[str, str]
+    refresh_calls: list[bool] = field(default_factory=list, init=False)
 
-    def get_content(self) -> dict[str, str]:
+    def get_content(self, *, refresh: bool = False) -> dict[str, str]:
+        self.refresh_calls.append(refresh)
         return self._content
 
 
@@ -60,6 +62,8 @@ class ModelStub:
     requested_ids: list[str] = field(default_factory=list)
     relations: dict[str, list[RelationStub]] = field(default_factory=dict)
     name: str = "test-model"
+    uuid: str = "11111111-1111-1111-1111-111111111111"
+    unit: UnitStub = field(default_factory=lambda: UnitStub("app/0"))
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)

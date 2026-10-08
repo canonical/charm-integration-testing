@@ -17,6 +17,9 @@ from .kubernetes_client import KubernetesChaosClient
 class DiskFillClient(NativeChaosClient):
     """Use native disk fill without falling back to workload-local stress-ng."""
 
+    def supports(self, operation: str) -> bool:
+        return operation == "fill_disk"
+
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         self._execute(model, unit, f"fallocate -l {size_mb}M -- {shlex.quote(path)}")
 

@@ -87,15 +87,11 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
 Chaos tools
 ~~~~~~~~~~~
 
-Install Chaos Mesh on the Kubernetes cluster for CPU and memory pressure or
-Disk I/O latency experiments. On PS6 staging and PS7, the infrastructure
-repositories manage the shared ``litmus-core`` Helm release. See the
-``docs/how-to/install_litmus_core.rst`` guide in sqa-ops for installation
-steps and chart versions.
-
-Litmus is currently detected and reported only; its execution client is not
-implemented or included in experiment selection. Detection does not prepare
-experiment definitions or permissions.
+Install Litmus or Chaos Mesh on the Kubernetes cluster for CPU and memory
+pressure. Disk I/O latency requires Chaos Mesh. On PS6 staging and PS7, the
+infrastructure repositories manage the shared ``litmus-core`` Helm release.
+See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
+and chart versions.
 
 Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
 cloud, replacing hyphens in the cloud name with underscores. For example:
@@ -107,56 +103,36 @@ cloud, replacing hyphens in the cloud name with underscores. For example:
 The combined tool report runs once per session, when a test first requests
 ``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
 the report checks each configured Kubernetes cloud once. Detection does not
-run automatically for unrelated tests.
-Litmus requires its three CRDs and a ready ``litmus`` Deployment in
-``litmus-system``.
-The shared operator namespace is independent of the test model namespace.
-CIT detects this installation without deploying charms or configuring CMR.
+run automatically for unrelated tests. Installation checks run again for
+each client request. Litmus requires its three CRDs and a ready ``litmus``
+Deployment in ``litmus-system``.
 
-``require_chaos_tool`` returns a ``MetaChaosClient`` for the target model.
-``chaos_tool_for_model`` returns a callable that accepts a model and creates
-a separate client for that model. Tests request experiments directly; the
-client selects the first configured implementation that supports each
-operation. Installation checks run for each client request rather than
-reusing the session report.
+For Litmus experiments, the Kubernetes credentials must allow creation and
+cleanup of experiment resources, ServiceAccounts, Roles and RoleBindings in
+the test model namespace, including granting the runner's required permissions.
 
-For example, a test can request I/O latency without selecting a tool:
-
-.. code:: python
-
-   from datetime import timedelta
-
-   def test_io_latency(require_chaos_tool, target_model_ref):
-       require_chaos_tool.io_latency(
-           model=target_model_ref,
-           unit="postgresql/0",
-           volume_path="/data",
-           delay=timedelta(milliseconds=50),
-           percent=80,
-           duration=timedelta(seconds=30),
-       )
-
-Chaos Mesh handles CPU and memory pressure and Disk I/O latency. Native disk
-fill uses ``fallocate`` through Juju on machine and Kubernetes models.
-Kubernetes network isolation blocks ingress through a ``NetworkPolicy``.
-Disk fill and network isolation do not require Litmus or Chaos Mesh.
-The native CPU and memory commands are not used as fallback for external
-pressure experiments.
+Tests select a supporting tool automatically for each experiment. When both
+tools are available, Litmus handles CPU and memory pressure and Chaos Mesh
+handles Disk I/O latency. Chaos Mesh also handles CPU and memory pressure
+when Litmus is unavailable. Disk fill and Kubernetes network isolation do
+not require either tool. Native disk fill supports machine and Kubernetes models.
+Native CPU and memory commands are not used as fallback for external pressure.
 
 Chaos Mesh support is checked per experiment. CPU and memory pressure require
 the ``stresschaos.chaos-mesh.org`` CRD, while Disk I/O latency requires
 ``iochaos.chaos-mesh.org``. Either CRD enables its corresponding experiments.
-
-Only unsupported operations permit fallback. If no implementation supports
-the requested experiment, that test is skipped. API and execution errors
-are reported as failures. Pending experiments are cleaned up at test teardown,
-including after a failure or skip. Cleanup errors are reported as failures.
-Explicit ``cleanup(model, unit, path)`` calls remove disk fill or I/O latency
-resources for that path only. An empty path selects CPU and memory stress
-for the model and unit. ``cleanup_all()`` removes all pending experiments.
 The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
-Tests request an experiment through this client instead of checking a specific
-tool first. Unsupported experiments skip when requested.
+
+Only unsupported operations permit fallback. Tests skip when no available
+implementation supports the requested experiment. Each test uses separate
+clients with cleanup at teardown, including after failure or skip.
+API, execution and cleanup errors fail the test. Cleanup retains resources for manual
+investigation when their recorded creation identifier cannot be verified.
+
+Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Cleanup allows graceful termination and requires reversion evidence for observed
+injections before deleting results and permissions; otherwise, it reports an
+error and retains them for investigation.
 
 Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and
@@ -261,3 +237,74 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Total CPU stress
+----------------
+
+``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
+one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+
+It temporarily limits the workload container to one CPU, waits for all bundle
+units to become active/idle, then starts four stress workers. Stress is held for
+``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
+required. Chaos Mesh waits up to one minute for the controller to confirm target
+selection and injection before the hold period starts. A startup timeout fails
+the test and still triggers cleanup. The requested experiment duration includes
+two extra minutes to allow for startup and polling.
+After cleanup, all bundle units, including a cross-model neighbor,
+must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
+default). Available deep interface validators run for the target application and
+its test neighbor, including validators implemented on the consumer side,
+before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+When no validator applies, logs report the missing validation coverage; only
+status recovery is checked. Deployment validation supplies the initial baseline.
+Original CPU requests and limits are restored even after failure or skip.
+A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
+
+For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
+``data-integrator:postgresql``. The ``postgresql_client`` validator runs on
+data-integrator and checks database connectivity, a query, and a write/read cycle
+at the deep level. The integration-test workflow includes this combination with
+PostgreSQL revision 495, channel ``14/stable``, and base ``22.04``. For manual
+workflow runs, use those same values and the branch containing your changes.
+The existing ``certificates`` combination does not exercise this DB validator.
+Confirm validation results for the neighbor in the live logs; an empty or skipped
+validation result is not evidence of successful database recovery.
+
+Network isolation recovery
+--------------------------
+
+``test_live_network_isolation`` requires Kubernetes and applies an ingress-only
+``NetworkPolicy`` to all Pods of the target application. It leaves egress unrestricted
+and retains the policy for ten minutes after the API accepts it. This interval
+does not prove when the network plugin started enforcing the policy.
+
+All bundle models must be active/idle before isolation. Remaining active/idle
+during isolation is valid. After policy removal, all bundle models must return
+to active/idle within fifteen minutes, without a test-driven restart. Deep
+validators then run for every application in the target and neighbor models,
+including consumer-side validators. Missing or skipped validators provide no
+functional coverage; the status check alone only verifies Juju state recovery.
+Policy creation, cleanup, recovery and validation errors fail the test.
+
+The temporary connection probes have been removed. This test does not independently
+measure packet blocking or continuously verify agent connectivity during the
+observation interval. Network enforcement must be supported by the cluster.
+
+Disk fill recovery
+------------------
+
+``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
+and machine models. It allocates 98 percent of the available space reported by
+``df`` in the execution working directory, using a unique file per test. This
+is not a guarantee of 98 percent total file system usage or of filling the
+application's data volume. Per-charm resource settings are not consumed yet.
+
+All bundle models must be active/idle before allocation. The file remains for
+ten minutes; no unhealthy status transition is required. Cleanup removes the
+file, then all bundle models must recover to active/idle within fifteen minutes
+without a test-driven restart. Available deep validators run on all applications
+in both target and neighbor models. Missing validators leave functional coverage
+unverified. Allocation, file checks, cleanup, recovery and validation errors fail
+the test.

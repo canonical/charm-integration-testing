@@ -1,8 +1,16 @@
 ---
 # Source: https://github.com/canonical/istio-ingress-k8s-operator
+# Tracks 1 and 2 are unmaintained; upstream plans 1.31 as the new default, but is not published yet:
+# https://github.com/canonical/istio-ingress-k8s-operator/issues/188#issuecomment-5995370160
 listed: true
 platforms: [kubernetes]
+default_channel: 1.29/candidate
 overrides:
-  - provides:
+  # Track 2 on Ubuntu 24.04 publishes this endpoint without its optional flag.
+  - criteria:
+      - all_of:
+          - track: '2'
+          - ubuntu_version: '24.04'
+    provides:
       gateway-metadata:
         optional: true  # charmcraft.yaml declares GatewayMetadataProvider as an optional integration

@@ -10,8 +10,13 @@ from .backend import ChaosClient
 
 
 class NativeChaosClient(ChaosClient):
+    _SUPPORTED_OPERATIONS = frozenset({"fill_disk", "stress_cpu", "stress_memory"})
+
     def __init__(self, juju_backend: JujuBackend):
         self._juju = juju_backend
+
+    def supports(self, operation: str) -> bool:
+        return operation in self._SUPPORTED_OPERATIONS
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         self._juju.exec_unit(model, unit, f"fallocate -l {size_mb}M -- {shlex.quote(path)}")
