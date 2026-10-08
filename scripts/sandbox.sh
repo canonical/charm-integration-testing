@@ -137,6 +137,13 @@ _confirm_host_token_use() {
         echo "including the AI agent, can use it to act as you on GitHub. gh also stores it"
         echo "in the VM (~/.config/gh/hosts.yml) until it is removed."
         echo ""
+        if [[ "$_gh_token" == ghp_* ]]; then
+            echo "NOTE: your host token is a classic PAT (ghp_), which Copilot CLI does not"
+            echo "support. gh will work, but Copilot will still ask you to log in. Use a"
+            echo "fine-grained PAT with the 'Copilot Requests' permission"
+            echo "(SANDBOX_VAR_COPILOT_GITHUB_TOKEN) or an OAuth token from 'gh auth login'."
+            echo ""
+        fi
         echo "If you decline, the sandbox still starts, but without GitHub authentication"
         echo "for the items above."
         echo ""
