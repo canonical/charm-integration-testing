@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
+from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.juju_version import JujuVersion
 from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
@@ -46,6 +46,8 @@ class _LocalCharmhubClientStub(CharmhubClientStub):
         juju_version: JujuVersion | None = None,
         platform: str | None = None,
         ubuntu_version: str | None = None,
+        test_channel: CharmChannel | None = None,
+        test_revision: int | None = None,
     ) -> Charm:
         return self.local_charm
 
@@ -268,6 +270,66 @@ class TestVersionCompatibility:
             applications={
                 "pg-local": AppSpec(charm="postgresql-k8s", local_charm=local_path),
                 "pg-store": AppSpec(charm="postgresql-k8s", channel="15/stable"),
+            },
+            integrations=[
+                IntegrationSpec(
+                    application="pg-local",
+                    endpoint="replication",
+                    remote_application="pg-store",
+                    remote_endpoint="replication-offer",
+                )
+            ],
+        )
+
+        assert len(bundle.applications) == 2
+        assert len(bundle.integrations) == 1
+
+    def test_local_anchor_uses_declared_test_channel_with_store_peer(self) -> None:
+        local_path = Path("/charms/postgresql-k8s.charm")
+        endpoints = {
+            "replication": CharmEndpoint(
+                type=EndpointType.REQUIRES,
+                interface="pgdata",
+                optional=True,
+                cyclic=True,
+            ),
+            "replication-offer": CharmEndpoint(
+                type=EndpointType.PROVIDES,
+                interface="pgdata",
+                optional=True,
+                cyclic=True,
+            ),
+        }
+        local_charm = make_charm(
+            "postgresql-k8s",
+            channel="14/stable",
+            endpoints=endpoints,
+            constraint_strs=[
+                "tracks(charms(endpoint[replication-offer])) <= tracks({self}) and "
+                "revisions(charms(endpoint[replication-offer])) <= revisions({self})"
+            ],
+        ).model_copy(
+            update={
+                "channel": None,
+                "revision": None,
+                "test_channel": CharmChannel.model_validate("14/stable"),
+                "test_revision": 27,
+                "source_path": local_path,
+            }
+        )
+        store_charm = make_charm("postgresql-k8s", channel="14/stable", revision=27, endpoints=endpoints)
+        builder = BundleBuilder(charmhub_client=_LocalCharmhubClientStub(local_charm, store_charm))
+
+        bundle = build_single_model(
+            builder,
+            applications={
+                "pg-local": AppSpec(
+                    charm="postgresql-k8s",
+                    local_charm=local_path,
+                    channel="14/stable",
+                    revision=27,
+                ),
+                "pg-store": AppSpec(charm="postgresql-k8s", channel="14/stable"),
             },
             integrations=[
                 IntegrationSpec(

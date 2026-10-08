@@ -166,6 +166,8 @@ class Charm(BaseModel):
     name: str
     channel: CharmChannel | None = None
     revision: int | None = None
+    test_channel: CharmChannel | None = None
+    test_revision: int | None = None
     ubuntu_version: str
     ubuntu_arch: str
     source_path: Path | None = None
@@ -192,6 +194,8 @@ class Charm(BaseModel):
             raise ValueError("Charmhub charm requires both a channel and revision")
         if self.source_path is not None and (self.channel is not None or self.revision is not None):
             raise ValueError("Local charm cannot have a Charmhub channel or revision")
+        if self.source_path is None and (self.test_channel is not None or self.test_revision is not None):
+            raise ValueError("Charmhub charm cannot have local test context")
         return self
 
     def __repr__(self) -> str:
@@ -200,8 +204,23 @@ class Charm(BaseModel):
     @property
     def source_label(self) -> str:
         if self.source_path is not None:
-            return f"local charm {self.source_path}"
+            context = ""
+            if self.test_channel is not None or self.test_revision is not None:
+                context = f" tested as {self.test_channel or 'unspecified channel'}"
+                if self.test_revision is not None:
+                    context += f" revision {self.test_revision}"
+            return f"local charm {self.source_path}{context}"
         return f"{self.name} revision {self.revision} ({self.channel})"
+
+    @property
+    def constraint_channel(self) -> CharmChannel | None:
+        """Channel used for release-policy and DSL evaluation, not bundle source identity."""
+        return self.test_channel if self.source_path is not None else self.channel
+
+    @property
+    def constraint_revision(self) -> int | None:
+        """Revision used for DSL evaluation, not bundle source identity."""
+        return self.test_revision if self.source_path is not None else self.revision
 
     def bundle_source(self) -> dict[str, str | int]:
         """Bundle application fields that select this charm artifact."""

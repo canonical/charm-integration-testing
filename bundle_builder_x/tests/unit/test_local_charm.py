@@ -9,7 +9,16 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from bundle_builder_x import AppSpec, BundleBuilder, Charm, ModelSpec, OverridesClient, SpecFile, unpack_charm_artifact
+from bundle_builder_x import (
+    AppSpec,
+    BundleBuilder,
+    Charm,
+    CharmChannel,
+    ModelSpec,
+    OverridesClient,
+    SpecFile,
+    unpack_charm_artifact,
+)
 from bundle_builder_x.charmhub import CharmhubClient
 
 
@@ -50,7 +59,14 @@ class TestLocalCharm:
                     name="local-model",
                     platform="machine",
                     juju="4.0.0",
-                    applications={"local-test": AppSpec(charm="local-test", local_charm=charm_path)},
+                    applications={
+                        "local-test": AppSpec(
+                            charm="local-test",
+                            local_charm=charm_path,
+                            channel="2/edge",
+                            revision=42,
+                        )
+                    },
                 )
             ]
         )
@@ -61,6 +77,8 @@ class TestLocalCharm:
         assert bundle_app.charm.source_path == charm_path.resolve()
         assert bundle_app.charm.channel is None
         assert bundle_app.charm.revision is None
+        assert str(bundle_app.charm.test_channel) == "2/edge"
+        assert bundle_app.charm.test_revision == 42
         assert bundle_app.charm.ubuntu_version == "26.04"
         local_charm_data = bundle_app.charm.model_dump()
         del local_charm_data["channel"]
@@ -114,7 +132,7 @@ class TestLocalCharm:
 
         assert charm.ubuntu_version == "26.04"
 
-    def test_local_charm_uses_default_channel_for_policy_overrides(self, tmp_path: Path) -> None:
+    def test_local_charm_uses_test_channel_for_policy_overrides(self, tmp_path: Path) -> None:
         charm_path = _write_charm(tmp_path / "local-test")
         overrides_path = tmp_path / "overrides"
         overrides_path.mkdir()
@@ -122,7 +140,10 @@ class TestLocalCharm:
             "default_channel: '3.0/stable'\n"
             "overrides:\n"
             "  - criteria:\n"
-            "      - track: '3.0'\n"
+            "      - track: '1'\n"
+            "    ha_units: 4\n"
+            "  - criteria:\n"
+            "      - track: '2'\n"
             "    ha_units: 5\n",
             encoding="utf-8",
         )
@@ -132,11 +153,15 @@ class TestLocalCharm:
             charm_path=charm_path,
             charm_name="local-test",
             ubuntu_arch="amd64",
+            test_channel=CharmChannel.model_validate("2/edge"),
+            test_revision=42,
             platform="machine",
         )
 
         assert charm.channel is None
         assert charm.revision is None
+        assert charm.test_channel == CharmChannel.model_validate("2/edge")
+        assert charm.test_revision == 42
         assert charm.ha_units == 5
 
     def test_local_charm_matches_base_policy_without_release_channel(self, tmp_path: Path) -> None:
@@ -144,6 +169,7 @@ class TestLocalCharm:
         overrides_path = tmp_path / "overrides"
         overrides_path.mkdir()
         (overrides_path / "local-test.yaml").write_text(
+            "default_channel: '3.0/stable'\n"
             "overrides:\n"
             "  - criteria:\n"
             "      - track: '3.0'\n"
@@ -163,6 +189,7 @@ class TestLocalCharm:
 
         assert charm.channel is None
         assert charm.revision is None
+        assert charm.test_channel is None
         assert charm.ha_units == 6
 
     def test_local_charm_rejects_malformed_manifest(self, tmp_path: Path) -> None:

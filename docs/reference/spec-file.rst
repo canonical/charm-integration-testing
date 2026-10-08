@@ -23,6 +23,11 @@ Structure
            channel: latest/stable # optional, overrides default channel
            revision: 42           # optional, pin to a specific revision
            base: ubuntu@22.04     # optional, pin to a specific base
+         local-app:
+           charm: charm-name
+           local_charm: ./build/charm-name.charm
+           channel: 2/edge         # optional test context, not a Charmhub source
+           revision: 42            # optional test context, not the local Juju revision
        integrations:
          # Local integration (same model)
          - application: app-a
@@ -108,19 +113,30 @@ Application
    * - ``charm``
      - yes
      - --
-     - Charmhub charm name.
+     - Charm name. When ``local_charm`` is absent, this is resolved from Charmhub.
    * - ``channel``
      - no
      - --
-     - Channel override (e.g. ``14/stable``).
+     - Channel override (e.g. ``14/stable``). With ``local_charm``, this is the
+       release context used to select channel-scoped overrides and evaluate DSL
+       constraints; it does not select a Charmhub artifact.
    * - ``revision``
      - no
      - --
-     - Pin to a specific revision.
+     - Pin to a specific Charmhub revision. With ``local_charm``, this is the
+       intended test context for revision-scoped DSL constraints, not the revision
+       Juju assigns to the local artifact.
    * - ``base``
      - no
      - --
      - Pin to a specific base (e.g. ``ubuntu@22.04``).
+   * - ``local_charm``
+     - no
+     - --
+     - Path to a local charm directory, such as one unpacked from a ``.charm``
+       artifact. It is deployed as a local charm; any ``channel`` or ``revision``
+       fields describe test context only and are not emitted as Charmhub source
+       fields in the generated bundle.
 
 Integration
 ~~~~~~~~~~~

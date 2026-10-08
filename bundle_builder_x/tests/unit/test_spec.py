@@ -40,16 +40,11 @@ class TestAppSpec:
 
         assert spec.local_charm == tmp_path
 
-    @pytest.mark.parametrize(
-        ("channel", "revision"),
-        [("1/stable", None), (None, 42)],
-        ids=["with-channel", "with-revision"],
-    )
-    def test_local_charm_rejects_store_release_options(
-        self, tmp_path: Path, channel: str | None, revision: int | None
-    ) -> None:
-        with pytest.raises(ValueError, match="local_charm cannot be combined"):
-            AppSpec(charm="my-charm", local_charm=tmp_path, channel=channel, revision=revision)
+    def test_local_charm_accepts_test_release_context(self, tmp_path: Path) -> None:
+        spec = AppSpec(charm="my-charm", local_charm=tmp_path, channel="2/edge", revision=42)
+
+        assert spec.channel == "2/edge"
+        assert spec.revision == 42
 
 
 class TestIntegrationSpec:

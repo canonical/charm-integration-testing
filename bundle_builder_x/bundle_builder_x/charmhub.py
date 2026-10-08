@@ -195,6 +195,8 @@ class CharmhubClient:
         juju_version: JujuVersion | None = None,
         platform: str | None = None,
         ubuntu_version: str | None = None,
+        test_channel: CharmChannel | None = None,
+        test_revision: int | None = None,
     ) -> Charm:
         """Build charm metadata from an unpacked local charm artifact."""
         charm_path = charm_path.resolve()
@@ -264,8 +266,6 @@ class CharmhubClient:
             )
             raise ValueError(f"Local charm {charm_name!r}{detail} available bases for {ubuntu_arch}: {available_bases}")
 
-        raw_default_channel = self.overrides_client.get_charm_default_channel(charm_name)
-        policy_channel = CharmChannel.model_validate(raw_default_channel) if raw_default_channel else None
         charm = self._build_charm(
             charm_name=charm_name,
             channel=None,
@@ -275,7 +275,9 @@ class CharmhubClient:
             metadata=metadata,
             config_schema=config_schema,
             source_path=charm_path,
-            policy_channel=policy_channel,
+            policy_channel=test_channel,
+            test_channel=test_channel,
+            test_revision=test_revision,
         )
         return self._ensure_compatibility(charm, juju_version, platform)
 
@@ -371,12 +373,16 @@ class CharmhubClient:
         config_schema: CharmConfigSchema,
         source_path: Path | None = None,
         policy_channel: CharmChannel | None = None,
+        test_channel: CharmChannel | None = None,
+        test_revision: int | None = None,
     ) -> Charm:
         policy_channel = policy_channel or channel
         return Charm(
             name=charm_name,
             channel=channel,
             revision=revision,
+            test_channel=test_channel,
+            test_revision=test_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             source_path=source_path,
@@ -401,8 +407,8 @@ class CharmhubClient:
             platform=platform,
             juju_version=str(juju_version) if juju_version is not None else None,
             base=charm.ubuntu_version,
-            channel=str(charm.channel),
-            revision=charm.revision,
+            channel=str(charm.constraint_channel) if charm.constraint_channel is not None else None,
+            revision=charm.constraint_revision,
         )
         if platform is not None:
             supported_platforms = charm.platforms

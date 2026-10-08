@@ -201,11 +201,16 @@ def _mermaid_subgraph_lines(bundle: Bundle, model_name: str, model_id: str) -> l
     for application in sorted(bundle.applications):
         info = bundle.applications[application]
         node_id = _mermaid_node_id(model_id, application)
-        charm_info = (
-            "local artifact"
-            if info.charm.source_path is not None
-            else f"{info.charm.channel} rev:{info.charm.revision}"
-        )
+        if info.charm.source_path is not None:
+            context = info.charm.test_channel
+            revision = info.charm.test_revision
+            charm_info = "local artifact"
+            if context is not None or revision is not None:
+                charm_info += f" tested as {context or 'unspecified channel'}"
+                if revision is not None:
+                    charm_info += f" rev:{revision}"
+        else:
+            charm_info = f"{info.charm.channel} rev:{info.charm.revision}"
         if application == info.charm.name:
             lines.append(f'{_IND * 2}{node_id}["{application}<br/>{charm_info}"]:::app')
         else:
