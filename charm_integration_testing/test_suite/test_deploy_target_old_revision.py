@@ -19,14 +19,14 @@ def test_deploy_target_old_revision(
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    tmp_path: Path,
+    juju_tmp_path: Path,
     target_bundle: Path,
 ) -> None:
     # Validation seeds canary data for later persistence checks.
     deploy_bundle_with_charm_and_validate(
         juju_client,
         bundle=target_bundle,
-        destination_bundle=tmp_path / f"bundle-{target_application}-downgrade.yaml",
+        destination_bundle=juju_tmp_path / f"bundle-{target_application}-downgrade.yaml",
         application=target_application,
         charm=target_downgrade_charm,
         target_model=target_model_ref,

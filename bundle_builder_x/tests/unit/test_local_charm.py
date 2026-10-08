@@ -88,6 +88,32 @@ class TestLocalCharm:
                 ubuntu_version="24.04",
             )
 
+    def test_local_charm_uses_runtime_bases_from_nested_manifest(self, tmp_path: Path) -> None:
+        charm_path = _write_charm(tmp_path / "local-test")
+        (charm_path / "manifest.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "bases": [
+                        {
+                            "build-on": [{"name": "ubuntu", "channel": "24.04", "architectures": ["amd64"]}],
+                            "run-on": [{"name": "ubuntu", "channel": "26.04", "architectures": ["amd64"]}],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        charm = CharmhubClient().charm_from_local(
+            charm_path=charm_path,
+            charm_name="local-test",
+            ubuntu_arch="amd64",
+            platform="machine",
+            ubuntu_version="26.04",
+        )
+
+        assert charm.ubuntu_version == "26.04"
+
     def test_unpack_rejects_archive_path_traversal(self, tmp_path: Path) -> None:
         artifact = tmp_path / "unsafe.charm"
         with ZipFile(artifact, "w") as archive:

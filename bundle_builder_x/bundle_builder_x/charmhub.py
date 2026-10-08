@@ -221,8 +221,17 @@ class CharmhubClient:
 
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         bases = manifest.get("bases", [])
+        runtime_bases = [
+            runtime_base
+            for base in bases
+            if isinstance(base, dict)
+            for runtime_base in (base.get("run-on") or [base])
+            if isinstance(runtime_base, dict)
+        ]
         supported_bases = [
-            base for base in bases if base.get("name") == "ubuntu" and ubuntu_arch in base.get("architectures", [])
+            base
+            for base in runtime_bases
+            if base.get("name") == "ubuntu" and ubuntu_arch in base.get("architectures", [])
         ]
         requested_base = ubuntu_version.removeprefix("ubuntu@") if ubuntu_version else None
         selected_base = next(
