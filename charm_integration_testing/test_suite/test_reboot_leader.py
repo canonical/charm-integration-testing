@@ -112,8 +112,10 @@ def test_reboot_leader(
     try:
         restart_leader()
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
-        if neighbor_model_ref is not None and neighbor_application is not None:
-            juju_client.validate_model(model=neighbor_model_ref, level="deep", applications=[neighbor_application])
+        if neighbor_application is not None:
+            juju_client.validate_model(
+                model=neighbor_model_ref or target_model_ref, level="deep", applications=[neighbor_application]
+            )
     except Exception as operation_error:
         try:
             wait_for_recovery()
