@@ -520,7 +520,7 @@ class JubilantBackend(JujuCmdBackend):
         return leaders[0]
 
     def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
-        self.client.model(model).cli("remove-unit", unit)
+        self.client.model(model).cli("remove-unit", "--no-prompt", unit)
 
     def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         application = unit.split("/", maxsplit=1)[0]

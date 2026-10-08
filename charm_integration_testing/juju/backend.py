@@ -329,15 +329,12 @@ class JujuBackend(ABC):
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
-    @abstractmethod
     def application_leader(self, model: JujuModelHandle, application: str) -> str:
         raise NotImplementedError
 
-    @abstractmethod
     def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
         raise NotImplementedError
 
-    @abstractmethod
     def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 

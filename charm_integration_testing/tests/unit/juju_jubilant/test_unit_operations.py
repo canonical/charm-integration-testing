@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 from juju import JujuModelHandle, JujuWaitState
+from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend
 from juju_jubilant.client import JubilantClient
 
@@ -53,7 +54,13 @@ def test_remove_unit_delegates_to_juju_cli() -> None:
 
     JubilantBackend(client=cast(JubilantClient, client)).remove_unit(MODEL, "target/1")
 
-    assert client.calls == [("remove-unit", "target/1")]
+    assert client.calls == [("remove-unit", "--no-prompt", "target/1")]
+
+
+def test_unit_operations_do_not_add_abstract_requirements_to_legacy_backend() -> None:
+    assert not {"application_leader", "remove_unit", "wait_for_unit_removal"}.intersection(
+        JujuCmdBackend.__abstractmethods__
+    )
 
 
 def test_wait_for_unit_removal_checks_status(monkeypatch: pytest.MonkeyPatch) -> None:
