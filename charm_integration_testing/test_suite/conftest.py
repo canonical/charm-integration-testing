@@ -400,9 +400,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help=(
-            "File path for the target model's bundle YAML. With --target-charm-file, the default is kept beside "
-            "the temporary charm under the user's home directory so Juju can read both; explicit paths must "
-            "also be accessible to Juju."
+            "File path for the target model's bundle YAML. By default it is written as "
+            "'generated-target-bundle.yaml' under pytest's root path."
         ),
     )
     parser.addoption(

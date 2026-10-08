@@ -1,3 +1,6 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
 import logging
 from datetime import timedelta
 from pathlib import Path
