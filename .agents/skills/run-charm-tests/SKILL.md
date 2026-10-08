@@ -73,7 +73,8 @@ This installs:
 
 Build the charm in its source repository, then pass the artifact path and
 matching CharmHub charm name. The target application is deployed from that
-artifact; neighbor charms continue to resolve from CharmHub.
+artifact; neighbor charms continue to resolve from Charmhub and are resolved
+for the local target's selected base.
 
 ```bash
 ./scripts/run-tests.sh \

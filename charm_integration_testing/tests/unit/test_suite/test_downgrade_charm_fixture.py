@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import pytest
+import test_suite.conftest as test_suite_conftest
 from test_suite.conftest import target_downgrade_charm
 
 from bundle_builder_x import Charm, CharmChannel
@@ -95,3 +96,44 @@ def test_resolves_explicit_downgrade_revision_for_local_target() -> None:
     assert charmhub_client.call_kwargs is not None
     assert charmhub_client.call_kwargs["charm_revision"] == 27
     assert charmhub_client.call_kwargs["ubuntu_version"] == "24.04"
+
+
+def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = Charm(
+        name="my-charm",
+        source_path=Path("/charms/target"),
+        ubuntu_version="26.04",
+        ubuntu_arch="amd64",
+        endpoints={},
+        platforms=["machine"],
+    )
+    local_downgrade = Path("/charms/downgrade.charm")
+    resolved_downgrade = Charm(
+        name="my-charm",
+        source_path=Path("/cache/downgrade"),
+        ubuntu_version="26.04",
+        ubuntu_arch="amd64",
+        endpoints={},
+        platforms=["machine"],
+    )
+    resolve_calls: list[tuple[Path, str | None]] = []
+
+    def resolve_local_charm(
+        request: pytest.FixtureRequest,
+        charm_path: Path,
+        target_series: str | None,
+    ) -> Charm:
+        resolve_calls.append((charm_path, target_series))
+        return resolved_downgrade
+
+    monkeypatch.setattr(test_suite_conftest, "_resolve_local_charm", resolve_local_charm)
+    request = cast(
+        pytest.FixtureRequest,
+        _RequestStub({"target_resolved_charm": target}),
+    )
+    fixture_function = cast(_WrappedFixture, target_downgrade_charm).__wrapped__
+
+    resolved = fixture_function(request, local_downgrade_charm=local_downgrade)
+
+    assert resolved is resolved_downgrade
+    assert resolve_calls == [(local_downgrade, "26.04")]
