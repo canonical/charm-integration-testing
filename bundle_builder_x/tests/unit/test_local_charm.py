@@ -3,16 +3,15 @@
 
 import stat
 from pathlib import Path
+from typing import cast
 from zipfile import ZipFile, ZipInfo
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
 from bundle_builder_x import (
     AppSpec,
     BundleBuilder,
-    Charm,
     CharmChannel,
     ModelSpec,
     OverridesClient,
@@ -20,6 +19,7 @@ from bundle_builder_x import (
     unpack_charm_artifact,
 )
 from bundle_builder_x.charmhub import CharmhubClient
+from bundle_builder_x.charmhub_http import CharmhubHttpClient, RefreshAction, RefreshResponse
 
 
 def _write_charm(path: Path) -> Path:
@@ -75,19 +75,9 @@ class TestLocalCharm:
 
         bundle_app = solution.bundles[0].applications["local-test"]
         assert bundle_app.charm.source_path == charm_path.resolve()
-        assert bundle_app.charm.channel is None
-        assert bundle_app.charm.revision is None
-        assert str(bundle_app.charm.test_channel) == "2/edge"
-        assert bundle_app.charm.test_revision == 42
+        assert bundle_app.charm.channel == CharmChannel.model_validate("2/edge")
+        assert bundle_app.charm.revision == 42
         assert bundle_app.charm.ubuntu_version == "26.04"
-        local_charm_data = bundle_app.charm.model_dump()
-        del local_charm_data["channel"]
-        del local_charm_data["revision"]
-        charm_with_default_source = Charm.model_validate(local_charm_data)
-        assert charm_with_default_source.channel is None
-        assert charm_with_default_source.revision is None
-        with pytest.raises(ValidationError, match="Local charm cannot have a Charmhub channel or revision"):
-            Charm.model_validate({**bundle_app.charm.model_dump(), "revision": 1})
         exported = yaml.safe_load(solution.bundles[0].export())
         assert exported["applications"]["local-test"]["charm"] == str(charm_path.resolve())
         assert exported["applications"]["local-test"]["base"] == "ubuntu@26.04"
@@ -128,6 +118,8 @@ class TestLocalCharm:
             ubuntu_arch="amd64",
             platform="machine",
             ubuntu_version="26.04",
+            channel=CharmChannel.model_validate("latest/stable"),
+            revision=1,
         )
 
         assert charm.ubuntu_version == "26.04"
@@ -138,6 +130,7 @@ class TestLocalCharm:
         overrides_path.mkdir()
         (overrides_path / "local-test.yaml").write_text(
             "default_channel: '3.0/stable'\n"
+            "default_revision: 9\n"
             "overrides:\n"
             "  - criteria:\n"
             "      - track: '1'\n"
@@ -153,23 +146,22 @@ class TestLocalCharm:
             charm_path=charm_path,
             charm_name="local-test",
             ubuntu_arch="amd64",
-            test_channel=CharmChannel.model_validate("2/edge"),
-            test_revision=42,
+            channel=CharmChannel.model_validate("2/edge"),
+            revision=42,
             platform="machine",
         )
 
-        assert charm.channel is None
-        assert charm.revision is None
-        assert charm.test_channel == CharmChannel.model_validate("2/edge")
-        assert charm.test_revision == 42
+        assert charm.channel == CharmChannel.model_validate("2/edge")
+        assert charm.revision == 42
         assert charm.ha_units == 5
 
-    def test_local_charm_matches_base_policy_without_release_channel(self, tmp_path: Path) -> None:
+    def test_local_charm_resolves_override_default_release_context(self, tmp_path: Path) -> None:
         charm_path = _write_charm(tmp_path / "local-test")
         overrides_path = tmp_path / "overrides"
         overrides_path.mkdir()
         (overrides_path / "local-test.yaml").write_text(
             "default_channel: '3.0/stable'\n"
+            "default_revision: 9\n"
             "overrides:\n"
             "  - criteria:\n"
             "      - track: '3.0'\n"
@@ -187,10 +179,30 @@ class TestLocalCharm:
             platform="machine",
         )
 
-        assert charm.channel is None
-        assert charm.revision is None
-        assert charm.test_channel is None
-        assert charm.ha_units == 6
+        assert charm.channel == CharmChannel.model_validate("3.0/stable")
+        assert charm.revision == 9
+        assert charm.ha_units == 4
+
+    def test_local_charm_resolves_default_context_from_charmhub(self, tmp_path: Path) -> None:
+        class _DefaultReleaseClient:
+            def refresh(self, action: RefreshAction) -> RefreshResponse:
+                return RefreshResponse(
+                    name="local-test",
+                    effective_channel="4.0/edge",
+                    charm=RefreshResponse.Charm(revision=27),
+                )
+
+        charm = CharmhubClient(
+            http_client=cast(CharmhubHttpClient, _DefaultReleaseClient()),
+        ).charm_from_local(
+            charm_path=_write_charm(tmp_path / "local-test"),
+            charm_name="local-test",
+            ubuntu_arch="amd64",
+            platform="machine",
+        )
+
+        assert charm.channel == CharmChannel.model_validate("4.0/edge")
+        assert charm.revision == 27
 
     def test_local_charm_rejects_malformed_manifest(self, tmp_path: Path) -> None:
         charm_path = _write_charm(tmp_path / "local-test")

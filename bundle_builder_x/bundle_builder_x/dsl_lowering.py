@@ -58,7 +58,7 @@ import z3  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
 from .assertion_tags import AssertionTag, CharmPayload, PeerChannelMismatchTag
-from .charm import Charm, CharmConfigValue
+from .charm import CharmConfigValue
 from .constraints_dsl import (
     AndExpr,
     AnyExpr,
@@ -631,14 +631,6 @@ def _is_self_channel_expr(expr: AnyExpr) -> bool:
     return isinstance(expr, (TracksExpr, RisksExpr, ChannelsExpr, RevisionsExpr)) and isinstance(expr.arg, SelfExpr)
 
 
-def _self_release_context_missing(expr: AnyExpr, charm: Charm) -> bool:
-    if not isinstance(expr, (TracksExpr, RisksExpr, ChannelsExpr, RevisionsExpr)) or not isinstance(expr.arg, SelfExpr):
-        return False
-    if isinstance(expr, RevisionsExpr):
-        return charm.constraint_revision is None
-    return charm.constraint_channel is None
-
-
 def _lower_compare(
     op: str,
     left: AnyExpr,
@@ -646,12 +638,6 @@ def _lower_compare(
     ctx: LoweringContext,
 ) -> z3.BoolRef:
     """Lower a CompareExpr to a Z3 Bool."""
-    if ctx.domain_charm.spec.source_path is not None and (
-        _self_release_context_missing(left, ctx.domain_charm.spec)
-        or _self_release_context_missing(right, ctx.domain_charm.spec)
-    ):
-        return z3.BoolVal(True)
-
     # Lower features expressions eagerly to detect the features==set special case
     # before attempting to lower the StrLiteralSet, which is only valid inside 'in'.
     l_lowered = _lower(left, ctx)
@@ -896,9 +882,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result: z3.ExprRef = z3.EmptySet(z3.StringSort())
             entries: list[_ChannelSetEntry] = []
             for i, dc in enumerate(ctx.domain.charms):
-                channel = dc.spec.constraint_channel
-                if channel is None:
-                    continue
+                channel = dc.spec.channel
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.StringVal(channel.explicit_track)), z3_result)
                 entries.append(
@@ -918,9 +902,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.StringSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
-                channel = dc.spec.constraint_channel
-                if channel is None:
-                    continue
+                channel = dc.spec.channel
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.StringVal(channel.risk)), z3_result)
                 entries.append(
@@ -940,9 +922,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.StringSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
-                channel = dc.spec.constraint_channel
-                if channel is None:
-                    continue
+                channel = dc.spec.channel
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.StringVal(str(channel))), z3_result)
                 entries.append(
@@ -962,9 +942,7 @@ def _lower(expr: AnyExpr, ctx: LoweringContext) -> _LoweredValue:  # noqa: C901
             z3_result = z3.EmptySet(z3.IntSort())
             entries = []
             for i, dc in enumerate(ctx.domain.charms):
-                revision = dc.spec.constraint_revision
-                if revision is None:
-                    continue
+                revision = dc.spec.revision
                 condition = z3.And(dc.exists, z3.IsMember(z3.IntVal(i), charm_set))
                 z3_result = z3.If(condition, z3.SetAdd(z3_result, z3.IntVal(revision)), z3_result)
                 entries.append(

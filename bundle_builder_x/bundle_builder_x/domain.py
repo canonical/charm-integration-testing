@@ -597,8 +597,8 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
         if (
             domain_app.charm != charm.name
             or domain_app.local_charm != charm.source_path
-            or (domain_app.channel is not None and domain_app.channel != charm.constraint_channel)
-            or (domain_app.revision is not None and domain_app.revision != charm.constraint_revision)
+            or (domain_app.channel is not None and domain_app.channel != charm.channel)
+            or (domain_app.revision is not None and domain_app.revision != charm.revision)
             or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
         ):
             continue

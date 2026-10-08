@@ -26,8 +26,8 @@ Structure
          local-app:
            charm: charm-name
            local_charm: ./build/charm-name.charm
-           channel: 2/edge         # optional test context, not a Charmhub source
-           revision: 42            # optional test context, not the local Juju revision
+           channel: 2/edge         # optional test context; defaults to resolved default channel
+           revision: 42            # optional test context; defaults to resolved default revision
        integrations:
          # Local integration (same model)
          - application: app-a
@@ -119,13 +119,15 @@ Application
      - --
      - Channel override (e.g. ``14/stable``). With ``local_charm``, this is the
        release context used to select channel-scoped overrides and evaluate DSL
-       constraints; it does not select a Charmhub artifact.
+       constraints; it does not select a Charmhub artifact. When omitted, the
+       default channel is read from charm overrides or resolved from Charmhub.
    * - ``revision``
      - no
      - --
      - Pin to a specific Charmhub revision. With ``local_charm``, this is the
        intended test context for revision-scoped DSL constraints, not the revision
-       Juju assigns to the local artifact.
+       Juju assigns to the local artifact. When omitted, the default revision is
+       read from charm overrides or resolved from Charmhub.
    * - ``base``
      - no
      - --

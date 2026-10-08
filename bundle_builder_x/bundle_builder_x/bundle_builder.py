@@ -828,7 +828,7 @@ class BundleBuilder:
         """
         owning_model = domain.charms[tag.charm.charm_id].model
         peer_model = domain.charms[tag.peer_charm_id].model
-        peer_channel = domain.charms[tag.peer_charm_id].spec.constraint_channel
+        peer_channel = domain.charms[tag.peer_charm_id].spec.channel
         peer_is_local = domain.charms[tag.peer_charm_id].spec.source_path is not None
         owning_is_local = domain.charms[tag.charm.charm_id].spec.source_path is not None
 
@@ -855,7 +855,7 @@ class BundleBuilder:
         ):
             return True
 
-        if owning_is_local or peer_channel is None:
+        if owning_is_local:
             return False
 
         return self._fetch_and_add_charm_variant(
@@ -955,8 +955,8 @@ class BundleBuilder:
                 charm_path=app.local_charm,
                 charm_name=app.charm,
                 ubuntu_arch=model.arch,
-                test_channel=app.channel,
-                test_revision=app.revision,
+                channel=app.channel,
+                revision=app.revision,
                 juju_version=model.juju_version,
                 platform=model.platform,
                 ubuntu_version=app.base,

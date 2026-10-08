@@ -195,8 +195,8 @@ class CharmhubClient:
         juju_version: JujuVersion | None = None,
         platform: str | None = None,
         ubuntu_version: str | None = None,
-        test_channel: CharmChannel | None = None,
-        test_revision: int | None = None,
+        channel: CharmChannel | None = None,
+        revision: int | None = None,
     ) -> Charm:
         """Build charm metadata from an unpacked local charm artifact."""
         charm_path = charm_path.resolve()
@@ -266,20 +266,82 @@ class CharmhubClient:
             )
             raise ValueError(f"Local charm {charm_name!r}{detail} available bases for {ubuntu_arch}: {available_bases}")
 
+        channel, revision = self._resolve_local_release_context(
+            charm_name,
+            channel,
+            revision,
+            ubuntu_arch=ubuntu_arch,
+            ubuntu_version=selected_base["channel"],
+        )
         charm = self._build_charm(
             charm_name=charm_name,
-            channel=None,
-            revision=None,
+            channel=channel,
+            revision=revision,
             ubuntu_version=selected_base["channel"],
             ubuntu_arch=ubuntu_arch,
             metadata=metadata,
             config_schema=config_schema,
             source_path=charm_path,
-            policy_channel=test_channel,
-            test_channel=test_channel,
-            test_revision=test_revision,
+            policy_channel=channel,
         )
         return self._ensure_compatibility(charm, juju_version, platform)
+
+    def _resolve_local_release_context(
+        self,
+        charm_name: str,
+        channel: CharmChannel | None,
+        revision: int | None,
+        ubuntu_arch: str,
+        ubuntu_version: str,
+    ) -> tuple[CharmChannel, int]:
+        """Resolve omitted local-artifact selectors from overrides, then Charmhub's default release."""
+        if channel is None:
+            default_channel = self.overrides_client.get_charm_default_channel(charm_name)
+            if default_channel is not None:
+                channel = CharmChannel.model_validate(default_channel)
+
+        if revision is None:
+            revision = self.overrides_client.get_charm_default_revision(charm_name)
+
+        if channel is not None and revision is not None:
+            return channel, revision
+
+        refresh_info = self.http_client.refresh(
+            RefreshAction(
+                charm_name=charm_name,
+                charm_channel=str(channel) if channel is not None else None,
+                base=CharmhubBase(channel=ubuntu_version, architecture=ubuntu_arch),
+            )
+        )
+        if refresh_info.error is not None:
+            raise ReleaseUnavailableError(
+                kind=(
+                    ReleaseUnavailableKind.CHANNEL_NOT_FOUND
+                    if channel is not None
+                    else ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
+                ),
+                request=ReleaseRequest(
+                    charm_name=charm_name,
+                    architecture=ubuntu_arch,
+                    base=ubuntu_version,
+                    channel=str(channel) if channel is not None else None,
+                ),
+                detail=f"Failed to resolve default release context for local charm {charm_name}: "
+                f"{refresh_info.error.message}",
+                error_code=refresh_info.error.code,
+            )
+
+        if channel is None:
+            if refresh_info.effective_channel is None:
+                raise IncompleteCharmInfoException(f"Charmhub returned no default channel for charm {charm_name}")
+            channel = CharmChannel.model_validate(refresh_info.effective_channel)
+
+        if revision is None:
+            if refresh_info.charm is None or refresh_info.charm.revision is None:
+                raise IncompleteCharmInfoException(f"Charmhub returned no default revision for charm {charm_name}")
+            revision = refresh_info.charm.revision
+
+        return channel, revision
 
     def find_charms(
         self, provides: str | None = None, requires: str | None = None, platform: str | None = None
@@ -365,24 +427,20 @@ class CharmhubClient:
     def _build_charm(
         self,
         charm_name: str,
-        channel: CharmChannel | None,
-        revision: int | None,
+        channel: CharmChannel,
+        revision: int,
         ubuntu_version: str,
         ubuntu_arch: str,
         metadata: CharmMetadata,
         config_schema: CharmConfigSchema,
         source_path: Path | None = None,
         policy_channel: CharmChannel | None = None,
-        test_channel: CharmChannel | None = None,
-        test_revision: int | None = None,
     ) -> Charm:
         policy_channel = policy_channel or channel
         return Charm(
             name=charm_name,
             channel=channel,
             revision=revision,
-            test_channel=test_channel,
-            test_revision=test_revision,
             ubuntu_version=ubuntu_version,
             ubuntu_arch=ubuntu_arch,
             source_path=source_path,
@@ -407,8 +465,8 @@ class CharmhubClient:
             platform=platform,
             juju_version=str(juju_version) if juju_version is not None else None,
             base=charm.ubuntu_version,
-            channel=str(charm.constraint_channel) if charm.constraint_channel is not None else None,
-            revision=charm.constraint_revision,
+            channel=str(charm.channel),
+            revision=charm.revision,
         )
         if platform is not None:
             supported_platforms = charm.platforms

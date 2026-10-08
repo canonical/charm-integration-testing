@@ -46,8 +46,8 @@ class _LocalCharmhubClientStub(CharmhubClientStub):
         juju_version: JujuVersion | None = None,
         platform: str | None = None,
         ubuntu_version: str | None = None,
-        test_channel: CharmChannel | None = None,
-        test_revision: int | None = None,
+        channel: CharmChannel | None = None,
+        revision: int | None = None,
     ) -> Charm:
         return self.local_charm
 
@@ -261,7 +261,7 @@ class TestVersionCompatibility:
             channel="14/stable",
             endpoints=endpoints,
             constraint_strs=["tracks(charms(endpoint[replication-offer])) <= tracks({self})"],
-        ).model_copy(update={"channel": None, "revision": None, "source_path": local_path})
+        ).model_copy(update={"source_path": local_path})
         store_charm = make_charm("postgresql-k8s", channel="15/stable", endpoints=endpoints)
         builder = BundleBuilder(charmhub_client=_LocalCharmhubClientStub(local_charm, store_charm))
 
@@ -310,10 +310,8 @@ class TestVersionCompatibility:
             ],
         ).model_copy(
             update={
-                "channel": None,
-                "revision": None,
-                "test_channel": CharmChannel.model_validate("14/stable"),
-                "test_revision": 27,
+                "channel": CharmChannel.model_validate("14/stable"),
+                "revision": 27,
                 "source_path": local_path,
             }
         )
