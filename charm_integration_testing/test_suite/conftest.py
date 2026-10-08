@@ -821,8 +821,8 @@ def _resolve_local_charm(
     request: pytest.FixtureRequest,
     charm_path: Path,
     ubuntu_version: str | None,
-    test_channel: str | None = None,
-    test_revision: int | None = None,
+    channel: str | None = None,
+    revision: int | None = None,
 ) -> Charm:
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
     juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
@@ -830,8 +830,8 @@ def _resolve_local_charm(
         charm_path=charm_path,
         charm_name=request.getfixturevalue("target_charm"),
         ubuntu_arch=request.getfixturevalue("target_arch"),
-        test_channel=CharmChannel.model_validate(test_channel) if test_channel is not None else None,
-        test_revision=test_revision,
+        channel=CharmChannel.model_validate(channel) if channel is not None else None,
+        revision=revision,
         juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
         platform=request.getfixturevalue("target_platform"),
         ubuntu_version=ubuntu_version,
@@ -853,8 +853,8 @@ def target_channel(request: pytest.FixtureRequest) -> str | None:
     """Charmhub channel or local artifact's intended test channel.
 
     Returns ``None`` when the value is ``"default"``, which tells
-    Charmhub resolution to defer to ``charm-default-versions.yaml``. For a local artifact,
-    it leaves channel-scoped policy and DSL context unspecified.
+    Charmhub resolution to use its default release. For a local artifact, the default channel
+    is resolved from charm overrides or from Charmhub's default release.
     """
     value = request.config.getoption("--target-channel")
     return None if value == "default" else value
@@ -865,8 +865,8 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     """Charmhub revision or local artifact's intended test revision.
 
     Returns ``None`` when the value is ``"default"``, which tells
-    Charmhub resolution to defer to ``charm-default-versions.yaml``. For a local artifact,
-    it is context only; Juju assigns the installed local revision.
+    Charmhub resolution to use its default release. For a local artifact, the default revision
+    is resolved from charm overrides or from Charmhub; Juju still assigns the deployed local revision.
     """
     value = request.config.getoption("--target-revision")
     return None if value == "default" else int(value)
@@ -878,6 +878,7 @@ def target_resolved_charm(request: pytest.FixtureRequest, local_target_charm: Pa
 
     A ``--target-charm-file`` artifact is used as-is; any supplied channel/revision
     provide test context for overrides and constraints, not the Juju source identity.
+    Omitted selectors resolve to the configured defaults or Charmhub's default release.
     For Charmhub, explicit selectors are used; otherwise resolution falls back to
     charm override defaults. The whole downgrade/upgrade cycle is skipped when the
     target cannot be resolved on the requested series.
@@ -897,8 +898,8 @@ def target_resolved_charm(request: pytest.FixtureRequest, local_target_charm: Pa
             request,
             local_target_charm,
             target_series,
-            test_channel=target_channel,
-            test_revision=target_revision,
+            channel=target_channel,
+            revision=target_revision,
         )
 
     channel = CharmChannel.model_validate(target_channel) if target_channel else None
@@ -954,7 +955,8 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
             request,
             local_downgrade_charm,
             target.ubuntu_version,
-            test_channel=str(target.constraint_channel) if target.constraint_channel is not None else None,
+            channel=str(target.channel),
+            revision=target.revision,
         )
 
     target_charm: str = request.getfixturevalue("target_charm")
@@ -965,7 +967,7 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
     bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
     target_base = target.ubuntu_version
-    channel = CharmChannel.model_validate(target_channel) if target_channel else target.constraint_channel
+    channel = CharmChannel.model_validate(target_channel) if target_channel else target.channel
 
     def resolve_on_target_base(revision: int | None) -> Charm | None:
         try:
@@ -984,7 +986,7 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
             return None
 
     value = request.config.getoption("--target-downgrade-revision")
-    if value != "default" or channel is None:
+    if value != "default":
         revision = None if value == "default" else int(value)
         try:
             downgrade = resolve_on_target_base(revision)
@@ -1004,7 +1006,6 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
             f"Unable to select a historical revision for branched channel '{channel}': "
             "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
         )
-    assert target.revision is not None
     test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     try:
         historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(

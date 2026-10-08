@@ -5,10 +5,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from juju import JujuApplicationInfo, JujuModelHandle
-from juju.models import CharmChannel
+from juju.models import CharmChannel as JujuCharmChannel
 from test_suite.fixtures.integration_spec import _resolve_deployed_charm
 
-from bundle_builder_x import Charm
+from bundle_builder_x import Charm, CharmChannel
 
 
 class TestResolveDeployedCharmBase:
@@ -21,7 +21,7 @@ class TestResolveDeployedCharmBase:
         return JujuApplicationInfo(
             charm="my-charm",
             revision=1,
-            channel=CharmChannel(track="1.0", risk="stable", branch=branch),
+            channel=JujuCharmChannel(track="1.0", risk="stable", branch=branch),
             base=base,
         )
 
@@ -74,6 +74,8 @@ class TestResolveDeployedCharmBase:
         local_charm = Charm(
             name="my-charm",
             source_path=Path("/charms/my-charm"),
+            channel=CharmChannel.model_validate("latest/stable"),
+            revision=1,
             ubuntu_version="26.04",
             ubuntu_arch="amd64",
             endpoints={},

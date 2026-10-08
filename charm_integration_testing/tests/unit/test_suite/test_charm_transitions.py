@@ -63,6 +63,8 @@ def _local_charm(path: Path) -> Charm:
     return Charm(
         name="my-charm",
         source_path=path,
+        channel=CharmChannel.model_validate("1/stable"),
+        revision=1,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
         endpoints={},

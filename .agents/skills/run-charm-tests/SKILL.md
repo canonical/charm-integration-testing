@@ -118,8 +118,9 @@ Use the substrate and endpoints that fit the charm. You may pass
 you want to test, for example `--target-channel "2/edge" --target-revision 42`.
 These selectors choose track/risk-based overrides and evaluate version
 constraints; they do not change the artifact or the local revision Juju assigns
-when deploying it. If omitted, channel-specific overrides are not selected;
-base-only overrides can still apply.
+when deploying it. If omitted, the intended release context resolves from the
+charm's configured default channel/revision, then Charmhub's default release.
+This default is charm-specific and is not necessarily `latest/stable`.
 
 The downgrade/upgrade cycle and `test_deploy_target_old_revision` move the
 target between artifacts. By default the other artifact is the charm's default

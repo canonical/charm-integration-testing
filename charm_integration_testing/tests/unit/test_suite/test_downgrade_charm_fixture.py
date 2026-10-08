@@ -67,8 +67,8 @@ def test_resolves_explicit_downgrade_revision_for_local_target() -> None:
     target = Charm(
         name="my-charm",
         source_path=Path("/charms/my-charm"),
-        test_channel=CharmChannel.model_validate("2/edge"),
-        test_revision=42,
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=42,
         ubuntu_version="24.04",
         ubuntu_arch="amd64",
         endpoints={},
@@ -116,8 +116,8 @@ def test_resolves_local_target_with_declared_test_context(monkeypatch: pytest.Mo
     resolved_target = Charm(
         name="my-charm",
         source_path=Path("/cache/target"),
-        test_channel=CharmChannel.model_validate("2/edge"),
-        test_revision=42,
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=42,
         ubuntu_version="26.04",
         ubuntu_arch="amd64",
         endpoints={},
@@ -129,10 +129,10 @@ def test_resolves_local_target_with_declared_test_context(monkeypatch: pytest.Mo
         request: pytest.FixtureRequest,
         charm_path: Path,
         ubuntu_version: str | None,
-        test_channel: str | None = None,
-        test_revision: int | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
     ) -> Charm:
-        resolve_calls.append((charm_path, ubuntu_version, test_channel, test_revision))
+        resolve_calls.append((charm_path, ubuntu_version, channel, revision))
         return resolved_target
 
     monkeypatch.setattr(test_suite_conftest, "_resolve_local_charm", resolve_local_charm)
@@ -163,8 +163,8 @@ def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.M
     target = Charm(
         name="my-charm",
         source_path=Path("/charms/target"),
-        test_channel=CharmChannel.model_validate("2/edge"),
-        test_revision=42,
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=42,
         ubuntu_version="26.04",
         ubuntu_arch="amd64",
         endpoints={},
@@ -174,6 +174,8 @@ def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.M
     resolved_downgrade = Charm(
         name="my-charm",
         source_path=Path("/cache/downgrade"),
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=42,
         ubuntu_version="26.04",
         ubuntu_arch="amd64",
         endpoints={},
@@ -185,10 +187,10 @@ def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.M
         request: pytest.FixtureRequest,
         charm_path: Path,
         target_series: str | None,
-        test_channel: str | None = None,
-        test_revision: int | None = None,
+        channel: str | None = None,
+        revision: int | None = None,
     ) -> Charm:
-        resolve_calls.append((charm_path, target_series, test_channel, test_revision))
+        resolve_calls.append((charm_path, target_series, channel, revision))
         return resolved_downgrade
 
     monkeypatch.setattr(test_suite_conftest, "_resolve_local_charm", resolve_local_charm)
@@ -201,4 +203,4 @@ def test_resolves_local_downgrade_artifact_for_target_base(monkeypatch: pytest.M
     resolved = fixture_function(request, local_downgrade_charm=local_downgrade)
 
     assert resolved is resolved_downgrade
-    assert resolve_calls == [(local_downgrade, "26.04", "2/edge", None)]
+    assert resolve_calls == [(local_downgrade, "26.04", "2/edge", 42)]
