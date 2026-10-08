@@ -86,7 +86,9 @@ class ChaosMeshChaosClient(ChaosClient):
             "percent": percent,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("IOChaos", "iochaos", model, unit, volume_path, self._name("io-latency", application), spec)
+        name = self._name("io-latency", application)
+        self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
+        self._wait_for_injection(model.model, "iochaos", name, "IOChaos")
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         """Clean resources for the model, unit and path. An empty path selects stress."""
@@ -165,9 +167,9 @@ class ChaosMeshChaosClient(ChaosClient):
         }
         name = self._name(label, application)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
-        self._wait_for_stress_injection(model.model, name)
+        self._wait_for_injection(model.model, "stresschaos", name, "StressChaos")
 
-    def _wait_for_stress_injection(self, namespace: str, name: str) -> None:
+    def _wait_for_injection(self, namespace: str, plural: str, name: str, kind: str) -> None:
         """Wait for controller-confirmed injection, retaining failed runs for cleanup."""
         deadline = self._clock() + self._startup_timeout
         while (remaining := deadline - self._clock()) > 0:
@@ -175,7 +177,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 group=_GROUP,
                 version=_VERSION,
                 namespace=namespace,
-                plural="stresschaos",
+                plural=plural,
                 name=name,
                 _request_timeout=min(30, remaining),
             )
@@ -185,7 +187,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 or metadata.get("uid") != self._uids[name]
                 or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
             ):
-                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during injection.")
+                raise RuntimeError(f"Cannot verify identity of {kind} {namespace}/{name} during injection.")
             status = current.get("status") or {}
             experiment = status.get("experiment") or {}
             conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
@@ -194,7 +196,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 or experiment.get("desiredPhase") == "Stop"
                 or conditions.get("Paused") == "True"
             ):
-                raise RuntimeError(f"StressChaos {namespace}/{name} stopped before injection was confirmed.")
+                raise RuntimeError(f"{kind} {namespace}/{name} stopped before injection was confirmed.")
             if (
                 conditions.get("Selected") == "True"
                 and conditions.get("AllInjected") == "True"
@@ -207,7 +209,7 @@ class ChaosMeshChaosClient(ChaosClient):
             remaining = deadline - self._clock()
             if remaining > 0:
                 self._pause(min(self._poll_interval, remaining))
-        raise TimeoutError(f"Timed out waiting for StressChaos {namespace}/{name} injection.")
+        raise TimeoutError(f"Timed out waiting for {kind} {namespace}/{name} injection.")
 
     def _create(
         self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]
