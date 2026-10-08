@@ -90,6 +90,59 @@ This installs:
   --log-cli-level "INFO"
 ```
 
+### Test a locally built target charm
+
+Build the charm in its source repository, then pass the artifact path and
+matching CharmHub charm name. The target application is deployed from that
+artifact; neighbor charms continue to resolve from Charmhub using their own
+Charmhub default base.
+
+```bash
+./scripts/run-tests.sh \
+  --target-cloud "localhost" \
+  --target-platform "machine" \
+  --target-charm "<charm-name>" \
+  --target-charm-file "<path-to-charm>.charm" \
+  --target-application "<target-app>" \
+  --target-endpoint "<target-endpoint>" \
+  --neighbor-charm "<neighbor-charm>" \
+  --neighbor-application "<neighbor-app>" \
+  --neighbor-endpoint "<neighbor-endpoint>" \
+  --current-state "no_bundle" \
+  --mermaid-output "./local-charm-bundle.mmd" \
+  --log-dir "./local-charm-test-logs"
+```
+
+Use the substrate and endpoints that fit the charm. You may pass
+`--target-channel` and/or `--target-revision` to describe the release context
+you want to test, for example `--target-channel "2/edge" --target-revision 42`.
+These selectors choose track/risk-based overrides and evaluate version
+constraints; they do not change the artifact or the local revision Juju assigns
+when deploying it. If omitted, the intended release context resolves from the
+charm's configured default channel/revision, then Charmhub's default release.
+This default is charm-specific and is not necessarily `latest/stable`.
+
+The downgrade/upgrade cycle and `test_deploy_target_old_revision` move the
+target between artifacts. By default the other artifact is the charm's default
+CharmHub release; choose another with `--target-downgrade-revision <rev>` or
+test against a second local build with
+`--target-downgrade-charm-file <path>.charm` (the two options are mutually
+exclusive). The cycle is skipped when the chosen CharmHub revision does not
+support the target's base.
+
+Artifacts are unpacked by content hash. Generated bundles are kept separately
+in a project-scoped directory keyed by controller and model, so they remain
+available when a later session resumes with `--current-state` without different
+models overwriting each other's bundles. With snap-installed Juju, these
+directories are under `~/snap/juju/common/charm-integration-testing/`; without
+the Juju snap, they are under the project's `.pytest_cache/`. The artifact cache
+with snap-installed Juju is under
+`~/snap/juju/common/charm-artifacts/`, scoped to the mounted project path so
+separate project checkouts do not share cache entries. Without the Juju snap,
+artifacts are stored under the project's `.pytest_cache/charm-artifacts/`.
+Concurrent runs of the same project and artifact reuse the immutable unpacked
+content.
+
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
 ```bash
 # Reproduce Issue #693 test execution 509067
@@ -287,8 +340,8 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 | `neighbor` | `--neighbor-charm` | Integration partner charm |
 | `neighbor_endpoint` | `--neighbor-endpoint` | Partner charm's endpoint |
 | `series` | `--target-series` | Ubuntu series (20.04, 22.04, etc.) |
-| `revision` | `--target-revision` | Charm revision to test |
-| `channel` | `--target-channel` | Charm channel (edge, beta, stable) |
+| `revision` | `--target-revision` | Charmhub revision, or intended test context for a local artifact |
+| `channel` | `--target-channel` | Charmhub channel, or intended test context for a local artifact |
 | `juju_channel` | (Juju version) | Juju version (3/stable, 4/edge) |
 | `execution_id` | N/A | Used for logging/tracking |
 

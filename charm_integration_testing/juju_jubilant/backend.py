@@ -596,6 +596,7 @@ class JubilantBackend(JujuCmdBackend):
             revision=app_info.charm_rev,
             channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
             base=app_info.base.channel if app_info.base else None,
+            origin=app_info.charm_origin,
         )
 
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
@@ -818,11 +819,24 @@ class JubilantBackend(JujuCmdBackend):
         revision: int | None = None,
         channel: str | None = None,
     ) -> None:
+        app_status = self.status(model).apps.get(application)
+        if app_status is not None and app_status.charm_origin == "local":
+            # Leaving a local charm requires --switch, which Juju rejects alongside --revision.
+            switch = f"ch:{app_status.charm_name}" + (f"-{revision}" if revision is not None else "")
+            args = ["refresh", application, "--switch", switch]
+            if channel:
+                args.extend(["--channel", channel])
+            self.client.model(model).cli(*args)
+            return
         self.client.model(model).refresh(
             app=application,
             revision=revision,
             channel=channel,
         )
+
+    def refresh_application_from_path(self, model: JujuModelHandle, application: str, path: pathlib.Path) -> None:
+        # jubilant's refresh(path=...) copies the charm for snap Juju, which fails for unpacked directories.
+        self.client.model(model).cli("refresh", application, "--path", str(path))
 
     def validate_application(
         self, model: JujuModelHandle, application: str, level: str

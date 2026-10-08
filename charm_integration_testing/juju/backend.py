@@ -269,6 +269,10 @@ class JujuBackend(ABC):
     ) -> None:
         raise NotImplementedError
 
+    def refresh_application_from_path(self, model: JujuModelHandle, application: str, path: Path) -> None:
+        """Refresh from a local charm artifact when the backend supports local paths."""
+        raise NotImplementedError
+
     @abstractmethod
     def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         raise NotImplementedError

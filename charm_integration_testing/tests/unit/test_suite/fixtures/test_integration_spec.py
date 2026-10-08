@@ -1,11 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from juju import JujuApplicationInfo, JujuModelHandle
-from juju.models import CharmChannel
+from juju.models import CharmChannel as JujuCharmChannel
 from test_suite.fixtures.integration_spec import _resolve_deployed_charm
+
+from bundle_builder_x import Charm, CharmChannel
 
 
 class TestResolveDeployedCharmBase:
@@ -18,7 +21,7 @@ class TestResolveDeployedCharmBase:
         return JujuApplicationInfo(
             charm="my-charm",
             revision=1,
-            channel=CharmChannel(track="1.0", risk="stable", branch=branch),
+            channel=JujuCharmChannel(track="1.0", risk="stable", branch=branch),
             base=base,
         )
 
@@ -64,3 +67,37 @@ class TestResolveDeployedCharmBase:
         charmhub_client.charm_from_store.assert_called_once()
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_version"] is None
         assert charmhub_client.charm_from_store.call_args.kwargs["ubuntu_arch"] == "arm64"
+
+    def test_returns_local_charm_for_local_origin_application(self) -> None:
+        # GIVEN an application deployed from a local charm artifact
+        model_ref = JujuModelHandle(model="my-model", controller="my-controller")
+        local_charm = Charm(
+            name="my-charm",
+            source_path=Path("/charms/my-charm"),
+            channel=CharmChannel.model_validate("latest/stable"),
+            revision=1,
+            ubuntu_version="26.04",
+            ubuntu_arch="amd64",
+            endpoints={},
+            platforms=["machine"],
+        )
+        juju_client = MagicMock()
+        juju_client.list_applications.return_value = {
+            "my-app": JujuApplicationInfo(charm="local:my-charm-0", revision=0, origin="local", base="26.04")
+        }
+        charmhub_client = MagicMock()
+
+        # WHEN resolving the deployed charm
+        deployed_charm = _resolve_deployed_charm(
+            charmhub_client,
+            juju_client,
+            model_ref,
+            "my-app",
+            cache={},
+            arch="amd64",
+            local_charm=local_charm,
+        )
+
+        # THEN the local artifact metadata is used instead of querying Charmhub
+        assert deployed_charm is local_charm
+        charmhub_client.charm_from_store.assert_not_called()

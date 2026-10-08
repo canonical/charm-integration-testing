@@ -1,83 +1,34 @@
 # Copyright 2025-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
-import yaml
 from juju import JujuClient, JujuModelHandle
 
+from bundle_builder_x import Charm
+
+from .charm_transitions import deploy_bundle_with_charm_and_validate
 from .scheduler.states import State
-
-
-def _create_bundle_with_revision_override(
-    bundle_path: Path,
-    destination_bundle: Path,
-    target_application: str,
-    target_revision: int,
-) -> None:
-    with bundle_path.open("r", encoding="utf-8") as file:
-        bundle_data = next(yaml.safe_load_all(file))
-
-    if not isinstance(bundle_data, dict):
-        raise ValueError(f"Invalid bundle file: {bundle_path}")
-
-    applications = bundle_data.get("applications")
-    if not isinstance(applications, dict) or target_application not in applications:
-        raise ValueError(f"Application '{target_application}' not found in bundle: {bundle_path}")
-
-    target_application_data = applications[target_application]
-    if not isinstance(target_application_data, dict):
-        raise ValueError(f"Invalid application definition for '{target_application}' in {bundle_path}")
-
-    target_application_data["revision"] = target_revision
-
-    with destination_bundle.open("w", encoding="utf-8") as file:
-        yaml.safe_dump(bundle_data, file, sort_keys=False)
 
 
 @pytest.mark.state(requires=State.NEIGHBOR_ONLY, provides=State.DEPLOYED_WITH_OLD_REVISION)
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
-    target_downgrade_revision: int,
+    target_downgrade_charm: Charm,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
-    target_charm: str,
-    tmp_path: Path,
+    juju_tmp_path: Path,
     target_bundle: Path,
 ) -> None:
-    juju_client.logger.info(
-        f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
+    # Validation seeds canary data for later persistence checks.
+    deploy_bundle_with_charm_and_validate(
+        juju_client,
+        bundle=target_bundle,
+        destination_bundle=juju_tmp_path / f"bundle-{target_application}-downgrade.yaml",
+        application=target_application,
+        charm=target_downgrade_charm,
+        target_model=target_model_ref,
+        neighbor_model=neighbor_model_ref,
     )
-
-    # Create a temporary bundle file with target revision overridden
-    overridden_bundle = tmp_path / f"bundle-{target_application}-rev-{target_downgrade_revision}.yaml"
-    _create_bundle_with_revision_override(
-        bundle_path=target_bundle,
-        destination_bundle=overridden_bundle,
-        target_application=target_application,
-        target_revision=target_downgrade_revision,
-    )
-
-    # Deploy the original bundle with only the target app revision overridden
-    juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
-
-    models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
-
-    # Wait for return to idle
-    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
-
-    # Verify the application is deployed at the target revision and the model is healthy
-    deployed_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
-    if deployed_revision != target_downgrade_revision:
-        pytest.fail(
-            f"Expected '{target_application}' to be deployed at revision {target_downgrade_revision}, "
-            f"got {deployed_revision}."
-        )
-
-    # Validate all applications and relations, seeding canary data for later persistence checks.
-    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
-    for model_ref in models_to_validate:
-        juju_client.validate_model(model=model_ref, level="simple")

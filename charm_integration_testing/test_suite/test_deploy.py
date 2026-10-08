@@ -17,14 +17,14 @@ def test_deploy(
     neighbor_bundle: Path | None,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
-    tmp_path: Path,
+    juju_tmp_path: Path,
 ) -> None:
     all_bundles: list[tuple[Path, JujuModelHandle]] = [(target_bundle, target_model_ref)]
     if neighbor_bundle is not None:
         assert neighbor_model_ref is not None
         all_bundles.append((neighbor_bundle, neighbor_model_ref))
 
-    juju_client.deploy_bundles(all_bundles, tmp_path)
+    juju_client.deploy_bundles(all_bundles, juju_tmp_path)
 
     juju_client.multi_model_idle_for_period(
         [model_ref for _, model_ref in all_bundles],
