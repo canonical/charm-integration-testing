@@ -15,7 +15,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, overload
 
 import jubilant
 import yaml
@@ -148,17 +148,6 @@ class JubilantBackend(JujuCmdBackend):
             raise JujuRestartNotSupportedError(f"{application} has no follower to restart.")
         unit_name = followers[0]
 
-        def check_follower() -> jubilant.Status:
-            current = self.status(model)
-            current_units = current.apps[application].units
-            if (
-                set(current_units) != set(units)
-                or sum(unit.leader for unit in current_units.values()) != 1
-                or current_units[unit_name].leader
-            ):
-                raise RuntimeError(f"Unit membership or leadership changed before restarting {unit_name}.")
-            return current
-
         kubernetes = self.get_kubernetes_client_for_model(model)
         if kubernetes is not None:
             application_pods = kubernetes.get_charm_pods(application, model.model)
@@ -168,7 +157,7 @@ class JubilantBackend(JujuCmdBackend):
             if len(pods) != 1 or not pods[0].metadata.uid or pods[0].metadata.deletion_timestamp is not None:
                 raise RuntimeError(f"Unable to identify a single live Pod for {unit_name}.")
             pod = pods[0]
-            check_follower()
+            self._check_follower(self.status(model), application, set(units), unit_name)
             kubernetes.restart_pod(
                 model.model,
                 pod.metadata.name,
@@ -187,39 +176,22 @@ class JubilantBackend(JujuCmdBackend):
                     "Follower reboot requires a dedicated machine, not a nested container."
                 )
 
-            def check_placement(current: jubilant.Status) -> None:
-                if current.apps[application].units[unit_name].machine != machine:
-                    raise RuntimeError(f"Machine placement changed for {unit_name}.")
-                for app in current.apps.values():
-                    for name, unit in app.units.items():
-                        if (
-                            name != unit_name
-                            and unit.machine is not None
-                            and (unit.machine == machine or unit.machine.startswith(machine + "/"))
-                        ):
-                            raise JujuRestartNotSupportedError(f"Restarting {unit_name} would also restart {name}.")
-
-            check_placement(status)
+            self._check_follower_placement(status, application, unit_name, machine)
             deadline = time.monotonic() + timeout.total_seconds()
-
-            def ssh(command: str) -> str:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
-                return self.client.ssh(model, machine, command, timeout=min(30, remaining))
-
-            def boot_id() -> str:
-                value = ssh("cat /proc/sys/kernel/random/boot_id").strip()
-                if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
-                    raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
-                return value
-
-            original_boot = boot_id()
-            check_placement(check_follower())
-            ssh("sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot")
+            original_boot = self._machine_boot_id(model, machine, deadline, timeout)
+            current = self.status(model)
+            self._check_follower(current, application, set(units), unit_name)
+            self._check_follower_placement(current, application, unit_name, machine)
+            self._ssh_before_deadline(
+                model,
+                machine,
+                "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
+                deadline,
+                timeout,
+            )
             while time.monotonic() < deadline:
                 try:
-                    if boot_id() != original_boot:
+                    if self._machine_boot_id(model, machine, deadline, timeout) != original_boot:
                         break
                 except (jubilant.CLIError, subprocess.TimeoutExpired):
                     pass  # SSH can be unavailable while the machine reboots.
@@ -227,6 +199,45 @@ class JubilantBackend(JujuCmdBackend):
             else:
                 raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
         return unit_name
+
+    @staticmethod
+    def _check_follower(current: jubilant.Status, application: str, expected_units: set[str], unit_name: str) -> None:
+        current_units = current.apps[application].units
+        if (
+            set(current_units) != expected_units
+            or sum(unit.leader for unit in current_units.values()) != 1
+            or current_units[unit_name].leader
+        ):
+            raise RuntimeError(f"Unit membership or leadership changed before restarting {unit_name}.")
+
+    @staticmethod
+    def _check_follower_placement(current: jubilant.Status, application: str, unit_name: str, machine: str) -> None:
+        if current.apps[application].units[unit_name].machine != machine:
+            raise RuntimeError(f"Machine placement changed for {unit_name}.")
+        for app in current.apps.values():
+            for name, unit in app.units.items():
+                if (
+                    name != unit_name
+                    and unit.machine is not None
+                    and (unit.machine == machine or unit.machine.startswith(machine + "/"))
+                ):
+                    raise JujuRestartNotSupportedError(f"Restarting {unit_name} would also restart {name}.")
+
+    def _ssh_before_deadline(
+        self, model: JujuModelHandle, machine: str, command: str, deadline: float, timeout: timedelta
+    ) -> str:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
+        return self.ssh(model, machine, command, timeout=min(30, remaining))
+
+    def _machine_boot_id(self, model: JujuModelHandle, machine: str, deadline: float, timeout: timedelta) -> str:
+        value = self._ssh_before_deadline(
+            model, machine, "cat /proc/sys/kernel/random/boot_id", deadline, timeout
+        ).strip()
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
+            raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
+        return value
 
     def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
         """Return a KubernetesClient for the given cloud, constructing and caching it on first use."""
@@ -659,11 +670,27 @@ class JubilantBackend(JujuCmdBackend):
 
         self.client.model(model).cli("scp", *options, source, destination)
 
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
-        self.client.model(model).ssh(
-            target=application,
-            command=command,
-        )
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        """Run SSH, optionally bounding the entire process and returning its output."""
+        juju = self.client.model(model)
+        if timeout is None:
+            juju.ssh(target=application, command=command)
+            return None
+        args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
+        try:
+            return subprocess.run(  # nosec B603
+                args, check=True, capture_output=True, text=True, timeout=timeout
+            ).stdout
+        except subprocess.CalledProcessError as error:
+            raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")

@@ -308,24 +308,3 @@ without a test-driven restart. Available deep validators run on all applications
 in both target and neighbor models. Missing validators leave functional coverage
 unverified. Allocation, file checks, cleanup, recovery and validation errors fail
 the test.
-
-HA follower restart
--------------------
-
-``test_scale_remove_follower`` runs in ``DEPLOYED_HA`` and preserves the unit
-count. It selects a Juju non-leader and rechecks leadership before disruption;
-this does not identify the application's internal database leader.
-
-On Kubernetes it deletes the selected unit's Pod with a ``UID`` precondition and
-waits for a replacement with the same Juju unit annotation and a new ``UID``.
-On machine models it reboots a dedicated machine and confirms that its boot ID changes. Shared
-machines, nested containers, subordinate charms and configurations without a
-follower are skipped. ``scale_down: false`` does not disable this test.
-Each SSH command has a process timeout within the reboot wait budget.
-After restart confirmation, Juju extensions run, including Vault unsealing.
-
-After restarting, target and neighbor models must return to active/idle within
-fifteen minutes with the original target unit count. Simple validators then run
-on both models; failures fail the test. A non-active transition is not required,
-and validators are not run during the restart. Missing validators leave
-functional coverage unverified.

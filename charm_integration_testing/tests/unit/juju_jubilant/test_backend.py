@@ -7,7 +7,7 @@ from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, overload
 from unittest.mock import patch
 
 import jubilant
@@ -22,6 +22,7 @@ from juju import (
     JujuExtension,
     JujuIntegrationApplication,
     JujuModelHandle,
+    JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
 )
@@ -3069,7 +3070,7 @@ class FollowerRestartKubernetesStub:
         self.calls.append((namespace, name, uid, timeout))
 
 
-class FollowerRestartClientStub(JubilantClient):
+class FollowerRestartSshStub:
     def __init__(self) -> None:
         self.boots: list[str | Exception] = [FOLLOWER_BOOT_ID, FOLLOWER_NEW_BOOT_ID]
         self.calls: list[tuple[str, str]] = []
@@ -3088,10 +3089,22 @@ class FollowerRestartClientStub(JubilantClient):
 
 class FollowerRestartBackendStub(JubilantBackend):
     def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
-        self.stub = FollowerRestartClientStub()
-        super().__init__(client=self.stub)
+        self.stub = FollowerRestartSshStub()
+        super().__init__()
         self.snapshots = [follower_status(), follower_status()]
         self.kube = kube
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        assert timeout is not None
+        return self.stub.ssh(model, application, command, timeout)
 
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         return self.snapshots.pop(0)
@@ -3290,3 +3303,72 @@ def test_ssh_timeout_before_reboot_fails() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
     assert len(backend.stub.calls) == 1
+
+
+SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
+
+
+def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
+        assert check and capture_output and text
+        assert timeout == 7.5
+        return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    result = JubilantBackend().ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=7.5)
+    assert result == "boot-id\n"
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if timed_out:
+            raise subprocess.TimeoutExpired(args, timeout)
+        raise subprocess.CalledProcessError(255, args, output="", stderr="connection refused")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    with pytest.raises(subprocess.TimeoutExpired if timed_out else jubilant.CLIError):
+        JubilantBackend().ssh(SSH_MODEL, "1", "command", timeout=1)
+
+
+@pytest.mark.parametrize("change", ["none", "membership", "leader", "no-leader"])
+def test_follower_check_uses_explicit_snapshot(change: str) -> None:
+    # GIVEN the selected follower and the original membership
+    current = follower_status()
+    units = current.apps["target"].units
+    expected = set(units)
+    if change == "membership":
+        del units["target/1"]
+    elif change == "leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+        units["target/1"] = replace(units["target/1"], leader=True)
+    elif change == "no-leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+
+    # WHEN checking a fresh snapshot, THEN only unchanged membership and leadership pass
+    if change == "none":
+        JubilantBackend._check_follower(current, "target", expected, "target/1")
+    else:
+        with pytest.raises(RuntimeError, match="membership or leadership changed"):
+            JubilantBackend._check_follower(current, "target", expected, "target/1")
+
+
+@pytest.mark.parametrize("other_machine", [None, "3", "1", "1/lxd/0"])
+def test_placement_check_uses_explicit_snapshot(other_machine: str | None) -> None:
+    # GIVEN another application's unit with an optional machine placement
+    current = follower_status()
+    current.apps["other"] = replace(
+        current.apps["target"], units={"other/0": UnitStatus(machine=cast(str, other_machine))}
+    )
+
+    # WHEN checking placement, THEN shared machines and their nested containers are rejected
+    if other_machine in {"1", "1/lxd/0"}:
+        with pytest.raises(JujuRestartNotSupportedError, match="also restart"):
+            JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
+    else:
+        JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
