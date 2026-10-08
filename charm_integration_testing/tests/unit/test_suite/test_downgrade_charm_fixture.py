@@ -14,14 +14,17 @@ from bundle_builder_x import JujuVersion as BundleJujuVersion
 
 
 class _RequestConfigStub:
+    def __init__(self, downgrade_revision: str = "27") -> None:
+        self.downgrade_revision = downgrade_revision
+
     def getoption(self, option: str) -> str:
         assert option == "--target-downgrade-revision"
-        return "27"
+        return self.downgrade_revision
 
 
 class _RequestStub:
-    def __init__(self, fixtures: dict[str, object]) -> None:
-        self.config = _RequestConfigStub()
+    def __init__(self, fixtures: dict[str, object], downgrade_revision: str = "27") -> None:
+        self.config = _RequestConfigStub(downgrade_revision)
         self.fixtures = fixtures
 
     def getfixturevalue(self, argname: str) -> object:
@@ -105,6 +108,56 @@ def test_resolves_explicit_downgrade_revision_for_local_target() -> None:
     assert charmhub_client.call_kwargs is not None
     assert charmhub_client.call_kwargs["charm_revision"] == 27
     assert charmhub_client.call_kwargs["ubuntu_version"] == "24.04"
+    assert charmhub_client.call_kwargs["platform"] == "machine"
+    assert charmhub_client.call_kwargs["juju_version"] == BundleJujuVersion.parse("3.6.1")
+    assert charmhub_client.call_kwargs["charm_track"] == "2"
+    assert charmhub_client.call_kwargs["charm_risk"] == "edge"
+
+
+def test_resolves_default_charmhub_release_for_local_target_with_channel_context() -> None:
+    target = Charm(
+        name="my-charm",
+        source_path=Path("/charms/my-charm"),
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=42,
+        ubuntu_version="26.04",
+        ubuntu_arch="amd64",
+        endpoints={},
+        platforms=["machine"],
+    )
+    downgrade = Charm(
+        name="my-charm",
+        channel=CharmChannel.model_validate("2/edge"),
+        revision=51,
+        ubuntu_version="26.04",
+        ubuntu_arch="amd64",
+        endpoints={},
+        platforms=["machine"],
+    )
+    charmhub_client = _CharmhubClientStub(downgrade)
+    request = cast(
+        pytest.FixtureRequest,
+        _RequestStub(
+            {
+                "target_resolved_charm": target,
+                "target_charm": "my-charm",
+                "target_channel": "2/edge",
+                "target_arch": "amd64",
+                "target_platform": "machine",
+                "juju_cli_version": "3.6.1",
+                "charmhub_client": charmhub_client,
+            },
+            downgrade_revision="default",
+        ),
+    )
+    fixture_function = cast(_WrappedFixture, target_downgrade_charm).__wrapped__
+
+    resolved = fixture_function(request, local_downgrade_charm=None)
+
+    assert resolved is downgrade
+    assert charmhub_client.call_kwargs is not None
+    assert charmhub_client.call_kwargs["charm_revision"] is None
+    assert charmhub_client.call_kwargs["ubuntu_version"] == "26.04"
     assert charmhub_client.call_kwargs["platform"] == "machine"
     assert charmhub_client.call_kwargs["juju_version"] == BundleJujuVersion.parse("3.6.1")
     assert charmhub_client.call_kwargs["charm_track"] == "2"

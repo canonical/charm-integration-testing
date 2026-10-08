@@ -986,7 +986,7 @@ def target_downgrade_charm(request: pytest.FixtureRequest, local_downgrade_charm
             return None
 
     value = request.config.getoption("--target-downgrade-revision")
-    if value != "default":
+    if value != "default" or target.source_path is not None:
         revision = None if value == "default" else int(value)
         try:
             downgrade = resolve_on_target_base(revision)
