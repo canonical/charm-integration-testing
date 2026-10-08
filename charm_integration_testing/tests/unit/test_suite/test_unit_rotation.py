@@ -22,6 +22,8 @@ def _rotate_units(
         k8s_model=k8s_model,
         kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
     )
+    if kubernetes_client is not None:
+        client.workload_pod_deleter = lambda model, pod_name: kubernetes_client.delete_pod(model.model, pod_name)
     rotate_application_units(
         cast(JujuClient, client),
         backend,

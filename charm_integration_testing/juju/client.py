@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesClient, KubernetesExtension
+from kubernetes_client import KubernetesExtension
 
 from validators.base import ValidationResult
 
@@ -75,18 +75,18 @@ class JujuClient:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
 
-    def delete_kubernetes_pod(
-        self,
-        kubernetes_client: KubernetesClient,
-        namespace: str,
-        pod_name: str,
-    ) -> None:
-        """Delete a pod and dispatch each configured Kubernetes hook exactly once."""
-        kubernetes_client.delete_pod(namespace=namespace, pod_name=pod_name)
+    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a model's workload pod and dispatch configured lifecycle hooks."""
+        kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
+        if kubernetes_client is None:
+            raise RuntimeError(f"Cannot delete workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
+
+        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
+        kubernetes_client.delete_pod(namespace=model.model, pod_name=pod_name)
         registered_extensions = {id(extension) for extension in kubernetes_client.extensions}
         for extension in self.extensions:
             if isinstance(extension, KubernetesExtension) and id(extension) not in registered_extensions:
-                extension.post_delete_pod(namespace, pod_name)
+                extension.post_delete_pod(model.model, pod_name)
 
     def rotate_application_units(
         self,
