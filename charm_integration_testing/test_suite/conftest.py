@@ -677,6 +677,15 @@ def local_downgrade_charm(request: pytest.FixtureRequest) -> Path | None:
     return _unpack_charm_file_option(request, "--target-downgrade-charm-file")
 
 
+@pytest.fixture
+def juju_tmp_path(tmp_path: Path) -> Iterator[Path]:
+    """Temporary directory readable by Juju, including when Juju is installed as a snap."""
+    root = Path.home() / "snap/juju/common" if Path("/snap/juju/current").exists() else tmp_path
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="cit-test-", dir=root) as directory:
+        yield Path(directory)
+
+
 def _resolve_local_charm(request: pytest.FixtureRequest, charm_path: Path, ubuntu_version: str | None) -> Charm:
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
     juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
