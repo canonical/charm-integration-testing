@@ -17,11 +17,12 @@
 #                              the signing key). Falls back to the host's
 #                              `gh auth token` if not set.
 #   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
-#                              Required; falls back to the host's
-#                              `gh auth token` only with your consent.
+#                              Falls back to the host's `gh auth token` only
+#                              with your consent; if declined, the sandbox
+#                              continues without gh authentication.
 #   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Token for Copilot AI auth inside the VM.
-#                              Required; falls back to the host's
-#                              `gh auth token` only with your consent.
+#                              Same consent-gated fallback; if declined, Copilot
+#                              is started without a token.
 #   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT               VM-side mount path (default: /project)
 #   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
@@ -109,6 +110,7 @@ COPILOT_TOKEN=""
 # The host's `gh auth token` carries whatever scopes the host login has (often
 # broad: repo, workflow, admin:org, ...). Do not hand it to the sandbox without
 # the user's explicit consent. Args: the sandbox consumers that would receive it.
+# Returns non-zero if the user declines.
 _confirm_host_token_use() {
     [ "$#" -gt 0 ] || return 0
 
@@ -119,13 +121,16 @@ _confirm_host_token_use() {
         echo "${_bold}WARNING: no dedicated token is set for:${_reset}"
         printf '  - %s\n' "$@"
         echo ""
-        echo "If you continue, the sandbox will use your host 'gh auth token', which"
+        echo "You can pass your host 'gh auth token' into the sandbox instead. It"
         echo "carries every permission your host gh login has. Anything running in the VM,"
         echo "including the AI agent, can use it to act as you on GitHub. gh also stores it"
         echo "in the VM (~/.config/gh/hosts.yml) until it is removed."
         echo ""
-        echo "You are responsible for your own actions. If you proceed without configuring"
-        echo "$DEV_DIR/.env, you accept these risks. To avoid them, set"
+        echo "If you decline, the sandbox still starts, but without GitHub authentication"
+        echo "for the items above."
+        echo ""
+        echo "You are responsible for your own actions. If you pass your host token without"
+        echo "configuring $DEV_DIR/.env, you accept these risks. To avoid them, set"
         echo "SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN there to"
         echo "fine-grained PATs limited to the repositories you need (Contents: read,"
         echo "Pull requests: read and write)."
@@ -133,58 +138,58 @@ _confirm_host_token_use() {
     } >&2
 
     if [ ! -t 0 ]; then
-        echo "ERROR: cannot ask for consent without a terminal; set the tokens above in $DEV_DIR/.env." >&2
-        exit 1
+        echo "No terminal to ask for consent; continuing without GitHub credentials for the items above." >&2
+        return 1
     fi
 
     local _answer
-    read -r -p "Pass your host gh token into the sandbox anyway? [y/N] " _answer
+    read -r -p "Pass your host gh token into the sandbox? (N continues without it) [y/N] " _answer
     case "$_answer" in
         [yY]|[yY][eE][sS]) ;;
         *)
-            echo "Aborted. Set the dedicated tokens in $DEV_DIR/.env and re-run." >&2
-            exit 1
+            echo "Continuing without GitHub credentials for the consumers above." >&2
+            echo "Set the dedicated tokens in $DEV_DIR/.env to enable them." >&2
+            return 1
             ;;
     esac
 }
 
-# Fail fast when no GitHub credentials are resolvable. A sandbox started
-# without them cannot clone, push, open PRs or run Copilot, so there is no
-# point provisioning the VM first.
+# Resolve GitHub credentials. They are optional: without them the sandbox still
+# runs, but gh and Copilot inside the VM are unauthenticated. The host's
+# `gh auth token` is only used with the user's consent.
 _require_github_auth() {
-    VM_GH_TOKEN="${SANDBOX_VAR_GITHUB_TOKEN:-$_gh_token}"
-    COPILOT_TOKEN="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
+    VM_GH_TOKEN="${SANDBOX_VAR_GITHUB_TOKEN:-}"
+    COPILOT_TOKEN="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}"
 
-    local _missing=() _borrowed=()
-    [ -n "$VM_GH_TOKEN" ] || _missing+=("SANDBOX_VAR_GITHUB_TOKEN  (gh CLI inside the VM)")
-    [ -n "$COPILOT_TOKEN" ] || _missing+=("SANDBOX_VAR_COPILOT_GITHUB_TOKEN  (Copilot CLI auth)")
+    local _unset=()
+    [ -n "$VM_GH_TOKEN" ] || _unset+=("gh CLI inside the VM")
+    [ -n "$COPILOT_TOKEN" ] || _unset+=("Copilot CLI inside the VM")
+    [ "${#_unset[@]}" -gt 0 ] || return 0
 
-    if [ "${#_missing[@]}" -eq 0 ]; then
-        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] || _borrowed+=("gh CLI inside the VM")
-        [ -n "${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}" ] || _borrowed+=("Copilot CLI inside the VM")
-        _confirm_host_token_use "${_borrowed[@]}"
+    if [ -z "$_gh_token" ]; then
+        {
+            echo "WARNING: no token is set and the host has no 'gh auth token' for:"
+            printf '  - %s\n' "${_unset[@]}"
+            echo "Continuing without GitHub authentication for the items above. To enable it,"
+            echo "set SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN in $DEV_DIR/.env."
+        } >&2
         return 0
     fi
 
-    {
-        echo "ERROR: No GitHub credentials available; the sandbox would start unable to do any work."
-        echo "Missing:"
-        printf '  - %s\n' "${_missing[@]}"
-        echo ""
-        echo "Fix with either of:"
-        echo "  1. Authenticate on the host (used as the fallback for both):"
-        echo "       gh auth login -s admin:ssh_signing_key"
-        echo "  2. Set explicit tokens in $DEV_DIR/.env:"
-        echo "       SANDBOX_VAR_GITHUB_TOKEN=<fine-grained PAT>"
-        echo "       SANDBOX_VAR_COPILOT_GITHUB_TOKEN=<token with Copilot access>"
-    } >&2
-    exit 1
+    if _confirm_host_token_use "${_unset[@]}"; then
+        [ -n "$VM_GH_TOKEN" ] || VM_GH_TOKEN="$_gh_token"
+        [ -n "$COPILOT_TOKEN" ] || COPILOT_TOKEN="$_gh_token"
+    fi
 }
 
 # Log the VM's gh CLI in with the resolved token. Piped over stdin so the token
 # never lands in the VM's process list; GH_TOKEN/GITHUB_TOKEN are unset because
 # `gh auth login` refuses to run while they are present.
 _vm_gh_auth_login() {
+    if [ -z "$VM_GH_TOKEN" ]; then
+        echo "==> No gh token provided; skipping gh authentication inside the VM."
+        return 0
+    fi
     echo "==> Authenticating gh inside the VM..."
     if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc '
         unset GH_TOKEN GITHUB_TOKEN
@@ -219,8 +224,8 @@ Environment (.env keys):
   GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
                          when provisioning the VM (default: gh auth token)
   SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
-                         (required; falls back to host gh token only with consent)
-  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (required; same fallback)
+                         (falls back to host gh token only with consent)
+  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (same fallback)
   SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
@@ -667,7 +672,8 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
@@ -682,7 +688,8 @@ EOF
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
