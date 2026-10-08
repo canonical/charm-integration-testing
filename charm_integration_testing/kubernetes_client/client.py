@@ -295,6 +295,8 @@ class KubernetesClient:
                 if e.status == 404:
                     return None
                 raise
+            if pod.metadata is not None and pod.metadata.deletion_timestamp is not None:
+                return None
             if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
                 return None
             if any(
@@ -326,6 +328,8 @@ class KubernetesClient:
             if len(pods) != expected_count:
                 return None
             for pod in pods:
+                if pod.metadata is not None and pod.metadata.deletion_timestamp is not None:
+                    return None
                 if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
                     return None
                 if not any(

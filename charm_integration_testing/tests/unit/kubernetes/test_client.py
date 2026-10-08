@@ -4,7 +4,7 @@
 import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -865,6 +865,30 @@ class TestKubernetesClientInit:
             assert result == ready_pod
             assert mock_sleep.call_count == 1
 
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_terminating_pod_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running, ready pod that is terminating, followed by a live ready pod
+            terminating_pod = create_sample_pod("test-pod", "test-namespace", "Running", "old-uid")
+            terminating_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            terminating_pod.metadata.deletion_timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            ready_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            backend = MagicMock()
+            backend.core_v1_api.read_namespaced_pod.side_effect = [terminating_pod, ready_pod]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for readiness
+            result = client.wait_for_pod_ready("test-pod", "test-namespace")
+
+            # THEN the terminating pod is not accepted as ready
+            assert result == ready_pod
+            assert mock_sleep.call_count == 1
+
     class TestWaitForCharmPodsReady:
         """Test suite for wait_for_charm_pods_ready method."""
 
@@ -891,6 +915,35 @@ class TestKubernetesClientInit:
             result = client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
 
             # THEN it returns only after the desired pods are Running and Ready
+            assert result == [ready_pod]
+            assert mock_sleep.call_count == 1
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_terminating_pod_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running, ready pod that is terminating, followed by a live ready pod
+            terminating_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", labels={"app.kubernetes.io/name": "app"}
+            )
+            terminating_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            terminating_pod.metadata.deletion_timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            ready_pod = create_sample_pod("app-hash-pod-2", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[terminating_pod]),
+                V1PodListStub(items=[ready_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the application pod set
+            result = client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
+            # THEN it ignores the terminating pod and returns the live replacement
             assert result == [ready_pod]
             assert mock_sleep.call_count == 1
 
