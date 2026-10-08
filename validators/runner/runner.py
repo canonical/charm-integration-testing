@@ -313,6 +313,12 @@ class ValidatorRunner:
                     )
                 )
                 continue
+
+            def checkpoint(
+                validator: BasePersistenceValidator, expected_state: PersistenceState = expected
+            ) -> tuple[ValidationResult, PersistenceState]:
+                return validator.checkpoint(expected_state)
+
             for validator_cls in registered_validators:
                 outcome, error_result, skipped = self._call_persistence_method(
                     validator_cls,
@@ -320,7 +326,7 @@ class ValidatorRunner:
                     integration,
                     interface_name,
                     role,
-                    lambda v, expected=expected: v.checkpoint(expected),
+                    checkpoint,
                 )
                 if error_result is not None:
                     results.append(error_result)
