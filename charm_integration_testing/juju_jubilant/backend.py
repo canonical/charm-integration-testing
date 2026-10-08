@@ -192,7 +192,11 @@ class JubilantBackend(JujuCmdBackend):
                     raise RuntimeError(f"Machine placement changed for {unit_name}.")
                 for app in current.apps.values():
                     for name, unit in app.units.items():
-                        if name != unit_name and (unit.machine == machine or unit.machine.startswith(machine + "/")):
+                        if (
+                            name != unit_name
+                            and unit.machine is not None
+                            and (unit.machine == machine or unit.machine.startswith(machine + "/"))
+                        ):
                             raise JujuRestartNotSupportedError(f"Restarting {unit_name} would also restart {name}.")
 
             check_placement(status)

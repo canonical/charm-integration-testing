@@ -3166,6 +3166,19 @@ def test_shared_machine_is_not_rebooted(placement: str) -> None:
     assert backend.stub.calls == []
 
 
+def test_unassigned_unit_does_not_prevent_follower_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    # Simulate a null placement from status despite Jubilant's str annotation.
+    unassigned = UnitStatus(machine=cast(str, None))
+    for snapshot in backend.snapshots:
+        snapshot.apps["other"] = replace(snapshot.apps["target"], units={"other/0": unassigned})
+
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert all(target == "1" for target, _ in backend.stub.calls)
+    assert len(backend.stub.calls) == 3
+    assert "systemctl reboot" in backend.stub.calls[1][1]
+
+
 def test_machine_without_reboot_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = FollowerRestartBackendStub()
     ticks = iter([0.0, 0.0, 0.0, 11.0])

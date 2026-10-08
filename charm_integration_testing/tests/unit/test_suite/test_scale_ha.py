@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
 from test_suite import test_scale_ha as scale_ha
+from test_suite import test_scale_remove_follower as remove_follower
 
 from bundle_builder_x import Charm, CharmChannel
 
@@ -198,7 +199,9 @@ class FollowerClient(RecordingJujuClient):
 def test_follower_restart_preserves_ha_without_requiring_scale_down() -> None:
     client = FollowerClient()
     neighbor = JujuModelHandle(controller="controller", model="neighbor")
-    scale_ha.test_scale_remove_follower(cast(JujuClient, client), MODEL, neighbor, "target", _charm(scale_down=False))
+    remove_follower.test_scale_remove_follower(
+        cast(JujuClient, client), MODEL, neighbor, "target", _charm(scale_down=False)
+    )
     assert client.calls == [
         ("idle", [MODEL, neighbor], True),
         ("num_units", "target", MODEL),
@@ -214,7 +217,7 @@ def test_follower_restart_preserves_ha_without_requiring_scale_down() -> None:
 def test_follower_failure_is_not_hidden(error: str) -> None:
     client = FollowerClient(error=error)
     with pytest.raises((RuntimeError, TimeoutError, pytest.fail.Exception)):
-        scale_ha.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
+        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
     if error != "validation":
         assert not any(call[0] == "validate_model" for call in client.calls)
 
@@ -222,7 +225,7 @@ def test_follower_failure_is_not_hidden(error: str) -> None:
 def test_follower_requires_ha_count_before_disruption() -> None:
     client = FollowerClient(current_units=2)
     with pytest.raises(pytest.fail.Exception, match="at least 3"):
-        scale_ha.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
+        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
     assert not any(call[0] == "restart" for call in client.calls)
 
 
@@ -231,12 +234,12 @@ def test_follower_skips_unsupported_configuration(reason: str) -> None:
     client = FollowerClient(error=reason, current_units=1 if reason == "single" else 3)
     charm = _charm(ha_units=1 if reason == "single" else 3, subordinate=reason == "subordinate")
     with pytest.raises(pytest.skip.Exception):
-        scale_ha.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", charm)
+        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", charm)
     assert not any(call[0] == "validate_model" for call in client.calls)
 
 
 def test_follower_does_not_skip_unexpected_not_implemented_error() -> None:
     client = FollowerClient(error="not-implemented")
     with pytest.raises(NotImplementedError, match="restart hook failed"):
-        scale_ha.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
+        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", _charm())
     assert not any(call[0] == "validate_model" for call in client.calls)

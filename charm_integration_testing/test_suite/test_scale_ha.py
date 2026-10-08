@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
+from juju import JujuClient, JujuModelHandle
 
 from bundle_builder_x import Charm
 
@@ -78,33 +78,3 @@ def test_scale_from_ha(
     juju_client.scale_application(target_application, original_units, model=target_model_ref)
     juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
     juju_client.validate_model(model=target_model_ref, level="simple")
-
-
-@pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
-def test_scale_remove_follower(
-    juju_client: JujuClient,
-    target_model_ref: JujuModelHandle,
-    neighbor_model_ref: JujuModelHandle | None,
-    target_application: str,
-    target_deployed_charm: Charm | None,
-) -> None:
-    charm = _require_principal_charm(target_deployed_charm)
-    timeout = timedelta(minutes=15)
-    models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
-    juju_client.multi_model_idle_for_period(models=models, timeout=timeout, strict_timeout=True)
-    original_units = juju_client.num_units(target_application, model=target_model_ref)
-    if original_units < charm.ha_units:
-        pytest.fail(f"Expected at least {charm.ha_units} HA units, found {original_units}.")
-    if original_units < 2:
-        pytest.skip("The application has no follower to restart.")
-
-    try:
-        juju_client.restart_follower(target_application, model=target_model_ref, timeout=timeout)
-    except JujuRestartNotSupportedError as error:
-        pytest.skip(str(error))
-
-    juju_client.multi_model_idle_for_period(models=models, timeout=timeout, strict_timeout=True)
-    if juju_client.num_units(target_application, model=target_model_ref) != original_units:
-        pytest.fail("The application unit count changed after restarting its follower.")
-    for model in models:
-        juju_client.validate_model(model=model, level="simple")
