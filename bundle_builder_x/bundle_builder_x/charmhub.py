@@ -536,8 +536,16 @@ class CharmhubClient:
         )
 
         # The revision lookup reports the channel where this revision was released. Prefer it
-        # over the charm's current default channel, which may be on another track.
+        # over the charm's current default channel, but only when that channel still supports
+        # the selected base.
         channel = refresh_info.effective_channel
+        if channel is not None and not self._channel_supports_ubuntu_version(
+            charm_name,
+            ubuntu_arch,
+            ubuntu_version,
+            CharmChannel.model_validate(channel),
+        ):
+            channel = None
         if channel is None:
             default_refresh_info = self._default_refresh_info(
                 charm_name,
