@@ -113,8 +113,13 @@ Charmhub default base.
   --log-dir "./local-charm-test-logs"
 ```
 
-Use the substrate and endpoints that fit the charm. Do not set
-`--target-channel` or `--target-revision` for a local artifact.
+Use the substrate and endpoints that fit the charm. You may pass
+`--target-channel` and/or `--target-revision` to describe the release context
+you want to test, for example `--target-channel "2/edge" --target-revision 42`.
+These selectors choose track/risk-based overrides and evaluate version
+constraints; they do not change the artifact or the local revision Juju assigns
+when deploying it. If omitted, channel-specific overrides are not selected;
+base-only overrides can still apply.
 
 The downgrade/upgrade cycle and `test_deploy_target_old_revision` move the
 target between artifacts. By default the other artifact is the charm's default
@@ -334,8 +339,8 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 | `neighbor` | `--neighbor-charm` | Integration partner charm |
 | `neighbor_endpoint` | `--neighbor-endpoint` | Partner charm's endpoint |
 | `series` | `--target-series` | Ubuntu series (20.04, 22.04, etc.) |
-| `revision` | `--target-revision` | Charm revision to test |
-| `channel` | `--target-channel` | Charm channel (edge, beta, stable) |
+| `revision` | `--target-revision` | Charmhub revision, or intended test context for a local artifact |
+| `channel` | `--target-channel` | Charmhub channel, or intended test context for a local artifact |
 | `juju_channel` | (Juju version) | Juju version (3/stable, 4/edge) |
 | `execution_id` | N/A | Used for logging/tracking |
 

@@ -12,6 +12,8 @@ def test_local_target_base_does_not_constrain_neighbor_base() -> None:
     target = Charm(
         name="my-charm",
         source_path=Path("/charms/my-charm"),
+        test_channel=CharmChannel.model_validate("2/edge"),
+        test_revision=42,
         ubuntu_version="26.04",
         ubuntu_arch="amd64",
         endpoints={},
@@ -20,8 +22,8 @@ def test_local_target_base_does_not_constrain_neighbor_base() -> None:
 
     target_spec, neighbor_spec = application_specs(
         target_charm="my-charm",
-        target_channel=None,
-        target_revision=None,
+        target_channel="2/edge",
+        target_revision=42,
         target_series=None,
         local_target_charm=Path("/charms/my-charm"),
         target_resolved_charm=target,
@@ -29,6 +31,8 @@ def test_local_target_base_does_not_constrain_neighbor_base() -> None:
     )
 
     assert target_spec.base == "26.04"
+    assert target_spec.channel == "2/edge"
+    assert target_spec.revision == 42
     assert neighbor_spec.base is None
 
 
