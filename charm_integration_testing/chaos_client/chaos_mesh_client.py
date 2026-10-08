@@ -136,7 +136,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 experiment.get("desiredPhase") == "Run"
                 and conditions.get("Selected") == "True"
                 and conditions.get("AllInjected") == "True"
-                and conditions.get("AllRecovered") == "False"
+                and conditions.get("AllRecovered") in (None, "False")
                 and all(record.get("phase") == "Injected" for record in records)
             ):
                 raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active: {status}")
@@ -302,7 +302,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 conditions.get("Selected") == "True"
                 and conditions.get("AllInjected") == "True"
                 and experiment.get("desiredPhase") == "Run"
-                and conditions.get("AllRecovered") != "True"
+                and conditions.get("AllRecovered") in (None, "False")
             ):
                 if self._clock() < deadline:
                     return

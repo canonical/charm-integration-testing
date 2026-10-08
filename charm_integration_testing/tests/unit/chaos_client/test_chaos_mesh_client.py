@@ -615,7 +615,8 @@ def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) 
 
 
 @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
-def test_stress_waits_for_injection_before_returning(operation: str) -> None:
+@pytest.mark.parametrize("recovered_status", [None, "False"])
+def test_stress_waits_for_injection_before_returning(operation: str, recovered_status: str | None) -> None:
     # GIVEN a controller that reports unselected/pending before it injects the fault
     backend = BackendStub()
     api = backend.custom_objects_api
@@ -632,10 +633,11 @@ def test_stress_waits_for_injection_before_returning(operation: str) -> None:
             "conditions": [
                 {"type": "Selected", "status": "True" if len(sleeps) > 1 else "False"},
                 {"type": "AllInjected", "status": "True"},
-                {"type": "AllRecovered", "status": "False"},
             ],
             "experiment": {"desiredPhase": "Run"},
         }
+        if recovered_status is not None:
+            obj["status"]["conditions"].append({"type": "AllRecovered", "status": recovered_status})
 
     mesh = ChaosMeshChaosClient(backend, clock=lambda: now, pause=pause)
     if operation == "stress_cpu":
@@ -650,7 +652,8 @@ def test_stress_waits_for_injection_before_returning(operation: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "state", ["pending", "recovered", "stopped", "paused", "replacement", "wrong-owner", "api-error"]
+    "state",
+    ["pending", "recovered", "recovery-unknown", "stopped", "paused", "replacement", "wrong-owner", "api-error"],
 )
 def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
     # GIVEN a created resource whose injection cannot be confirmed
@@ -667,11 +670,13 @@ def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
             obj["status"] = {"experiment": {"desiredPhase": "Stop"}}
         elif state == "paused":
             obj["status"] = {"conditions": [{"type": "Paused", "status": "True"}]}
-        elif state == "recovered":
+        elif state in {"recovered", "recovery-unknown"}:
             obj["status"] = {
                 "experiment": {"desiredPhase": "Run"},
                 "conditions": [{"type": key, "status": "True"} for key in ("Selected", "AllInjected", "AllRecovered")],
             }
+            if state == "recovery-unknown":
+                obj["status"]["conditions"][-1]["status"] = "Unknown"
         elif state == "replacement":
             obj["metadata"]["uid"] = "replacement"
         elif state == "wrong-owner":
@@ -681,7 +686,9 @@ def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
 
     mesh = ChaosMeshChaosClient(backend, startup_timeout=timedelta(seconds=3), clock=lambda: now, pause=pause)
     expected = (
-        TimeoutError if state in {"pending", "recovered"} else (ApiException if state == "api-error" else RuntimeError)
+        TimeoutError
+        if state in {"pending", "recovered", "recovery-unknown"}
+        else (ApiException if state == "api-error" else RuntimeError)
     )
     with pytest.raises(expected):
         mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
@@ -727,6 +734,9 @@ class TestStressObservation:
         "state",
         [
             "running",
+            "recovery-missing",
+            "recovery-unknown",
+            "recovered-while-running",
             "completed",
             "running-empty-records",
             "completed-empty-records",
@@ -784,6 +794,12 @@ class TestStressObservation:
                     "message": "daemon unavailable",
                 }
             ]
+        elif state == "recovery-missing":
+            conditions.pop()
+        elif state == "recovery-unknown":
+            conditions[-1]["status"] = "Unknown"
+        elif state == "recovered-while-running":
+            conditions[-1]["status"] = "True"
         elif state == "paused":
             conditions.append({"type": "Paused", "status": "True"})
         elif state == "pause-requested":
@@ -812,7 +828,7 @@ class TestStressObservation:
             api.raise_on_read = ApiException(status=503)
 
         # WHEN observing, THEN only active or explicitly allowed completed runs pass
-        if state == "running" or (state == "completed" and allow_completed):
+        if state in {"running", "recovery-missing"} or (state == "completed" and allow_completed):
             meta.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
         else:
             expected = ApiException if state in {"missing-resource", "api-error"} else RuntimeError

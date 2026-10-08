@@ -13,7 +13,7 @@ from kubernetes_client import KubernetesClient
 from .fixtures.chaos_tools import ChaosTool, available_chaos_tools
 from .scheduler.states import State
 
-ValidationKey = tuple[JujuModelHandle, str, str, str, int]
+ValidationKey = tuple[JujuModelHandle, str, str, str, int | None]
 
 
 def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHandle, str, str]]) -> set[ValidationKey]:

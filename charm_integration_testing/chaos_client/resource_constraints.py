@@ -37,6 +37,7 @@ class CharmResourceConstraints(BaseModel):
     memory_exhaustion_workers: PositiveInt | None = None
     memory_exhaustion_size_mb: PositiveInt | None = None
     memory_exhaustion_duration_seconds: PositiveInt | None = None
+    memory_exhaustion_limit: str | None = Field(default=None, min_length=1)
 
     # Memory moderate pressure (backed by ChaosClient.stress_memory)
     memory_moderate_pressure_workers: PositiveInt | None = None
