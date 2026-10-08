@@ -30,6 +30,13 @@ class AppSpec(BaseModel):
     channel: str | None = None
     revision: int | None = None
     base: str | None = None
+    local_charm: Path | None = None
+
+    @model_validator(mode="after")
+    def _validate_local_charm(self) -> AppSpec:
+        if self.local_charm is not None and (self.channel is not None or self.revision is not None):
+            raise ValueError("local_charm cannot be combined with channel or revision")
+        return self
 
 
 class IntegrationSpec(BaseModel):

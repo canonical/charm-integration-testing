@@ -829,6 +829,8 @@ class BundleBuilder:
         owning_model = domain.charms[tag.charm.charm_id].model
         peer_model = domain.charms[tag.peer_charm_id].model
         peer_channel = domain.charms[tag.peer_charm_id].spec.channel
+        peer_is_local = domain.charms[tag.peer_charm_id].spec.source_path is not None
+        owning_is_local = domain.charms[tag.charm.charm_id].spec.source_path is not None
 
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
@@ -840,7 +842,7 @@ class BundleBuilder:
             risk = tag.required_risk or None
             branch = None
 
-        if self._fetch_and_add_charm_variant(
+        if not peer_is_local and self._fetch_and_add_charm_variant(
             charm_id=tag.peer_charm_id,
             charm_name=tag.peer_charm_name,
             domain=domain,
@@ -852,6 +854,9 @@ class BundleBuilder:
             connect_to_id=tag.charm.charm_id,
         ):
             return True
+
+        if owning_is_local or peer_channel is None:
+            return False
 
         return self._fetch_and_add_charm_variant(
             charm_id=tag.charm.charm_id,
@@ -883,59 +888,61 @@ class BundleBuilder:
         expanded = False
         interface = sub_charm_spec.endpoints[tag.subordinate_endpoint].interface
 
-        # Try fetching the subordinate charm at the principal's base.
-        try:
-            sub_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.subordinate_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=sub_charm_spec.channel.track or None,
-                charm_risk=sub_charm_spec.channel.risk or None,
-                charm_branch=sub_charm_spec.channel.branch or None,
-                ubuntu_version=principal_base,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                sub_charm,
-                tag.subordinate_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.principal_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
-            )
+        if sub_charm_spec.source_path is None:
+            # Try fetching the subordinate charm at the principal's base.
+            try:
+                sub_charm = self.charmhub_client.charm_from_store(
+                    charm_name=tag.subordinate_charm_name,
+                    ubuntu_arch=model.arch,
+                    juju_version=model.juju_version,
+                    platform=model.platform,
+                    charm_track=sub_charm_spec.channel.track if sub_charm_spec.channel else None,
+                    charm_risk=sub_charm_spec.channel.risk if sub_charm_spec.channel else None,
+                    charm_branch=sub_charm_spec.channel.branch if sub_charm_spec.channel else None,
+                    ubuntu_version=principal_base,
+                )
+                expanded |= self._add_charm_for_charm_id(
+                    sub_charm,
+                    tag.subordinate_charm_id,
+                    domain,
+                    model_ref,
+                    connect_to_id=tag.principal_charm_id,
+                    connect_to_neighbors=True,
+                    connect_to_interface=interface,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(
+                    f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
+                )
 
         # Also try fetching the principal at the subordinate's base, in case
         # the principal has a variant that matches.
-        try:
-            principal_spec = domain.charms[tag.principal_charm_id].spec
-            principal_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.principal_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=principal_spec.channel.track or None,
-                charm_risk=principal_spec.channel.risk or None,
-                charm_branch=principal_spec.channel.branch or None,
-                ubuntu_version=tag.subordinate_base,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                principal_charm,
-                tag.principal_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.subordinate_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
-            )
+        principal_spec = domain.charms[tag.principal_charm_id].spec
+        if principal_spec.source_path is None:
+            try:
+                principal_charm = self.charmhub_client.charm_from_store(
+                    charm_name=tag.principal_charm_name,
+                    ubuntu_arch=model.arch,
+                    juju_version=model.juju_version,
+                    platform=model.platform,
+                    charm_track=principal_spec.channel.track if principal_spec.channel else None,
+                    charm_risk=principal_spec.channel.risk if principal_spec.channel else None,
+                    charm_branch=principal_spec.channel.branch if principal_spec.channel else None,
+                    ubuntu_version=tag.subordinate_base,
+                )
+                expanded |= self._add_charm_for_charm_id(
+                    principal_charm,
+                    tag.principal_charm_id,
+                    domain,
+                    model_ref,
+                    connect_to_id=tag.subordinate_charm_id,
+                    connect_to_neighbors=True,
+                    connect_to_interface=interface,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(
+                    f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
+                )
 
         return expanded
 
@@ -943,6 +950,15 @@ class BundleBuilder:
         # Get the charm matching the application constraints
         model = domain.models[model_ref]
         app = model.applications[application]
+        if app.local_charm is not None:
+            return self.charmhub_client.charm_from_local(
+                charm_path=app.local_charm,
+                charm_name=app.charm,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                ubuntu_version=app.base,
+            )
         return self.charmhub_client.charm_from_store(
             charm_name=app.charm,
             ubuntu_arch=model.arch,
