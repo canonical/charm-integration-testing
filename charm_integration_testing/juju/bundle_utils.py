@@ -8,6 +8,29 @@ from dataclasses import dataclass
 import yaml
 
 
+def application_unit_count_from_bundle(bundle_yaml: str, application: str, platform: str) -> int:
+    """Return an application's configured unit count from the base bundle document."""
+    try:
+        bundle = next(yaml.safe_load_all(bundle_yaml))
+    except StopIteration:
+        raise ValueError("Bundle is empty.") from None
+
+    if not isinstance(bundle, dict):
+        raise ValueError("Invalid bundle document.")
+    applications = bundle.get("applications")
+    if not isinstance(applications, dict) or application not in applications:
+        raise ValueError(f"Application '{application}' not found in bundle.")
+    application_data = applications[application]
+    if not isinstance(application_data, dict):
+        raise ValueError(f"Invalid application definition for '{application}'.")
+
+    units_key = "scale" if platform == "kubernetes" else "num_units"
+    units = application_data.get(units_key)
+    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+        raise ValueError(f"Application '{application}' must define a positive integer '{units_key}'.")
+    return units
+
+
 @dataclass(frozen=True)
 class OfferDetails:
     """Details of a single offer declared in a bundle overlay."""

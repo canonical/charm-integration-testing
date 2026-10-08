@@ -7,8 +7,8 @@ from typing import cast
 
 import pytest
 from juju import JujuClient
-from test_suite import ha_helpers
 from test_suite import test_scale_ha as scale_ha
+from test_suite.fixtures import integration_spec
 
 from .ha_fakes import MODEL, RecordingJujuClient, charm
 
@@ -103,20 +103,15 @@ def test_scale_from_ha_skips_subordinate_before_parsing_or_accessing_juju(tmp_pa
     assert client.calls == []
 
 
-def test_bundle_application_units_reads_platform_specific_unit_key(tmp_path: Path) -> None:
-    bundle = tmp_path / "bundle.yaml"
-    bundle.write_text(
-        "applications:\n"
-        "  target:\n"
-        "    scale: 2\n"
-        "  machine-target:\n"
-        "    num_units: 4\n"
-        "---\n"
-        "applications:\n"
-        "  target:\n"
-        "    offers: {}\n",
-        encoding="utf-8",
-    )
+def test_scale_to_ha_fails_if_deployed_charm_metadata_is_unavailable() -> None:
+    client = RecordingJujuClient(current_units=1)
 
-    assert ha_helpers.bundle_application_units(bundle, "target", "kubernetes") == 2
-    assert ha_helpers.bundle_application_units(bundle, "machine-target", "machine") == 4
+    with pytest.raises(pytest.fail.Exception, match="Unable to resolve the deployed target charm metadata"):
+        scale_ha.test_scale_to_ha(cast(JujuClient, client), MODEL, "target", None)
+
+    assert client.calls == []
+
+
+def test_require_principal_charm_rejects_subordinates() -> None:
+    with pytest.raises(pytest.skip.Exception, match="mysql-k8s is subordinate"):
+        integration_spec.require_principal_charm(charm(subordinate=True))

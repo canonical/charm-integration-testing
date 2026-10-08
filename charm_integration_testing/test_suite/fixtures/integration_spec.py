@@ -222,6 +222,15 @@ def target_deployed_charm(
     )
 
 
+def require_principal_charm(charm: Charm | None) -> Charm:
+    """Fail or skip test cases that require independently scalable principal charms."""
+    if charm is None:
+        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA tests.")
+    if charm.subordinate:
+        pytest.skip(f"{charm.name} is subordinate and cannot be scaled independently.")
+    return charm
+
+
 @pytest.fixture
 def neighbor_deployed_charm(
     charmhub_client: CharmhubClient,
