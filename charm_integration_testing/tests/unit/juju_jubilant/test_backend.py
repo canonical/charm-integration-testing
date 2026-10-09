@@ -13,6 +13,7 @@ import pytest
 import yaml
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuIntegrationApplication,
@@ -307,6 +308,33 @@ class TestJubilantClient:
 
         # THEN the jubilant.Juju has the composed controller:model uri
         assert model.model == "test-controller:my-model"
+
+
+def test_application_health_uses_one_real_status_snapshot() -> None:
+    # GIVEN Jubilant status types with mixed application, workload and agent states
+    status = StatusStub(
+        application_statuses={"app": "active"},
+        unit_workload_statuses={"app/2": "active", "app/7": "blocked"},
+        unit_juju_statuses={"app/2": "executing", "app/7": "error"},
+    )
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN reading health, THEN the adapter preserves all unit statuses from one snapshot
+    assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
+        "active", {"app/2": "active", "app/7": "blocked"}, {"app/2": "executing", "app/7": "error"}
+    )
+    assert status.call_count == 1
+
+
+def test_application_health_missing_application_fails() -> None:
+    # GIVEN an empty status snapshot
+    status = StatusStub()
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN checking a disappeared application, THEN absence does not count as healthy
+    with pytest.raises(KeyError, match="missing"):
+        backend.application_health(TEST_MODEL, "missing")
+    assert status.call_count == 1
 
 
 @dataclass

@@ -37,6 +37,16 @@ class TestNativeChaosClientInit:
         assert client._juju is stub
         assert stub.exec_calls == []
 
+    def test_legacy_client_inherits_unsupported_stress_check(self) -> None:
+        # GIVEN an existing concrete client that does not implement check_stress
+        stub = JujuStub()
+        client = NativeChaosClient(stub)
+
+        # WHEN checking stress, THEN construction still works and no commands are executed
+        with pytest.raises(NotImplementedError):
+            client.check_stress(TEST_MODEL, "postgresql/0")
+        assert stub.exec_calls == []
+
 
 class TestFillDisk:
     """Test suite for fill_disk method."""

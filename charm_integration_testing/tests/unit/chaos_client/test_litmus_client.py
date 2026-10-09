@@ -518,6 +518,130 @@ def test_startup_waits_for_injection_not_engine_creation(context: ClientContext)
     assert not context.engines
 
 
+class TestCheckStress:
+    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+    @pytest.mark.parametrize("state", ["completed", "failed", "empty", "stopped", "injected"])
+    def test_completion_contract_through_meta(self, context: ClientContext, operation: str, state: str) -> None:
+        chaos = context.chaos_client()
+        meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
+        if operation == "stress_cpu":
+            meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
+        else:
+            meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        meta.check_stress(MODEL, UNIT)
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+        engine = next(iter(context.engines.values()))
+        engine["status"]["engineStatus"] = "completed"
+        result = context.results[0]
+        result["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+        result["metadata"]["annotations"] = {"pod/postgresql-random-pod": "reverted"}
+        if state == "failed":
+            result["status"]["experimentStatus"]["verdict"] = "Fail"
+        elif state == "empty":
+            context.results.clear()
+        elif state == "stopped":
+            engine["spec"]["engineState"] = "stop"
+        elif state == "injected":
+            result["metadata"]["annotations"] = {"pod/postgresql-random-pod": "injected"}
+
+        with pytest.raises(RuntimeError):
+            meta.check_stress(MODEL, UNIT)
+        if state in {"completed", "empty", "injected"}:
+            # Independent OOM evidence permits delayed/missing completion results.
+            # Cleanup still verifies reversion before removing tracked resources.
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT, allow_completed=True)
+        assert len(chaos._created) == 1
+
+    @dataclass(frozen=True)
+    class Params:
+        change: str
+        message: str
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params("engine-missing", "requested stress duration"),
+            Params("result-missing", "no longer confirmed active"),
+            Params("completed", "requested stress duration"),
+            Params("stopped", "requested stress duration"),
+            Params("reverted", "requested stress duration"),
+            Params("targeted", "no longer confirmed active"),
+            Params("failed", "failed"),
+            Params("replaced", "was replaced"),
+            Params("owner", "Cannot verify ownership"),
+            Params("deleting", "ended before stress"),
+            Params("stop-requested", "ended before stress"),
+        ],
+        ids=lambda params: params.change,
+    )
+    def test_rejects_loss_of_active_stress(self, context: ClientContext, params: Params) -> None:
+        # GIVEN successfully injected CPU stress
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        chaos.check_stress(MODEL, UNIT)
+        engine = next(iter(context.engines.values()))
+        result = context.results[0]
+
+        # WHEN the experiment ends, disappears or loses identity
+        match params.change:
+            case "engine-missing":
+                context.engines.clear()
+            case "result-missing":
+                context.results.clear()
+            case "completed" | "stopped":
+                engine["status"]["engineStatus"] = params.change
+            case "reverted" | "targeted":
+                result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.change}
+            case "failed":
+                result["status"]["experimentStatus"] = {"phase": "Error", "verdict": "Error"}
+            case "replaced":
+                engine["metadata"]["uid"] = "replacement"
+            case "owner":
+                engine["metadata"]["annotations"].clear()
+            case "deleting":
+                engine["metadata"]["deletionTimestamp"] = "2026-10-05T00:00:00Z"
+            case "stop-requested":
+                engine["spec"]["engineState"] = "stop"
+
+        # THEN observation fails immediately and retains cleanup tracking
+        with pytest.raises(RuntimeError, match=params.message):
+            chaos.check_stress(MODEL, UNIT)
+        assert context.now == 0
+        assert len(chaos._created) == 1
+
+    def test_unknown_scope_and_cleaned_run_are_not_reported_active(self, context: ClientContext) -> None:
+        # GIVEN a successfully started run
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+
+        # WHEN checking unrelated scopes, THEN no active run is reported
+        for model, unit in [
+            (JujuModelHandle(controller="other", model=MODEL.model), UNIT),
+            (MODEL, "postgresql/1"),
+        ]:
+            with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+                chaos.check_stress(model, unit)
+        chaos.cleanup(MODEL, UNIT, "")
+        with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+            chaos.check_stress(MODEL, UNIT)
+
+    def test_api_error_is_not_hidden(self, context: ClientContext) -> None:
+        # GIVEN active stress followed by an observation API failure
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        error = ApiException(status=503)
+        context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = error
+
+        # WHEN observing, THEN the original failure propagates
+        with pytest.raises(ApiException) as exc_info:
+            chaos.check_stress(MODEL, UNIT)
+        assert exc_info.value is error
+        assert len(chaos._created) == 1
+
+
 @pytest.mark.parametrize("verdict", ["Fail", "Error"])
 def test_startup_reports_failed_result(context: ClientContext, verdict: str) -> None:
     context.auto_inject = False

@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Callable, Literal, NoReturn
 
@@ -43,6 +43,7 @@ class _CleanupAction:
     scope: tuple[str, str]
     path: str
     run: Callable[[], None]
+    stress_tool: ChaosClient | None = None
 
 
 class MetaChaosClient(ChaosClient):
@@ -91,29 +92,43 @@ class MetaChaosClient(ChaosClient):
         duration: timedelta,
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
-    ) -> None:
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
-            match scenario:
-                case "exhaustion":
-                    merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
-                    merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
-                case "moderate_pressure":
-                    merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
-                    merged_duration = self._merged_duration(
-                        constraints.cpu_moderate_pressure_duration_seconds, duration
-                    )
-                case _:
-                    raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
-            return lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration)
+        duration_margin: timedelta = timedelta(0),
+    ) -> timedelta:
+        """Inject CPU stress for the resolved duration plus margin; return the duration without margin."""
+        if duration_margin < timedelta(0):
+            raise ValueError("CPU stress duration margin must be nonnegative.")
+        if not self.supports("stress_cpu"):
+            self._on_unsupported("stress_cpu")
+        constraints = self._resolve_constraints(model, unit)
+        match scenario:
+            case "exhaustion":
+                merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
+                merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
+            case "moderate_pressure":
+                merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
+                merged_duration = self._merged_duration(constraints.cpu_moderate_pressure_duration_seconds, duration)
+            case _:
+                raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
 
-        self._dispatch_constrained(
+        self._dispatch(
             "stress_cpu",
-            model,
-            unit,
-            build_invoke,
+            lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration + duration_margin),
             lambda tool: self._experiment_cleanup(tool, model, unit),
             self._cleanups,
         )
+        return merged_duration
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Check only successful stress owners, retaining them until cleanup succeeds."""
+        tools = {
+            id(action.stress_tool): action.stress_tool
+            for action in self._cleanups
+            if action.scope == (model.uri, unit) and action.stress_tool is not None
+        }
+        if not tools:
+            raise RuntimeError(f"No successfully started stress for {model.uri}/{unit}.")
+        for tool in tools.values():
+            tool.check_stress(model, unit, allow_completed=allow_completed)
 
     def stress_memory(
         self,
@@ -196,10 +211,6 @@ class MetaChaosClient(ChaosClient):
     def remove_network_isolation(self, model: str, unit: str) -> None:
         self._cleanup(self._network_cleanups, (model, unit), "")
 
-    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        for tool in self._tools:
-            tool.check_stress(model, unit, allow_completed=allow_completed)
-
     def cleanup_all(self) -> None:
         """Clean up all pending experiments, including network isolation."""
         errors: list[Exception] = []
@@ -277,7 +288,7 @@ class MetaChaosClient(ChaosClient):
     def _dispatch(
         self,
         operation: str,
-        invoke: Callable[[ChaosClient], None],
+        invoke: Callable[[ChaosClient], object],
         cleanup: Callable[[ChaosClient], _CleanupAction],
         pending: list[_CleanupAction],
     ) -> None:
@@ -291,6 +302,8 @@ class MetaChaosClient(ChaosClient):
                 # Failed calls may have created resources.
                 pending.append(action)
                 raise
+            if operation in {"stress_cpu", "stress_memory"}:
+                action = replace(action, stress_tool=tool)
             pending.append(action)
             return
         self._on_unsupported(operation)

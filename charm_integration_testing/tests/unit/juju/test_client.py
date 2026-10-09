@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -11,6 +12,7 @@ from juju import JujuModelHandle, JujuValidationError
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import (
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuIntegrationApplication,
     PersistenceKey,
@@ -63,6 +65,16 @@ class BackendStub(NullJujuBackend):
         self, model: JujuModelHandle, application: str, level: str
     ) -> dict[str, list[ValidationResult]]:
         return self.validate_results.get(application, {})
+
+
+@dataclass
+class HealthBackendStub(NullJujuBackend):
+    health: JujuApplicationHealth
+    calls: list[tuple[JujuModelHandle, str]] = field(default_factory=list)
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        self.calls.append((model, application))
+        return self.health
 
 
 @dataclass
@@ -285,6 +297,66 @@ class TestJujuClientMultiModelIdleForPeriod:
         assert backend.calls == []
 
 
+class TestApplicationHealth:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        health: JujuApplicationHealth
+        error: str | None = "Unhealthy application"
+
+    cases = [
+        Params("active", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "idle"}), None),
+        Params("busy", JujuApplicationHealth("waiting", {"app/2": "maintenance"}, {"app/2": "executing"}), None),
+        Params("app-error", JujuApplicationHealth("error", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("app-blocked", JujuApplicationHealth("blocked", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("unit-error", JujuApplicationHealth("active", {"app/2": "error"}, {"app/2": "idle"})),
+        Params("unit-blocked", JujuApplicationHealth("active", {"app/2": "blocked"}, {"app/2": "idle"})),
+        Params("agent-error", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "error"})),
+        Params("agent-lost", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "lost"})),
+        Params("agent-down", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "down"})),
+        Params("unknown", JujuApplicationHealth("unknown", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("empty-status", JujuApplicationHealth("", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("empty-unit-status", JujuApplicationHealth("active", {"app/2": ""}, {"app/2": "idle"})),
+        Params("empty-agent-status", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": ""})),
+        Params("no-units", JujuApplicationHealth("active", {}, {}), "Incomplete unit health"),
+        Params("missing-agent", JujuApplicationHealth("active", {"app/2": "active"}, {}), "Incomplete unit health"),
+        Params(
+            "different-agent",
+            JujuApplicationHealth("active", {"app/2": "active"}, {"app/3": "idle"}),
+            "Incomplete unit health",
+        ),
+        Params(
+            "second-unit-blocked",
+            JujuApplicationHealth(
+                "active", {"app/2": "active", "app/3": "blocked"}, {"app/2": "idle", "app/3": "idle"}
+            ),
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", cases, ids=lambda params: params.label)
+    def test_health_snapshot(self, params: Params) -> None:
+        # GIVEN a typed backend snapshot, without an idle-wait implementation
+        backend = HealthBackendStub(params.health)
+        client = JujuClient(backend, logging.getLogger(__name__))
+        model = JujuModelHandle(controller="ctrl", model="model")
+
+        # WHEN checking health, THEN bad states fail but non-idle healthy transitions are permitted
+        if params.error is None:
+            client.check_application_health(model, "app")
+        else:
+            with pytest.raises(RuntimeError, match=params.error):
+                client.check_application_health(model, "app")
+        assert backend.calls == [(model, "app")]
+
+    def test_default_method_preserves_existing_backends(self) -> None:
+        # GIVEN a pre-existing concrete backend that does not implement health
+        backend = NullJujuBackend()
+
+        # WHEN health is requested, THEN it fails explicitly rather than preventing instantiation
+        with pytest.raises(NotImplementedError):
+            backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
+
+
 class TestJujuValidationError:
     class TestMessage:
         def test_single_unit_single_failure(self) -> None:
@@ -328,7 +400,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model(self._model())
+        assert client.validate_model(self._model()) == {}
 
     def test_does_not_raise_when_all_pass(self, logger: LoggerStub) -> None:
         # GIVEN one application whose backend validation returns PASS
@@ -498,7 +570,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model(self._model())
+        assert client.validate_model(self._model()) == {"myapp/0": [_skipped(), _skipped("metrics")]}
 
         # THEN the unit with all skipped results is skipped with a log
         assert any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
@@ -536,10 +608,33 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend, [extension])
 
         # WHEN
-        client.validate_model(self._model(), level=None)
+        assert client.validate_model(self._model(), level=None) == {}
 
         # THEN the extension was invoked with the application
         assert extension.calls == [("myapp", "prepare", {})]
+
+    def test_returns_functional_results_without_persistence_or_aliasing(self, logger: LoggerStub) -> None:
+        # GIVEN backend and extension checks on multiple units and applications, plus persistence
+        backend_results = {"myapp/2": [_pass()]}
+        backend = BackendStub(
+            app_list={"myapp": _app_info(), "other": _app_info()},
+            validate_results={"myapp": backend_results, "other": {"other/3": [_pass("other")]}},
+        )
+        functional = ExtensionStub({"myapp": {"myapp/2": [_skipped("metrics")], "myapp/4": [_pass()]}})
+        persistence = PersistenceExtensionStub({"myapp": {"myapp/2": [_pass("canary")]}})
+        client = self._client(logger, backend, [functional, persistence])
+
+        # WHEN validating through the facade
+        results = client.validate_model(self._model())
+
+        # THEN functional checks are returned without persistence checks or shared result lists
+        assert results == {
+            "myapp/2": [_pass(), _skipped("metrics")],
+            "myapp/4": [_pass()],
+            "other/3": [_pass("other")],
+        }
+        results["myapp/2"].clear()
+        assert backend_results == {"myapp/2": [_pass()]}
 
     def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN a persistence extension that reports a FAIL

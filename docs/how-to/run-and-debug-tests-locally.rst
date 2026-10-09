@@ -238,6 +238,29 @@ The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
 
+Moderate CPU pressure
+---------------------
+
+``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
+It stresses one target unit's workload container and skips if CPU stress support
+or passing simple validators for the tested endpoints are unavailable.
+
+Defaults are one worker and five minutes, overridden by
+``cpu_moderate_pressure_workers`` and ``cpu_moderate_pressure_duration_seconds``.
+Tune workers for the charm's CPU allocation; one worker is not universally
+moderate pressure.
+
+After initial active/idle and simple validation, the test confirms injection
+and repeatedly checks stress status, workload health and simple validators.
+Error/blocked workloads, disconnected agents, experiment errors and lost
+validation coverage fail. Non-idle states are allowed during stress; sampled
+checks may miss brief failures.
+
+Cleanup runs on failure too. After successful observation and cleanup, target
+and neighbor models must recover to active/idle within fifteen minutes and pass
+simple validation without additional restarts. Cleanup failures fail the test.
+Select ``-k test_live_cpu_stress_moderate`` to run it.
+
 Total memory stress
 -------------------
 

@@ -52,6 +52,15 @@ class CharmChannel:
 
 
 @dataclass(frozen=True)
+class JujuApplicationHealth:
+    """Application, unit workload and unit agent status from one snapshot."""
+
+    status: str
+    units: dict[str, str]
+    agents: dict[str, str]
+
+
+@dataclass(frozen=True)
 class JujuApplicationInfo:
     charm: str
     revision: int

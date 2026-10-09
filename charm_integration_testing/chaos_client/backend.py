@@ -17,13 +17,6 @@ class ChaosClient(ABC):
     Use NotImplementedError only for unsupported operations, before any side effects.
     """
 
-    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        """Report known errors; allow completion only after independent fault confirmation.
-
-        This optional check is not proof of sustained stress. Allowing completion
-        must not suppress experiment errors or cleanup verification.
-        """
-
     @abstractmethod
     def supports(self, operation: str) -> bool:
         """Report whether this client can currently run the named experiment operation.
@@ -39,7 +32,14 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
+    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> timedelta | None:
+        raise NotImplementedError
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active stress unless independent fault evidence permits normal completion.
+
+        Allowing completion must not suppress experiment errors or cleanup checks.
+        """
         raise NotImplementedError
 
     @abstractmethod
