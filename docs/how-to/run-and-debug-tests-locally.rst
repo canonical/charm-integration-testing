@@ -11,7 +11,11 @@ Information you will need
 This guide will reference variables that need to contain values specific to your use case. For convenience, they are treated as environment variables, so that you can simply copy and paste the commands as they are written (without any edits or substitutions), as long as you set the environment variables yourself beforehand. However, you may also substitute values directly into the commands if you prefer not to set environment variables.
 
 ``TARGET_CHARM``:
-  The name of the primary charm under test on `Charmhub <https://charmhub.io/>`_. For example, ``grafana-k8s``.
+  The Charmhub name of the primary charm under test, matching the name in its
+  ``metadata.yaml``. For example, ``grafana-k8s``.
+``TARGET_CHARM_FILE``:
+  Optional path to a locally packed ``.charm`` file for the target. When set,
+  tests deploy this package instead of fetching the target from Charmhub.
 ``TARGET_ENDPOINT``:
   Endpoint of the charm being tested. For example, ``grafana-dashboard``.
 ``NEIGHBOR_CHARM``:
@@ -19,11 +23,19 @@ This guide will reference variables that need to contain values specific to your
 ``NEIGHBOR_ENDPOINT``:
   Endpoint for the neighbor charm being tested. For example, ``grafana-dashboard``.
 ``REVISION``:
-  Revision number of the charm under test. For our example, ``143``.
+  Optional Charmhub revision to use as test context. For a local build, this
+  selects release-specific overrides and constraints; it does not change the
+  package deployed or the revision Juju assigns to it.
+``CHANNEL``:
+  Optional Charmhub channel to use as test context, for example ``2/edge``.
+  For a local build, this selects channel-specific overrides and constraints;
+  it does not select a Charmhub release.
 ``SERIES``:
-  Series to run the charm tests under. This is one of ``20.04``, ``22.04`` and ``24.04``.
+  Ubuntu base to test, such as ``20.04``, ``22.04``, ``24.04`` or ``26.04``.
 ``SUBSTRATE``:
-  Substrate to run the tests on. The only possible value at the moment is ``kubernetes``.
+  Substrate to run the tests on: ``kubernetes`` or ``machine``.
+``TARGET_CLOUD``:
+  Juju cloud name for the target model, such as ``local-k8s`` or ``localhost``.
 ``K8S_CLOUD_NAME``:
   The name to use for the Kubernetes cloud that Juju will use for its controller and model. For example, ``k8s-cloud``.
 ``K8S_CONTROLLER_NAME``:
@@ -192,6 +204,66 @@ The contents of the output file will look something like the following:
   relations:
   - - neighbor:grafana-dashboard
     - target:grafana-dashboard
+
+Test a local charm on Juju 4 or Ubuntu 26.04
+----------------------------------------------
+
+Build the charm in its source repository and keep the resulting ``.charm``
+file. For example, run ``charmcraft pack`` and set ``TARGET_CHARM_FILE`` to
+the path of the output file. The test suite unpacks the archive and deploys
+that local charm; the neighbor charm continues to resolve from Charmhub.
+
+To test with Juju 4, install or switch the Juju CLI in the sandbox to the
+desired channel before running tests. If Juju is not installed, run:
+
+.. code:: bash
+
+   sudo snap install juju --channel 4/stable
+
+If Juju is already installed, switch channels with:
+
+.. code:: bash
+
+   sudo snap refresh juju --channel 4/stable
+
+Confirm the selected version:
+
+.. code:: bash
+
+   juju version
+
+Set ``TARGET_CHARM``, ``TARGET_CHARM_FILE``, ``TARGET_ENDPOINT``,
+``NEIGHBOR_CHARM``, ``NEIGHBOR_ENDPOINT``, ``TARGET_CLOUD`` and
+``SUBSTRATE`` to match your charm and sandbox. Then run:
+
+.. code:: bash
+
+   ./scripts/run-tests.sh \
+     --target-cloud "${TARGET_CLOUD}" \
+     --target-platform "${SUBSTRATE}" \
+     --target-charm "${TARGET_CHARM}" \
+     --target-charm-file "${TARGET_CHARM_FILE}" \
+     --target-series 26.04 \
+     --target-channel 2/edge \
+     --target-application target \
+     --target-endpoint "${TARGET_ENDPOINT}" \
+     --neighbor-charm "${NEIGHBOR_CHARM}" \
+     --neighbor-application neighbor \
+     --neighbor-endpoint "${NEIGHBOR_ENDPOINT}" \
+     --current-state no_bundle \
+     --charm-overrides ./static/charm-overrides/ \
+     --mermaid-output ./local-charm-bundle.mmd \
+     --log-dir ./local-charm-test-logs \
+     --prefix local-juju4-2604
+
+Change ``2/edge`` to the release context you want to test, or omit
+``--target-channel`` and ``--target-revision`` to use the resolved defaults.
+The selectors choose test context for overrides and version constraints; the
+local charm remains the deployment source. Choose a substrate and neighbor
+that support the charm's endpoint and base. The charm archive must declare the
+requested base in its runtime metadata. To test only one lifecycle step, append
+a pytest selector such as
+``charm_integration_testing/test_suite/test_deploy.py::test_deploy``.
 
 Run tests
 ---------
