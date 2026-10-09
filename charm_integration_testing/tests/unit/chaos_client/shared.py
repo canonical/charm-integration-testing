@@ -10,6 +10,7 @@ from kubernetes.client import ApiException, V1DeleteOptions, V1NetworkPolicy  # 
 
 class FakeCustomObjectsApi:
     def __init__(self, raise_on_delete: ApiException | None = None, *, inject_stress: bool = False) -> None:
+        self.retain_on_delete = False
         self.inject_stress = inject_stress
         self.create_calls: list[dict[str, object]] = []
         self.delete_calls: list[dict[str, object]] = []
@@ -47,7 +48,15 @@ class FakeCustomObjectsApi:
         return deepcopy(self.objects[(plural, namespace, name)])
 
     def delete_namespaced_custom_object(
-        self, *, group: str, version: str, namespace: str, plural: str, name: str, body: V1DeleteOptions | None = None
+        self,
+        *,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        name: str,
+        body: V1DeleteOptions | None = None,
+        _request_timeout: float = 30,
     ) -> None:
         self.delete_calls.append(
             {"group": group, "version": version, "namespace": namespace, "plural": plural, "name": name}
@@ -60,7 +69,8 @@ class FakeCustomObjectsApi:
             raise ApiException(status=404)
         if body is not None and body.preconditions.uid != self.objects[resource]["metadata"].get("uid"):
             raise ApiException(status=409)
-        del self.objects[resource]
+        if not self.retain_on_delete:
+            del self.objects[resource]
 
 
 class FakeNetworkingV1Api:

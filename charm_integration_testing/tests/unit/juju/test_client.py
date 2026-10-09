@@ -1372,6 +1372,67 @@ class TestDeployBundles:
         ]
 
 
+def test_validate_model_returns_functional_results_only() -> None:
+    backend = BackendStub(
+        app_list={"app": JujuApplicationInfo(charm="app", revision=1)}, validate_results={"app": {"app/0": [_pass()]}}
+    )
+    extension = ExtensionStub({"app": {"app/0": [_pass(endpoint="other")]}})
+    persistence = PersistenceExtensionStub({"app": {"app/0": [_pass(endpoint="canary")]}})
+    client = _client(backend, [extension, persistence])
+    model = JujuModelHandle(controller="controller", model="model")
+    results = client.validate_model(model)
+    assert [result.endpoint for result in results["app/0"]] == ["db", "other"]
+    assert persistence.calls
+    assert client.validate_model(model, level=None) == {}
+
+
+@pytest.mark.parametrize(
+    "app,workload,agent",
+    [
+        ("blocked", "active", "idle"),
+        ("active", "blocked", "idle"),
+        ("error", "active", "idle"),
+        ("active", "error", "idle"),
+        ("active", "active", "error"),
+        ("active", "active", "lost"),
+        ("active", "active", "down"),
+        ("unknown", "active", "idle"),
+    ],
+)
+def test_check_application_health_rejects_errors(app: str, workload: str, agent: str) -> None:
+    from unittest.mock import Mock
+
+    from juju import JujuApplicationHealth
+
+    backend = Mock()
+    backend.application_health.return_value = JujuApplicationHealth(app, {"app/0": workload}, {"app/0": agent})
+    with pytest.raises(RuntimeError, match="Unhealthy application"):
+        _client(backend).check_application_health(JujuModelHandle(controller="c", model="m"), "app")
+
+
+@pytest.mark.parametrize("workload,agent", [("active", "idle"), ("maintenance", "executing"), ("waiting", "idle")])
+def test_check_application_health_allows_non_error_states(workload: str, agent: str) -> None:
+    from unittest.mock import Mock
+
+    from juju import JujuApplicationHealth
+
+    backend = Mock()
+    backend.application_health.return_value = JujuApplicationHealth(workload, {"app/0": workload}, {"app/0": agent})
+    _client(backend).check_application_health(JujuModelHandle(controller="c", model="m"), "app")
+
+
+@pytest.mark.parametrize("units,agents", [({}, {}), ({"app/0": "active"}, {})])
+def test_check_application_health_rejects_missing_units(units: dict[str, str], agents: dict[str, str]) -> None:
+    from unittest.mock import Mock
+
+    from juju import JujuApplicationHealth
+
+    backend = Mock()
+    backend.application_health.return_value = JujuApplicationHealth("active", units, agents)
+    with pytest.raises(RuntimeError, match="Incomplete unit health"):
+        _client(backend).check_application_health(JujuModelHandle(controller="c", model="m"), "app")
+
+
 # ---------------------------------------------------------------------------
 # TestJujuClientAddModelCloud
 # ---------------------------------------------------------------------------

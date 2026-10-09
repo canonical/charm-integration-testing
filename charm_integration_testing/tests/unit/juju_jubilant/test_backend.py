@@ -3200,6 +3200,35 @@ class TestMigrationTolerance:
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
 
 
+def test_application_health_uses_one_status_snapshot() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from juju import JujuApplicationHealth
+
+    status = SimpleNamespace(
+        apps={
+            "app": SimpleNamespace(
+                app_status=SimpleNamespace(current="active"),
+                units={
+                    "app/0": SimpleNamespace(
+                        workload_status=SimpleNamespace(current="active"), juju_status=SimpleNamespace(current="idle")
+                    ),
+                    "app/1": SimpleNamespace(
+                        workload_status=SimpleNamespace(current="blocked"), juju_status=SimpleNamespace(current="error")
+                    ),
+                },
+            )
+        }
+    )
+    backend = JubilantBackend()
+    with patch.object(backend, "status", Mock(return_value=status)) as read_status:
+        assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
+            "active", {"app/0": "active", "app/1": "blocked"}, {"app/0": "idle", "app/1": "error"}
+        )
+        read_status.assert_called_once_with(TEST_MODEL)
+
+
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
 FOLLOWER_RESTART_TIMEOUT = timedelta(seconds=10)
 FOLLOWER_BOOT_ID = "11111111-1111-1111-1111-111111111111"

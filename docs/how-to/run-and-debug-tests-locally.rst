@@ -138,6 +138,33 @@ Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and
 privileged helpers do not provide isolation between tenants.
 
+Moderate memory stress
+~~~~~~~~~~~~~~~~~~~~~~
+
+``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
+Mesh with ``StressChaos``. It skips without memory stress support or passing
+simple validators for every selected target and neighbor endpoint. If any selected
+endpoint has no passing simple validator, the test skips before injecting stress.
+
+Defaults are one worker, 128 MB and five minutes. Per-charm settings
+``memory_moderate_pressure_workers``, ``memory_moderate_pressure_size_mb`` and
+``memory_moderate_pressure_duration_seconds`` override them. Tune these values
+for the workload; container memory limits are unchanged.
+
+After confirmed injection, the test repeatedly checks experiment status,
+workload health and simple validators. Error/blocked workloads, disconnected
+agents, lost validation coverage, experiment errors and early completion fail.
+Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
+Startup and the last validation round under stress share a two-minute allowance;
+calls exceeding the stress execution budget fail when they return.
+
+Cleanup runs on failure too; failed cleanup remains registered for retry.
+Chaos Mesh memory cleanup waits for resource deletion. After successful
+observation and cleanup, a separate fifteen-minute timeout applies to the
+active/idle wait, followed by simple validation without additional restarts.
+These post-cleanup checks are outside the stress execution budget.
+Select ``-k test_live_memory_stress_moderate`` to run it.
+
 Install the repository dependencies
 -----------------------------------
 
