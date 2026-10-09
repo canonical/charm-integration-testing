@@ -7,7 +7,9 @@ You are running inside a Multipass VM with access to a Juju substrate.
 
 Explicit user requests are non-negotiable. When a user explicitly requests an action, execute it. Do not skip, substitute, or optimize around the request based on time, complexity, or likelihood of success. If you cannot execute it, report the blocker clearly.
 
-Before implementing, ask clarifying questions to understand the actual goal, constraints, and expected outcomes.
+Before implementing or reviewing repository changes, read `.github/copilot-instructions.md` and any matching files under `.github/instructions/`. Check related tickets and active PRs for overlapping work before changing shared APIs, helpers, hooks, or backend operations.
+
+Understand the goal, constraints, and expected outcomes before implementing. Ask clarifying questions when ambiguity materially affects behavior or design; otherwise, make reasonable assumptions and proceed.
 
 **Never `git push` unless the user explicitly authorizes pushing.** A configured `GH_TOKEN`/`GITHUB_TOKEN`, or a request to fix, commit, or open a PR, is not permission. Without explicit permission, leave commits local and report that they were not pushed. Do not work around missing permission or a failed push by switching credentials, remotes, protocols, or using force.
 
