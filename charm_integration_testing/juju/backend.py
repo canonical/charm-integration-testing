@@ -146,6 +146,10 @@ class JujuBackend(ABC):
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         raise NotImplementedError
 
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Remove a specific unit when the backend supports targeted unit removal."""
+        raise NotImplementedError
+
     @abstractmethod
     def num_units(self, model: JujuModelHandle, application: str) -> int:
         raise NotImplementedError

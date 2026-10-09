@@ -26,6 +26,9 @@ class NullJujuBackend(JujuBackend):
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         raise NotImplementedError
 
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        raise NotImplementedError
+
     def num_units(self, model: JujuModelHandle, application: str) -> int:
         raise NotImplementedError
 

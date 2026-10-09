@@ -147,6 +147,11 @@ class JubilantBackend(JujuCmdBackend):
             self._kubernetes_clients[cloud] = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path))
         return self._kubernetes_clients[cloud]
 
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        if self.is_k8s_model(model):
+            raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
+        self.client.model(model).remove_unit(unit)
+
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         try:

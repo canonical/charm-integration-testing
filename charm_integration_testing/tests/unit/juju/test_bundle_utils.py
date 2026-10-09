@@ -3,6 +3,7 @@
 
 import pytest
 from juju.bundle_utils import (
+    application_unit_count_from_bundle,
     parse_offer_names_from_bundle,
     parse_offers_from_bundle,
     strip_offers_from_bundle,
@@ -51,6 +52,56 @@ applications:
         endpoints:
         - glauth-auxiliary
 """
+
+
+# ---------------------------------------------------------------------------
+# Tests: application_unit_count_from_bundle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("application", "platform", "expected_units"),
+    [("target", "kubernetes", 2), ("machine-target", "machine", 4)],
+)
+def test_application_unit_count_from_bundle_reads_platform_specific_key(
+    application: str,
+    platform: str,
+    expected_units: int,
+) -> None:
+    bundle = """\
+applications:
+  target:
+    scale: 2
+  machine-target:
+    num_units: 4
+---
+applications:
+  target:
+    offers: {}
+"""
+
+    assert application_unit_count_from_bundle(bundle, application, platform) == expected_units
+
+
+@pytest.mark.parametrize(
+    ("bundle", "application", "platform", "message"),
+    [
+        ("", "target", "kubernetes", "Bundle is empty"),
+        ("[]", "target", "kubernetes", "Invalid bundle"),
+        ("applications: {}", "target", "kubernetes", "not found"),
+        ("applications:\n  target: null", "target", "kubernetes", "Invalid application"),
+        ("applications:\n  target: {}", "target", "kubernetes", "positive integer 'scale'"),
+        ("applications:\n  target:\n    num_units: 0", "target", "machine", "positive integer 'num_units'"),
+    ],
+)
+def test_application_unit_count_from_bundle_rejects_invalid_values(
+    bundle: str,
+    application: str,
+    platform: str,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        application_unit_count_from_bundle(bundle, application, platform)
 
 
 # ---------------------------------------------------------------------------

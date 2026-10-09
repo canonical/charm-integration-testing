@@ -5,6 +5,8 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
+from kubernetes_client import KubernetesExtension
+
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
@@ -17,6 +19,7 @@ from .models import (
     JujuIntegration,
     JujuIntegrationApplication,
 )
+from .unit_rotation import rotate_application_units
 from .version import JujuVersion
 
 
@@ -56,9 +59,58 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing unit {unit}.")
+        self.backend.remove_unit(model, unit)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_scale(model)
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.logger.info(f"Getting the units for {application}.")
+        return self.backend.application_units(model, application)
+
+    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a model's workload pod and dispatch configured lifecycle hooks."""
+        kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
+        if kubernetes_client is None:
+            raise RuntimeError(f"Cannot delete workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
+
+        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
+        extension_hooks = [extension for extension in self.extensions if isinstance(extension, KubernetesExtension)]
+        kubernetes_client.delete_pod(
+            namespace=model.model,
+            pod_name=pod_name,
+            extension_hooks=extension_hooks,
+        )
+
+    def rotate_application_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        *,
+        related_models: list[JujuModelHandle] | None = None,
+        timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        """Rotate every application unit while preserving capacity across cloud types.
+
+        Kubernetes workloads use one surge replica while all original pods are replaced,
+        because scale-down may select any pod for Deployment-backed workloads.
+        """
+        self.logger.info(f"Rotating all units for {application}.")
+        rotate_application_units(
+            self,
+            self.backend,
+            application,
+            model,
+            related_models=related_models,
+            timeout=timeout,
+        )
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:
