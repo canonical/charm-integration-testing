@@ -50,7 +50,7 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
         )
     }
     client.backend.application_units.return_value = ["target/0"]
-    client.validate_model.return_value = {"neighbor/0": [result()]}
+    client.validate_model.return_value = {"target/0": [result(endpoint="database")], "neighbor/0": [result()]}
     chaos = Mock()
     chaos.stress_memory.return_value = timedelta(minutes=5)
     arguments: dict[str, Any] = dict(
@@ -100,7 +100,7 @@ def test_per_charm_settings_and_neighbor_model(scenario: Scenario, tmp_path: Pat
     meta = MetaChaosClient([chaos], client.backend, ResourceConstraintsClient(tmp_path))
     arguments.update(chaos_tool_for_model=Mock(return_value=meta), neighbor_model_ref=NEIGHBOR)
     client.validate_model.side_effect = lambda *, model, level, applications: (
-        {"neighbor/0": [result()]} if model == NEIGHBOR else {}
+        {"neighbor/0": [result()]} if model == NEIGHBOR else {"target/0": [result(endpoint="database")]}
     )
     live.test_live_memory_stress_moderate(**arguments)
     chaos.stress_memory.assert_called_once_with(MODEL, "target/0", 2, 64, timedelta(seconds=140))
@@ -188,9 +188,12 @@ def test_failures_and_cleanup(scenario: Scenario, failure: str, cleanup_fails: b
     elif failure == "health":
         client.check_application_health.side_effect = [None, None, error]
     elif failure == "validation":
-        client.validate_model.side_effect = [{"neighbor/0": [result()]}, error]
+        client.validate_model.side_effect = [client.validate_model.return_value, error]
     elif failure == "coverage":
-        client.validate_model.side_effect = [{"neighbor/0": [result()]}, {"neighbor/0": [result(status="SKIPPED")]}]
+        client.validate_model.side_effect = [
+            client.validate_model.return_value,
+            {"neighbor/0": [result(status="SKIPPED")]},
+        ]
     elif failure == "cleanup":
         chaos.cleanup_all.side_effect = error
     else:
@@ -304,7 +307,7 @@ def test_execution_budget_overrun_fails_and_cleans_up(
             calls += 1
             if calls > 1:
                 clock[0] += elapsed
-            return {"neighbor/0": [result()]}
+            return {"target/0": [result(endpoint="database")], "neighbor/0": [result()]}
 
         client.validate_model.side_effect = validate
     with pytest.raises(TimeoutError, match="execution budget"):
@@ -312,3 +315,33 @@ def test_execution_budget_overrun_fails_and_cleans_up(
     chaos.cleanup_all.assert_called_once()
     assert client.multi_model_idle_for_period.call_count == 1
     assert clock[0] == expected_clock
+
+
+@pytest.mark.parametrize("neighbor_model", [None, NEIGHBOR], ids=["same-model", "cross-model"])
+@pytest.mark.parametrize("missing_application", ["target", "neighbor"])
+@pytest.mark.parametrize("coverage", ["absent", "skipped", "wrong-endpoint"])
+def test_partial_baseline_coverage_skips_before_injection(
+    scenario: Scenario, neighbor_model: JujuModelHandle | None, missing_application: str, coverage: str
+) -> None:
+    # GIVEN one selected endpoint has no passing simple validator
+    arguments, client, chaos, _ = scenario
+    arguments["neighbor_model_ref"] = neighbor_model
+
+    def validate(*, model: JujuModelHandle, level: str, applications: list[str]) -> dict[str, list[ValidationResult]]:
+        results = {}
+        for application in applications:
+            endpoint = "database" if application == "target" else "postgresql"
+            if application != missing_application:
+                results[f"{application}/0"] = [result(endpoint=endpoint)]
+            elif coverage == "skipped":
+                results[f"{application}/0"] = [result(endpoint=endpoint, status="SKIPPED")]
+            elif coverage == "wrong-endpoint":
+                results[f"{application}/0"] = [result(endpoint="unselected")]
+        return results
+
+    client.validate_model.side_effect = validate
+    # WHEN establishing baseline coverage, THEN skip before creating any chaos client
+    with pytest.raises(pytest.skip.Exception, match="No passing simple"):
+        live.test_live_memory_stress_moderate(**arguments)
+    arguments["chaos_tool_for_model"].assert_not_called()
+    chaos.stress_memory.assert_not_called()

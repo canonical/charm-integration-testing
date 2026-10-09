@@ -1,29 +1,38 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import field
+import logging
+import subprocess
+from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable
+from typing import Any, Callable, cast, overload
 from unittest.mock import patch
 
 import jubilant
 import pytest
 import yaml
+from jubilant.statustypes import AppStatus, ModelStatus, UnitStatus
 from juju import (
     CharmChannel,
     JujuApplicationInfo,
+    JujuClient,
     JujuConsumedOfferInfo,
+    JujuExtension,
     JujuIntegrationApplication,
     JujuModelHandle,
+    JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
 )
+from juju.backend import JujuBackend
 from juju.version import JujuVersion
+from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
+from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic.dataclasses import dataclass
 
@@ -3218,3 +3227,361 @@ def test_application_health_uses_one_status_snapshot() -> None:
             "active", {"app/0": "active", "app/1": "blocked"}, {"app/0": "idle", "app/1": "error"}
         )
         read_status.assert_called_once_with(TEST_MODEL)
+
+
+FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
+FOLLOWER_RESTART_TIMEOUT = timedelta(seconds=10)
+FOLLOWER_BOOT_ID = "11111111-1111-1111-1111-111111111111"
+FOLLOWER_NEW_BOOT_ID = "22222222-2222-2222-2222-222222222222"
+
+
+def follower_status() -> jubilant.Status:
+    return jubilant.Status(
+        model=ModelStatus(name="model", type="iaas", controller="controller", cloud="cloud", version="3.6"),
+        machines={},
+        apps={
+            "target": AppStatus(
+                charm="target",
+                charm_origin="charmhub",
+                charm_name="target",
+                charm_rev=1,
+                exposed=False,
+                units={
+                    "target/0": UnitStatus(leader=True, machine="0"),
+                    "target/1": UnitStatus(machine="1"),
+                    "target/2": UnitStatus(machine="2"),
+                },
+            )
+        },
+    )
+
+
+class FollowerRestartKubernetesStub:
+    def __init__(self) -> None:
+        self.pods = [
+            V1Pod(metadata=V1ObjectMeta(name="target-1", uid="old", annotations={"unit.juju.is/id": "target/1"}))
+        ]
+        self.calls: list[tuple[object, ...]] = []
+
+    def get_charm_pods(self, application: str, namespace: str) -> list[V1Pod]:
+        return self.pods
+
+    def restart_pod(
+        self,
+        namespace: str,
+        name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: set[str],
+    ) -> None:
+        assert application == "target"
+        assert unit == "target/1"
+        assert existing_uids == {pod.metadata.uid for pod in self.pods}
+        self.calls.append((namespace, name, uid, timeout))
+
+
+class FollowerRestartSshStub:
+    def __init__(self) -> None:
+        self.boots: list[str | Exception] = [FOLLOWER_BOOT_ID, FOLLOWER_NEW_BOOT_ID]
+        self.calls: list[tuple[str, str]] = []
+        self.timeouts: list[float] = []
+
+    def ssh(self, model: JujuModelHandle, machine: str, command: str, timeout: float) -> str:
+        self.calls.append((machine, command))
+        self.timeouts.append(timeout)
+        if command.startswith("cat "):
+            result = self.boots.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return ""
+
+
+class FollowerRestartBackendStub(JubilantBackend):
+    def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
+        self.stub = FollowerRestartSshStub()
+        super().__init__()
+        self.snapshots = [follower_status(), follower_status()]
+        self.kube = kube
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        assert timeout is not None
+        return self.stub.ssh(model, application, command, timeout)
+
+    def status(self, model: JujuModelHandle) -> jubilant.Status:
+        return self.snapshots.pop(0)
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        return cast(KubernetesClient | None, self.kube)
+
+
+def test_restarts_only_follower_pod() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods.append(
+        V1Pod(metadata=V1ObjectMeta(name="target-2", uid="sibling", annotations={"unit.juju.is/id": "target/2"}))
+    )
+    backend = FollowerRestartBackendStub(kube)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert kube.calls == [("model", "target-1", "old", FOLLOWER_RESTART_TIMEOUT)]
+
+
+@pytest.mark.parametrize("change", ["leader", "membership", "no-leader"])
+def test_rechecks_leadership_before_deletion(change: str) -> None:
+    kube = FollowerRestartKubernetesStub()
+    backend = FollowerRestartBackendStub(kube)
+    units = backend.snapshots[1].apps["target"].units
+    if change == "leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+        units["target/1"] = replace(units["target/1"], leader=True)
+    elif change == "membership":
+        del units["target/2"]
+    else:
+        units["target/0"] = replace(units["target/0"], leader=False)
+    with pytest.raises(RuntimeError, match="changed"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert kube.calls == []
+
+
+@pytest.mark.parametrize("leaders", [0, 2])
+def test_rejects_ambiguous_leadership(leaders: int) -> None:
+    backend = FollowerRestartBackendStub(FollowerRestartKubernetesStub())
+    units = backend.snapshots[0].apps["target"].units
+    for index, name in enumerate(units):
+        units[name] = replace(units[name], leader=index < leaders)
+    with pytest.raises(RuntimeError, match="exactly one"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_missing_target_pod_does_not_delete_another_unit() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods[0].metadata.annotations = {"unit.juju.is/id": "target/0"}
+    with pytest.raises(RuntimeError, match="single live Pod"):
+        FollowerRestartBackendStub(kube).restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert kube.calls == []
+
+
+def test_machine_reboot_waits_for_changed_boot_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, FOLLOWER_BOOT_ID, FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert all(target == "1" for target, _ in backend.stub.calls)
+    assert len(backend.stub.calls) == 4
+    assert "systemctl reboot" in backend.stub.calls[1][1]
+
+
+@pytest.mark.parametrize("placement", ["1", "1/lxd/0"])
+def test_shared_machine_is_not_rebooted(placement: str) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.snapshots[0].apps["other"] = replace(
+        backend.snapshots[0].apps["target"], units={"other/0": UnitStatus(machine=placement)}
+    )
+    with pytest.raises(NotImplementedError, match="also restart"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.calls == []
+
+
+def test_unassigned_unit_does_not_prevent_follower_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    # Simulate a null placement from status despite Jubilant's str annotation.
+    unassigned = UnitStatus(machine=cast(str, None))
+    for snapshot in backend.snapshots:
+        snapshot.apps["other"] = replace(snapshot.apps["target"], units={"other/0": unassigned})
+
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert all(target == "1" for target, _ in backend.stub.calls)
+    assert len(backend.stub.calls) == 3
+    assert "systemctl reboot" in backend.stub.calls[1][1]
+
+
+def test_machine_without_reboot_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    ticks = iter([0.0, 0.0, 0.0, 11.0])
+    monkeypatch.setattr("juju_jubilant.backend.time.monotonic", lambda: next(ticks))
+    with pytest.raises(TimeoutError, match="did not reboot"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_placement_change_prevents_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    units = backend.snapshots[1].apps["target"].units
+    units["target/1"] = replace(units["target/1"], machine="3")
+    with pytest.raises(RuntimeError, match="placement changed"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+def test_nested_container_is_not_rebooted() -> None:
+    backend = FollowerRestartBackendStub()
+    units = backend.snapshots[0].apps["target"].units
+    units["target/1"] = replace(units["target/1"], machine="1/lxd/0")
+    with pytest.raises(NotImplementedError, match="nested container"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.calls == []
+
+
+def test_ssh_failure_during_reboot_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, jubilant.CLIError(1, ["ssh"], "", "disconnected"), FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+
+
+def test_invalid_boot_id_prevents_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [""]
+    with pytest.raises(RuntimeError, match="Invalid boot ID"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+def test_client_delegates_without_adding_an_abstract_backend_requirement() -> None:
+    kube = FollowerRestartKubernetesStub()
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__))
+    assert client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert "restart_follower" not in JujuCmdBackend.__abstractmethods__
+    with pytest.raises(NotImplementedError, match="does not support"):
+        JujuBackend.restart_follower(client.backend, FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+class FollowerRestartExtension(JujuExtension):
+    def __init__(self, kube: FollowerRestartKubernetesStub, *, fail: bool = False) -> None:
+        self.kube = kube
+        self.fail = fail
+        self.calls: list[tuple[JujuModelHandle, str]] = []
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        assert self.kube.calls == [("model", "target-1", "old", FOLLOWER_RESTART_TIMEOUT)]
+        self.calls.append((model, unit))
+        if self.fail:
+            raise RuntimeError("restart hook failed")
+
+
+def test_client_runs_hook_after_restart() -> None:
+    kube = FollowerRestartKubernetesStub()
+    extension = FollowerRestartExtension(kube)
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
+    client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+    assert extension.calls == [(FOLLOWER_MODEL, "target/1")]
+
+
+def test_restart_failure_does_not_run_hook() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods = []
+    extension = FollowerRestartExtension(kube)
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
+    with pytest.raises(RuntimeError, match="single live Pod"):
+        client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+    assert extension.calls == []
+
+
+def test_hook_failure_is_not_hidden() -> None:
+    kube = FollowerRestartKubernetesStub()
+    client = JujuClient(
+        FollowerRestartBackendStub(kube), logging.getLogger(__name__), [FollowerRestartExtension(kube, fail=True)]
+    )
+    with pytest.raises(RuntimeError, match="restart hook failed"):
+        client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_each_ssh_call_uses_remaining_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 4.0])
+    monkeypatch.setattr("juju_jubilant.backend.time.monotonic", lambda: next(ticks))
+    backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.timeouts == [9.0, 8.0, 6.0]
+
+
+def test_ssh_timeout_during_reboot_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, subprocess.TimeoutExpired("juju ssh", 1), FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+
+
+def test_ssh_timeout_before_reboot_fails() -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [subprocess.TimeoutExpired("juju ssh", 1)]
+    with pytest.raises(subprocess.TimeoutExpired):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
+
+
+def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
+        assert check and capture_output and text
+        assert timeout == 7.5
+        return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    result = JubilantBackend().ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=7.5)
+    assert result == "boot-id\n"
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if timed_out:
+            raise subprocess.TimeoutExpired(args, timeout)
+        raise subprocess.CalledProcessError(255, args, output="", stderr="connection refused")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    with pytest.raises(subprocess.TimeoutExpired if timed_out else jubilant.CLIError):
+        JubilantBackend().ssh(SSH_MODEL, "1", "command", timeout=1)
+
+
+@pytest.mark.parametrize("change", ["none", "membership", "leader", "no-leader"])
+def test_follower_check_uses_explicit_snapshot(change: str) -> None:
+    # GIVEN the selected follower and the original membership
+    current = follower_status()
+    units = current.apps["target"].units
+    expected = set(units)
+    if change == "membership":
+        del units["target/1"]
+    elif change == "leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+        units["target/1"] = replace(units["target/1"], leader=True)
+    elif change == "no-leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+
+    # WHEN checking a fresh snapshot, THEN only unchanged membership and leadership pass
+    if change == "none":
+        JubilantBackend._check_follower(current, "target", expected, "target/1")
+    else:
+        with pytest.raises(RuntimeError, match="membership or leadership changed"):
+            JubilantBackend._check_follower(current, "target", expected, "target/1")
+
+
+@pytest.mark.parametrize("other_machine", [None, "3", "1", "1/lxd/0"])
+def test_placement_check_uses_explicit_snapshot(other_machine: str | None) -> None:
+    # GIVEN another application's unit with an optional machine placement
+    current = follower_status()
+    current.apps["other"] = replace(
+        current.apps["target"], units={"other/0": UnitStatus(machine=cast(str, other_machine))}
+    )
+
+    # WHEN checking placement, THEN shared machines and their nested containers are rejected
+    if other_machine in {"1", "1/lxd/0"}:
+        with pytest.raises(JujuRestartNotSupportedError, match="also restart"):
+            JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
+    else:
+        JubilantBackend._check_follower_placement(current, "target", "target/1", "1")

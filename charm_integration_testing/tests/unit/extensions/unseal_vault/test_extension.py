@@ -112,3 +112,12 @@ class TestUnsealVaultK8sJujuExtension:
         # THEN the unsealer re-unseals vault, pairing the namespace with the controller the
         # extension was built for, without re-authorizing the already-authorized charm
         assert unsealer.calls == [(TEST_MODEL, False)]
+
+
+def test_unit_restart_unseals_without_reauthorizing() -> None:
+    unsealer = VaultUnsealerStub()
+    extension = GenericUnsealVaultJujuExtension(unsealer)
+
+    extension.post_restart_unit(TEST_MODEL, "vault/1")
+
+    assert unsealer.calls == [(TEST_MODEL, False)]

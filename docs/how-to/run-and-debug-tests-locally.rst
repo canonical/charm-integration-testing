@@ -143,7 +143,8 @@ Moderate memory stress
 
 ``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
 Mesh with ``StressChaos``. It skips without memory stress support or passing
-simple validators for the tested target or neighbor endpoints.
+simple validators for every selected target and neighbor endpoint. If any selected
+endpoint has no passing simple validator, the test skips before injecting stress.
 
 Defaults are one worker, 128 MB and five minutes. Per-charm settings
 ``memory_moderate_pressure_workers``, ``memory_moderate_pressure_size_mb`` and

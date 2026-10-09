@@ -114,8 +114,13 @@ def test_live_memory_stress_moderate(
 
     check_health()
     required = validate_service(juju_client, endpoints)
-    if not required:
-        pytest.skip("No passing simple interface validators for the tested service; moderate stress is unverified.")
+    covered_endpoints = {(model, unit.split("/")[0], endpoint) for model, unit, endpoint, _, _ in required}
+    missing_endpoints = set(endpoints) - covered_endpoints
+    if missing_endpoints:
+        pytest.skip(
+            f"No passing simple interface validators for selected endpoints: {missing_endpoints}; "
+            "moderate stress is unverified."
+        )
 
     def validate() -> None:
         passed = validate_service(juju_client, endpoints)
