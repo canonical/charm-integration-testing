@@ -26,6 +26,7 @@
 #                              as <NAME> (prefix stripped), e.g.
 #                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
 #                              inside the VM.
+#   SANDBOX_COPILOT_SETTINGS_FILE  Copilot settings JSON file for each run
 
 set -euo pipefail
 
@@ -75,9 +76,8 @@ _is_mounted() {
 # append "NAME=value" entries onto the array named by $1 (nameref) for
 # passthrough into the VM via `multipass exec ... env ...`.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
-# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN and COPILOT_MODEL are excluded here since
-# they need special-cased handling (dual GH_TOKEN/GITHUB_TOKEN mapping and
-# host-side defaults) that callers apply explicitly.
+# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN, COPILOT_MODEL, and COPILOT_HOME are
+# excluded here since callers handle them explicitly.
 _collect_sandbox_vars() {
     local -n _target="$1"
     local _var _name
@@ -85,7 +85,7 @@ _collect_sandbox_vars() {
         [[ "$_var" == SANDBOX_VAR_?* ]] || continue
         _name="${_var#SANDBOX_VAR_}"
         case "$_name" in
-            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL) continue ;;
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL|COPILOT_HOME) continue ;;
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
@@ -117,6 +117,7 @@ Environment (.env keys):
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
+  SANDBOX_COPILOT_SETTINGS_FILE  Path to Copilot settings JSON for each run
 
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
@@ -208,6 +209,17 @@ _cmd_up() {
         multipass exec "$VM_NAME" -- bash -c "sudo mkdir -p '$VM_MOUNT' && sudo chown ubuntu:ubuntu '$VM_MOUNT'"
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
+
+    # Install the bundled uv binary and expose its uvx alias.
+    echo "==> Checking for uvx..."
+    multipass exec "$VM_NAME" -- bash -lc "
+        set -euo pipefail
+        if ! command -v uvx &>/dev/null; then
+            sudo install -m 0755 '$VM_MOUNT/static/uv' /usr/local/bin/uv
+            sudo ln -sf /usr/local/bin/uv /usr/local/bin/uvx
+        fi
+        uvx --version
+    "
 
     # Set up Python venv with project packages (poetry manages the venv)
     echo "==> Installing Python dependencies via poetry..."
@@ -498,7 +510,7 @@ EOF
 
     TASK="${*:-}"
 
-    # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
+    # Resolve and validate config file paths before any VM work.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         # Resolve relative paths against the project root for consistency.
         if [[ "$SANDBOX_MCP_CONFIG_FILE" != /* ]]; then
@@ -506,6 +518,20 @@ EOF
         fi
         if [ ! -f "$SANDBOX_MCP_CONFIG_FILE" ]; then
             echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $SANDBOX_MCP_CONFIG_FILE" >&2
+            exit 1
+        fi
+    fi
+    if [ -n "${SANDBOX_COPILOT_SETTINGS_FILE:-}" ]; then
+        if [[ "$SANDBOX_COPILOT_SETTINGS_FILE" != /* ]]; then
+            SANDBOX_COPILOT_SETTINGS_FILE="$PROJECT_DIR/$SANDBOX_COPILOT_SETTINGS_FILE"
+        fi
+        if [ ! -f "$SANDBOX_COPILOT_SETTINGS_FILE" ]; then
+            echo "ERROR: SANDBOX_COPILOT_SETTINGS_FILE not found: $SANDBOX_COPILOT_SETTINGS_FILE" >&2
+            exit 1
+        fi
+        if ! python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(value, dict) else 1)' \
+            "$SANDBOX_COPILOT_SETTINGS_FILE" 2>/dev/null; then
+            echo "ERROR: SANDBOX_COPILOT_SETTINGS_FILE must contain a valid JSON object." >&2
             exit 1
         fi
     fi
@@ -520,8 +546,9 @@ EOF
         exit 1
     fi
 
-    # All prerequisites met. Copy MCP config into the VM now.
+    # All prerequisites met. Copy run-specific config into the VM now.
     _mcp_vm_file=""
+    _copilot_home=""
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
@@ -531,12 +558,23 @@ EOF
         # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
         cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
+    if [ -n "${SANDBOX_COPILOT_SETTINGS_FILE:-}" ]; then
+        echo "==> Copying Copilot settings into a temporary COPILOT_HOME..."
+        _copilot_home=$(multipass exec "$VM_NAME" -- bash -c "mktemp -d /tmp/copilot-home-XXXXXX")
+        # shellcheck disable=SC2064
+        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true; multipass exec '$VM_NAME' -- rm -rf '$_copilot_home' 2>/dev/null || true" EXIT
+        multipass exec "$VM_NAME" -- bash -c \
+            "for file in config.json mcp-config.json; do
+                if [ -f \"\$HOME/.copilot/\$file\" ]; then cp \"\$HOME/.copilot/\$file\" \"$_copilot_home/\$file\"; fi
+            done"
+        # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
+        cat "$SANDBOX_COPILOT_SETTINGS_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_copilot_home/settings.json'"
+    fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    # Update the EXIT trap to cover PROMPT_FILE as well. This replaces the MCP-only
-    # trap (if set) so both files are removed on any early exit due to set -euo pipefail.
+    # Update the EXIT trap to cover PROMPT_FILE as well.
     # shellcheck disable=SC2064
-    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true" EXIT
+    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true; [ -z '$_copilot_home' ] || multipass exec '$VM_NAME' -- rm -rf '$_copilot_home' 2>/dev/null || true" EXIT
 
     {
         cat "$PROJECT_DIR/.agents/skills/system.md"
@@ -551,6 +589,7 @@ EOF
         _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        [ -n "$_copilot_home" ] && _env_args+=("COPILOT_HOME=$_copilot_home")
         _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
@@ -559,6 +598,7 @@ EOF
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
+            [ -z \"\${COPILOT_HOME:-}\" ] || rm -rf \"\$COPILOT_HOME\"
             exit \$_ec
         "
     else
@@ -566,6 +606,7 @@ EOF
         _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
+        [ -n "$_copilot_home" ] && _env_args+=("COPILOT_HOME=$_copilot_home")
         _collect_sandbox_vars _env_args
         multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
                 cd '$VM_MOUNT'
@@ -574,6 +615,7 @@ EOF
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
+            [ -z \"\${COPILOT_HOME:-}\" ] || rm -rf \"\$COPILOT_HOME\"
             exit \$_ec
         "
     fi
