@@ -12,7 +12,7 @@ from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient
+from .backend import ChaosClient, StressEndedEarlyError
 from .litmus_detection import LITMUS_CRDS
 from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
@@ -37,6 +37,7 @@ class _ExperimentRun:
     reverted: bool = False
     stop_requested: bool = False
     execution_error: RuntimeError | None = None
+    execution_error_reported: bool = False
     engine_requested: bool = False
     uid: str | None = None
     cleanup_uids: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -91,6 +92,39 @@ class LitmusChaosClient(ChaosClient):
             duration,
         )
 
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Report execution errors from experiments registered for this unit."""
+        for engine in self._created:
+            if engine.scope != (model.uri, unit) or engine.uid is None:
+                continue
+            if allow_completed and isinstance(engine.execution_error, StressEndedEarlyError):
+                engine.execution_error = None
+                engine.execution_error_reported = False
+            results = self._observe(engine)
+            if engine.execution_error is not None:
+                engine.execution_error_reported = True
+                raise engine.execution_error
+            if allow_completed:
+                # The caller has independently confirmed the intended fault outcome.
+                # Execution errors above and cleanup/reversion checks still apply.
+                continue
+            current = self._read_engine(engine)
+            if (
+                current is None
+                or (current.get("status") or {}).get("engineStatus") in {"completed", "stopped"}
+                or any(
+                    (result.get("status") or {}).get("experimentStatus", {}).get("phase") in {"Completed", "Stopped"}
+                    or self._target_status(result, engine.pod) == "reverted"
+                    for result in results
+                )
+            ):
+                engine.execution_error = StressEndedEarlyError(
+                    f"Litmus experiment {engine.name} ended before the observation period completed; "
+                    "the requested stress duration was not verified."
+                )
+                engine.execution_error_reported = True
+                raise engine.execution_error
+
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
 
@@ -127,7 +161,9 @@ class LitmusChaosClient(ChaosClient):
                 errors.append(error)
             else:
                 self._created.remove(engine)
-                if engine.execution_error is not None:
+                # Preserve failures first discovered during cleanup, without reporting
+                # an already raised experiment error as a second cleanup failure.
+                if engine.execution_error is not None and not engine.execution_error_reported:
                     errors.append(engine.execution_error)
         if errors:
             raise ChaosCleanupError(errors) from errors[0]
@@ -241,7 +277,7 @@ class LitmusChaosClient(ChaosClient):
         results = self._results(engine)
         for result in results:
             status = result.get("status", {}).get("experimentStatus", {})
-            if (
+            if engine.execution_error is None and (
                 status.get("verdict") in {"Fail", "Error"}
                 or status.get("phase") == "Error"
                 or status.get("errorOutput")
@@ -255,6 +291,7 @@ class LitmusChaosClient(ChaosClient):
         current = self._read_engine(engine)
         results = self._observe(engine)
         if engine.execution_error is not None:
+            engine.execution_error_reported = True
             raise engine.execution_error
         if current is None:
             raise RuntimeError(f"Litmus Engine {engine.name} disappeared before stress started.")
@@ -323,6 +360,13 @@ class LitmusChaosClient(ChaosClient):
         self._wait(lambda: self._children_removed(engine), deadline, engine.name)
         if observation_error is not None:
             raise observation_error
+        if engine.execution_error is not None and not self._reverted(engine):
+            # An errored experiment may exit without writing 'reverted'. Keep the
+            # unresolved cleanup registered, but do not hide its cause behind a timeout.
+            raise RuntimeError(
+                f"Litmus stress reversion is unconfirmed for failed experiment {engine.name}; "
+                f"cleanup retained for retry. Original error: {engine.execution_error}"
+            ) from engine.execution_error
         self._wait(lambda: self._reverted(engine), deadline, engine.name, "stress reversion")
         self._remove_results(engine)
         self._wait(lambda: not self._results(engine), deadline, engine.name)
