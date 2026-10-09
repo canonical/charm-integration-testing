@@ -10,15 +10,8 @@ from juju import JujuClient, JujuModelHandle
 
 from bundle_builder_x import Charm
 
+from .ha_utils import require_principal_charm
 from .scheduler.states import State
-
-
-def _require_principal_charm(charm: Charm | None) -> Charm:
-    if charm is None:
-        pytest.fail("Unable to resolve the deployed target charm metadata needed for HA scaling.")
-    if charm.subordinate:
-        pytest.skip(f"{charm.name} is subordinate and cannot be scaled independently.")
-    return charm
 
 
 def _bundle_application_units(bundle_path: Path, application: str, platform: str) -> int:
@@ -51,7 +44,7 @@ def test_scale_to_ha(
     target_application: str,
     target_deployed_charm: Charm | None,
 ) -> None:
-    charm = _require_principal_charm(target_deployed_charm)
+    charm = require_principal_charm(target_deployed_charm)
     ha_units = charm.ha_units
     current_units = juju_client.num_units(target_application, model=target_model_ref)
     if current_units < ha_units:
@@ -70,7 +63,7 @@ def test_scale_from_ha(
     target_platform: str,
     target_deployed_charm: Charm | None,
 ) -> None:
-    charm = _require_principal_charm(target_deployed_charm)
+    charm = require_principal_charm(target_deployed_charm)
     if not charm.scale_down:
         pytest.skip(f"{charm.name} does not support scaling down from HA.")
 
