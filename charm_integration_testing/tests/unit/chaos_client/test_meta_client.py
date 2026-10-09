@@ -679,7 +679,17 @@ def test_io_latency_uses_constraint_overrides() -> None:
 
     # THEN the merged values are dispatched
     assert tool.calls == [
-        ("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=250), 70, timedelta(seconds=75)))
+        (
+            "io_latency",
+            (
+                TEST_MODEL,
+                UNIT,
+                "/data",
+                timedelta(milliseconds=250),
+                70,
+                timedelta(seconds=75),
+            ),
+        )
     ]
 
 

@@ -614,7 +614,7 @@ def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) 
         assert backend.custom_objects_api.create_calls == []
 
 
-@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory", "io_latency"])
 @pytest.mark.parametrize("recovered_status", [None, "False"])
 def test_stress_waits_for_injection_before_returning(operation: str, recovered_status: str | None) -> None:
     # GIVEN a controller that reports unselected/pending before it injects the fault
@@ -642,20 +642,24 @@ def test_stress_waits_for_injection_before_returning(operation: str, recovered_s
     mesh = ChaosMeshChaosClient(backend, clock=lambda: now, pause=pause)
     if operation == "stress_cpu":
         mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
-    else:
+    elif operation == "stress_memory":
         mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=12))
+    else:
+        mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
     # THEN resource creation alone, or AllInjected without Selected, cannot start the hold period.
     assert sleeps == [1.0, 1.0]
     assert now == 2
-    mesh.cleanup(TEST_MODEL, UNIT, "")
+    path = "/data" if operation == "io_latency" else ""
+    mesh.cleanup(TEST_MODEL, UNIT, path)
     assert not api.objects
 
 
+@pytest.mark.parametrize("operation", ["stress_cpu", "io_latency"])
 @pytest.mark.parametrize(
     "state",
     ["pending", "recovered", "recovery-unknown", "stopped", "paused", "replacement", "wrong-owner", "api-error"],
 )
-def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
+def test_injection_failure_retains_cleanup_tracking(state: str, operation: str) -> None:
     # GIVEN a created resource whose injection cannot be confirmed
     backend = BackendStub()
     api = backend.custom_objects_api
@@ -691,18 +695,22 @@ def test_injection_failure_retains_cleanup_tracking(state: str) -> None:
         else (ApiException if state == "api-error" else RuntimeError)
     )
     with pytest.raises(expected):
-        mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+        if operation == "stress_cpu":
+            mesh.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=12))
+        else:
+            mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
     assert now <= 3
     assert len(mesh._created) == 1
     assert not api.delete_calls
     api.raise_on_read = None
+    path = "/data" if operation == "io_latency" else ""
     # THEN ordinary failures remain cleanable; replaced or unowned resources are protected.
     if state in {"replacement", "wrong-owner"}:
         with pytest.raises(RuntimeError):
-            mesh.cleanup(TEST_MODEL, UNIT, "")
+            mesh.cleanup(TEST_MODEL, UNIT, path)
         assert not api.delete_calls
     else:
-        mesh.cleanup(TEST_MODEL, UNIT, "")
+        mesh.cleanup(TEST_MODEL, UNIT, path)
         assert not api.objects
 
 

@@ -26,7 +26,7 @@ class FakeCustomObjectsApi:
         )
         stored: dict[str, Any] = deepcopy(body)
         stored["metadata"]["uid"] = uuid4().hex
-        if plural == "stresschaos" and self.inject_stress:
+        if plural in {"stresschaos", "iochaos"} and self.inject_stress:
             stored["status"] = {
                 "conditions": [
                     {"type": "Selected", "status": "True"},
