@@ -46,9 +46,6 @@ def test_live_disk_io_latency(
         # A healthy workload may remain active throughout the fault.
         sleep(LATENCY_DURATION.total_seconds())
     finally:
-        # Cleans up every pending experiment on this unit; io_latency is the only one active
-        # here, and the exact dispatched path may differ from VOLUME_PATH when a per-charm
-        # override redirects it, so a path-scoped cleanup() call cannot be relied on.
         require_chaos_tool.cleanup_all()
 
     # Recovery must happen without operator intervention.
