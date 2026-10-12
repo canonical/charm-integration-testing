@@ -22,6 +22,7 @@ from extensions import (
     MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
+    RemoteLoggingExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
@@ -358,6 +359,7 @@ def _build_juju_client(
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    remote_logging_endpoints_by_controller: dict[str, str],
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -375,6 +377,7 @@ def _build_juju_client(
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
+            RemoteLoggingExtension(juju_backend, logger, remote_logging_endpoints_by_controller),
         ],
     )
 
@@ -387,9 +390,16 @@ def juju_client(
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    remote_logging_endpoints_by_controller: dict[str, str],
 ) -> JujuClient:
     return _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        target_controller,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        remote_logging_endpoints_by_controller,
     )
 
 
@@ -402,6 +412,7 @@ def seed_persistence_state_for_resumed_run(
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
+    remote_logging_endpoints_by_controller: dict[str, str],
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
@@ -441,7 +452,13 @@ def seed_persistence_state_for_resumed_run(
         return
 
     client = _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        target_controller,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        remote_logging_endpoints_by_controller,
     )
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:
@@ -564,6 +581,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
+        "--target-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional OTLP endpoint used to configure remote logging on the target controller model.",
+    )
+    parser.addoption(
+        "--neighbor-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional OTLP endpoint used to configure remote logging on the neighbor controller model.",
     )
     parser.addoption(
         "--charm-overrides",
@@ -866,6 +895,49 @@ def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
     return value
+
+
+@pytest.fixture(scope="session")
+def target_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--target-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def neighbor_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--neighbor-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+def _build_remote_logging_endpoints_by_controller(
+    target_controller: str,
+    target_endpoint: str | None,
+    neighbor_controller: str | None,
+    neighbor_endpoint: str | None,
+) -> dict[str, str]:
+    endpoints: dict[str, str] = {}
+    if target_endpoint:
+        endpoints[target_controller] = target_endpoint
+    if neighbor_controller is not None and neighbor_controller != target_controller and neighbor_endpoint:
+        endpoints[neighbor_controller] = neighbor_endpoint
+    return endpoints
+
+
+@pytest.fixture(scope="session")
+def remote_logging_endpoints_by_controller(
+    target_controller: str,
+    target_remote_logging_endpoint: str | None,
+    neighbor_controller: str | None,
+    neighbor_remote_logging_endpoint: str | None,
+) -> dict[str, str]:
+    return _build_remote_logging_endpoints_by_controller(
+        target_controller,
+        target_remote_logging_endpoint,
+        neighbor_controller,
+        neighbor_remote_logging_endpoint,
+    )
 
 
 @pytest.fixture

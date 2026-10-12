@@ -35,6 +35,9 @@ outputs:
   model-config:
     description: Path to a temporary file containing the Juju model config as JSON.
     value: ${{ steps.lookup.outputs.model-config }}
+  remote-logging:
+    description: Optional OTLP endpoint for controller-model remote logging.
+    value: ${{ steps.lookup.outputs.remote-logging }}
   metadata-source:
     description: >
       Path to the local directory containing Juju simplestreams image metadata.
@@ -60,6 +63,7 @@ runs:
         cloud_type=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"cloud-type\"]" "${table}")
         kubeconfig_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}")
         novarc_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}")
+        remote_logging=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"remote-logging\"] // \"\"" "${table}")
 
         # Write Juju config objects to per-environment temp files so that
         # multiple calls (e.g. target + neighbor) don't overwrite each other.
@@ -78,6 +82,7 @@ runs:
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
+        echo "remote-logging=${remote_logging}" >> "${GITHUB_OUTPUT}"
         if [[ "${cloud_type}" == "o7k" ]]; then
           echo "metadata-source=${HOME}/openstack/images" >> "${GITHUB_OUTPUT}"
         else
