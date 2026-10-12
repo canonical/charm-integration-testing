@@ -12,6 +12,8 @@ KUBERNETES_COLLECTOR_CHARM = "opentelemetry-collector-k8s"
 MACHINE_COLLECTOR_CHARM = "opentelemetry-collector"
 INTEGRATOR_CHARM = "opentelemetry-collector-integrator"
 EXTERNAL_CONFIG_ENDPOINT = "external-config"
+CONTROLLER_APPLICATION = "controller"
+JUJU_INFO_ENDPOINT = "juju-info"
 
 COLLECTOR_CHANNEL = "dev/edge"
 INTEGRATOR_CHANNEL = "3.0/stable"
@@ -71,6 +73,19 @@ class RemoteLoggingExtension(JujuExtension):
                 },
             )
 
+        if collector_charm == MACHINE_COLLECTOR_CHARM and not self.juju.integration_exists(
+            collector,
+            JUJU_INFO_ENDPOINT,
+            CONTROLLER_APPLICATION,
+            JUJU_INFO_ENDPOINT,
+            model,
+        ):
+            self.juju.integrate(
+                model,
+                JujuIntegrationApplication(collector, JUJU_INFO_ENDPOINT),
+                JujuIntegrationApplication(CONTROLLER_APPLICATION, JUJU_INFO_ENDPOINT),
+            )
+
         if not self.juju.integration_exists(
             integrator,
             EXTERNAL_CONFIG_ENDPOINT,
@@ -86,6 +101,12 @@ class RemoteLoggingExtension(JujuExtension):
 
         self.juju.wait_application_settled(model, collector, timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
         self.juju.wait_application_settled(model, integrator, timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
+
+        separator = "-" * 80
+        self.logger.info(
+            f"Juju status for controller model '{model.uri}':\n"
+            f"{separator}\n{self.juju.juju_status_text(model)}{separator}"
+        )
 
     def _ensure_deployed(
         self,

@@ -8,9 +8,11 @@ from typing import Any
 import pytest
 import yaml
 from extensions.remote_logging.extension import (
+    CONTROLLER_APPLICATION,
     DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
     EXTERNAL_CONFIG_ENDPOINT,
     INTEGRATOR_CHARM,
+    JUJU_INFO_ENDPOINT,
     KUBERNETES_COLLECTOR_CHARM,
     MACHINE_COLLECTOR_CHARM,
     RemoteLoggingExtension,
@@ -28,6 +30,7 @@ OTLP_ENDPOINT = "observability.example:4317"
 class JujuStub(JujuStubBase):
     deployments: list[tuple[str, str, str | None, dict[str, Any] | None, bool]] = field(default_factory=list)
     deployment_error_for: str | None = None
+    status_models: list[str] = field(default_factory=list)
 
     def deploy_application(
         self,
@@ -51,6 +54,11 @@ class JujuStub(JujuStubBase):
             force=force,
             channel=channel,
         )
+
+    def juju_status_text(self, model: JujuModelHandle) -> str:
+        assert len(self.waited_settled) == 2
+        self.status_models.append(model.uri)
+        return "controller status\n"
 
 
 class TestRemoteLoggingExtension:
@@ -80,6 +88,7 @@ class TestRemoteLoggingExtension:
     )
     def test_deploys_configures_integrates_and_waits(
         self,
+        caplog: pytest.LogCaptureFixture,
         logger: logging.Logger,
         is_k8s: bool,
         collector_charm: str,
@@ -90,7 +99,8 @@ class TestRemoteLoggingExtension:
         extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
 
         # WHEN the controller is bootstrapped
-        extension.post_bootstrap_controller(CONTROLLER)
+        with caplog.at_level(logging.INFO):
+            extension.post_bootstrap_controller(CONTROLLER)
 
         # THEN the substrate-specific collector and configured integrator are deployed
         assert juju.deployments[0] == (CONTROLLER_MODEL.uri, collector_charm, collector_charm, None, collector_trust)
@@ -115,7 +125,18 @@ class TestRemoteLoggingExtension:
                 }
             },
         }
-        assert juju.integrations == [
+        expected_integrations = []
+        if not is_k8s:
+            expected_integrations.append(
+                (
+                    CONTROLLER_MODEL.uri,
+                    collector_charm,
+                    JUJU_INFO_ENDPOINT,
+                    CONTROLLER_APPLICATION,
+                    JUJU_INFO_ENDPOINT,
+                )
+            )
+        expected_integrations.append(
             (
                 CONTROLLER_MODEL.uri,
                 INTEGRATOR_CHARM,
@@ -123,12 +144,16 @@ class TestRemoteLoggingExtension:
                 collector_charm,
                 EXTERNAL_CONFIG_ENDPOINT,
             )
-        ]
+        )
+        assert juju.integrations == expected_integrations
         timeout = str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
         assert juju.waited_settled == [
             (CONTROLLER_MODEL.uri, collector_charm, timeout),
             (CONTROLLER_MODEL.uri, INTEGRATOR_CHARM, timeout),
         ]
+        assert juju.status_models == [CONTROLLER_MODEL.uri]
+        assert f"Juju status for controller model '{CONTROLLER_MODEL.uri}'" in caplog.text
+        assert "controller status" in caplog.text
 
     def test_reuses_existing_applications_and_integration(self, logger: logging.Logger) -> None:
         # GIVEN the stack already exists under custom application names and is integrated
@@ -178,6 +203,41 @@ class TestRemoteLoggingExtension:
                 },
             )
         ]
+
+    def test_reuses_existing_machine_collector_relations(self, logger: logging.Logger) -> None:
+        # GIVEN the machine stack and both required relations already exist
+        juju = JujuStub(
+            is_k8s=False,
+            applications={
+                "collector": MACHINE_COLLECTOR_CHARM,
+                "integrator": INTEGRATOR_CHARM,
+            },
+        )
+        juju.integrations.extend(
+            [
+                (
+                    CONTROLLER_MODEL.uri,
+                    "collector",
+                    JUJU_INFO_ENDPOINT,
+                    CONTROLLER_APPLICATION,
+                    JUJU_INFO_ENDPOINT,
+                ),
+                (
+                    CONTROLLER_MODEL.uri,
+                    "integrator",
+                    EXTERNAL_CONFIG_ENDPOINT,
+                    "collector",
+                    EXTERNAL_CONFIG_ENDPOINT,
+                ),
+            ]
+        )
+        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+
+        # WHEN the hook runs again
+        extension.post_bootstrap_controller(CONTROLLER)
+
+        # THEN neither relation is duplicated
+        assert len(juju.integrations) == 2
 
     def test_propagates_deployment_failure(self, logger: logging.Logger) -> None:
         # GIVEN the collector deployment fails and no concurrent deployment appears
