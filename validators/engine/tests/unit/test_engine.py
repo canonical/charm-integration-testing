@@ -10,7 +10,7 @@ import pytest
 from validators.base import BaseValidator, ValidationLevel, ValidationResult
 from validators.engine.engine import load_validators, run_for_charm
 from validators.test_utils.helpers import make_charm_from_relation
-from validators.test_utils.stubs import RelationRoleStub, RelationStub, UnitStub
+from validators.test_utils.stubs import ApplicationStub, RelationRoleStub, RelationStub, UnitStub
 from validators.test_utils.validators import FailingValidator, PassingValidator
 
 
@@ -55,6 +55,23 @@ class EntryPointStub:
         if self._load_error is not None:
             raise self._load_error
         return self._load_result
+
+
+class LocalAppDataAccessGuard:
+    def __init__(
+        self,
+        local_app: ApplicationStub,
+        data: dict[ApplicationStub | UnitStub | None, dict[str, str]],
+    ) -> None:
+        self.local_app = local_app
+        self.data = data
+
+    def get(
+        self, key: ApplicationStub | UnitStub | None, default: dict[str, str] | None = None
+    ) -> dict[str, str] | None:
+        if key is self.local_app:
+            raise AssertionError("A non-leader must not read its own application databag.")
+        return self.data.get(key, default)
 
 
 class TestLoadValidators:
@@ -216,6 +233,26 @@ class TestRunForCharm:
         assert len(results) == 1
         assert results[0].status == "SKIPPED"
         assert results[0].relation_id == 0
+
+    def test_non_leader_skips_local_app_databag_when_checking_readiness(self) -> None:
+        relation = RelationStub(name="db", id=0)
+        charm = make_charm_from_relation(relation, interface_name="test-interface", role=RelationRoleStub.requires)
+        charm.unit = UnitStub("app/0", leader=False)
+        integration = charm.model.relations["db"][0]
+        integration.data = cast(
+            dict[ApplicationStub | UnitStub | None, dict[str, str]],
+            LocalAppDataAccessGuard(charm.app, integration.data),
+        )
+
+        results = run_for_charm(
+            cast(ops.CharmBase, charm),
+            level="simple",
+            validators={"test-interface": [PassingValidator]},
+            skip_missing_unvalidated=True,
+        )
+
+        assert len(results) == 1
+        assert results[0].status == "SKIPPED"
 
     def test_runs_integration_with_remote_data_when_requested(self) -> None:
         relation = RelationStub(name="db", id=0)
