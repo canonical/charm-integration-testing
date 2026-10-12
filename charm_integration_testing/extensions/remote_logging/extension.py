@@ -130,19 +130,17 @@ class RemoteLoggingExtension(JujuExtension):
         config_yaml = yaml.safe_dump(
             {
                 "receivers": {
-                  "syslog": {
-                      "tcp": {
-                          "listen_address": "0.0.0.0:5424"
-                      },
-                      "protocol": "rfc5424"
-                  }
+                    "syslog": {
+                        "tcp": {"listen_address": "0.0.0.0:5424"},
+                        "protocol": "rfc5424",
+                    }
                 },
                 "exporters": {
                     "otlp": {
                         "endpoint": endpoint,
                         "tls": {"insecure": True},
                     }
-                }
+                },
             },
             sort_keys=False,
         )

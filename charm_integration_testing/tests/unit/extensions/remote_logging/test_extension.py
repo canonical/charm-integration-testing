@@ -102,12 +102,18 @@ class TestRemoteLoggingExtension:
         assert integrator_deployment[3]["traces_pipeline"] is False
         assert integrator_deployment[3]["logs_pipeline"] is True
         assert yaml.safe_load(integrator_deployment[3]["config_yaml"]) == {
+            "receivers": {
+                "syslog": {
+                    "tcp": {"listen_address": "0.0.0.0:5424"},
+                    "protocol": "rfc5424",
+                }
+            },
             "exporters": {
                 "otlp": {
                     "endpoint": OTLP_ENDPOINT,
                     "tls": {"insecure": True},
                 }
-            }
+            },
         }
         assert juju.integrations == [
             (
@@ -155,6 +161,11 @@ class TestRemoteLoggingExtension:
                 "integrator",
                 {
                     "config_yaml": (
+                        "receivers:\n"
+                        "  syslog:\n"
+                        "    tcp:\n"
+                        "      listen_address: 0.0.0.0:5424\n"
+                        "    protocol: rfc5424\n"
                         "exporters:\n"
                         "  otlp:\n"
                         f"    endpoint: {OTLP_ENDPOINT}\n"
