@@ -52,7 +52,8 @@ def _has_negotiated_data(integration: Relation, charm: CharmBase) -> bool:
     from the relation role, so treat the relation as ready once either side
     has published anything; the gate can then never get stuck at SKIPPED.
     """
-    return _has_data(integration, charm.app, [charm.unit]) or _has_data(integration, integration.app, integration.units)
+    local_app = charm.app if charm.unit.is_leader() else None
+    return _has_data(integration, local_app, [charm.unit]) or _has_data(integration, integration.app, integration.units)
 
 
 def load_validators() -> dict[str, list[type[BaseValidator]]]:
