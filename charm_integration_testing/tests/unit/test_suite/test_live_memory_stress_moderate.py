@@ -10,8 +10,8 @@ from unittest.mock import Mock
 import pytest
 from chaos_client import ChaosResourceConstraintsError, MetaChaosClient, ResourceConstraintsClient
 from juju import CharmChannel, JujuApplicationInfo, JujuClient, JujuModelHandle, JujuValidationError
+from test_suite import moderate_stress
 from test_suite import test_live_memory_stress_moderate as live
-from test_suite.fixtures.chaos_tools import ChaosTool
 
 from validators.base.validator import ValidationResult
 
@@ -41,8 +41,8 @@ def result(**overrides: Any) -> ValidationResult:
 def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     clock = [0.0]
     monkeypatch.setattr(live, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(live, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
-    monkeypatch.setattr(live, "available_chaos_tools", lambda backend: {ChaosTool.LITMUS})
+    monkeypatch.setattr(moderate_stress, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(moderate_stress, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     client = Mock()
     client.backend.list_applications.return_value = {
         "target": JujuApplicationInfo(
@@ -52,6 +52,7 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     client.backend.application_units.return_value = ["target/0"]
     client.validate_model.return_value = {"target/0": [result(endpoint="database")], "neighbor/0": [result()]}
     chaos = Mock()
+    chaos.supports.return_value = True
     chaos.stress_memory.return_value = timedelta(minutes=5)
     arguments: dict[str, Any] = dict(
         juju_client=client,
@@ -62,7 +63,6 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
         neighbor_model_ref=None,
         neighbor_application="neighbor",
         neighbor_endpoint="postgresql",
-        kubernetes_client=Mock(),
         memory_pressure_check_interval=timedelta(seconds=10),
         memory_pressure_recovery_timeout=timedelta(minutes=15),
     )
@@ -143,7 +143,7 @@ def test_validation_scopes_applications_before_running(
     endpoints = [(MODEL, "target", "database"), (neighbor_model, "neighbor", "postgresql")]
     # WHEN validating duplicate endpoints, THEN each selected application runs once
     if failing_application == "unrelated":
-        passed = live.validate_service(client, endpoints + [endpoints[0]])
+        passed = moderate_stress.validate_service(client, endpoints + [endpoints[0]])
         assert passed == {
             (MODEL, "target/0", "database", "postgresql_client", 1),
             (neighbor_model, "neighbor/0", "postgresql", "postgresql_client", 1),
@@ -152,7 +152,7 @@ def test_validation_scopes_applications_before_running(
     else:
         # A selected application's failure must still propagate.
         with pytest.raises(JujuValidationError):
-            live.validate_service(client, endpoints)
+            moderate_stress.validate_service(client, endpoints)
 
 
 @pytest.mark.parametrize(
@@ -211,19 +211,20 @@ def test_failures_and_cleanup(scenario: Scenario, failure: str, cleanup_fails: b
         assert caught.value is error
 
 
-@pytest.mark.parametrize("platform", ["machine", "no-tools", "mesh-without-stress"])
-def test_unsupported_skips(scenario: Scenario, monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+def test_unsupported_skips(scenario: Scenario) -> None:
+    arguments, client, chaos, _ = scenario
+    chaos.supports.return_value = False
+    with pytest.raises(pytest.skip.Exception, match="No available chaos client"):
+        live.test_live_memory_stress_moderate(**arguments)
+    chaos.supports.assert_called_once_with("stress_memory")
+    chaos.stress_memory.assert_not_called()
+    client.multi_model_idle_for_period.assert_not_called()
+
+
+def test_chaos_detection_error_is_not_skipped(scenario: Scenario) -> None:
     arguments, _, chaos, _ = scenario
-    if platform == "machine":
-        arguments["kubernetes_client"] = None
-    else:
-        monkeypatch.setattr(
-            live,
-            "available_chaos_tools",
-            lambda backend: set() if platform == "no-tools" else {ChaosTool.CHAOS_MESH},
-        )
-        arguments["kubernetes_client"].backend.crd_exists.return_value = False
-    with pytest.raises(pytest.skip.Exception):
+    arguments["chaos_tool_for_model"].side_effect = RuntimeError("API unavailable")
+    with pytest.raises(RuntimeError, match="API unavailable"):
         live.test_live_memory_stress_moderate(**arguments)
     chaos.stress_memory.assert_not_called()
 
@@ -249,7 +250,7 @@ def test_validator_runtime_counts_toward_observation(scenario: Scenario) -> None
     _, _, chaos, clock = scenario
     validate = Mock(side_effect=lambda: clock.__setitem__(0, clock[0] + 7))
     health = Mock()
-    live.observe_memory_pressure(chaos, MODEL, "target/0", 20, 10, health, validate, stress_deadline=140)
+    moderate_stress.observe_moderate_pressure(chaos, MODEL, "target/0", 20, 10, health, validate, stress_deadline=140)
     assert clock[0] == 24
     assert validate.call_count == 2
     assert health.call_count == 4
@@ -340,8 +341,8 @@ def test_partial_baseline_coverage_skips_before_injection(
         return results
 
     client.validate_model.side_effect = validate
-    # WHEN establishing baseline coverage, THEN skip before creating any chaos client
+    # WHEN establishing baseline coverage, THEN skip before injecting any stress
     with pytest.raises(pytest.skip.Exception, match="No passing simple"):
         live.test_live_memory_stress_moderate(**arguments)
-    arguments["chaos_tool_for_model"].assert_not_called()
+    chaos.check_stress.assert_not_called()
     chaos.stress_memory.assert_not_called()
