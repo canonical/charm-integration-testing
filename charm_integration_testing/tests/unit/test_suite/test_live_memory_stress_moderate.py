@@ -100,7 +100,7 @@ def test_per_charm_settings_and_neighbor_model(scenario: Scenario, tmp_path: Pat
     )
     meta = MetaChaosClient([chaos], client.backend, ResourceConstraintsClient(tmp_path))
     arguments.update(chaos_tool_for_model=Mock(return_value=meta), neighbor_model_ref=NEIGHBOR)
-    client.validate_model.side_effect = lambda *, model, level, applications: (
+    client.validate_model.side_effect = lambda *, model, level, applications, endpoints: (
         {"neighbor/0": [result()]} if model == NEIGHBOR else {"target/0": [result(endpoint="database")]}
     )
     live.test_live_memory_stress_moderate(**arguments)
@@ -112,8 +112,9 @@ def test_per_charm_settings_and_neighbor_model(scenario: Scenario, tmp_path: Pat
 
 @pytest.mark.parametrize("neighbor_model", [MODEL, NEIGHBOR], ids=["same-model", "cross-model"])
 @pytest.mark.parametrize("failing_application", ["unrelated", "target", "neighbor"])
+@pytest.mark.parametrize("selected_endpoint", [False, True])
 def test_validation_scopes_applications_before_running(
-    neighbor_model: JujuModelHandle, failing_application: str
+    neighbor_model: JujuModelHandle, failing_application: str, selected_endpoint: bool
 ) -> None:
     # GIVEN a real validation client and a failing application in the model
     calls: list[tuple[JujuModelHandle, str]] = []
@@ -133,17 +134,20 @@ def test_validation_scopes_applications_before_running(
             calls.append((model, application))
             return {
                 f"{application}/0": [
+                    result(endpoint="database" if application == "target" else "postgresql"),
                     result(
-                        endpoint="database" if application == "target" else "postgresql",
+                        endpoint=("database" if application == "target" else "postgresql")
+                        if selected_endpoint
+                        else ("postgresql" if application == "target" else "database"),
                         status="FAIL" if application == failing_application else "PASS",
-                    )
+                    ),
                 ]
             }
 
     client = JujuClient(Backend(), getLogger(__name__))
     endpoints = [(MODEL, "target", "database"), (neighbor_model, "neighbor", "postgresql")]
     # WHEN validating duplicate endpoints, THEN each selected application runs once
-    if failing_application == "unrelated":
+    if failing_application == "unrelated" or not selected_endpoint:
         passed = moderate_stress.validate_service(client, endpoints + [endpoints[0]])
         assert passed == {
             (MODEL, "target/0", "database", "postgresql_client", 1),
@@ -348,7 +352,9 @@ def test_partial_baseline_coverage_skips_before_injection(
     arguments, client, chaos, _ = scenario
     arguments["neighbor_model_ref"] = neighbor_model
 
-    def validate(*, model: JujuModelHandle, level: str, applications: list[str]) -> dict[str, list[ValidationResult]]:
+    def validate(
+        *, model: JujuModelHandle, level: str, applications: list[str], endpoints: set[tuple[str, str]]
+    ) -> dict[str, list[ValidationResult]]:
         results = {}
         for application in applications:
             endpoint = "database" if application == "target" else "postgresql"

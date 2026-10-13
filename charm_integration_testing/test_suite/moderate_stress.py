@@ -6,6 +6,7 @@
 from time import monotonic, sleep
 from typing import Callable
 
+import pytest
 from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
 
@@ -19,7 +20,12 @@ def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHan
         applications = list(
             dict.fromkeys(application for selected_model, application, _ in endpoints if selected_model == model)
         )
-        results = juju_client.validate_model(model=model, level="simple", applications=applications)
+        selected_endpoints = {
+            (application, endpoint) for selected_model, application, endpoint in endpoints if selected_model == model
+        }
+        results = juju_client.validate_model(
+            model=model, level="simple", applications=applications, endpoints=selected_endpoints
+        )
         for selected_model, application, endpoint in endpoints:
             if selected_model != model:
                 continue
@@ -30,6 +36,19 @@ def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHan
                     if result.status == "PASS" and result.level == "simple" and result.endpoint == endpoint:
                         passed.add((model, unit, result.endpoint, result.interface, result.relation_id))
     return passed
+
+
+def validate_baseline(juju_client: JujuClient, endpoints: list[tuple[JujuModelHandle, str, str]]) -> set[ValidationKey]:
+    """Require a passing simple baseline for every selected endpoint before injection."""
+    required = validate_service(juju_client, endpoints)
+    covered_endpoints = {(model, unit.split("/")[0], endpoint) for model, unit, endpoint, _, _ in required}
+    missing_endpoints = set(endpoints) - covered_endpoints
+    if missing_endpoints:
+        pytest.skip(
+            f"No passing simple interface validators for selected endpoints: {missing_endpoints}; "
+            "moderate stress is unverified."
+        )
+    return required
 
 
 def check_service_health(juju_client: JujuClient, endpoints: list[tuple[JujuModelHandle, str, str]]) -> None:

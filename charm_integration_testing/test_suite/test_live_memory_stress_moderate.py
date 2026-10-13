@@ -13,8 +13,8 @@ from juju import JujuClient, JujuModelHandle
 from .moderate_stress import (
     check_service_health,
     observe_moderate_pressure,
+    validate_baseline,
     validate_required_coverage,
-    validate_service,
 )
 from .scheduler.states import State
 
@@ -59,14 +59,7 @@ def test_live_memory_stress_moderate(
     )
 
     check_service_health(juju_client, endpoints)
-    required = validate_service(juju_client, endpoints)
-    covered_endpoints = {(model, unit.split("/")[0], endpoint) for model, unit, endpoint, _, _ in required}
-    missing_endpoints = set(endpoints) - covered_endpoints
-    if missing_endpoints:
-        pytest.skip(
-            f"No passing simple interface validators for selected endpoints: {missing_endpoints}; "
-            "moderate stress is unverified."
-        )
+    required = validate_baseline(juju_client, endpoints)
 
     units = juju_client.backend.application_units(target_model_ref, target_application)
     if not units:
