@@ -80,6 +80,18 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
         juju.validate_model.assert_not_called()
 
 
+def test_skips_before_baseline_wait_when_unsupported() -> None:
+    juju, chaos = MagicMock(), MagicMock()
+    chaos.supports.return_value = False
+
+    with pytest.raises(pytest.skip.Exception, match="io_latency"):
+        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+
+    chaos.supports.assert_called_once_with("io_latency")
+    juju.multi_model_idle_for_period.assert_not_called()
+    chaos.io_latency.assert_not_called()
+
+
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
 def test_neighbor_validation(neighbor: JujuModelHandle, monkeypatch: pytest.MonkeyPatch) -> None:
     juju, chaos = MagicMock(), MagicMock()

@@ -43,14 +43,17 @@ def test_live_disk_io_latency(
     target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
+    if not require_chaos_tool.supports("io_latency"):
+        # Skip before the baseline wait, not after.
+        pytest.skip(f"No available chaos client supports 'io_latency' for {target_model_ref.uri}.")
+
     models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
     juju_client.multi_model_idle_for_period(models=models, timeout=RECOVER_TIMEOUT, strict_timeout=True)
     unit = f"{target_application}/0"
 
     try:
-        # Chaos-Mesh-only (no client implements io_latency otherwise): the fixture skips the
-        # test automatically via on_unsupported when Chaos Mesh is absent. io_latency() blocks
-        # until Chaos Mesh's controller confirms the IOChaos resource was actually injected.
+        # io_latency() blocks until Chaos Mesh's controller confirms the IOChaos resource was
+        # actually injected.
         resolved_duration = require_chaos_tool.io_latency(
             model=target_model_ref,
             unit=unit,
