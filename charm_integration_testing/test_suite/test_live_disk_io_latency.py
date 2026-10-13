@@ -51,7 +51,11 @@ def test_live_disk_io_latency(
     juju_client.multi_model_idle_for_period(models=models, timeout=RECOVER_TIMEOUT, strict_timeout=True)
     unit = f"{target_application}/0"
 
+    observation_error: Exception | None = None
     try:
+        # The experiment's duration starts counting down at creation, before io_latency()
+        # returns, so track elapsed time across the call rather than starting a fresh window.
+        injection_start = monotonic()
         # io_latency() blocks until Chaos Mesh's controller confirms the IOChaos resource was
         # actually injected.
         resolved_duration = require_chaos_tool.io_latency(
@@ -64,10 +68,22 @@ def test_live_disk_io_latency(
         )
         # A per-charm override may have changed the experiment's actual duration, so observe for
         # as long as the fault will actually run rather than the (possibly stale) caller value,
-        # and detect if the fault stops or is removed before then.
-        observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, resolved_duration.total_seconds())
+        # minus the time already spent waiting for confirmed injection, and detect if the fault
+        # stops or is removed before then.
+        remaining = resolved_duration.total_seconds() - (monotonic() - injection_start)
+        observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, max(0.0, remaining))
+    except Exception as error:
+        observation_error = error
+        raise
     finally:
-        require_chaos_tool.cleanup_all()
+        try:
+            require_chaos_tool.cleanup_all()
+        except Exception as cleanup_error:
+            if observation_error is not None:
+                raise RuntimeError(
+                    f"Disk I/O latency injection failed: {observation_error!r}; cleanup also failed: {cleanup_error!r}"
+                ) from cleanup_error
+            raise
 
     # Recovery must happen without operator intervention.
     juju_client.multi_model_idle_for_period(models=models, timeout=RECOVER_TIMEOUT, strict_timeout=True)
