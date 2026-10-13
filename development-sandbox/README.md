@@ -66,6 +66,7 @@ All tokens are optional. Set them in `development-sandbox/.env`
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
 - **nginx API cache:** auto-provisioned via `substrate.yaml` cloud-init, listening on `http://localhost:8080` *inside the VM* (`/charmhub/`, `/snapcraft/`), caching responses for 4h.
 - Any host env var prefixed `SANDBOX_VAR_` is passed into the VM with the prefix stripped, e.g. `SANDBOX_VAR_CHARMHUB_API_URL` / `SANDBOX_VAR_SNAPCRAFT_API_URL` override `bundle_builder_x`'s API base URLs inside the VM as `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL` (e.g. point at the nginx cache above), and `SANDBOX_VAR_COPILOT_MODEL` overrides the Copilot model inside the VM. See `.env.sample`.
+- `uvx` is installed in the VM by `scripts/sandbox.sh up`, using the repository's bundled `static/uv` binary.
 
 ## MCP servers
 
@@ -96,3 +97,26 @@ convention. The format is the standard Copilot MCP config:
 MCP config applies to both `sandbox.sh run 'task'` and `sandbox.sh run --interactive`.
 It has no effect on `up`, `shell`, `down`, or `destroy`.
 
+## Copilot settings
+
+To use a Copilot CLI `settings.json` for a run, set
+`SANDBOX_COPILOT_SETTINGS_FILE` in `development-sandbox/.env`:
+
+```
+SANDBOX_COPILOT_SETTINGS_FILE=development-sandbox/copilot-settings.json
+```
+
+The file must contain a JSON object. It is copied to a temporary `COPILOT_HOME`
+for each `sandbox.sh run` invocation, alongside the sandbox's Copilot and MCP
+configuration, and removed when the run ends. The regular Copilot home is left
+unchanged. `development-sandbox/copilot-settings.json` is gitignored.
+
+For Auto routing with the efficiency profile, set
+`SANDBOX_VAR_COPILOT_MODEL=auto` and use this settings file:
+
+```json
+{
+  "model": "auto",
+  "autoTier": "efficiency"
+}
+```
