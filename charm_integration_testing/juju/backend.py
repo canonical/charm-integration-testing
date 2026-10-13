@@ -16,7 +16,13 @@ from pydantic.dataclasses import dataclass
 from validators.base.validator import ValidationResult
 
 from .handles import JujuModelHandle
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .models import (
+    JujuApplicationHealth,
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+)
 from .version import JujuVersion
 
 _P = ParamSpec("_P")
@@ -238,6 +244,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        """Read application and unit health from a single status snapshot."""
         raise NotImplementedError
 
     @abstractmethod
