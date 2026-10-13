@@ -519,6 +519,31 @@ def test_startup_waits_for_injection_not_engine_creation(context: ClientContext)
 
 
 class TestCheckStress:
+    @pytest.mark.parametrize("state", ["missing-results", "targeted", "reverted", "stopped-result"])
+    @pytest.mark.parametrize("completed_engine", [False, True])
+    def test_completion_requires_evidence_and_rejects_interruption(
+        self, context: ClientContext, state: str, completed_engine: bool
+    ) -> None:
+        # GIVEN confirmed injection followed by incomplete or interrupted result state
+        chaos = context.chaos_client()
+        chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        if completed_engine:
+            next(iter(context.engines.values()))["status"]["engineStatus"] = "completed"
+        if state == "missing-results":
+            context.results.clear()
+        elif state == "stopped-result":
+            context.results[0]["status"]["experimentStatus"]["phase"] = "Stopped"
+        else:
+            context.results[0]["metadata"]["annotations"] = {"pod/postgresql-random-pod": state}
+
+        # WHEN OOM permits completion, THEN only explicit completion tolerates result lag
+        if completed_engine and state != "stopped-result":
+            chaos.check_stress(MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                chaos.check_stress(MODEL, UNIT, allow_completed=True)
+        assert len(chaos._created) == 1
+
     @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
     @pytest.mark.parametrize("state", ["completed", "failed", "empty", "stopped", "injected"])
     def test_completion_contract_through_meta(self, context: ClientContext, operation: str, state: str) -> None:

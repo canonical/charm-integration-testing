@@ -108,8 +108,6 @@ class LitmusChaosClient(ChaosClient):
                 raise engine.execution_error
             current = self._read_engine(engine)
             if allow_completed:
-                # Independent fault evidence permits completion before result updates
-                # settle. Execution errors and explicit interruption still fail.
                 if (
                     current is None
                     or current.get("metadata", {}).get("deletionTimestamp")
@@ -117,9 +115,18 @@ class LitmusChaosClient(ChaosClient):
                         current.get("spec", {}).get("engineState") == "stop"
                         or current.get("status", {}).get("engineStatus") == "stopped"
                     )
+                    or any(
+                        (result.get("status") or {}).get("experimentStatus", {}).get("phase") == "Stopped"
+                        for result in results
+                    )
                 ):
                     raise RuntimeError(f"Litmus experiment {engine.name} was interrupted during observation.")
-                continue
+                # A completed Engine can precede result updates. Cleanup still verifies reversion.
+                if (current.get("status") or {}).get("engineStatus") == "completed" or any(
+                    (result.get("status") or {}).get("experimentStatus", {}).get("phase") == "Completed"
+                    for result in results
+                ):
+                    continue
             if (
                 current is None
                 or (current.get("status") or {}).get("engineStatus") in {"completed", "stopped"}

@@ -311,6 +311,8 @@ class TestApplicationHealth:
         Params("app-blocked", JujuApplicationHealth("blocked", {"app/2": "active"}, {"app/2": "idle"})),
         Params("unit-error", JujuApplicationHealth("active", {"app/2": "error"}, {"app/2": "idle"})),
         Params("unit-blocked", JujuApplicationHealth("active", {"app/2": "blocked"}, {"app/2": "idle"})),
+        Params("app-terminated", JujuApplicationHealth("terminated", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("unit-terminated", JujuApplicationHealth("active", {"app/2": "terminated"}, {"app/2": "idle"})),
         Params("agent-error", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "error"})),
         Params("agent-lost", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "lost"})),
         Params("agent-down", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "down"})),
@@ -646,6 +648,29 @@ class TestJujuClientValidateModel:
         with pytest.raises(JujuValidationError) as exc_info:
             client.validate_model(self._model(), level=None)
         assert "myapp/0" in exc_info.value.failed_validations
+
+    @pytest.mark.parametrize("source", ["backend", "extension", "persistence"])
+    @pytest.mark.parametrize("selected", [False, True])
+    def test_endpoint_filter_preserves_selected_failures_and_persistence(
+        self, logger: LoggerStub, source: str, selected: bool
+    ) -> None:
+        # GIVEN a failure from each validation source, on a selected or unrelated endpoint
+        endpoint = "db" if selected else "metrics"
+        failure = {"myapp": {"myapp/0": [_fail(endpoint)]}}
+        backend = BackendStub(app_list={"myapp": _app_info()}, validate_results=failure if source == "backend" else {})
+        extensions: list[JujuExtension] = []
+        if source == "extension":
+            extensions.append(ExtensionStub(failure))
+        elif source == "persistence":
+            extensions.append(PersistenceExtensionStub(failure))
+        client = self._client(logger, backend, extensions)
+
+        # WHEN filtering functional results, THEN persistence failures are never filtered
+        if selected or source == "persistence":
+            with pytest.raises(JujuValidationError):
+                client.validate_model(self._model(), endpoints={("myapp", "db")})
+        else:
+            assert client.validate_model(self._model(), endpoints={("myapp", "db")}) == {"myapp/0": []}
 
     def test_persistence_extension_owns_its_state(self, logger: LoggerStub) -> None:
         # GIVEN an extension that adds a new state entry on prepare

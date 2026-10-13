@@ -263,6 +263,22 @@ def test_duplicate_endpoints_validate_application_once(harness: Harness) -> None
     assert harness.backend.rounds == {"target": 1}
 
 
+@pytest.mark.parametrize("cross_model", [False, True], ids=["same-model", "cross-model"])
+@pytest.mark.parametrize("status", ["FAIL", "ERROR"])
+def test_unselected_endpoint_failure_is_excluded(
+    harness: Harness, cross_model: bool, status: Literal["FAIL", "ERROR"]
+) -> None:
+    # GIVEN failures on endpoints selected only for the other application
+    harness.backend.cross_model = cross_model
+    harness.backend.results["target"] = [{UNIT: [result(), result(status, endpoint="service")]}]
+    harness.backend.results["neighbor"] = [{"neighbor/4": [result(endpoint="service"), result(status)]}]
+
+    # WHEN running all phases, THEN filtering uses both application and endpoint
+    harness.run()
+    assert harness.backend.rounds == {"target": 5, "neighbor": 5}
+    assert harness.events.count("cleanup") == 1
+
+
 @dataclass(frozen=True)
 class DurationParams:
     label: str

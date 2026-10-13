@@ -70,11 +70,17 @@ class JujuSpy(JujuClient):
             raise self.error
 
     def validate_model(
-        self, model: JujuModelHandle, level: str | None = "simple", *, applications: list[str] | None = None
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+        *,
+        applications: list[str] | None = None,
+        endpoints: set[tuple[str, str]] | None = None,
     ) -> dict[str, list[ValidationResult]]:
         assert model == MODEL
         assert level == "deep"
         assert applications is None
+        assert endpoints is None
         self.events.append("validate")
         if self.failure == "validation":
             raise RuntimeError("validation failed")
