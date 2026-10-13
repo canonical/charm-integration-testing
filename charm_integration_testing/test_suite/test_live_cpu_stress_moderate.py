@@ -13,8 +13,8 @@ from juju import JujuClient, JujuModelHandle
 from .moderate_stress import (
     check_service_health,
     observe_moderate_pressure,
+    validate_baseline,
     validate_required_coverage,
-    validate_service,
 )
 from .scheduler.states import State
 
@@ -69,14 +69,7 @@ def test_live_cpu_stress_moderate(
     juju_client.multi_model_idle_for_period(models=models, timeout=cpu_pressure_recovery_timeout, strict_timeout=True)
 
     check_service_health(juju_client, endpoints)
-    required = validate_service(juju_client, endpoints)
-    covered_endpoints = {(model, unit.split("/")[0], endpoint) for model, unit, endpoint, _, _ in required}
-    missing_endpoints = set(endpoints) - covered_endpoints
-    if missing_endpoints:
-        pytest.skip(
-            f"No passing simple interface validators for selected endpoints: {missing_endpoints}; "
-            "moderate stress is unverified."
-        )
+    required = validate_baseline(juju_client, endpoints)
 
     units = juju_client.backend.application_units(target_model_ref, target_application)
     if not units:
@@ -114,7 +107,8 @@ def test_live_cpu_stress_moderate(
             chaos.cleanup_all()
         except BaseException as cleanup_error:
             if observation_error is not None:
-                raise cleanup_error from observation_error
+                # Keep the original failure and traceback, with cleanup retained in the exception chain.
+                raise observation_error from cleanup_error
             raise
 
     juju_client.multi_model_idle_for_period(models=models, timeout=cpu_pressure_recovery_timeout, strict_timeout=True)

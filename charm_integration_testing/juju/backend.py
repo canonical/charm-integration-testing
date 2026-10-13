@@ -29,6 +29,10 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+class JujuRestartNotSupportedError(NotImplementedError):
+    """The backend or placement does not support restarting a follower; no restart was attempted."""
+
+
 class JujuPerformanceWarning(UserWarning):
     """Base warning for Juju performance issues."""
 
@@ -148,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        """Restart one Juju non-leader without changing the application unit count."""
+        raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")
+
     @abstractmethod
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         raise NotImplementedError

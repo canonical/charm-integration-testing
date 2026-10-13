@@ -5,7 +5,7 @@ import logging
 import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, Callable, Collection, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
@@ -264,6 +264,74 @@ class KubernetesClient:
             timeout=timeout,
             delay=delay,
         )
+
+    def restart_pod(
+        self,
+        namespace: str,
+        pod_name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> None:
+        """Delete this Pod instance and rediscover its unit's replacement before running hooks.
+
+        ``existing_uids`` contains all application Pod UIDs observed before deletion.
+        Deletion and replacement polling share one timeout budget; hooks run afterwards.
+        """
+        deadline = monotonic() + timeout.total_seconds()
+        old_uids = set(existing_uids) | {uid}
+
+        def remaining() -> float:
+            seconds = deadline - monotonic()
+            if seconds <= 0:
+                raise TimeoutError(f"Pod {namespace}/{pod_name} was not replaced within {timeout}.")
+            return seconds
+
+        def request_timeout() -> tuple[float, float]:
+            # Share the remaining budget between connection and response reads.
+            seconds = min(30, remaining()) / 2
+            return seconds, seconds
+
+        self.backend.core_v1_api.delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            body=K8sClient.V1DeleteOptions(preconditions=K8sClient.V1Preconditions(uid=uid)),
+            _request_timeout=request_timeout(),
+        )
+        self.logger.info(f"Waiting for replacement of Pod {namespace}/{pod_name} ({uid}).")
+
+        while True:
+            try:
+                pods = self.backend.core_v1_api.list_namespaced_pod(
+                    namespace,
+                    label_selector=f"app.kubernetes.io/name={application}",
+                    _request_timeout=request_timeout(),
+                )
+            except ApiException as error:
+                if error.status != 404:
+                    raise
+            else:
+                remaining()
+                replacements = [
+                    pod
+                    for pod in pods.items
+                    if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+                    and pod.metadata.uid
+                    and pod.metadata.uid not in old_uids
+                    and pod.metadata.deletion_timestamp is None
+                ]
+                if (
+                    len(replacements) == 1
+                    and replacements[0].status is not None
+                    and replacements[0].status.phase == PodStatus.RUNNING.value
+                ):
+                    for extension in self.extensions:
+                        extension.post_delete_pod(namespace, replacements[0].metadata.name)
+                    return
+            sleep(min(self.default_delay.total_seconds(), remaining()))
 
     def delete_pod(self, namespace: str, pod_name: str) -> None:
         """

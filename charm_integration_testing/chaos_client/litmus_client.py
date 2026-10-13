@@ -94,7 +94,7 @@ class LitmusChaosClient(ChaosClient):
         )
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        """Report execution errors from experiments registered for this unit."""
+        """Require active stress or explicitly allowed completion, and report execution errors."""
         engines = [engine for engine in self._created if engine.scope == (model.uri, unit) and engine.uid is not None]
         if not engines:
             raise RuntimeError(f"No tracked Litmus stress for {model.uri}/{unit}.")

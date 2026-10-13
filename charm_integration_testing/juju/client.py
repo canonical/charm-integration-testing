@@ -56,6 +56,14 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
+    def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
+        self.logger.info(f"Restarting a follower of {application}.")
+        unit = self.backend.restart_follower(model, application, timeout)
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+        self.logger.info(f"Restarted follower {unit}.")
+        return unit
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
@@ -365,7 +373,7 @@ class JujuClient:
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
     def check_application_health(self, model: JujuModelHandle, application: str) -> None:
-        """Reject workload failures and disconnected agents without requiring idle."""
+        """Reject errored, blocked or unknown workloads and disconnected, errored or unknown agents."""
         self.logger.info("Checking application health for %s/%s.", model.uri, application)
         health = self.backend.application_health(model, application)
         if not health.units or set(health.units) != set(health.agents):

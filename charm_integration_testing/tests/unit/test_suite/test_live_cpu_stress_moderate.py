@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from traceback import extract_tb
 from typing import Literal
 
 import pytest
@@ -420,16 +421,29 @@ def test_failure_always_cleans_up_and_preserves_errors(harness: Harness, operati
         harness.tool.errors["cleanup"] = RuntimeError("cleanup failed")
 
     # WHEN running, THEN cleanup occurs and neither error is lost
-    with pytest.raises(ChaosCleanupError if also_cleanup else RuntimeError) as caught:
+    with pytest.raises(RuntimeError) as caught:
         harness.run()
+    assert caught.value is error
     if also_cleanup:
-        assert caught.value.__cause__ is error
-        assert isinstance(caught.value, ChaosCleanupError)
-        assert str(caught.value.errors[0]) == "cleanup failed"
-    else:
-        assert caught.value is error
+        cleanup_error = caught.value.__cause__
+        assert isinstance(cleanup_error, ChaosCleanupError)
+        assert cleanup_error.errors[0] is harness.tool.errors["cleanup"]
+        assert cleanup_error.__traceback__ is not None
     assert harness.events[-1] == "cleanup"
     assert len(harness.backend.idle_calls) == 1
+
+
+def test_cleanup_preserves_observation_type_and_traceback(harness: Harness) -> None:
+    harness.tool.check_error_at = 1
+    harness.tool.errors["cleanup"] = ValueError("cleanup failed")
+
+    with pytest.raises(RuntimeError, match="stress ended") as caught:
+        harness.run()
+
+    assert type(caught.value) is RuntimeError
+    assert isinstance(caught.value.__cause__, ChaosCleanupError)
+    assert any(frame.name == "check_stress" for frame in extract_tb(caught.value.__traceback__))
+    assert harness.events[-1] == "cleanup"
 
 
 def test_cleanup_failure_blocks_recovery(harness: Harness) -> None:
