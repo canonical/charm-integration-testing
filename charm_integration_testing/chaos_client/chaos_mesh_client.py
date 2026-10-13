@@ -28,12 +28,15 @@ class ChaosMeshChaosClient(ChaosClient):
         backend: KubernetesBackend,
         *,
         startup_timeout: timedelta = timedelta(minutes=1),
+        cleanup_timeout: timedelta = timedelta(minutes=2),
         poll_interval: timedelta = timedelta(seconds=1),
         clock: Callable[[], float] = monotonic,
         pause: Callable[[float], None] = sleep,
     ) -> None:
-        if min(startup_timeout.total_seconds(), poll_interval.total_seconds()) <= 0:
-            raise ValueError("Startup timeout and poll interval must be positive.")
+        if min(startup_timeout.total_seconds(), cleanup_timeout.total_seconds(), poll_interval.total_seconds()) <= 0:
+            raise ValueError("Startup/cleanup timeouts and poll interval must be positive.")
+        self._cleanup_timeout = cleanup_timeout.total_seconds()
+        self._memory_stress: set[str] = set()
         self._startup_timeout = startup_timeout.total_seconds()
         self._poll_interval = poll_interval.total_seconds()
         self._clock = clock
@@ -144,9 +147,13 @@ class ChaosMeshChaosClient(ChaosClient):
             plural, namespace, name = resource
             if self._scopes[name] != (model.uri, unit, path):
                 continue
+            deadline = self._clock() + self._cleanup_timeout
+            request_options = (
+                {"_request_timeout": min(30, self._cleanup_timeout)} if name in self._memory_stress else {}
+            )
             try:
                 current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                    group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name
+                    group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name, **request_options
                 )
                 metadata = current.get("metadata") or {}
                 if (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner:
@@ -158,6 +165,11 @@ class ChaosMeshChaosClient(ChaosClient):
                     )
                 if not uid or self._uids[name] != uid:
                     raise RuntimeError(f"Cannot verify UID of {plural} {namespace}/{name}.")
+                if name in self._memory_stress:
+                    remaining = deadline - self._clock()
+                    if remaining <= 0:
+                        raise TimeoutError(f"Timed out removing StressChaos {namespace}/{name}.")
+                    request_options["_request_timeout"] = min(30, remaining)
                 self._backend.custom_objects_api.delete_namespaced_custom_object(
                     group=_GROUP,
                     version=_VERSION,
@@ -165,13 +177,43 @@ class ChaosMeshChaosClient(ChaosClient):
                     plural=plural,
                     name=name,
                     body=V1DeleteOptions(preconditions=V1Preconditions(uid=uid)),
+                    **request_options,
                 )
             except ApiException as error:
                 if error.status != 404:
                     raise
+            if name in self._memory_stress:
+                self._wait_for_memory_removal(namespace, name, deadline)
+            self._memory_stress.discard(name)
             self._created.remove(resource)
             del self._scopes[name]
             self._uids.pop(name, None)
+
+    def _wait_for_memory_removal(self, namespace: str, name: str, deadline: float) -> None:
+        while (remaining := deadline - self._clock()) > 0:
+            try:
+                current = self._backend.custom_objects_api.get_namespaced_custom_object(
+                    group=_GROUP,
+                    version=_VERSION,
+                    namespace=namespace,
+                    plural="stresschaos",
+                    name=name,
+                    _request_timeout=min(30, remaining),
+                )
+            except ApiException as error:
+                if error.status == 404:
+                    return
+                raise
+            metadata = current.get("metadata") or {}
+            if (
+                metadata.get("uid") != self._uids[name]
+                or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
+            ):
+                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during cleanup.")
+            remaining = deadline - self._clock()
+            if remaining > 0:
+                self._pause(min(self._poll_interval, remaining))
+        raise TimeoutError(f"Timed out removing StressChaos {namespace}/{name}.")
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
@@ -223,6 +265,8 @@ class ChaosMeshChaosClient(ChaosClient):
                 raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
             spec["containerNames"] = containers
         name = self._name(label, application)
+        if "memory" in stressors:
+            self._memory_stress.add(name)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
         self._wait_for_stress_injection(model.model, name)
 
@@ -295,6 +339,7 @@ class ChaosMeshChaosClient(ChaosClient):
         except ApiException as error:
             if error.status == 409:
                 # A conflicting resource belongs to an earlier create request.
+                self._memory_stress.discard(name)
                 self._created.remove(resource)
                 del self._scopes[name]
             raise

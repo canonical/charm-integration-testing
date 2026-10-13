@@ -123,7 +123,7 @@ class ClientStub(ChaosClient):
 @dataclass(frozen=True)
 class Params:
     operation: str
-    invoke: Callable[[ChaosClient], None]
+    invoke: Callable[[ChaosClient], object]
     args: tuple[object, ...]
 
 
@@ -418,6 +418,20 @@ def test_path_cleanup_preserves_stress_and_other_latency_paths() -> None:
     ]
 
 
+@pytest.mark.parametrize("allow_completed", [False, True])
+def test_check_stress_forwards_completion_policy_and_failure(allow_completed: bool) -> None:
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+    client.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+    tool.check_stress.assert_called_once_with(TEST_MODEL, UNIT, allow_completed=allow_completed)
+    tool.check_stress.side_effect = RuntimeError("experiment stopped")
+    with pytest.raises(RuntimeError, match="experiment stopped"):
+        client.check_stress(TEST_MODEL, UNIT, allow_completed=allow_completed)
+
+
 def test_resolve_constraints_raises_when_application_is_missing() -> None:
     # GIVEN no application matching the unit name
     client = MetaChaosClient([ClientStub(set())], BackendStub(), DEFAULT_CONSTRAINTS_CLIENT)
@@ -693,3 +707,94 @@ def test_io_latency_without_matching_constraints_preserves_caller_values() -> No
 
     # THEN the original values are preserved
     assert tool.calls == [("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION))]
+
+
+@pytest.mark.parametrize("configured_seconds", [None, 20])
+def test_memory_moderate_margin_is_added_after_constraints(configured_seconds: int | None) -> None:
+    # GIVEN different exhaustion settings and an optional moderate duration override
+    tool = ClientStub({"stress_memory"})
+    client = MetaChaosClient(
+        [tool],
+        backend_with_application(),
+        ConstraintsClientStub(
+            CharmResourceConstraints(
+                memory_exhaustion_workers=8,
+                memory_exhaustion_size_mb=2048,
+                memory_exhaustion_duration_seconds=600,
+                memory_moderate_pressure_workers=2,
+                memory_moderate_pressure_size_mb=64,
+                memory_moderate_pressure_duration_seconds=configured_seconds,
+            )
+        ),
+    )
+
+    # WHEN moderate stress includes a startup allowance
+    resolved = client.stress_memory(
+        TEST_MODEL,
+        UNIT,
+        1,
+        128,
+        DURATION,
+        scenario="moderate_pressure",
+        duration_margin=timedelta(minutes=2),
+    )
+
+    # THEN only moderate settings apply, with the allowance preserved
+    assert resolved == timedelta(seconds=configured_seconds or 30)
+    expected_duration = timedelta(seconds=(configured_seconds or 30) + 120)
+    assert tool.calls == [("stress_memory", (TEST_MODEL, UNIT, 2, 64, expected_duration))]
+
+
+def test_memory_negative_margin_fails_before_injection() -> None:
+    tool = ClientStub({"stress_memory"})
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    with pytest.raises(ValueError, match="margin"):
+        client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION, duration_margin=timedelta(seconds=-1))
+    assert tool.calls == []
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_stress_checks_only_selected_tool_and_retains_failed_cleanup(failure: bool) -> None:
+    from unittest.mock import Mock
+
+    unsupported, selected, unused = [Mock(spec=ChaosClient) for _ in range(3)]
+    unsupported.stress_memory.side_effect = NotImplementedError
+    client = MetaChaosClient([unsupported, selected, unused], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+    client.check_stress(TEST_MODEL, UNIT)
+    selected.check_stress.assert_called_once_with(TEST_MODEL, UNIT, allow_completed=False)
+    unsupported.check_stress.assert_not_called()
+    unused.check_stress.assert_not_called()
+    selected.cleanup.side_effect = RuntimeError("cleanup failed") if failure else None
+    if failure:
+        with pytest.raises(ChaosCleanupError):
+            client.cleanup_all()
+        client.check_stress(TEST_MODEL, UNIT)
+        selected.cleanup.side_effect = None
+    client.cleanup_all()
+    with pytest.raises(RuntimeError, match="No active stress"):
+        client.check_stress(TEST_MODEL, UNIT)
+
+
+@pytest.mark.parametrize("injection_failed", [False, True])
+def test_no_successful_stress_cannot_pass_status_check(injection_failed: bool) -> None:
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    if injection_failed:
+        tool.stress_memory.side_effect = RuntimeError("injection failed")
+        with pytest.raises(RuntimeError, match="injection failed"):
+            client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+    with pytest.raises(RuntimeError, match="No active stress"):
+        client.check_stress(TEST_MODEL, UNIT)
+    tool.check_stress.assert_not_called()
+    client.cleanup_all()
+    assert tool.cleanup.call_count == int(injection_failed)
+
+
+def test_selected_tool_without_status_support_fails() -> None:
+    client = MetaChaosClient([ClientStub({"stress_memory"})], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+    with pytest.raises(NotImplementedError, match="status checks"):
+        client.check_stress(TEST_MODEL, UNIT)

@@ -21,6 +21,7 @@ import jubilant
 import yaml
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuExecOutput,
@@ -258,6 +259,18 @@ class JubilantBackend(JujuCmdBackend):
             if _is_transient_model_unavailability_error(e, model):
                 raise TransientModelUnavailabilityError(e.returncode, e.cmd, e.output, e.stderr) from e
             raise
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        status = self.status(model)
+        try:
+            app = status.apps[application]
+        except KeyError as error:
+            raise RuntimeError(f"Application {application!r} is missing from model {model.uri}.") from error
+        return JujuApplicationHealth(
+            status=app.app_status.current,
+            units={name: unit.workload_status.current for name, unit in app.units.items()},
+            agents={name: unit.juju_status.current for name, unit in app.units.items()},
+        )
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def juju_status_text(self, model: JujuModelHandle) -> str:
