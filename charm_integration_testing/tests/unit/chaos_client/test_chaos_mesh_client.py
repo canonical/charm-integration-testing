@@ -982,7 +982,7 @@ class TestCpuTargetScope:
 
 
 @pytest.mark.parametrize("operation", ["memory", "io"])
-def test_non_cpu_cleanup_does_not_gain_cpu_waiting(operation: str) -> None:
+def test_memory_cleanup_waits_but_io_cleanup_returns_after_delete(operation: str) -> None:
     backend = BackendStub()
     api = backend.custom_objects_api
     api.retain_on_delete = True
@@ -1005,13 +1005,20 @@ def test_non_cpu_cleanup_does_not_gain_cpu_waiting(operation: str) -> None:
         assert spec["containerNames"] == ["postgresql"]
     else:
         assert "containerNames" not in spec
-    client.cleanup(TEST_MODEL, UNIT, path)
-
-    assert clock.now == 0
+    if operation == "memory":
+        with pytest.raises(TimeoutError, match="deletion timed out"):
+            client.cleanup(TEST_MODEL, UNIT, path)
+        assert client._created
+        assert clock.now == 3
+        api.retain_on_delete = False
+        client.cleanup(TEST_MODEL, UNIT, path)
+        assert not api.objects
+    else:
+        client.cleanup(TEST_MODEL, UNIT, path)
+        assert clock.now == 0
+        assert api.objects  # IO cleanup returns after accepted deletion.
+        assert [operation for operation, _ in api.request_timeouts] == ["create", "read", "delete"]
     assert client._created == []
-    assert api.objects  # Existing non-CPU cleanup returns after accepted deletion.
-    expected = ["create", "read", "read", "delete"] if operation == "memory" else ["create", "read", "delete"]
-    assert [operation for operation, _ in api.request_timeouts] == expected
     assert all(timeout is not None and timeout > 0 for _, timeout in api.request_timeouts)
 
 
@@ -1292,3 +1299,50 @@ class TestMemoryStressObservation:
         model = JujuModelHandle(controller="other", model=TEST_MODEL.model) if scope == "controller" else TEST_MODEL
         with pytest.raises(RuntimeError, match="No tracked Chaos Mesh stress"):
             mesh.check_stress(model, "postgresql/1" if scope == "unit" else UNIT)
+
+
+@pytest.mark.parametrize("outcome", ["removed", "timeout", "replacement", "api-error"])
+def test_memory_cleanup_waits_and_retains_failed_cleanup(outcome: str) -> None:
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.retain_on_delete = True
+    clock = [0.0]
+
+    def pause(seconds: float) -> None:
+        clock[0] += seconds
+        if outcome == "removed":
+            api.objects.clear()
+        elif outcome == "replacement":
+            next(iter(api.objects.values()))["metadata"]["uid"] = "replacement"
+        elif outcome == "api-error":
+            api.raise_on_read = ApiException(status=403)
+
+    mesh = ChaosMeshChaosClient(backend, cleanup_timeout=timedelta(seconds=2), clock=lambda: clock[0], pause=pause)
+    meta = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
+    meta.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=5))
+    resource = mesh._created[0]
+    uid = api.objects[resource]["metadata"]["uid"]
+    if outcome == "removed":
+        meta.cleanup_all()
+        assert clock[0] == 1
+        assert not mesh._created
+        assert not meta._cleanups
+    else:
+        with pytest.raises(ChaosCleanupError) as error:
+            meta.cleanup_all()
+        expected = {"timeout": TimeoutError, "replacement": RuntimeError, "api-error": ApiException}
+        assert isinstance(error.value.errors[0], expected[outcome])
+        assert mesh._created == [resource]
+        assert meta._cleanups
+        assert resource[2] in mesh._memory_stress
+        if outcome == "replacement":
+            with pytest.raises(ChaosCleanupError):
+                meta.cleanup_all()
+            assert len(api.delete_calls) == 1
+        api.raise_on_read = None
+        api.objects[resource]["metadata"]["uid"] = uid
+        api.retain_on_delete = False
+        meta.cleanup_all()
+        assert not mesh._created
+        assert not meta._cleanups
+        assert not mesh._memory_stress

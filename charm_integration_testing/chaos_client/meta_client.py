@@ -71,7 +71,7 @@ class MetaChaosClient(ChaosClient):
         return any(tool.supports(operation) for tool in self._tools)
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
             merged_size_mb = self._merged_int(constraints.disk_fill_size_mb, size_mb)
             return lambda tool: tool.fill_disk(model, unit, path, merged_size_mb)
 
@@ -139,13 +139,15 @@ class MetaChaosClient(ChaosClient):
         duration: timedelta,
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
-        duration_margin: timedelta = timedelta(0),
-    ) -> None:
-        """Apply memory settings, then add the caller's experiment duration margin."""
-        if duration_margin < timedelta(0):
-            raise ValueError("Memory stress duration margin must not be negative.")
+        duration_margin: timedelta = timedelta(),
+    ) -> timedelta:
+        if duration_margin < timedelta():
+            raise ValueError("Stress duration margin must not be negative.")
 
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+        resolved_duration = duration
+
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
+            nonlocal resolved_duration
             match scenario:
                 case "exhaustion":
                     merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
@@ -159,9 +161,10 @@ class MetaChaosClient(ChaosClient):
                     )
                 case _:
                     raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
-            return lambda tool: tool.stress_memory(
-                model, unit, merged_workers, merged_size_mb, merged_duration + duration_margin
-            )
+            resolved_duration = merged_duration
+            # Apply startup allowance after resolving the configured observation duration.
+            experiment_duration = merged_duration + duration_margin
+            return lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, experiment_duration)
 
         self._dispatch_constrained(
             "stress_memory",
@@ -171,6 +174,7 @@ class MetaChaosClient(ChaosClient):
             lambda tool: self._experiment_cleanup(tool, model, unit),
             self._cleanups,
         )
+        return resolved_duration
 
     def io_latency(
         self,
@@ -181,7 +185,7 @@ class MetaChaosClient(ChaosClient):
         percent: int,
         duration: timedelta,
     ) -> None:
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
+        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
             merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
             merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
             merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
@@ -268,7 +272,7 @@ class MetaChaosClient(ChaosClient):
         operation: str,
         model: JujuModelHandle,
         unit: str,
-        build_invoke: Callable[[CharmResourceConstraints], Callable[[ChaosClient], None]],
+        build_invoke: Callable[[CharmResourceConstraints], Callable[[ChaosClient], object]],
         cleanup: Callable[[ChaosClient], _CleanupAction],
         pending: list[_CleanupAction],
     ) -> None:

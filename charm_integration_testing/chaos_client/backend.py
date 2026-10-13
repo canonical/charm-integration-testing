@@ -43,7 +43,9 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
+    def stress_memory(
+        self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta
+    ) -> timedelta | None:
         raise NotImplementedError
 
     @abstractmethod

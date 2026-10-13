@@ -307,6 +307,10 @@ class TestApplicationHealth:
     cases = [
         Params("active", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "idle"}), None),
         Params("busy", JujuApplicationHealth("waiting", {"app/2": "maintenance"}, {"app/2": "executing"}), None),
+        Params(
+            "maintenance", JujuApplicationHealth("maintenance", {"app/2": "maintenance"}, {"app/2": "executing"}), None
+        ),
+        Params("waiting", JujuApplicationHealth("waiting", {"app/2": "waiting"}, {"app/2": "idle"}), None),
         Params("app-error", JujuApplicationHealth("error", {"app/2": "active"}, {"app/2": "idle"})),
         Params("app-blocked", JujuApplicationHealth("blocked", {"app/2": "active"}, {"app/2": "idle"})),
         Params("unit-error", JujuApplicationHealth("active", {"app/2": "error"}, {"app/2": "idle"})),
@@ -1490,6 +1494,20 @@ class TestDeployBundles:
             f"deploy:{tmp_path / 'phase2-bundle-0.yaml'}",
             "post_deploy",
         ]
+
+
+def test_validate_model_returns_functional_results_only() -> None:
+    backend = BackendStub(
+        app_list={"app": JujuApplicationInfo(charm="app", revision=1)}, validate_results={"app": {"app/0": [_pass()]}}
+    )
+    extension = ExtensionStub({"app": {"app/0": [_pass(endpoint="other")]}})
+    persistence = PersistenceExtensionStub({"app": {"app/0": [_pass(endpoint="canary")]}})
+    client = _client(backend, [extension, persistence])
+    model = JujuModelHandle(controller="controller", model="model")
+    results = client.validate_model(model)
+    assert [result.endpoint for result in results["app/0"]] == ["db", "other"]
+    assert persistence.calls
+    assert client.validate_model(model, level=None) == {}
 
 
 # ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ class ChaosMeshChaosClient(ChaosClient):
         backend: KubernetesBackend,
         *,
         startup_timeout: timedelta = timedelta(minutes=1),
-        cleanup_timeout: timedelta = timedelta(minutes=1),
+        cleanup_timeout: timedelta = timedelta(minutes=2),
         poll_interval: timedelta = timedelta(seconds=1),
         request_timeout: timedelta = timedelta(seconds=30),
         clock: Callable[[], float] = monotonic,
@@ -37,6 +37,7 @@ class ChaosMeshChaosClient(ChaosClient):
     ) -> None:
         if min(startup_timeout, cleanup_timeout, poll_interval, request_timeout) <= timedelta(0):
             raise ValueError("Startup, cleanup and request timeouts and poll interval must be positive.")
+        self._memory_stress: set[str] = set()
         self._startup_timeout = startup_timeout.total_seconds()
         self._cleanup_timeout = cleanup_timeout.total_seconds()
         self._poll_interval = poll_interval.total_seconds()
@@ -134,13 +135,14 @@ class ChaosMeshChaosClient(ChaosClient):
             except ApiException as error:
                 if error.status != 404:
                     raise
-            if name in self._cpu_stress:
+            if name in self._cpu_stress or name in self._memory_stress:
                 self._wait(
                     lambda timeout: self._read_resource(plural, namespace, name, timeout) is None,
                     deadline,
                     name,
                     "deletion",
                 )
+            self._memory_stress.discard(name)
             self._created.remove(resource)
             del self._scopes[name]
             self._uids.pop(name, None)
@@ -286,6 +288,8 @@ class ChaosMeshChaosClient(ChaosClient):
                 raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
             spec["containerNames"] = containers
         name = self._name(label, application)
+        if "memory" in stressors:
+            self._memory_stress.add(name)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
         self._wait_for_stress_injection(model.model, name)
 
@@ -363,6 +367,7 @@ class ChaosMeshChaosClient(ChaosClient):
         except ApiException as error:
             if error.status == 409:
                 # A conflicting resource belongs to an earlier create request.
+                self._memory_stress.discard(name)
                 self._created.remove(resource)
                 del self._scopes[name]
                 self._cpu_stress.discard(name)
