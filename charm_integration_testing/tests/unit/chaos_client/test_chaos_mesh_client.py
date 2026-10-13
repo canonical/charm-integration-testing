@@ -981,6 +981,33 @@ class TestCpuTargetScope:
         assert client._created == []
 
 
+@pytest.mark.parametrize("request_seconds", [2, 45], ids=["shorter-than-default", "longer-than-default"])
+def test_memory_requests_use_configured_timeout_and_remaining_startup_budget(request_seconds: int) -> None:
+    # GIVEN pending memory injection and a non-default request timeout
+    backend = BackendStub()
+    api = backend.custom_objects_api
+    api.inject_stress = False
+    clock = Clock()
+    client = ChaosMeshChaosClient(
+        backend,
+        request_timeout=timedelta(seconds=request_seconds),
+        startup_timeout=timedelta(seconds=request_seconds + 1),
+        poll_interval=timedelta(seconds=request_seconds),
+        clock=clock.read,
+        pause=clock.pause,
+    )
+
+    # WHEN injection never completes, THEN requests respect the setting and remaining budget
+    with pytest.raises(TimeoutError, match="injection"):
+        client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=5))
+    assert backend.core_v1_api.calls == [(TEST_MODEL.model, "app.kubernetes.io/name=postgresql", request_seconds)]
+    assert api.request_timeouts == [("create", request_seconds), ("read", request_seconds), ("read", 1)]
+    assert clock.now == request_seconds + 1
+    assert len(client._created) == 1
+    client.cleanup(TEST_MODEL, UNIT, "")
+    assert not client._created
+
+
 @pytest.mark.parametrize("operation", ["memory", "io"])
 def test_memory_cleanup_waits_but_io_cleanup_returns_after_delete(operation: str) -> None:
     backend = BackendStub()
@@ -997,7 +1024,7 @@ def test_memory_cleanup_waits_but_io_cleanup_returns_after_delete(operation: str
     spec = api.create_calls[0]["body"]["spec"]
     if operation == "memory":
         assert spec["selector"] == {"pods": {TEST_MODEL.model: ["postgresql-pod"]}}
-        assert backend.core_v1_api.calls == [(TEST_MODEL.model, "app.kubernetes.io/name=postgresql", 30)]
+        assert backend.core_v1_api.calls == [(TEST_MODEL.model, "app.kubernetes.io/name=postgresql", 2)]
     else:
         assert spec["selector"] == SELECTOR
         assert backend.core_v1_api.calls == []

@@ -260,7 +260,7 @@ class ChaosMeshChaosClient(ChaosClient):
         pods = self._backend.core_v1_api.list_namespaced_pod(
             namespace=model.model,
             label_selector=f"app.kubernetes.io/name={unit.split('/')[0]}",
-            _request_timeout=30,
+            _request_timeout=self._request_timeout,
         )
         matches = [
             pod
@@ -303,7 +303,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 namespace=namespace,
                 plural="stresschaos",
                 name=name,
-                _request_timeout=min(30, remaining),
+                _request_timeout=self._request_budget(deadline),
             )
             metadata = current.get("metadata") or {}
             if (
