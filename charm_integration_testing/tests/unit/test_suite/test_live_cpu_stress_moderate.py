@@ -16,6 +16,7 @@ from juju import (
     JujuModelHandle,
     JujuValidationError,
 )
+from test_suite import moderate_stress
 from test_suite import test_live_cpu_stress_moderate as cpu
 
 from validators.base import ValidationResult
@@ -182,7 +183,8 @@ class Harness:
 def harness(monkeypatch: pytest.MonkeyPatch) -> Harness:
     clock = Clock()
     monkeypatch.setattr(cpu, "monotonic", clock.monotonic)
-    monkeypatch.setattr(cpu, "sleep", clock.sleep)
+    monkeypatch.setattr(moderate_stress, "monotonic", clock.monotonic)
+    monkeypatch.setattr(moderate_stress, "sleep", clock.sleep)
     events: list[str] = []
     backend = Backend(clock, events)
     tool = CpuTool(clock, events)
@@ -254,7 +256,7 @@ def test_duplicate_endpoints_validate_application_once(harness: Harness) -> None
     client = JujuClient(harness.backend, logging.getLogger(__name__))
 
     # WHEN collecting coverage, THEN both endpoints share one application validation
-    passed = cpu.validate_service(client, [(MODEL, "target", "db"), (MODEL, "target", "other")])
+    passed = moderate_stress.validate_service(client, [(MODEL, "target", "db"), (MODEL, "target", "other")])
 
     assert passed == {(MODEL, UNIT, endpoint, "database", 1) for endpoint in ("db", "other")}
     assert harness.backend.rounds == {"target": 1}
@@ -310,19 +312,34 @@ def test_no_preflight_coverage_skips_before_injection(harness: Harness, validati
     harness.backend.results = {"target": [{UNIT: validations}], "neighbor": [{}]}
 
     # WHEN preflight runs, THEN it skips before injecting
-    with pytest.raises(pytest.skip.Exception, match="No passing simple validators"):
+    with pytest.raises(pytest.skip.Exception, match="No passing simple interface validators"):
         harness.run()
     assert "inject" not in harness.events
 
 
-def test_neighbor_only_coverage_is_observed(harness: Harness) -> None:
-    # GIVEN only the consumer-side endpoint has a validator
-    harness.backend.results["target"] = [{}]
-    harness.backend.cross_model = True
+@pytest.mark.parametrize("cross_model", [False, True], ids=["same-model", "cross-model"])
+@pytest.mark.parametrize("application", ["target", "neighbor"])
+@pytest.mark.parametrize("coverage", ["empty", "skipped", "other-endpoint", "deep"])
+def test_partial_baseline_skips_before_injection(
+    harness: Harness, cross_model: bool, application: str, coverage: str
+) -> None:
+    # GIVEN just one selected endpoint lacks a passing simple result
+    harness.backend.cross_model = cross_model
+    unit = UNIT if application == "target" else "neighbor/4"
+    endpoint = "db" if application == "target" else "service"
+    validations = {
+        "empty": [],
+        "skipped": [result("SKIPPED", endpoint=endpoint)],
+        "other-endpoint": [result(endpoint="unselected")],
+        "deep": [result(endpoint=endpoint, level="deep")],
+    }[coverage]
+    harness.backend.results[application] = [{unit: validations}]
 
-    # WHEN running pressure, THEN neighbor coverage suffices and is repeated
-    harness.run()
-    assert harness.backend.rounds["neighbor"] == 5
+    # WHEN preflight runs, THEN the other endpoint's PASS cannot hide the gap
+    with pytest.raises(pytest.skip.Exception, match="No passing simple interface validators"):
+        harness.run()
+    assert "inject" not in harness.events
+    assert harness.tool.check_times == []
 
 
 @dataclass(frozen=True)
@@ -431,7 +448,7 @@ def test_validator_overrun_fails(harness: Harness, overrun: int) -> None:
     harness.backend.validation_seconds = 70 + overrun
 
     # WHEN the validator returns, THEN even a tool reporting active cannot hide the overrun
-    with pytest.raises(TimeoutError, match="safety margin"):
+    with pytest.raises(TimeoutError, match="execution budget"):
         harness.run()
     assert harness.tool.check_times == [0, 140 + 2 * overrun]
     assert harness.events[-1] == "cleanup"
@@ -442,7 +459,7 @@ def test_startup_consumes_margin(harness: Harness) -> None:
     harness.tool.startup_seconds = 140
 
     # WHEN injection returns, THEN observation cannot pretend it has a fresh budget
-    with pytest.raises(TimeoutError, match="safety margin"):
+    with pytest.raises(TimeoutError, match="execution budget"):
         harness.run()
     assert harness.tool.check_times == []
     assert harness.events[-1] == "cleanup"

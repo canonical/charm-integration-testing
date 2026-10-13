@@ -243,7 +243,9 @@ Moderate CPU pressure
 
 ``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
 It stresses one target unit's workload container and skips if CPU stress support
-or passing simple validators for the tested endpoints are unavailable.
+or passing simple validators for any selected target or neighbor endpoint are
+unavailable. Each selected endpoint must have at least one passing simple result
+before injection.
 
 Defaults are one worker and five minutes, overridden by
 ``cpu_moderate_pressure_workers`` and ``cpu_moderate_pressure_duration_seconds``.
