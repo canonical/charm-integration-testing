@@ -106,9 +106,8 @@ def test_live_memory_stress_moderate(
             chaos.cleanup_all()
         except Exception as cleanup_error:
             if observation_error is not None:
-                raise RuntimeError(
-                    f"Moderate memory stress failed: {observation_error!r}; cleanup also failed: {cleanup_error!r}"
-                ) from cleanup_error
+                # Keep the original failure and traceback, with cleanup retained in the exception chain.
+                raise observation_error from cleanup_error
             raise
     juju_client.multi_model_idle_for_period(
         models=models_to_validate, timeout=memory_pressure_recovery_timeout, strict_timeout=True

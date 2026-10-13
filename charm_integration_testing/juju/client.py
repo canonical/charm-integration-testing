@@ -373,7 +373,7 @@ class JujuClient:
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
     def check_application_health(self, model: JujuModelHandle, application: str) -> None:
-        """Reject workload errors or blocked states and disconnected or errored agents."""
+        """Reject errored, blocked or unknown workloads and disconnected, errored or unknown agents."""
         health = self.backend.application_health(model, application)
         if not health.units or set(health.units) != set(health.agents):
             raise RuntimeError(f"Incomplete unit health for {model.uri}/{application}.")

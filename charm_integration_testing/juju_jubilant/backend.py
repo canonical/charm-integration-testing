@@ -261,7 +261,11 @@ class JubilantBackend(JujuCmdBackend):
             raise
 
     def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
-        app = self.status(model).apps[application]
+        status = self.status(model)
+        try:
+            app = status.apps[application]
+        except KeyError as error:
+            raise RuntimeError(f"Application {application!r} is missing from model {model.uri}.") from error
         return JujuApplicationHealth(
             status=app.app_status.current,
             units={name: unit.workload_status.current for name, unit in app.units.items()},

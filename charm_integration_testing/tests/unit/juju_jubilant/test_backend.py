@@ -3229,6 +3229,26 @@ def test_application_health_uses_one_status_snapshot() -> None:
         read_status.assert_called_once_with(TEST_MODEL)
 
 
+def test_application_health_missing_application_has_context() -> None:
+    backend = JubilantBackend()
+    with patch.object(backend, "status", return_value=follower_status()) as read_status:
+        with pytest.raises(RuntimeError, match="missing") as caught:
+            backend.application_health(TEST_MODEL, "absent-app")
+    assert "absent-app" in str(caught.value)
+    assert TEST_MODEL.uri in str(caught.value)
+    assert isinstance(caught.value.__cause__, KeyError)
+    read_status.assert_called_once_with(TEST_MODEL)
+
+
+def test_application_health_does_not_relabel_status_errors() -> None:
+    backend = JubilantBackend()
+    error = KeyError("status parsing failed")
+    with patch.object(backend, "status", side_effect=error):
+        with pytest.raises(KeyError) as caught:
+            backend.application_health(TEST_MODEL, "target")
+    assert caught.value is error
+
+
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
 FOLLOWER_RESTART_TIMEOUT = timedelta(seconds=10)
 FOLLOWER_BOOT_ID = "11111111-1111-1111-1111-111111111111"

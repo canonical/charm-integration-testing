@@ -4,6 +4,7 @@
 from datetime import timedelta
 from logging import getLogger
 from pathlib import Path
+from traceback import extract_tb
 from typing import Any
 from unittest.mock import Mock
 
@@ -205,10 +206,29 @@ def test_failures_and_cleanup(scenario: Scenario, failure: str, cleanup_fails: b
         live.test_live_memory_stress_moderate(**arguments)
     chaos.cleanup_all.assert_called_once()
     if cleanup_fails:
+        assert caught.value is error
         assert caught.value.__cause__ is cleanup_error
-        assert "cleanup failed" in str(caught.value)
+        assert cleanup_error.__traceback__ is not None
     elif failure != "coverage":
         assert caught.value is error
+
+
+def fail_observation(*args: Any, **kwargs: Any) -> None:
+    raise TimeoutError("observation timed out")
+
+
+def test_cleanup_preserves_observation_type_and_traceback(scenario: Scenario) -> None:
+    arguments, _, chaos, _ = scenario
+    chaos.check_stress.side_effect = fail_observation
+    cleanup_error = ValueError("cleanup failed")
+    chaos.cleanup_all.side_effect = cleanup_error
+
+    with pytest.raises(TimeoutError, match="observation timed out") as caught:
+        live.test_live_memory_stress_moderate(**arguments)
+
+    assert caught.value.__cause__ is cleanup_error
+    assert any(frame.name == "fail_observation" for frame in extract_tb(caught.value.__traceback__))
+    chaos.cleanup_all.assert_called_once()
 
 
 def test_unsupported_skips(scenario: Scenario) -> None:
