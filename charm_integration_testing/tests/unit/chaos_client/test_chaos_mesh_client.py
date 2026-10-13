@@ -645,7 +645,9 @@ def test_stress_waits_for_injection_before_returning(operation: str, recovered_s
     elif operation == "stress_memory":
         mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(minutes=12))
     else:
-        mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
+        resolved = mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
+        # THEN the requested duration is returned, so live tests can size their own observation.
+        assert resolved == timedelta(minutes=12)
     # THEN resource creation alone, or AllInjected without Selected, cannot start the hold period.
     assert sleeps == [1.0, 1.0]
     assert now == 2
