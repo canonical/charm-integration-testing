@@ -45,6 +45,13 @@ class RemoteLoggingExtension(JujuExtension):
         self._log_status(model, phase="before")
 
         try:
+            self.logger.debug(f"Waiting for application '{CONTROLLER_APPLICATION}' to settle in '{model.uri}'.")
+            self.juju.wait_application_settled(
+                model,
+                CONTROLLER_APPLICATION,
+                timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
+            )
+
             collector_charm = (
                 KUBERNETES_COLLECTOR_CHARM if self.juju.is_k8s_controller(controller) else MACHINE_COLLECTOR_CHARM
             )

@@ -174,12 +174,14 @@ class TestRemoteLoggingExtension:
         assert juju.integrations == expected_integrations
         timeout = str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
         assert juju.waited_settled == [
+            (CONTROLLER_MODEL.uri, CONTROLLER_APPLICATION, timeout),
             (CONTROLLER_MODEL.uri, collector_charm, timeout),
             (CONTROLLER_MODEL.uri, INTEGRATOR_CHARM, timeout),
         ]
         assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
         assert juju.events == [
             "status",
+            f"wait:{CONTROLLER_APPLICATION}",
             f"deploy:{collector_charm}",
             f"deploy:{INTEGRATOR_CHARM}",
             f"wait:{collector_charm}",
@@ -288,7 +290,12 @@ class TestRemoteLoggingExtension:
 
         # AND status is captured before and after the failed change
         assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
-        assert juju.events == ["status", f"deploy:{KUBERNETES_COLLECTOR_CHARM}", "status"]
+        assert juju.events == [
+            "status",
+            f"wait:{CONTROLLER_APPLICATION}",
+            f"deploy:{KUBERNETES_COLLECTOR_CHARM}",
+            "status",
+        ]
 
     def test_propagates_wait_timeout_and_logs_final_status(self, logger: logging.Logger) -> None:
         # GIVEN the collector does not settle before the remote logging timeout
@@ -302,11 +309,12 @@ class TestRemoteLoggingExtension:
         # AND status is captured after the timeout without waiting for the integrator
         assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
         assert juju.waited_settled == [
+            (CONTROLLER_MODEL.uri, CONTROLLER_APPLICATION, str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)),
             (
                 CONTROLLER_MODEL.uri,
                 KUBERNETES_COLLECTOR_CHARM,
                 str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT),
-            )
+            ),
         ]
         assert juju.events[-2:] == [f"wait:{KUBERNETES_COLLECTOR_CHARM}", "status"]
 
@@ -324,7 +332,7 @@ class TestRemoteLoggingExtension:
             extension.post_bootstrap_controller(CONTROLLER)
 
         # THEN setup still completes and both diagnostic failures are logged
-        assert len(juju.waited_settled) == 2
+        assert len(juju.waited_settled) == 3
         assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
         assert caplog.text.count("Failed to collect Juju status") == 2
 
@@ -341,3 +349,17 @@ class TestRemoteLoggingExtension:
             extension.post_bootstrap_controller(CONTROLLER)
 
         assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
+
+    def test_waits_for_controller_before_making_changes(self, logger: logging.Logger) -> None:
+        # GIVEN the controller application does not settle
+        juju = JujuStub(wait_error_for=CONTROLLER_APPLICATION)
+        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+
+        # WHEN/THEN the timeout is surfaced
+        with pytest.raises(JujuWaitTimeoutError):
+            extension.post_bootstrap_controller(CONTROLLER)
+
+        # AND nothing is deployed or integrated
+        assert juju.events == ["status", f"wait:{CONTROLLER_APPLICATION}", "status"]
+        assert juju.deployments == []
+        assert juju.integrations == []
