@@ -8,7 +8,7 @@ from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 
 
 class KubernetesChaosClient(ChaosClient):
@@ -35,7 +35,7 @@ class KubernetesChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
+    ) -> IoLatencyInjection:
         raise NotImplementedError
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:

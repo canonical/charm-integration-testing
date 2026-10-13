@@ -9,7 +9,7 @@ from juju import JujuBackend, JujuModelHandle
 
 from bundle_builder_x import CharmChannel
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 from .resource_constraints import CharmResourceConstraints, ResourceConstraintsClient
 
 
@@ -165,11 +165,15 @@ class MetaChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
-        """Inject I/O latency and return the resolved (possibly per-charm-constrained) duration.
+    ) -> IoLatencyInjection:
+        """Inject I/O latency and report the resolved (possibly per-charm-constrained) duration.
 
         Unlike the other experiments, callers need the resolved duration back so they can keep
         observing the fault for exactly as long as it will actually run before cleaning it up.
+        The returned start time is the tool's own, taken when the experiment resource was
+        actually created, not when this method returns: resolving per-charm constraints (below)
+        and awaiting controller-confirmed injection can both delay that return by a non-trivial
+        amount, during which the experiment's duration is already counting down.
         """
         if not self.supports("io_latency"):
             self._on_unsupported("io_latency")
@@ -177,9 +181,10 @@ class MetaChaosClient(ChaosClient):
         merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
         merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
         merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
+        injections: list[IoLatencyInjection] = []
 
         def invoke(tool: ChaosClient) -> None:
-            tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+            injections.append(tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration))
 
         self._dispatch(
             "io_latency",
@@ -187,7 +192,7 @@ class MetaChaosClient(ChaosClient):
             lambda tool: self._experiment_cleanup(tool, model, unit, volume_path),
             self._cleanups,
         )
-        return merged_duration
+        return IoLatencyInjection(duration=merged_duration, injected_at=injections[0].injected_at)
 
     def isolate_network(self, model: str, unit: str) -> None:
         self._dispatch(

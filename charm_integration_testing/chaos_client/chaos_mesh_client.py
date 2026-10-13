@@ -10,7 +10,7 @@ from juju import JujuModelHandle
 from kubernetes.client import ApiException, V1DeleteOptions, V1Preconditions  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
 
 _GROUP = "chaos-mesh.org"
@@ -75,7 +75,7 @@ class ChaosMeshChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
+    ) -> IoLatencyInjection:
         application = unit.split("/")[0]
         spec: dict[str, object] = {
             "action": "latency",
@@ -88,8 +88,11 @@ class ChaosMeshChaosClient(ChaosClient):
         }
         name = self._name("io-latency", application)
         self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
+        # The experiment's duration starts counting down from creation, not from when
+        # injection is confirmed below, so the start time must be captured here.
+        injected_at = self._clock()
         self._wait_for_injection(model.model, "iochaos", name, "IOChaos")
-        return duration
+        return IoLatencyInjection(duration=duration, injected_at=injected_at)
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Validate tracked stress experiments during observation."""

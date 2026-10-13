@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from juju import JujuBackend, JujuModelHandle
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 
 
 class NativeChaosClient(ChaosClient):
@@ -37,7 +37,7 @@ class NativeChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
+    ) -> IoLatencyInjection:
         raise NotImplementedError
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:

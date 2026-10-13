@@ -12,6 +12,7 @@ from chaos_client import (
     ChaosNotSupportedError,
     ChaosResourceConstraintsError,
     CharmResourceConstraints,
+    IoLatencyInjection,
     MetaChaosClient,
     ResourceConstraintsClient,
 )
@@ -75,10 +76,11 @@ DEFAULT_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
 
 
 class ClientStub(ChaosClient):
-    def __init__(self, supported: set[str]) -> None:
+    def __init__(self, supported: set[str], *, injected_at: float = 123.0) -> None:
         self.supported = supported
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.errors: dict[str, BaseException] = {}
+        self.injected_at = injected_at
 
     def supports(self, operation: str) -> bool:
         return operation in self.supported
@@ -107,9 +109,9 @@ class ClientStub(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
+    ) -> IoLatencyInjection:
         self._call("io_latency", model, unit, volume_path, delay, percent, duration)
-        return duration
+        return IoLatencyInjection(duration=duration, injected_at=self.injected_at)
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         self._call("cleanup", model, unit, path)
@@ -676,7 +678,7 @@ def test_io_latency_uses_constraint_overrides() -> None:
     )
 
     # WHEN injecting I/O latency
-    resolved_duration = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    injection = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
     # THEN the merged values are dispatched, and the merged duration is returned to the caller
     assert tool.calls == [
@@ -692,7 +694,10 @@ def test_io_latency_uses_constraint_overrides() -> None:
             ),
         )
     ]
-    assert resolved_duration == timedelta(seconds=75)
+    assert injection.duration == timedelta(seconds=75)
+    # THEN the tool's own injected_at is forwarded, not a timestamp taken in MetaChaosClient
+    # itself (which would wrongly include constraint-resolution time in the caller's window).
+    assert injection.injected_at == tool.injected_at
 
 
 def test_io_latency_without_matching_constraints_preserves_caller_values() -> None:
@@ -701,8 +706,8 @@ def test_io_latency_without_matching_constraints_preserves_caller_values() -> No
     client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
 
     # WHEN injecting I/O latency
-    resolved_duration = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    injection = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
     # THEN the original values are preserved, and the caller's duration is returned unchanged
     assert tool.calls == [("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION))]
-    assert resolved_duration == DURATION
+    assert injection.duration == DURATION

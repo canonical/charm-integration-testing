@@ -53,12 +53,11 @@ def test_live_disk_io_latency(
 
     observation_error: Exception | None = None
     try:
-        # The experiment's duration starts counting down at creation, before io_latency()
-        # returns, so track elapsed time across the call rather than starting a fresh window.
-        injection_start = monotonic()
         # io_latency() blocks until Chaos Mesh's controller confirms the IOChaos resource was
-        # actually injected.
-        resolved_duration = require_chaos_tool.io_latency(
+        # actually injected. The returned injected_at is when the experiment resource was
+        # actually created (its duration starts counting down then, not when this call
+        # returns), so remaining observation time must be measured from that point.
+        injection = require_chaos_tool.io_latency(
             model=target_model_ref,
             unit=unit,
             volume_path=VOLUME_PATH,
@@ -68,9 +67,9 @@ def test_live_disk_io_latency(
         )
         # A per-charm override may have changed the experiment's actual duration, so observe for
         # as long as the fault will actually run rather than the (possibly stale) caller value,
-        # minus the time already spent waiting for confirmed injection, and detect if the fault
-        # stops or is removed before then.
-        remaining = resolved_duration.total_seconds() - (monotonic() - injection_start)
+        # minus the time already spent resolving constraints and awaiting confirmed injection,
+        # and detect if the fault stops or is removed before then.
+        remaining = injection.duration.total_seconds() - (monotonic() - injection.injected_at)
         observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, max(0.0, remaining))
     except Exception as error:
         observation_error = error

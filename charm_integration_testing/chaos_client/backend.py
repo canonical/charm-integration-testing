@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import timedelta
 
 from juju import JujuModelHandle
@@ -9,6 +10,21 @@ from juju import JujuModelHandle
 
 class StressEndedEarlyError(RuntimeError):
     """Stress ended before the requested observation window was verified."""
+
+
+@dataclass(frozen=True)
+class IoLatencyInjection:
+    """Result of injecting I/O latency.
+
+    ``injected_at`` is a `time.monotonic`-comparable timestamp taken when the experiment
+    resource was actually created, i.e. when its duration began counting down. Callers
+    must measure remaining observation time from this point, not from when io_latency()
+    returns, since resolving resource constraints and awaiting controller-confirmed
+    injection can both take a non-trivial amount of time.
+    """
+
+    duration: timedelta
+    injected_at: float
 
 
 class ChaosClient(ABC):
@@ -64,8 +80,8 @@ class ChaosClient(ABC):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> timedelta:
-        """Inject I/O latency and return the duration the experiment was actually configured for."""
+    ) -> IoLatencyInjection:
+        """Inject I/O latency and report the duration and start time actually used."""
         raise NotImplementedError
 
     @abstractmethod

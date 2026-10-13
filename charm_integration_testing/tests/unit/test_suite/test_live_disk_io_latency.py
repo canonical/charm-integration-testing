@@ -2,9 +2,11 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from time import monotonic
 from unittest.mock import MagicMock
 
 import pytest
+from chaos_client import IoLatencyInjection
 from juju import JujuModelHandle
 from test_suite import test_live_disk_io_latency as module
 from test_suite.test_live_disk_io_latency import (
@@ -30,17 +32,18 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
     juju, chaos = MagicMock(), MagicMock()
     waits = iter(["baseline", "recovery"])
     hold = MagicMock()
-    # Simulate time elapsing only across the io_latency() call, so observation accounts for it.
-    clock = iter([0.0, 5.0])
+    # The experiment was created at t=0; 5s elapsed (e.g. awaiting confirmed injection) by
+    # the time observation starts, so observation must account for it.
+    injection = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=0.0)
 
     def event(name: str) -> None:
         events.append(name)
         if failure == name:
             raise RuntimeError(name)
 
-    def fake_io_latency(**kwargs: object) -> timedelta:
+    def fake_io_latency(**kwargs: object) -> IoLatencyInjection:
         event("io_latency")
-        return RESOLVED_DURATION
+        return injection
 
     def fake_observe(chaos: object, model: object, unit: object, volume_path: object, seconds: float) -> None:
         hold(seconds)
@@ -50,7 +53,7 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
     juju.validate_model.side_effect = lambda **kwargs: event("validation")
     chaos.io_latency.side_effect = fake_io_latency
     chaos.cleanup_all.side_effect = lambda: event("cleanup")
-    monkeypatch.setattr(module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(module, "monotonic", lambda: 5.0)
     monkeypatch.setattr(module, "observe_io_latency", fake_observe)
 
     if failure:
@@ -101,11 +104,9 @@ def test_observation_duration_clamped_when_confirmation_outlasts_it(monkeypatch:
     juju, chaos = MagicMock(), MagicMock()
     hold = MagicMock()
     # Confirmation alone takes longer than the resolved duration.
-    clock = iter([0.0, RESOLVED_DURATION.total_seconds() + 5.0])
-
-    monkeypatch.setattr(module, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(module, "monotonic", lambda: RESOLVED_DURATION.total_seconds() + 5.0)
     monkeypatch.setattr(module, "observe_io_latency", lambda chaos, model, unit, volume_path, seconds: hold(seconds))
-    chaos.io_latency.return_value = RESOLVED_DURATION
+    chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=0.0)
 
     run_disk_io_latency(juju, chaos, MODEL, "target", None)
 
@@ -117,7 +118,7 @@ def test_observation_duration_clamped_when_confirmation_outlasts_it(monkeypatch:
 def test_reports_both_errors_when_observation_and_cleanup_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cleanup failure must not hide the original fault that failed the live test."""
     juju, chaos = MagicMock(), MagicMock()
-    chaos.io_latency.return_value = RESOLVED_DURATION
+    chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", MagicMock(side_effect=RuntimeError("fault not injected")))
     chaos.cleanup_all.side_effect = RuntimeError("cleanup unreachable")
 
@@ -132,7 +133,7 @@ def test_reports_both_errors_when_observation_and_cleanup_fail(monkeypatch: pyte
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
 def test_neighbor_validation(neighbor: JujuModelHandle, monkeypatch: pytest.MonkeyPatch) -> None:
     juju, chaos = MagicMock(), MagicMock()
-    chaos.io_latency.return_value = RESOLVED_DURATION
+    chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", lambda *args, **kwargs: None)
     run_disk_io_latency(juju, chaos, MODEL, "target", neighbor)
     models = [MODEL] if neighbor == MODEL else [MODEL, neighbor]
