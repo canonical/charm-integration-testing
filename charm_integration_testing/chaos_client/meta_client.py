@@ -208,6 +208,12 @@ class MetaChaosClient(ChaosClient):
         for tool in self._tools:
             tool.check_stress(model, unit, allow_completed=allow_completed)
 
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        for tool in self._tools:
+            tool.check_io_latency(model, unit, volume_path, allow_completed=allow_completed)
+
     def cleanup_all(self) -> None:
         """Clean up all pending experiments, including network isolation."""
         errors: list[Exception] = []

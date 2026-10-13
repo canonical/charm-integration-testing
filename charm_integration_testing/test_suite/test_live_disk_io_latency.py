@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
-from time import sleep
+from time import monotonic, sleep
 
 import pytest
 from chaos_client import MetaChaosClient
@@ -15,8 +15,24 @@ VOLUME_PATH = "/"
 DELAY = timedelta(milliseconds=500)
 PERCENT = 100
 LATENCY_DURATION = timedelta(minutes=10)
+# Delay between IOChaos activity checks during observation.
+CHECK_INTERVAL = timedelta(seconds=10)
 # Disk I/O latency recovers on the update-status hook interval, so allow a few cycles.
 RECOVER_TIMEOUT = timedelta(minutes=15)
+
+
+def observe_io_latency(
+    chaos: MetaChaosClient, model: JujuModelHandle, unit: str, volume_path: str, seconds: float
+) -> None:
+    """Poll IOChaos health until the resolved duration elapses, detecting early interruption."""
+    deadline = monotonic() + seconds
+    while True:
+        remaining = deadline - monotonic()
+        exhausted = remaining <= 0
+        chaos.check_io_latency(model, unit, volume_path, allow_completed=exhausted)
+        if exhausted:
+            return
+        sleep(min(CHECK_INTERVAL.total_seconds(), remaining))
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
@@ -44,8 +60,9 @@ def test_live_disk_io_latency(
             duration=LATENCY_DURATION,
         )
         # A per-charm override may have changed the experiment's actual duration, so observe for
-        # as long as the fault will actually run rather than the (possibly stale) caller value.
-        sleep(resolved_duration.total_seconds())
+        # as long as the fault will actually run rather than the (possibly stale) caller value,
+        # and detect if the fault stops or is removed before then.
+        observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, resolved_duration.total_seconds())
     finally:
         require_chaos_tool.cleanup_all()
 

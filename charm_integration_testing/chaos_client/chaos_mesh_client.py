@@ -141,6 +141,57 @@ class ChaosMeshChaosClient(ChaosClient):
             ):
                 raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active: {status}")
 
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        """Validate tracked IOChaos experiments during observation."""
+        for plural, namespace, name in self._created:
+            if plural != "iochaos" or self._scopes[name] != (model.uri, unit, volume_path):
+                continue
+            current = self._backend.custom_objects_api.get_namespaced_custom_object(
+                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name, _request_timeout=30
+            )
+            metadata = current.get("metadata") or {}
+            annotations = metadata.get("annotations") or {}
+            if (
+                not self._uids.get(name)
+                or metadata.get("uid") != self._uids[name]
+                or annotations.get(_OWNER_ANNOTATION) != self._owner
+            ):
+                raise RuntimeError(f"Cannot verify identity of IOChaos {namespace}/{name} during observation.")
+            status = current.get("status") or {}
+            experiment = status.get("experiment") or {}
+            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
+            records = experiment.get("containerRecords") or []
+            failures = [
+                event for record in records for event in record.get("events") or [] if event.get("type") == "Failed"
+            ]
+            if failures:
+                raise RuntimeError(f"IOChaos {namespace}/{name} failed during observation: {failures}")
+            if not records:
+                raise RuntimeError(f"IOChaos {namespace}/{name} has no container records during observation.")
+            if (
+                metadata.get("deletionTimestamp")
+                or annotations.get("experiment.chaos-mesh.org/pause") == "true"
+                or conditions.get("Paused") == "True"
+            ):
+                raise RuntimeError(f"IOChaos {namespace}/{name} was interrupted during observation.")
+            if (
+                allow_completed
+                and experiment.get("desiredPhase") == "Stop"
+                and conditions.get("AllRecovered") == "True"
+                and all(record.get("phase") == "Not Injected" for record in records)
+            ):
+                continue
+            if not (
+                experiment.get("desiredPhase") == "Run"
+                and conditions.get("Selected") == "True"
+                and conditions.get("AllInjected") == "True"
+                and conditions.get("AllRecovered") in (None, "False")
+                and all(record.get("phase") == "Injected" for record in records)
+            ):
+                raise RuntimeError(f"IOChaos {namespace}/{name} is no longer confirmed active: {status}")
+
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         """Clean resources for the model, unit and path. An empty path selects stress."""
         for resource in reversed(tuple(self._created)):

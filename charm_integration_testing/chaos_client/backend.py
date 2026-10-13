@@ -24,6 +24,15 @@ class ChaosClient(ABC):
         must not suppress experiment errors or cleanup verification.
         """
 
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        """Report known errors; allow completion only once the latency duration has elapsed.
+
+        This optional check is not proof of sustained latency injection. Allowing completion
+        must not suppress experiment errors or cleanup verification.
+        """
+
     @abstractmethod
     def supports(self, operation: str) -> bool:
         """Report whether this client can currently run the named experiment operation.

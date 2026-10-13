@@ -863,3 +863,88 @@ class TestStressObservation:
         backend.custom_objects_api.raise_on_read = ApiException(status=403)
         model = JujuModelHandle(controller="other", model=TEST_MODEL.model) if scope == "controller" else TEST_MODEL
         mesh.check_stress(model, "postgresql/1" if scope == "unit" else UNIT)
+
+
+class TestIoLatencyObservation:
+    @pytest.mark.parametrize("allow_completed", [False, True])
+    @pytest.mark.parametrize(
+        "state",
+        [
+            "running",
+            "recovery-missing",
+            "completed",
+            "running-empty-records",
+            "stopped",
+            "paused",
+            "pause-requested",
+            "deleting",
+            "apply-failed",
+            "wrong-owner",
+            "missing-resource",
+        ],
+    )
+    def test_status_changes_after_injection(self, state: str, allow_completed: bool) -> None:
+        # GIVEN an experiment whose initial injection succeeded
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        meta = MetaChaosClient([mesh], JujuBackendStub(), ResourceConstraintsClient())
+        meta.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=10))
+        api = backend.custom_objects_api
+        resource = mesh._created[0]
+        obj = api.objects[resource]
+        conditions = obj["status"]["conditions"]
+        conditions.append({"type": "AllRecovered", "status": "False"})
+        record: dict[str, Any] = {"phase": "Injected", "events": []}
+        obj["status"]["experiment"]["containerRecords"] = [record]
+        if state in {"completed", "stopped"}:
+            obj["status"]["experiment"]["desiredPhase"] = "Stop"
+            if state == "completed":
+                conditions[-1]["status"] = "True"
+                record["phase"] = "Not Injected"
+        if state == "running-empty-records":
+            obj["status"]["experiment"]["containerRecords"] = []
+        if state == "apply-failed":
+            record["events"] = [{"type": "Failed", "operation": "Apply", "message": "daemon unavailable"}]
+        elif state == "recovery-missing":
+            conditions.pop()
+        elif state == "paused":
+            conditions.append({"type": "Paused", "status": "True"})
+        elif state == "pause-requested":
+            obj["metadata"]["annotations"]["experiment.chaos-mesh.org/pause"] = "true"
+        elif state == "deleting":
+            obj["metadata"]["deletionTimestamp"] = "2026-09-30T00:00:00Z"
+        elif state == "wrong-owner":
+            obj["metadata"]["annotations"] = {}
+        elif state == "missing-resource":
+            api.objects.clear()
+
+        # WHEN observing, THEN only active or explicitly allowed completed runs pass
+        if state in {"running", "recovery-missing"} or (state == "completed" and allow_completed):
+            meta.check_io_latency(TEST_MODEL, UNIT, "/data", allow_completed=allow_completed)
+        else:
+            expected = ApiException if state == "missing-resource" else RuntimeError
+            message = "no container records" if state == "running-empty-records" else None
+            with pytest.raises(expected, match=message):
+                meta.check_io_latency(TEST_MODEL, UNIT, "/data", allow_completed=allow_completed)
+        assert mesh._created == [resource]
+        assert not api.delete_calls
+
+        # Failures do not lose the cleanup registration.
+        api.raise_on_read = None
+        if state != "wrong-owner":
+            meta.cleanup_all()
+            assert not mesh._created
+
+    @pytest.mark.parametrize("scope", ["unit", "controller", "path", "stress"])
+    def test_ignores_unrelated_experiments(self, scope: str) -> None:
+        backend = BackendStub()
+        mesh = ChaosMeshChaosClient(backend)
+        if scope == "stress":
+            mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+        else:
+            mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=30))
+        backend.custom_objects_api.raise_on_read = ApiException(status=403)
+        model = JujuModelHandle(controller="other", model=TEST_MODEL.model) if scope == "controller" else TEST_MODEL
+        unit = "postgresql/1" if scope == "unit" else UNIT
+        path = "/other" if scope == "path" else "/data"
+        mesh.check_io_latency(model, unit, path)
