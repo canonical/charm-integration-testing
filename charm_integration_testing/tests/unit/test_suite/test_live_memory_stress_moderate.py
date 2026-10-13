@@ -41,7 +41,6 @@ def result(**overrides: Any) -> ValidationResult:
 @pytest.fixture
 def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     clock = [0.0]
-    monkeypatch.setattr(live, "monotonic", lambda: clock[0])
     monkeypatch.setattr(moderate_stress, "monotonic", lambda: clock[0])
     monkeypatch.setattr(moderate_stress, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     client = Mock()
@@ -66,6 +65,10 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
         neighbor_endpoint="postgresql",
         memory_pressure_check_interval=timedelta(seconds=10),
         memory_pressure_recovery_timeout=timedelta(minutes=15),
+        memory_pressure_workers=1,
+        memory_pressure_duration=timedelta(minutes=5),
+        memory_pressure_size_mb=128,
+        memory_pressure_duration_margin=timedelta(minutes=2),
     )
     return arguments, client, chaos, clock
 

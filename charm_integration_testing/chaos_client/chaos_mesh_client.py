@@ -67,25 +67,7 @@ class ChaosMeshChaosClient(ChaosClient):
                 return False
 
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
-        if not self.supports("stress_cpu"):
-            raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
-        pod, container = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
-        name = self._name("cpu-stress", unit.split("/")[0])
-        spec: dict[str, object] = {
-            "mode": "all",
-            "selector": {"pods": {model.model: [pod]}},
-            "containerNames": [container],
-            "stressors": {"cpu": {"workers": workers}},
-            "duration": f"{int(duration.total_seconds())}s",
-        }
-        self._cpu_stress.add(name)
-        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
-        self._wait(
-            lambda timeout: self._stress_injected(model.model, name, timeout),
-            self._clock() + self._startup_timeout,
-            name,
-            "injection",
-        )
+        self._create_stress_chaos(model, unit, "cpu-stress", {"cpu": {"workers": workers}}, duration)
 
     def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
         self._create_stress_chaos(
@@ -257,83 +239,24 @@ class ChaosMeshChaosClient(ChaosClient):
     ) -> None:
         if "stresschaos.chaos-mesh.org" in self._missing_crds:
             raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
-        pods = self._backend.core_v1_api.list_namespaced_pod(
-            namespace=model.model,
-            label_selector=f"app.kubernetes.io/name={unit.split('/')[0]}",
-            _request_timeout=self._request_timeout,
-        )
-        matches = [
-            pod
-            for pod in pods.items
-            if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
-            and pod.metadata.deletion_timestamp is None
-            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(f"Expected one live Pod for {model.model}/{unit}, found {len(matches)}.")
-        application = unit.split("/")[0]
+        pod, container = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {
             "mode": "all",
-            "selector": {"pods": {model.model: [matches[0].metadata.name]}},
+            "selector": {"pods": {model.model: [pod]}},
+            "containerNames": [container],
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        if "memory" in stressors:
-            containers = [
-                item.name
-                for item in (matches[0].spec.containers if matches[0].spec else [])
-                if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
-            ]
-            if len(containers) != 1:
-                raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
-            spec["containerNames"] = containers
-        name = self._name(label, application)
-        if "memory" in stressors:
-            self._memory_stress.add(name)
+        name = self._name(label, unit.split("/")[0])
+        tracked = self._memory_stress if "memory" in stressors else self._cpu_stress
+        tracked.add(name)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
-        self._wait_for_stress_injection(model.model, name)
-
-    def _wait_for_stress_injection(self, namespace: str, name: str) -> None:
-        """Wait for controller-confirmed injection, retaining failed runs for cleanup."""
-        deadline = self._clock() + self._startup_timeout
-        while (remaining := deadline - self._clock()) > 0:
-            current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                group=_GROUP,
-                version=_VERSION,
-                namespace=namespace,
-                plural="stresschaos",
-                name=name,
-                _request_timeout=self._request_budget(deadline),
-            )
-            metadata = current.get("metadata") or {}
-            if (
-                not self._uids.get(name)
-                or metadata.get("uid") != self._uids[name]
-                or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
-            ):
-                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during injection.")
-            status = current.get("status") or {}
-            experiment = status.get("experiment") or {}
-            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
-            if (
-                metadata.get("deletionTimestamp")
-                or experiment.get("desiredPhase") == "Stop"
-                or conditions.get("Paused") == "True"
-            ):
-                raise RuntimeError(f"StressChaos {namespace}/{name} stopped before injection was confirmed.")
-            if (
-                conditions.get("Selected") == "True"
-                and conditions.get("AllInjected") == "True"
-                and experiment.get("desiredPhase") == "Run"
-                and conditions.get("AllRecovered") in (None, "False")
-            ):
-                if self._clock() < deadline:
-                    return
-                break
-            remaining = deadline - self._clock()
-            if remaining > 0:
-                self._pause(min(self._poll_interval, remaining))
-        raise TimeoutError(f"Timed out waiting for StressChaos {namespace}/{name} injection.")
+        self._wait(
+            lambda timeout: self._stress_injected(model.model, name, timeout),
+            self._clock() + self._startup_timeout,
+            name,
+            "injection",
+        )
 
     def _create(
         self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]

@@ -393,7 +393,8 @@ class TestStressCpu:
         assert api.request_timeouts == [("create", 2), ("read", 2)]
 
     @pytest.mark.parametrize("state", ["pending", "unselected", "no-records", "partial", "recovered"])
-    def test_unconfirmed_injection_times_out_and_retains_cleanup(self, state: str) -> None:
+    @pytest.mark.parametrize("operation", ["cpu", "memory"])
+    def test_unconfirmed_injection_times_out_and_retains_cleanup(self, state: str, operation: str) -> None:
         # GIVEN controller state that does not prove all selected containers are stressed
         backend = BackendStub()
         api = backend.custom_objects_api
@@ -413,14 +414,18 @@ class TestStressCpu:
 
         # WHEN injection never becomes confirmed, THEN timeout retains the owned resource
         with pytest.raises(TimeoutError, match="injection timed out"):
-            client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            if operation == "cpu":
+                client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            else:
+                client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=30))
         assert clock.now == 3
         assert len(client._created) == 1
         client.cleanup(TEST_MODEL, UNIT, "")
         assert api.objects == {}
 
     @pytest.mark.parametrize("state", ["stopped", "failed"])
-    def test_early_end_or_failure_during_startup_fails_immediately(self, state: str) -> None:
+    @pytest.mark.parametrize("operation", ["cpu", "memory"])
+    def test_early_end_or_failure_during_startup_fails_immediately(self, state: str, operation: str) -> None:
         # GIVEN a controller that ends or fails before injection can be observed
         backend = BackendStub()
         experiment = backend.custom_objects_api.stress_status["experiment"]
@@ -431,9 +436,12 @@ class TestStressCpu:
         clock = Clock()
         client = timed_client(backend, clock)
 
-        # WHEN starting CPU stress, THEN failure is immediate, not a timeout
+        # WHEN starting stress, THEN failure is immediate, not a timeout
         with pytest.raises(RuntimeError, match="stopped|failed"):
-            client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            if operation == "cpu":
+                client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            else:
+                client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=30))
         assert clock.now == 0
         assert len(client._created) == 1
 
@@ -941,8 +949,9 @@ class TestCleanupIdentity:
         assert mesh._uids == {}
 
 
-class TestCpuTargetScope:
-    def test_selects_exact_unit_and_workload_container_among_siblings(self) -> None:
+class TestStressTargetScope:
+    @pytest.mark.parametrize("operation", ["cpu", "memory"])
+    def test_selects_exact_unit_and_workload_container_among_siblings(self, operation: str) -> None:
         backend = BackendStub()
         pods = backend.core_v1_api
         sibling = deepcopy(pods.pods[0])
@@ -951,7 +960,10 @@ class TestCpuTargetScope:
         pods.pods.insert(0, sibling)
         client = ChaosMeshChaosClient(backend)
 
-        client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+        if operation == "cpu":
+            client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+        else:
+            client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=30))
 
         spec = backend.custom_objects_api.create_calls[0]["body"]["spec"]
         assert spec["selector"] == {"pods": {TEST_MODEL.model: ["postgresql-pod"]}}
@@ -959,7 +971,8 @@ class TestCpuTargetScope:
         assert pods.calls == [(TEST_MODEL.model, "app.kubernetes.io/name=postgresql", 30)]
 
     @pytest.mark.parametrize("problem", ["missing", "duplicate", "no-workload", "multiple-workloads"])
-    def test_ambiguous_target_fails_before_creation(self, problem: str) -> None:
+    @pytest.mark.parametrize("operation", ["cpu", "memory"])
+    def test_ambiguous_target_fails_before_creation(self, problem: str, operation: str) -> None:
         backend = BackendStub()
         pods = backend.core_v1_api.pods
         if problem == "missing":
@@ -976,7 +989,10 @@ class TestCpuTargetScope:
         client = ChaosMeshChaosClient(backend)
 
         with pytest.raises(RuntimeError, match="one live Pod|one workload container"):
-            client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            if operation == "cpu":
+                client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
+            else:
+                client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=30))
         assert backend.custom_objects_api.create_calls == []
         assert client._created == []
 

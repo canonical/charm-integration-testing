@@ -596,7 +596,7 @@ def test_stress_memory_rejects_negative_duration_margin() -> None:
     tool = ClientStub({"stress_memory"})
     client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
 
-    with pytest.raises(ValueError, match="duration margin must not be negative"):
+    with pytest.raises(ValueError, match="duration margin must be nonnegative"):
         client.stress_memory(TEST_MODEL, UNIT, 1, 512, DURATION, duration_margin=timedelta(seconds=-1))
 
     assert tool.calls == []

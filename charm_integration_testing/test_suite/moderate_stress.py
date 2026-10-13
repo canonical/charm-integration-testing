@@ -3,6 +3,8 @@
 
 """Shared validation and observation for moderate CPU and memory stress."""
 
+from datetime import timedelta
+from functools import partial
 from time import monotonic, sleep
 from typing import Callable
 
@@ -11,6 +13,67 @@ from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
 
 ValidationKey = tuple[JujuModelHandle, str, str, str, int | None]
+
+
+def run_moderate_stress(
+    juju_client: JujuClient,
+    chaos_tool_for_model: Callable[[JujuModelHandle], MetaChaosClient],
+    target: tuple[JujuModelHandle, str, str],
+    neighbor: tuple[JujuModelHandle | None, str, str],
+    *,
+    operation: str,
+    inject: Callable[[MetaChaosClient, JujuModelHandle, str], timedelta],
+    check_interval: timedelta,
+    duration_margin: timedelta,
+    recovery_timeout: timedelta,
+) -> None:
+    """Verify baseline, sustained moderate stress, cleanup and recovery for a pair."""
+    if any(value <= timedelta(0) for value in (check_interval, duration_margin, recovery_timeout)):
+        raise ValueError("Check interval, duration margin and recovery timeout must be positive.")
+    model, application, _ = target
+    chaos = chaos_tool_for_model(model)
+    if not chaos.supports(operation):
+        pytest.skip(f"No available chaos client supports '{operation}' for moderate stress.")
+    endpoints = [target, (neighbor[0] or model, neighbor[1], neighbor[2])]
+    models = list(dict.fromkeys(selected_model for selected_model, _, _ in endpoints))
+    juju_client.multi_model_idle_for_period(models=models, timeout=recovery_timeout, strict_timeout=True)
+    check_service_health(juju_client, endpoints)
+    required = validate_baseline(juju_client, endpoints)
+    units = juju_client.backend.application_units(model, application)
+    if not units:
+        pytest.fail("No target units found for moderate stress.")
+    unit = sorted(units)[0]
+    observation_error: BaseException | None = None
+    try:
+        started = monotonic()
+        duration = inject(chaos, model, unit)
+        if duration <= timedelta(0):
+            raise ValueError("Resolved moderate stress duration must be positive.")
+        juju_client.logger.info("Observing moderate %s on %s/%s for %s.", operation, model.uri, unit, duration)
+        observe_moderate_pressure(
+            chaos,
+            model,
+            unit,
+            duration.total_seconds(),
+            check_interval.total_seconds(),
+            partial(check_service_health, juju_client, endpoints),
+            partial(validate_required_coverage, juju_client, endpoints, required),
+            stress_deadline=started + (duration + duration_margin).total_seconds(),
+        )
+    except BaseException as error:
+        observation_error = error
+        raise
+    finally:
+        try:
+            chaos.cleanup_all()
+        except BaseException as cleanup_error:
+            if observation_error is not None:
+                # Preserve the observation traceback and chain the cleanup failure.
+                raise observation_error from cleanup_error
+            raise
+    juju_client.multi_model_idle_for_period(models=models, timeout=recovery_timeout, strict_timeout=True)
+    check_service_health(juju_client, endpoints)
+    validate_required_coverage(juju_client, endpoints, required)
 
 
 def validate_service(juju_client: JujuClient, endpoints: list[tuple[JujuModelHandle, str, str]]) -> set[ValidationKey]:

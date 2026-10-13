@@ -19,6 +19,7 @@ from juju import (
 )
 from test_suite import moderate_stress
 from test_suite import test_live_cpu_stress_moderate as cpu
+from test_suite import test_live_memory_stress_moderate as memory
 
 from validators.base import ValidationResult
 
@@ -119,9 +120,9 @@ class Backend(NullJujuBackend):
             raise TimeoutError("recovery failed")
 
 
-class CpuTool(ClientStub):
+class StressTool(ClientStub):
     def __init__(self, clock: Clock, events: list[str]) -> None:
-        super().__init__({"stress_cpu", "check_stress", "cleanup"})
+        super().__init__({"stress_cpu", "stress_memory", "check_stress", "cleanup"})
         self.clock = clock
         self.events = events
         self.check_times: list[float] = []
@@ -132,6 +133,11 @@ class CpuTool(ClientStub):
         self.events.append("inject")
         self.clock.now += self.startup_seconds
         super().stress_cpu(model, unit, workers, duration)
+
+    def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
+        self.events.append("inject")
+        self.clock.now += self.startup_seconds
+        super().stress_memory(model, unit, workers, size_mb, duration)
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         self.events.append("stress")
@@ -150,9 +156,14 @@ class Harness:
     clock: Clock
     events: list[str]
     backend: Backend
-    tool: CpuTool
+    tool: StressTool
     constraints: ConstraintsClientStub
     chaos: MetaChaosClient
+    resource: str
+
+    @property
+    def operation(self) -> str:
+        return "stress_cpu" if self.resource == "cpu" else "stress_memory"
 
     def run(
         self,
@@ -160,37 +171,76 @@ class Harness:
         interval: timedelta = timedelta(seconds=10),
         margin: timedelta = timedelta(minutes=2),
         recovery: timedelta = timedelta(minutes=15),
+        workers: int = 1,
+        duration: timedelta = timedelta(minutes=5),
+        size_mb: int = 128,
     ) -> None:
         def resolve(model: JujuModelHandle) -> MetaChaosClient:
             assert model == MODEL
             return self.chaos
 
-        cpu.test_live_cpu_stress_moderate(
-            JujuClient(self.backend, logging.getLogger(__name__)),
-            resolve,
-            MODEL,
-            "target",
-            "db",
-            NEIGHBOR if self.backend.cross_model else None,
-            "neighbor",
-            "service",
-            interval,
-            margin,
-            recovery,
-        )
+        if self.resource == "cpu":
+            cpu.test_live_cpu_stress_moderate(
+                JujuClient(self.backend, logging.getLogger(__name__)),
+                resolve,
+                MODEL,
+                "target",
+                "db",
+                NEIGHBOR if self.backend.cross_model else None,
+                "neighbor",
+                "service",
+                interval,
+                margin,
+                recovery,
+                workers,
+                duration,
+            )
+        else:
+            memory.test_live_memory_stress_moderate(
+                JujuClient(self.backend, logging.getLogger(__name__)),
+                resolve,
+                MODEL,
+                "target",
+                "db",
+                NEIGHBOR if self.backend.cross_model else None,
+                "neighbor",
+                "service",
+                interval,
+                recovery,
+                workers,
+                duration,
+                size_mb,
+                margin,
+            )
 
 
-@pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch) -> Harness:
+@pytest.fixture(params=["cpu", "memory"])
+def harness(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Harness:
     clock = Clock()
-    monkeypatch.setattr(cpu, "monotonic", clock.monotonic)
     monkeypatch.setattr(moderate_stress, "monotonic", clock.monotonic)
     monkeypatch.setattr(moderate_stress, "sleep", clock.sleep)
     events: list[str] = []
     backend = Backend(clock, events)
-    tool = CpuTool(clock, events)
-    constraints = ConstraintsClientStub(CharmResourceConstraints(cpu_moderate_pressure_duration_seconds=20))
-    return Harness(clock, events, backend, tool, constraints, MetaChaosClient([tool], backend, constraints))
+    tool = StressTool(clock, events)
+    constraints = ConstraintsClientStub(
+        CharmResourceConstraints(
+            cpu_moderate_pressure_duration_seconds=20, memory_moderate_pressure_duration_seconds=20
+        )
+    )
+    return Harness(
+        clock, events, backend, tool, constraints, MetaChaosClient([tool], backend, constraints), request.param
+    )
+
+
+def test_caller_settings_reach_injection_without_charm_overrides(harness: Harness) -> None:
+    # GIVEN caller-provided settings and no per-charm overrides
+    harness.constraints.constraint = CharmResourceConstraints()
+    # WHEN running either resource with non-default settings
+    harness.run(workers=2, duration=timedelta(seconds=7), size_mb=64, margin=timedelta(seconds=15))
+    # THEN the resource inputs reach injection and only the base duration is observed
+    expected = (MODEL, UNIT, 2) + (() if harness.resource == "cpu" else (64,)) + (timedelta(seconds=22),)
+    assert harness.tool.calls[0] == (harness.operation, expected)
+    assert harness.tool.check_times[::2] == [0, 7]
 
 
 @pytest.mark.parametrize("cross_model", [False, True], ids=["same-model", "cross-model"])
@@ -227,7 +277,8 @@ def test_lifecycle(harness: Harness, cross_model: bool) -> None:
         "validate:target",
         "validate:neighbor",
     ]
-    assert harness.tool.calls[0] == ("stress_cpu", (MODEL, UNIT, 1, timedelta(seconds=140)))
+    expected = (MODEL, UNIT, 1) + (() if harness.resource == "cpu" else (128,)) + (timedelta(seconds=140),)
+    assert harness.tool.calls[0] == (harness.operation, expected)
     assert harness.tool.check_times == [0, 0, 10, 10, 20, 20]
     assert harness.backend.idle_calls == [[MODEL, NEIGHBOR] if cross_model else [MODEL]] * 2
     assert harness.backend.rounds == {"target": 5, "neighbor": 5}
@@ -303,6 +354,10 @@ def test_resolved_duration_and_margin(harness: Harness, params: DurationParams) 
     harness.constraints.constraint = CharmResourceConstraints(
         cpu_moderate_pressure_workers=params.workers,
         cpu_moderate_pressure_duration_seconds=params.seconds,
+        memory_moderate_pressure_workers=params.workers,
+        memory_moderate_pressure_duration_seconds=params.seconds,
+        memory_exhaustion_workers=99,
+        memory_exhaustion_duration_seconds=999,
         cpu_exhaustion_workers=99,
         cpu_exhaustion_duration_seconds=999,
     )
@@ -312,8 +367,10 @@ def test_resolved_duration_and_margin(harness: Harness, params: DurationParams) 
 
     # THEN overrides determine observation, with the margin added only to injection
     assert harness.tool.calls[0] == (
-        "stress_cpu",
-        (MODEL, UNIT, params.workers or 1, timedelta(seconds=(params.seconds or 300) + params.margin)),
+        harness.operation,
+        (MODEL, UNIT, params.workers or 1)
+        + (() if harness.resource == "cpu" else (128,))
+        + (timedelta(seconds=(params.seconds or 300) + params.margin),),
     )
     assert harness.tool.check_times[::2] == params.expected_times
     assert harness.constraints.calls == [("target", "stable", "24.04")]
@@ -427,17 +484,21 @@ def test_health_errors_propagate(harness: Harness, check: int) -> None:
     assert harness.events.count("cleanup") == (check != 1)
 
 
-@pytest.mark.parametrize("operation", ["stress_cpu", "check_stress"], ids=["injection", "observation"])
+@pytest.mark.parametrize("operation", ["inject", "check_stress"], ids=["injection", "observation"])
 @pytest.mark.parametrize("also_cleanup", [False, True])
-def test_failure_always_cleans_up_and_preserves_errors(harness: Harness, operation: str, also_cleanup: bool) -> None:
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_failure_always_cleans_up_and_preserves_errors(
+    harness: Harness, operation: str, also_cleanup: bool, error_type: type[BaseException]
+) -> None:
     # GIVEN injection or observation fails, optionally followed by cleanup failure
-    error = RuntimeError(f"{operation} failed")
+    operation = harness.operation if operation == "inject" else operation
+    error = error_type(f"{operation} failed")
     harness.tool.errors[operation] = error
     if also_cleanup:
         harness.tool.errors["cleanup"] = RuntimeError("cleanup failed")
 
     # WHEN running, THEN cleanup occurs and neither error is lost
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(error_type) as caught:
         harness.run()
     assert caught.value is error
     if also_cleanup:
@@ -509,11 +570,13 @@ def test_final_round_can_use_margin(harness: Harness) -> None:
 @pytest.mark.parametrize("setting", ["interval", "margin", "recovery"])
 def test_positive_configuration_required(harness: Harness, setting: str, value: timedelta) -> None:
     # GIVEN an invalid fixture setting
-    settings = {setting: value}
-
     # WHEN running, THEN configuration fails before preflight/injection
     with pytest.raises(ValueError, match="must be positive"):
-        harness.run(**settings)
+        harness.run(
+            interval=value if setting == "interval" else timedelta(seconds=10),
+            margin=value if setting == "margin" else timedelta(minutes=2),
+            recovery=value if setting == "recovery" else timedelta(minutes=15),
+        )
     assert harness.events == []
 
 
@@ -522,7 +585,7 @@ def test_unsupported_skips_without_fallback(harness: Harness) -> None:
     harness.tool.supported = {"fill_disk"}
 
     # WHEN CPU stress is requested, THEN there is no native fallback or injection
-    with pytest.raises(pytest.skip.Exception, match="Litmus or Chaos Mesh"):
+    with pytest.raises(pytest.skip.Exception, match=harness.operation):
         harness.run()
     assert harness.events == []
     assert harness.constraints.calls == []
