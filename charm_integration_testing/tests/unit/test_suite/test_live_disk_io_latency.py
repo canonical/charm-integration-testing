@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,11 +17,16 @@ from test_suite.test_live_disk_io_latency import (
 )
 
 MODEL = JujuModelHandle(controller="controller", model="model")
+# Deliberately different from LATENCY_DURATION, to prove the test observes for however long
+# io_latency() says the experiment was actually configured to run (e.g. a per-charm override),
+# rather than the caller-supplied duration.
+RESOLVED_DURATION = timedelta(minutes=20)
 
 
 @pytest.mark.parametrize("failure", [None, "baseline", "io_latency", "observe", "cleanup", "recovery", "validation"])
 def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
+    sleep_calls: list[float] = []
     juju, chaos = MagicMock(), MagicMock()
     waits = iter(["baseline", "recovery"])
 
@@ -29,11 +35,19 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
         if failure == name:
             raise RuntimeError(name)
 
+    def fake_io_latency(**kwargs: object) -> timedelta:
+        event("io_latency")
+        return RESOLVED_DURATION
+
+    def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        event("observe")
+
     juju.multi_model_idle_for_period.side_effect = lambda **kwargs: event(next(waits))
     juju.validate_model.side_effect = lambda **kwargs: event("validation")
-    chaos.io_latency.side_effect = lambda **kwargs: event("io_latency")
+    chaos.io_latency.side_effect = fake_io_latency
     chaos.cleanup_all.side_effect = lambda: event("cleanup")
-    monkeypatch.setattr("test_suite.test_live_disk_io_latency.sleep", lambda seconds: event("observe"))
+    monkeypatch.setattr("test_suite.test_live_disk_io_latency.sleep", fake_sleep)
 
     if failure:
         with pytest.raises(RuntimeError, match=failure):
@@ -50,6 +64,8 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
             percent=PERCENT,
             duration=LATENCY_DURATION,
         )
+        # The observation sleep must use the resolved duration, not the caller-supplied one.
+        assert sleep_calls == [RESOLVED_DURATION.total_seconds()]
 
     # The finally block runs cleanup_all whenever the try block was entered, i.e. for every
     # failure except "baseline" (which fails before the try block is reached).
@@ -66,6 +82,7 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
 def test_neighbor_validation(neighbor: JujuModelHandle, monkeypatch: pytest.MonkeyPatch) -> None:
     juju, chaos = MagicMock(), MagicMock()
+    chaos.io_latency.return_value = RESOLVED_DURATION
     monkeypatch.setattr("test_suite.test_live_disk_io_latency.sleep", lambda seconds: None)
     run_disk_io_latency(juju, chaos, MODEL, "target", neighbor)
     models = [MODEL] if neighbor == MODEL else [MODEL, neighbor]

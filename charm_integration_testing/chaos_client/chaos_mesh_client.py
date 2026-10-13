@@ -75,7 +75,7 @@ class ChaosMeshChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> timedelta:
         application = unit.split("/")[0]
         spec: dict[str, object] = {
             "action": "latency",
@@ -89,6 +89,7 @@ class ChaosMeshChaosClient(ChaosClient):
         name = self._name("io-latency", application)
         self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
         self._wait_for_injection(model.model, "iochaos", name, "IOChaos")
+        return duration
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Validate tracked stress experiments during observation."""

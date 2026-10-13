@@ -55,7 +55,8 @@ class ChaosClient(ABC):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> timedelta:
+        """Inject I/O latency and return the duration the experiment was actually configured for."""
         raise NotImplementedError
 
     @abstractmethod

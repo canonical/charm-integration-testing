@@ -35,7 +35,7 @@ class KubernetesChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> timedelta:
         raise NotImplementedError
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:

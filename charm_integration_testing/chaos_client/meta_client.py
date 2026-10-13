@@ -165,21 +165,29 @@ class MetaChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], None]:
-            merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
-            merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
-            merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
-            return lambda tool: tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+    ) -> timedelta:
+        """Inject I/O latency and return the resolved (possibly per-charm-constrained) duration.
 
-        self._dispatch_constrained(
+        Unlike the other experiments, callers need the resolved duration back so they can keep
+        observing the fault for exactly as long as it will actually run before cleaning it up.
+        """
+        if not self.supports("io_latency"):
+            self._on_unsupported("io_latency")
+        constraints = self._resolve_constraints(model, unit)
+        merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
+        merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
+        merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
+
+        def invoke(tool: ChaosClient) -> None:
+            tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+
+        self._dispatch(
             "io_latency",
-            model,
-            unit,
-            build_invoke,
+            invoke,
             lambda tool: self._experiment_cleanup(tool, model, unit, volume_path),
             self._cleanups,
         )
+        return merged_duration
 
     def isolate_network(self, model: str, unit: str) -> None:
         self._dispatch(

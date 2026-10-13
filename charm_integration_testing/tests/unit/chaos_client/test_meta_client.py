@@ -107,8 +107,9 @@ class ClientStub(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> timedelta:
         self._call("io_latency", model, unit, volume_path, delay, percent, duration)
+        return duration
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         self._call("cleanup", model, unit, path)
@@ -123,7 +124,7 @@ class ClientStub(ChaosClient):
 @dataclass(frozen=True)
 class Params:
     operation: str
-    invoke: Callable[[ChaosClient], None]
+    invoke: Callable[[ChaosClient], object]
     args: tuple[object, ...]
 
 
@@ -675,9 +676,9 @@ def test_io_latency_uses_constraint_overrides() -> None:
     )
 
     # WHEN injecting I/O latency
-    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    resolved_duration = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
-    # THEN the merged values are dispatched
+    # THEN the merged values are dispatched, and the merged duration is returned to the caller
     assert tool.calls == [
         (
             "io_latency",
@@ -691,6 +692,7 @@ def test_io_latency_uses_constraint_overrides() -> None:
             ),
         )
     ]
+    assert resolved_duration == timedelta(seconds=75)
 
 
 def test_io_latency_without_matching_constraints_preserves_caller_values() -> None:
@@ -699,7 +701,8 @@ def test_io_latency_without_matching_constraints_preserves_caller_values() -> No
     client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
 
     # WHEN injecting I/O latency
-    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    resolved_duration = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
-    # THEN the original values are preserved
+    # THEN the original values are preserved, and the caller's duration is returned unchanged
     assert tool.calls == [("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION))]
+    assert resolved_duration == DURATION

@@ -136,7 +136,7 @@ class LitmusChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> timedelta:
         raise NotImplementedError
 
     def isolate_network(self, model: str, unit: str) -> None:

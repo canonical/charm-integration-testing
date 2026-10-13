@@ -198,7 +198,7 @@ class TestExperimentAvailability:
     class Params:
         operation: str
         plural: str
-        invoke: Callable[[ChaosClient], None]
+        invoke: Callable[[ChaosClient], object]
         path: str = ""
 
     test_cases = [

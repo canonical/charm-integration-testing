@@ -35,7 +35,7 @@ def test_live_disk_io_latency(
         # Chaos-Mesh-only (no client implements io_latency otherwise): the fixture skips the
         # test automatically via on_unsupported when Chaos Mesh is absent. io_latency() blocks
         # until Chaos Mesh's controller confirms the IOChaos resource was actually injected.
-        require_chaos_tool.io_latency(
+        resolved_duration = require_chaos_tool.io_latency(
             model=target_model_ref,
             unit=unit,
             volume_path=VOLUME_PATH,
@@ -43,8 +43,9 @@ def test_live_disk_io_latency(
             percent=PERCENT,
             duration=LATENCY_DURATION,
         )
-        # A healthy workload may remain active throughout the fault.
-        sleep(LATENCY_DURATION.total_seconds())
+        # A per-charm override may have changed the experiment's actual duration, so observe for
+        # as long as the fault will actually run rather than the (possibly stale) caller value.
+        sleep(resolved_duration.total_seconds())
     finally:
         require_chaos_tool.cleanup_all()
 
