@@ -4,7 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from time import monotonic, sleep
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from uuid import uuid4
 
 from juju import JujuModelHandle
@@ -93,10 +93,11 @@ class LitmusChaosClient(ChaosClient):
         )
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        """Report execution errors from experiments registered for this unit."""
-        for engine in self._created:
-            if engine.scope != (model.uri, unit) or engine.uid is None:
-                continue
+        """Require active stress or explicitly allowed completion, and report execution errors."""
+        engines = [engine for engine in self._created if engine.scope == (model.uri, unit) and engine.uid is not None]
+        if not engines:
+            raise RuntimeError(f"No tracked Litmus stress for {model.uri}/{unit}.")
+        for engine in engines:
             if allow_completed and isinstance(engine.execution_error, StressEndedEarlyError):
                 engine.execution_error = None
                 engine.execution_error_reported = False
@@ -104,26 +105,22 @@ class LitmusChaosClient(ChaosClient):
             if engine.execution_error is not None:
                 engine.execution_error_reported = True
                 raise engine.execution_error
+            state = self._injection_state(engine, self._read_engine(engine), results)
             if allow_completed:
-                # The caller has independently confirmed the intended fault outcome.
-                # Execution errors above and cleanup/reversion checks still apply.
-                continue
-            current = self._read_engine(engine)
-            if (
-                current is None
-                or (current.get("status") or {}).get("engineStatus") in {"completed", "stopped"}
-                or any(
-                    (result.get("status") or {}).get("experimentStatus", {}).get("phase") in {"Completed", "Stopped"}
-                    or self._target_status(result, engine.pod) == "reverted"
-                    for result in results
-                )
-            ):
+                if state in {"missing", "interrupted"}:
+                    raise RuntimeError(f"Litmus experiment {engine.name} was interrupted during observation.")
+                # A completed Engine can precede result updates. Cleanup still verifies reversion.
+                if state == "completed":
+                    continue
+            if state in {"missing", "interrupted", "completed", "reverted"}:
                 engine.execution_error = StressEndedEarlyError(
                     f"Litmus experiment {engine.name} ended before the observation period completed; "
                     "the requested stress duration was not verified."
                 )
                 engine.execution_error_reported = True
                 raise engine.execution_error
+            if state != "injected":
+                raise RuntimeError(f"Litmus experiment {engine.name} is no longer confirmed active.")
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
@@ -293,15 +290,34 @@ class LitmusChaosClient(ChaosClient):
         if engine.execution_error is not None:
             engine.execution_error_reported = True
             raise engine.execution_error
-        if current is None:
+        state = self._injection_state(engine, current, results)
+        if state == "missing":
             raise RuntimeError(f"Litmus Engine {engine.name} disappeared before stress started.")
-        if current.get("status", {}).get("engineStatus") in {"completed", "stopped"} or any(
-            result.get("status", {}).get("experimentStatus", {}).get("phase") in {"Completed", "Stopped"}
-            or self._target_status(result, engine.pod) == "reverted"
-            for result in results
-        ):
+        if state in {"interrupted", "completed", "reverted"}:
             raise RuntimeError(f"Litmus experiment {engine.name} ended before stress could be observed.")
-        return any(self._target_status(result, engine.pod) == "injected" for result in results)
+        return state == "injected"
+
+    def _injection_state(
+        self, engine: _ExperimentRun, current: dict[str, Any] | None, results: list[dict[str, Any]]
+    ) -> Literal["missing", "interrupted", "completed", "reverted", "injected", "pending"]:
+        """Classify the already-read Engine and results without another API request."""
+        if current is None:
+            return "missing"
+        phases = {(result.get("status") or {}).get("experimentStatus", {}).get("phase") for result in results}
+        targets = {self._target_status(result, engine.pod) for result in results}
+        engine_status = (current.get("status") or {}).get("engineStatus")
+        if (
+            current.get("metadata", {}).get("deletionTimestamp")
+            or current.get("spec", {}).get("engineState") == "stop"
+            or engine_status == "stopped"
+            or "Stopped" in phases
+        ):
+            return "interrupted"
+        if engine_status == "completed" or "Completed" in phases:
+            return "completed"
+        if "reverted" in targets:
+            return "reverted"
+        return "injected" if "injected" in targets else "pending"
 
     def _reverted(self, engine: _ExperimentRun) -> bool:
         if engine.reverted:
