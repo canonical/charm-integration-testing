@@ -37,75 +37,116 @@ class RemoteLoggingExtension(JujuExtension):
     def post_bootstrap_controller(self, controller: str) -> None:
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None:
+            self.logger.debug(f"Skipping remote logging setup for controller '{controller}': no endpoint configured.")
             return
 
         model = JujuModelHandle(controller=controller, model="controller")
-        collector_charm = (
-            KUBERNETES_COLLECTOR_CHARM if self.juju.is_k8s_controller(controller) else MACHINE_COLLECTOR_CHARM
-        )
-        applications = self.juju.list_applications(model)
+        self.logger.debug(f"Starting remote logging setup for controller model '{model.uri}'.")
+        self._log_status(model, phase="before")
 
-        collector = self._ensure_deployed(
-            model,
-            applications,
-            charm=collector_charm,
-            config=None,
-            trust=collector_charm == KUBERNETES_COLLECTOR_CHARM,
-            channel=COLLECTOR_CHANNEL,
-        )
-        integrator_config = self._integrator_config(endpoint)
-        integrator = self._ensure_deployed(
-            model,
-            applications,
-            charm=INTEGRATOR_CHARM,
-            config=integrator_config,
-            trust=False,
-            channel=INTEGRATOR_CHANNEL,
-        )
+        try:
+            collector_charm = (
+                KUBERNETES_COLLECTOR_CHARM if self.juju.is_k8s_controller(controller) else MACHINE_COLLECTOR_CHARM
+            )
+            self.logger.debug(f"Selected collector charm '{collector_charm}' for controller model '{model.uri}'.")
 
-        if integrator in applications:
-            self.juju.configure_application(
+            applications = self.juju.list_applications(model)
+            self.logger.debug(f"Found {len(applications)} application(s) in controller model '{model.uri}'.")
+
+            collector = self._ensure_deployed(
                 model,
+                applications,
+                charm=collector_charm,
+                config=None,
+                trust=collector_charm == KUBERNETES_COLLECTOR_CHARM,
+                channel=COLLECTOR_CHANNEL,
+            )
+            integrator_config = self._integrator_config(endpoint)
+            integrator = self._ensure_deployed(
+                model,
+                applications,
+                charm=INTEGRATOR_CHARM,
+                config=integrator_config,
+                trust=False,
+                channel=INTEGRATOR_CHANNEL,
+            )
+
+            if integrator in applications:
+                self.logger.debug(f"Updating configuration for existing application '{integrator}' in '{model.uri}'.")
+                self.juju.configure_application(
+                    model,
+                    integrator,
+                    {
+                        key: str(value).lower() if isinstance(value, bool) else value
+                        for key, value in integrator_config.items()
+                    },
+                )
+
+            if collector_charm == MACHINE_COLLECTOR_CHARM:
+                if self.juju.integration_exists(
+                    collector,
+                    JUJU_INFO_ENDPOINT,
+                    CONTROLLER_APPLICATION,
+                    JUJU_INFO_ENDPOINT,
+                    model,
+                ):
+                    self.logger.debug(
+                        f"Reusing integration between '{collector}' and '{CONTROLLER_APPLICATION}' in '{model.uri}'."
+                    )
+                else:
+                    self.logger.debug(f"Integrating '{collector}' with '{CONTROLLER_APPLICATION}' in '{model.uri}'.")
+                    self.juju.integrate(
+                        model,
+                        JujuIntegrationApplication(collector, JUJU_INFO_ENDPOINT),
+                        JujuIntegrationApplication(CONTROLLER_APPLICATION, JUJU_INFO_ENDPOINT),
+                    )
+
+            if self.juju.integration_exists(
                 integrator,
-                {
-                    key: str(value).lower() if isinstance(value, bool) else value
-                    for key, value in integrator_config.items()
-                },
-            )
-
-        if collector_charm == MACHINE_COLLECTOR_CHARM and not self.juju.integration_exists(
-            collector,
-            JUJU_INFO_ENDPOINT,
-            CONTROLLER_APPLICATION,
-            JUJU_INFO_ENDPOINT,
-            model,
-        ):
-            self.juju.integrate(
+                EXTERNAL_CONFIG_ENDPOINT,
+                collector,
+                EXTERNAL_CONFIG_ENDPOINT,
                 model,
-                JujuIntegrationApplication(collector, JUJU_INFO_ENDPOINT),
-                JujuIntegrationApplication(CONTROLLER_APPLICATION, JUJU_INFO_ENDPOINT),
-            )
+            ):
+                self.logger.debug(f"Reusing integration between '{integrator}' and '{collector}' in '{model.uri}'.")
+            else:
+                self.logger.debug(f"Integrating '{integrator}' with '{collector}' in '{model.uri}'.")
+                self.juju.integrate(
+                    model,
+                    JujuIntegrationApplication(integrator, EXTERNAL_CONFIG_ENDPOINT),
+                    JujuIntegrationApplication(collector, EXTERNAL_CONFIG_ENDPOINT),
+                )
 
-        if not self.juju.integration_exists(
-            integrator,
-            EXTERNAL_CONFIG_ENDPOINT,
-            collector,
-            EXTERNAL_CONFIG_ENDPOINT,
-            model,
-        ):
-            self.juju.integrate(
-                model,
-                JujuIntegrationApplication(integrator, EXTERNAL_CONFIG_ENDPOINT),
-                JujuIntegrationApplication(collector, EXTERNAL_CONFIG_ENDPOINT),
-            )
+            for application in (collector, integrator):
+                self.logger.debug(f"Waiting for application '{application}' to settle in '{model.uri}'.")
+                self.juju.wait_application_settled(
+                    model,
+                    application,
+                    timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
+                )
+                self.logger.debug(f"Application '{application}' settled in '{model.uri}'.")
+        except Exception:
+            self.logger.debug(f"Remote logging setup failed for controller model '{model.uri}'.", exc_info=True)
+            raise
+        else:
+            self.logger.debug(f"Completed remote logging setup for controller model '{model.uri}'.")
+        finally:
+            self._log_status(model, phase="after")
 
-        self.juju.wait_application_settled(model, collector, timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
-        self.juju.wait_application_settled(model, integrator, timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
+    def _log_status(self, model: JujuModelHandle, *, phase: str) -> None:
+        try:
+            status = self.juju.juju_status_text(model)
+        except Exception:
+            self.logger.warning(
+                f"Failed to collect Juju status {phase} remote logging changes for controller model '{model.uri}'.",
+                exc_info=True,
+            )
+            return
 
         separator = "-" * 80
         self.logger.info(
-            f"Juju status for controller model '{model.uri}':\n"
-            f"{separator}\n{self.juju.juju_status_text(model)}{separator}"
+            f"Juju status {phase} remote logging changes for controller model '{model.uri}':\n"
+            f"{separator}\n{status}{separator}"
         )
 
     def _ensure_deployed(
@@ -120,8 +161,10 @@ class RemoteLoggingExtension(JujuExtension):
     ) -> str:
         existing = self._find_application(applications, charm)
         if existing is not None:
+            self.logger.debug(f"Reusing application '{existing}' for charm '{charm}' in '{model.uri}'.")
             return existing
 
+        self.logger.debug(f"Deploying charm '{charm}' as application '{charm}' in '{model.uri}'.")
         try:
             self.juju.deploy_application(
                 model,
@@ -134,9 +177,16 @@ class RemoteLoggingExtension(JujuExtension):
             self.logger.info(f"Deployed '{charm}' into '{model.uri}'.")
             return charm
         except Exception as error:
+            self.logger.debug(
+                f"Deployment of charm '{charm}' in '{model.uri}' raised; checking for a concurrent deployment.",
+                exc_info=True,
+            )
             existing = self._find_application(self.juju.list_applications(model), charm)
             if existing is None:
                 raise error from None
+            self.logger.debug(
+                f"Using concurrently deployed application '{existing}' for charm '{charm}' in '{model.uri}'."
+            )
             return existing
 
     @staticmethod
