@@ -91,10 +91,11 @@ class ChaosMeshChaosClient(ChaosClient):
             "duration": f"{int(duration.total_seconds())}s",
         }
         name = self._name("io-latency", application)
-        self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
-        # The experiment's duration starts counting down from creation, not from when
-        # injection is confirmed below, so the start time must be captured here.
+        # Sampled just before submitting the resource: Chaos Mesh's controller starts counting
+        # down the duration from creation, and the POST itself (awaited inside _create()) can
+        # be slow, so capturing the clock after it returns would miss that elapsed time.
         injected_at = self._clock()
+        self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
         self._wait_for_injection(model.model, "iochaos", name, "IOChaos")
         return IoLatencyInjection(duration=duration, injected_at=injected_at)
 

@@ -659,6 +659,33 @@ def test_stress_waits_for_injection_before_returning(operation: str, recovered_s
     assert not api.objects
 
 
+def test_io_latency_injected_at_precedes_slow_resource_creation() -> None:
+    """A slow Kubernetes API response must count against the experiment's duration.
+
+    injected_at must be sampled before submitting the IOChaos resource, not after, since the
+    duration starts counting down from creation and the POST itself (awaited inside _create())
+    may be slow.
+    """
+    backend = BackendStub()
+    now = 0.0
+
+    class SlowCreateApi(FakeCustomObjectsApi):
+        def create_namespaced_custom_object(self, **kwargs: object) -> dict[str, Any]:
+            nonlocal now
+            now += 5.0  # Simulate a slow Kubernetes API response.
+            return super().create_namespaced_custom_object(**kwargs)
+
+    backend.custom_objects_api = SlowCreateApi(inject_stress=True)
+    mesh = ChaosMeshChaosClient(backend, clock=lambda: now)
+
+    injection = mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
+
+    # THEN injected_at reflects the pre-submission time, not the time after the slow POST
+    # returned, so callers correctly account for the delay as part of the experiment's duration.
+    assert injection.injected_at == 0.0
+    assert now == 5.0
+
+
 @pytest.mark.parametrize("operation", ["stress_cpu", "io_latency"])
 @pytest.mark.parametrize(
     "state",
