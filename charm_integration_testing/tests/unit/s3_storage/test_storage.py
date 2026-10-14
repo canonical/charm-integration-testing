@@ -651,6 +651,32 @@ def test_stale_cleanup_retains_owned_bucket_without_credential_tag(client: S3Cli
         stubber.assert_no_pending_responses()
 
 
+def test_stale_cleanup_retains_owned_bucket_with_empty_credential_tag(client: S3Client) -> None:
+    keystone = KeystoneStub()
+    storage = S3Storage(
+        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+    )
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": storage._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": ""},
+                ]
+            },
+            {"Bucket": OLD_BUCKET},
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources") as error:
+            storage.cleanup_stale(timedelta(hours=4), NOW)
+
+        assert str(error.value.__cause__) == "Missing EC2 access-key tag; retaining bucket"
+        assert keystone.deleted == []
+        stubber.assert_no_pending_responses()
+
+
 def test_static_stale_cleanup_checks_ownership_tag(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     with Stubber(client) as stubber:
@@ -1062,3 +1088,13 @@ def test_environment_provider_identity_distinguishes_storage_credentials() -> No
     assert target.handle.resource_id != neighbor.handle.resource_id
     assert target.handle.resource_id == same_target.handle.resource_id
     assert "target-secret" not in target.handle.resource_id
+
+
+def test_direct_provider_handles_distinguish_endpoints_and_credentials() -> None:
+    providers = [
+        StaticS3Provider("https://first-s3.test", NAMESPACE, CREDS),
+        StaticS3Provider("https://second-s3.test", NAMESPACE, CREDS),
+        StaticS3Provider("https://first-s3.test", NAMESPACE, S3Credentials("other-access", "other-secret")),
+    ]
+
+    assert len({provider.handle.resource_id for provider in providers}) == len(providers)
