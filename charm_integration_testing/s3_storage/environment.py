@@ -104,6 +104,8 @@ def provider_from_environment(
                 region,
                 require("S3_ACCESS_KEY"),
                 require("S3_SECRET_KEY"),
+                get("S3_CLEANUP_ACCESS_KEY") or "",
+                get("S3_CLEANUP_SECRET_KEY") or "",
             ),
             cleanup_credentials=(
                 S3Credentials(require("S3_CLEANUP_ACCESS_KEY"), require("S3_CLEANUP_SECRET_KEY"))

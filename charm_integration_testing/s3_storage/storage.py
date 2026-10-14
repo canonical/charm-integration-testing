@@ -221,7 +221,7 @@ class S3Storage(S3Provider):
                                 raise
                             raise RuntimeError("Missing ownership tags; retaining bucket") from exc
                         owner = next((tag["Value"] for tag in tags if tag["Key"] == S3_OWNER_TAG), None)
-                        if owner is None:
+                        if not owner:
                             raise RuntimeError("Missing ownership tag; retaining bucket")
                         if owner != self._bucket_owner:
                             continue
