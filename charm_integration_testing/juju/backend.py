@@ -452,6 +452,10 @@ class JujuBackend(ABC):
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         raise NotImplementedError
 
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        """Return whether *model* is accessible on its controller, if supported by the backend."""
+        raise NotImplementedError("This backend cannot check whether a model exists.")
+
     @abstractmethod
     def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
         raise NotImplementedError

@@ -1032,6 +1032,16 @@ class JubilantBackend(JujuCmdBackend):
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
 
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        try:
+            self.client.model(model).show_model()
+        except jubilant.CLIError as exc:
+            message = f"{exc.stderr or ''}\n{exc.stdout or ''}".casefold()
+            if "model" in message and ("not found" in message or "does not exist" in message):
+                return False
+            raise
+        return True
+
     def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
         extra = ("--agent-version", agent_version) if agent_version else ()
         self.client.model(None).cli("upgrade-controller", "-c", controller, *extra, include_model=False)

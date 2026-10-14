@@ -40,6 +40,18 @@ class JujuStub(JujuStubBase):
         return JujuTask("id", self.action_return_code, self.action_status, "", "")
 
 
+@dataclass
+class MigrationFailureAfterMoveStub(JujuStub):
+    current_controller: str = MODEL.controller
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.current_controller = target_controller
+        raise RuntimeError("Migration command failed after moving the model")
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        return model.controller == self.current_controller
+
+
 class StorageStub(S3Provider):
     def __init__(self, endpoint: str = "https://s3.test", namespace: str = "test") -> None:
         self._endpoint = endpoint
@@ -245,6 +257,27 @@ def test_migrated_model_provider_is_shared_across_extensions() -> None:
         cleanup_buckets=True,
     )
     new_extension.post_deploy(migrated_model)
+
+    assert backend.configured_applications[0][2]["endpoint"] == storage.endpoint
+
+
+def test_failed_migration_reconciles_provider_for_retry_with_new_client() -> None:
+    backend = MigrationFailureAfterMoveStub()
+    target_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="after moving the model"):
+        client.migrate_model(MODEL.model, MODEL.controller, target_model.controller)
+
+    assert providers == {target_model.resource_id: storage}
+
+    retry_extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    retry_client = JujuClient(backend, logging.getLogger(__name__), [retry_extension])
+    retry_client.deploy_bundle_file("bundle.yaml", target_model)
 
     assert backend.configured_applications[0][2]["endpoint"] == storage.endpoint
 
