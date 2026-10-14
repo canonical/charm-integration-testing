@@ -41,6 +41,7 @@ class BootstrapKillBackendStub(NullJujuBackend):
     killed: list[str] = field(default_factory=list)
     models_added: list[tuple[str, str]] = field(default_factory=list)
     status_calls: list[str] = field(default_factory=list)
+    bootstrap_error: Exception | None = None
 
     def bootstrap_controller(
         self,
@@ -52,6 +53,8 @@ class BootstrapKillBackendStub(NullJujuBackend):
         agent_version: str | None = None,
     ) -> None:
         self.bootstrapped.append(controller)
+        if self.bootstrap_error is not None:
+            raise self.bootstrap_error
 
     def kill_controller(self, controller: str) -> None:
         self.killed.append(controller)
@@ -310,6 +313,48 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
 
         # THEN backend.kill_controller was called
         assert "my-ctrl" in backend.killed
+
+    def test_partial_bootstrap_is_tracked_for_teardown(self) -> None:
+        # GIVEN a bootstrap that creates a controller and then reports failure
+        backend = BootstrapKillBackendStub(bootstrap_error=RuntimeError("Bootstrap failed"))
+        registry = self._make_registry()
+        client = JujuClient(backend, LoggerStub(), [JujuResourceRegistryExtension(backend, registry)])
+
+        # WHEN bootstrap raises after partial creation
+        with pytest.raises(RuntimeError, match="Bootstrap failed"):
+            client.bootstrap_controller(
+                cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+            )
+
+        # THEN session teardown still attempts to stop the controller
+        handle = JujuControllerHandle(controller="my-ctrl")
+        assert registry.is_registered(handle)
+        registry.teardown(handle)
+        assert backend.killed == ["my-ctrl"]
+
+    def test_failed_bootstrap_can_be_retried_without_duplicate_registration(self) -> None:
+        # GIVEN a partial bootstrap failure followed by a successful retry
+        backend = BootstrapKillBackendStub(bootstrap_error=RuntimeError("Bootstrap failed"))
+        registry = self._make_registry()
+        first_client = JujuClient(backend, LoggerStub(), [JujuResourceRegistryExtension(backend, registry)])
+
+        with pytest.raises(RuntimeError, match="Bootstrap failed"):
+            first_client.bootstrap_controller(
+                cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+            )
+
+        # WHEN a new Juju client retries bootstrap with the same controller name
+        backend.bootstrap_error = None
+        retry_client = JujuClient(backend, LoggerStub(), [JujuResourceRegistryExtension(backend, registry)])
+        retry_client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+
+        # THEN the owned handle remains registered exactly once and is still destroyable
+        handle = JujuControllerHandle(controller="my-ctrl")
+        assert registry.registered_handles().count(handle) == 1
+        registry.teardown(handle)
+        assert backend.killed == ["my-ctrl"]
 
 
 class TestJujuResourceRegistryExtensionPreKill:

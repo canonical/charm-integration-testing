@@ -761,6 +761,7 @@ class JujuClient:
             f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'{version_suffix}, "
             f"using constraints '{controller_constraints}'."
         )
+
         self.backend.bootstrap_controller(
             cloud=cloud,
             controller=controller,
