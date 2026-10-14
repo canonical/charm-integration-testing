@@ -43,7 +43,7 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
@@ -207,21 +207,23 @@ def register_test_clouds(
 
 @pytest.fixture(scope="session")
 def kubernetes_client(
-    cloud_kubeconfigs: dict[str, Path],
-    target_cloud: str,
-    target_controller: str,
-    logger: logging.Logger,
+    target_model_ref: JujuModelHandle,
     juju_backend: JujuBackend,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> KubernetesClient | None:
-    """KubernetesClient for the target cloud, or None for machine clouds."""
-    path = cloud_kubeconfigs.get(target_cloud)
-    if path is None:
+    """Return the Juju backend's shared KubernetesClient for the target model."""
+    client = juju_backend.get_kubernetes_client_for_model(target_model_ref)
+    if client is None:
         return None
-    return KubernetesClient(
-        KubernetesBackend.k8s_client(kubeconfig=path),
-        logger=logger,
-        extensions=[UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)],
-    )
+    client.register_extension(unseal_vault_k8s_extension)
+    return client
+
+
+@pytest.fixture(scope="session")
+def unseal_vault_k8s_extension(
+    juju_backend: JujuBackend, target_controller: str, logger: logging.Logger
+) -> UnsealVaultK8sJujuExtension:
+    return UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)
 
 
 @pytest.fixture(scope="session")
@@ -353,11 +355,11 @@ def register_preexisting_neighbor_cloud(
 
 def _build_juju_client(
     juju_backend: JujuBackend,
-    target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -372,7 +374,7 @@ def _build_juju_client(
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
+            unseal_vault_k8s_extension,
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
         ],
@@ -382,14 +384,19 @@ def _build_juju_client(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
-    target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> JujuClient:
     return _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        unseal_vault_k8s_extension,
     )
 
 
@@ -398,10 +405,10 @@ def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
     persistence_extension: ValidatorInjectorExtension,
     juju_backend: JujuBackend,
-    target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
@@ -441,7 +448,12 @@ def seed_persistence_state_for_resumed_run(
         return
 
     client = _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        unseal_vault_k8s_extension,
     )
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:

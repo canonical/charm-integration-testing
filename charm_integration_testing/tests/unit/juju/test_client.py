@@ -412,7 +412,7 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
-    def test_restart_workload_pod_dispatches_juju_kubernetes_extensions(self) -> None:
+    def test_restart_workload_pod_registers_juju_kubernetes_extensions_on_shared_client(self) -> None:
         kubernetes_extension = PodDeleteExtensionStub()
         juju_extension = PodDeleteExtensionStub()
         kubernetes_backend = MagicMock()
@@ -423,7 +423,16 @@ class TestJujuClientUnitOperations:
         timeout = timedelta(minutes=5)
         existing_uids = {"old", "sibling"}
 
-        with patch.object(kubernetes_client, "restart_pod", return_value="replacement-pod") as restart_pod:
+        with patch.object(kubernetes_client, "restart_pod") as restart_pod:
+            client.restart_workload_pod(
+                model=model,
+                pod_name="pod",
+                pod_uid="old",
+                timeout=timeout,
+                application="app",
+                unit="app/1",
+                existing_uids=existing_uids,
+            )
             client.restart_workload_pod(
                 model=model,
                 pod_name="pod",
@@ -434,8 +443,10 @@ class TestJujuClientUnitOperations:
                 existing_uids=existing_uids,
             )
 
-        assert backend.resolved_models == [model]
-        restart_pod.assert_called_once_with(
+        assert backend.resolved_models == [model, model]
+        assert restart_pod.call_count == 2
+        assert kubernetes_client.extensions == [kubernetes_extension, juju_extension]
+        restart_pod.assert_called_with(
             namespace="model",
             pod_name="pod",
             uid="old",
@@ -445,7 +456,7 @@ class TestJujuClientUnitOperations:
             existing_uids=existing_uids,
         )
         assert kubernetes_extension.deleted_pods == []
-        assert juju_extension.deleted_pods == [("model", "replacement-pod")]
+        assert juju_extension.deleted_pods == []
 
     def test_restart_workload_pod_rejects_machine_models(self) -> None:
         backend = WorkloadPodBackendStub()

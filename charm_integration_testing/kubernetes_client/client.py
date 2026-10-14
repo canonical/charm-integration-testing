@@ -55,6 +55,11 @@ class KubernetesClient:
         self.extensions = extensions or []
         self.watch_factory = watch_factory
 
+    def register_extension(self, extension: KubernetesExtension) -> None:
+        """Register an extension once on this Kubernetes client."""
+        if extension not in self.extensions:
+            self.extensions.append(extension)
+
     def get_charm_pods(
         self, application_name: str, model: str
     ) -> list[K8sClient.V1Pod]:  # multiple pods per a charm, depends on charm name and unit number

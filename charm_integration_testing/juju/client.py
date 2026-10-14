@@ -104,7 +104,9 @@ class JujuClient:
         kubernetes_extensions = [
             extension for extension in self.extensions if isinstance(extension, KubernetesExtension)
         ]
-        replacement_pod = kubernetes_client.restart_pod(
+        for extension in kubernetes_extensions:
+            kubernetes_client.register_extension(extension)
+        kubernetes_client.restart_pod(
             namespace=model.model,
             pod_name=pod_name,
             uid=pod_uid,
@@ -113,8 +115,6 @@ class JujuClient:
             unit=unit,
             existing_uids=existing_uids,
         )
-        for extension in kubernetes_extensions:
-            extension.post_delete_pod(model.model, replacement_pod)
 
     def rotate_application_units(
         self,
