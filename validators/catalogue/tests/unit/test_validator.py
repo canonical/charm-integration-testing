@@ -213,7 +213,8 @@ class TestCatalogueValidatorSimple:
     def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
         validator = _make_validator(VALID_DATABAG, leader=False)
 
-        result = validator.validate(level="simple")
+        with patch.object(validator, "_local_databag", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level="simple")
 
         assert result.status == "SKIPPED"
         assert "leader" in (result.error or "")

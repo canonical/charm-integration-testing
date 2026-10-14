@@ -310,7 +310,8 @@ class TestEtcdClientValidatorRole:
     def test_deep_requires_skips_non_leader_before_local_app_databag_access(self) -> None:
         validator = _make_validator(VALID_REQUIRER_DATABAG, leader=False)
 
-        result = validator.validate(level="deep")
+        with patch.object(validator, "_local_databag", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level="deep")
 
         assert result.status == "SKIPPED"
         assert "leader" in (result.error or "")
