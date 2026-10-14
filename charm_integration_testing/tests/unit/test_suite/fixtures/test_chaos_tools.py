@@ -29,7 +29,7 @@ from test_suite.fixtures.chaos_tools import (
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
-from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api
+from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api, FakeWorkloadPodsApi
 from ...extensions.shared import NullJujuBackend
 
 pytest_plugins = ["pytester"]
@@ -52,11 +52,19 @@ class KubernetesStub(KubernetesBackend):
         self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
             items=[
                 k8s.V1Pod(
-                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"})
+                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"}),
+                    spec=k8s.V1PodSpec(
+                        containers=[
+                            k8s.V1Container(
+                                name="workload", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")]
+                            )
+                        ]
+                    ),
                 )
             ]
         )
         self.api_client = ClosingApiStub()
+        self.core_v1_api = FakeWorkloadPodsApi()
         self.crds: set[str] = set()
         self.crd_reads: list[str] = []
         self.ready_deployments: set[tuple[str, str]] = set()

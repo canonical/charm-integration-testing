@@ -7,6 +7,10 @@ from datetime import timedelta
 from juju import JujuModelHandle
 
 
+class StressEndedEarlyError(RuntimeError):
+    """Stress ended before the requested observation window was verified."""
+
+
 class ChaosClient(ABC):
     """Chaos experiment interface.
 
@@ -28,11 +32,20 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
+    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> timedelta | None:
+        raise NotImplementedError
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active stress unless independent fault evidence permits normal completion.
+
+        Allowing completion must not suppress experiment errors or cleanup checks.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
+    def stress_memory(
+        self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta
+    ) -> timedelta | None:
         raise NotImplementedError
 
     @abstractmethod

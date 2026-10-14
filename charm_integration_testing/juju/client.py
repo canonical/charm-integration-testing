@@ -56,6 +56,14 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
+    def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
+        self.logger.info(f"Restarting a follower of {application}.")
+        unit = self.backend.restart_follower(model, application, timeout)
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+        self.logger.info(f"Restarted follower {unit}.")
+        return unit
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
@@ -364,13 +372,27 @@ class JujuClient:
         self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
+    def check_application_health(self, model: JujuModelHandle, application: str) -> None:
+        """Reject errored, blocked, terminated or unknown workloads and disconnected, errored or unknown agents."""
+        self.logger.info("Checking application health for %s/%s.", model.uri, application)
+        health = self.backend.application_health(model, application)
+        if not health.units or set(health.units) != set(health.agents):
+            raise RuntimeError(f"Incomplete unit health for {model.uri}/{application}.")
+        if (
+            health.status in {"", "error", "blocked", "terminated", "unknown"}
+            or any(status in {"", "error", "blocked", "terminated", "unknown"} for status in health.units.values())
+            or any(status in {"", "error", "lost", "down", "unknown"} for status in health.agents.values())
+        ):
+            raise RuntimeError(f"Unhealthy application {model.uri}/{application}: {health}")
+
     def validate_model(
         self,
         model: JujuModelHandle,
         level: str | None = "simple",
         *,
         applications: list[str] | None = None,
-    ) -> None:
+        endpoints: set[tuple[str, str]] | None = None,
+    ) -> dict[str, list[ValidationResult]]:
         """Validate selected or all applications, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
@@ -381,6 +403,11 @@ class JujuClient:
             level: Validation level ("simple" or "deep"), or None to skip functional validation
                 entirely (e.g. when only running a persistence op).
             applications: Application names to validate; None selects all applications.
+            endpoints: (application, endpoint) pairs whose functional results count toward validation.
+                None includes all endpoints. Persistence results are always checked.
+
+        Returns:
+            Functional validation results by unit, excluding persistence results.
 
         Raises:
             JujuValidationError: If any validation or persistence checks fail.
@@ -392,6 +419,7 @@ class JujuClient:
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        functional_results: dict[str, list[ValidationResult]] = {}
         persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
@@ -406,6 +434,15 @@ class JujuClient:
                 for extension in self.extensions:
                     for unit, unit_results in extension.post_validate(model, application, level).items():
                         results.setdefault(unit, []).extend(unit_results)
+
+            if endpoints is not None:
+                results = {
+                    unit: [result for result in unit_results if (application, result.endpoint) in endpoints]
+                    for unit, unit_results in results.items()
+                }
+
+            for unit, unit_results in results.items():
+                functional_results.setdefault(unit, []).extend(unit_results)
 
             for extension, persistence_operation in persistence_operations:
                 for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
@@ -449,6 +486,7 @@ class JujuClient:
         # Raise exception for any failed validation results
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
+        return functional_results
 
     def bootstrap_controller(
         self,
@@ -477,13 +515,24 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_bootstrap_controller(controller)
 
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
-        self.logger.info(f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'.")
-        self.backend.add_model(controller=controller, model=model, model_config=model_config)
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        cloud_suffix = f" on cloud '{cloud}'" if cloud else ""
+        self.logger.info(
+            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'{cloud_suffix}."
+        )
+        self.backend.add_model(controller=controller, model=model, model_config=model_config, cloud=cloud)
 
         # Call extensions
         for extension in self.extensions:
             extension.post_add_model(controller, model)
+
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")
+        self.backend.add_cloud(cloud=cloud, controller=controller)
+
+    def register_cloud(self, cloud: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' with the Juju client.")
+        self.backend.register_cloud(cloud=cloud)
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")

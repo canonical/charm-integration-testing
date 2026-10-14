@@ -26,6 +26,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,13 +57,30 @@ def _make_validator(
     endpoint: str = "ingress",
     role: RelationRoleStub = RelationRoleStub.requires,
     local_databag: dict[str, str] | None = None,
+    leader: bool = True,
 ) -> IstioIngressRouteValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: app_databag})
     charm = make_charm_from_relation(relation, role=role, interface_name="istio_ingress_route")
+    charm.unit = UnitStub(leader=leader)
     # The requirer publishes its own listener config into its own local app databag.
     relation.data[charm.app] = DEFAULT_LOCAL_DATABAG if local_databag is None else local_databag
     return IstioIngressRouteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+
+class _RejectLocalAppDatabagReads(dict[ApplicationStub | UnitStub | None, dict[str, str]]):
+    def __init__(
+        self,
+        data: dict[ApplicationStub | UnitStub | None, dict[str, str]],
+        local_app: ApplicationStub,
+    ) -> None:
+        super().__init__(data)
+        self._local_app = local_app
+
+    def __getitem__(self, key: ApplicationStub | UnitStub | None) -> dict[str, str]:
+        if key is self._local_app:
+            raise AssertionError("local app databag read")
+        return super().__getitem__(key)
 
 
 def _mock_http_response(status: int = 200) -> MagicMock:
@@ -80,6 +98,27 @@ def _mock_http_response(status: int = 200) -> MagicMock:
 
 
 class TestIstioIngressRouteValidatorSimple:
+    def test_skips_non_leader_when_local_listener_config_is_required(self) -> None:
+        validator = _make_validator(VALID_HTTP_DATABAG, leader=False)
+        relation = cast(RelationStub, validator.relation)
+        relation.data = _RejectLocalAppDatabagReads(relation.data, cast(ApplicationStub, validator.charm.app))
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
+
+    def test_non_leader_can_probe_an_explicit_provider_port(self) -> None:
+        validator = _make_validator(
+            {"external_host": "ingress.example.com:8080", "tls_enabled": "False"},
+            leader=False,
+        )
+
+        with patch("validators.istio_ingress_route.validator._tcp_ping"):
+            result = validator.validate(level="simple")
+
+        assert result.status == "PASS"
+
     @pytest.mark.parametrize(
         "role,should_skip",
         [

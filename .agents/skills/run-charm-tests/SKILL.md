@@ -50,6 +50,27 @@ This installs:
   --log-dir "./test-logs"
 ```
 
+### With Cross-Model Relation (CMR) - Same Controller
+```bash
+# Test with both models on a single controller (no second bootstrap). --same-controller
+# requires --neighbor-cloud; pass the same cloud as --target-cloud for a same-platform
+# neighbor.
+./scripts/run-tests.sh \
+  --target-cloud "localhost" \
+  --target-charm "mysql" \
+  --target-endpoint "database" \
+  \
+  --neighbor-charm "mysql-router" \
+  --neighbor-endpoint "backend-database" \
+  \
+  --same-controller \
+  --neighbor-cloud "localhost" \
+  --current-state "no_bundle" \
+  --charm-overrides "./static/charm-overrides/" \
+  --log-dir "./test-logs" \
+  --log-cli-level "INFO"
+```
+
 ### With Cross-Model Relation (CMR) - Mixed Clouds
 ```bash
 # Test with target on LXD (machine) and neighbor on K8s
@@ -260,6 +281,7 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 |---|---|---|
 | `target_environment` | `--target-cloud` | Extract cloud type (OpenStack, K8s, LXD, etc.) |
 | `neighbor_environment` | `--neighbor-cloud` | Second cloud (CMR tests only) |
+| `same_controller` | `--same-controller` | Neighbor model on the target controller (requires `neighbor_environment`; no second bootstrap) |
 | `charm_under_test` | `--target-charm` | Primary charm being tested |
 | `charm_endpoint` | `--target-endpoint` | Charm relation endpoint |
 | `neighbor` | `--neighbor-charm` | Integration partner charm |
@@ -363,6 +385,21 @@ Tests:      [Deploy] ─────[Relate] ──[Verify]
 - Dual controllers running in parallel
 - Tests cross-model relations
 - What we use for mixed-cloud scenarios
+
+#### **Same-Controller CMR (`--same-controller`)**
+```
+Controller: [Target-Ctrl]
+Model:      [Target-Model] ──[CMR-Relation]─── [Neighbor-Model]
+Tests:      [Deploy] ─────[Relate] ──[Verify]
+```
+- One controller, two models
+- Tests cross-model relations without a second bootstrap
+- Requires `--neighbor-cloud` (rejected without it); pass the same cloud as
+  `--target-cloud` for a same-platform neighbor, or a different cloud for a multi-cloud
+  controller. A different neighbor cloud is registered on the target controller
+  automatically: from `KUBECONFIG_<cloud>` for Kubernetes, or from
+  `CLOUD_DEFINITION_<cloud>`/`CLOUD_CREDENTIALS_<cloud>` for any other platform (e.g.
+  OpenStack)
 
 #### **Parallel (Future)**
 ```

@@ -12,7 +12,7 @@ from kubernetes_client.cpu_limit import temporary_cpu_limit
 
 
 @pytest.mark.parametrize("saved", [{}, {"limits": {"cpu": "2", "memory": "1Gi"}, "requests": {"cpu": "1500m"}}])
-@pytest.mark.parametrize("failure", [None, "body", "patch", "replacement", "concurrent", "memory"])
+@pytest.mark.parametrize("failure", [None, "body", "patch", "wait", "replacement", "concurrent", "memory"])
 def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: str | None) -> None:
     # GIVEN a StatefulSet with optional pre-existing CPU and memory resources
     events: list[str] = []
@@ -22,7 +22,13 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
             raise AssertionError("CPU resource patches must not invoke restart hooks")
 
     kubernetes = KubernetesClient(backend=MagicMock(), extensions=[Extension()])
-    kubernetes.wait_for_statefulset_restart = MagicMock(side_effect=lambda *a, **kw: events.append("wait"))
+
+    def wait(*args: Any, **kwargs: Any) -> None:
+        events.append("wait")
+        if failure == "wait" and events.count("wait") == 1:
+            raise TimeoutError("rollout timed out")
+
+    kubernetes.wait_for_statefulset_restart = MagicMock(side_effect=wait)
     value: dict[str, Any] = {
         "metadata": {"uid": "uid", "resourceVersion": "1"},
         "spec": {"template": {"spec": {"containers": [{"name": "workload", "resources": deepcopy(saved)}]}}},
@@ -50,6 +56,7 @@ def test_restores_cpu_after_success_or_failure(saved: dict[str, Any], failure: s
             assert events == ["patch", "wait"]
             resources = value["spec"]["template"]["spec"]["containers"][0]["resources"]
             assert resources["limits"]["cpu"] == "1"
+            assert resources["requests"]["cpu"] == ("1" if saved else "100m")
             if failure == "replacement":
                 value["metadata"]["uid"] = "replacement"
             if failure == "concurrent":

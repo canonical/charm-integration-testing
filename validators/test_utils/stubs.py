@@ -33,8 +33,12 @@ class UnitStub:
     A plain class (not dataclass) so that instances are hashable by identity,
     matching the behaviour of real ops.Unit objects used as relation.data keys."""
 
-    def __init__(self, name: str = "unit/0") -> None:
+    def __init__(self, name: str = "unit/0", *, leader: bool = True) -> None:
         self.name = name
+        self._leader = leader
+
+    def is_leader(self) -> bool:
+        return self._leader
 
 
 @dataclass
@@ -88,6 +92,7 @@ class RelationMetaStub:
     relation_name: str
     interface_name: str | None = None
     role: RelationRoleStub = field(default_factory=lambda: RelationRoleStub.requires)
+    optional: bool = False
 
 
 @dataclass

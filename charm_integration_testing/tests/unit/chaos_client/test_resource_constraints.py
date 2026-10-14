@@ -52,6 +52,7 @@ class TestGetCharmResourceConstraints:
             "    memory_exhaustion_workers: 2\n"
             "    memory_exhaustion_size_mb: 2048\n"
             "    memory_exhaustion_duration_seconds: 60\n"
+            "    memory_exhaustion_limit: '1Gi'\n"
             "  - criteria:\n"
             "      - track: '16'\n"
             "    memory_exhaustion_size_mb: 4096\n",
@@ -64,11 +65,13 @@ class TestGetCharmResourceConstraints:
         assert track_14.memory_exhaustion_workers == 2
         assert track_14.memory_exhaustion_size_mb == 2048
         assert track_14.memory_exhaustion_duration_seconds == 60
+        assert track_14.memory_exhaustion_limit == "1Gi"
 
         # AND the track-16 block applies to its own channel, with unset fields left as defaults
         track_16 = client.get_charm_resource_constraints("postgresql-k8s", _ch("16"), "22.04")
         assert track_16.memory_exhaustion_size_mb == 4096
         assert track_16.memory_exhaustion_workers is None
+        assert track_16.memory_exhaustion_limit is None
 
         # AND an unmatched channel falls back to defaults
         unmatched = client.get_charm_resource_constraints("postgresql-k8s", _ch("14"), "24.04")

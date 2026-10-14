@@ -1,29 +1,39 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from dataclasses import field
+import logging
+import subprocess
+from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable
+from typing import Any, Callable, cast, overload
 from unittest.mock import patch
 
 import jubilant
 import pytest
 import yaml
+from jubilant.statustypes import AppStatus, ModelStatus, UnitStatus
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
+    JujuClient,
     JujuConsumedOfferInfo,
+    JujuExtension,
     JujuIntegrationApplication,
     JujuModelHandle,
+    JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
 )
+from juju.backend import JujuBackend
 from juju.version import JujuVersion
+from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
+from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend, KubernetesClient
 from pydantic.dataclasses import dataclass
 
@@ -307,6 +317,44 @@ class TestJubilantClient:
 
         # THEN the jubilant.Juju has the composed controller:model uri
         assert model.model == "test-controller:my-model"
+
+
+def test_application_health_uses_one_real_status_snapshot() -> None:
+    # GIVEN Jubilant status types with mixed application, workload and agent states
+    status = StatusStub(
+        application_statuses={"app": "active"},
+        unit_workload_statuses={"app/2": "active", "app/7": "blocked"},
+        unit_juju_statuses={"app/2": "executing", "app/7": "error"},
+    )
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN reading health, THEN the adapter preserves all unit statuses from one snapshot
+    assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
+        "active", {"app/2": "active", "app/7": "blocked"}, {"app/2": "executing", "app/7": "error"}
+    )
+    assert status.call_count == 1
+
+
+def test_application_health_missing_application_fails() -> None:
+    # GIVEN an empty status snapshot
+    status = StatusStub()
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN checking a disappeared application, THEN absence does not count as healthy
+    with pytest.raises(RuntimeError, match="missing") as caught:
+        backend.application_health(TEST_MODEL, "missing")
+    assert TEST_MODEL.uri in str(caught.value)
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert status.call_count == 1
+
+
+def test_application_health_does_not_relabel_status_errors() -> None:
+    backend = JubilantBackend()
+    error = KeyError("status parsing failed")
+    with patch.object(backend, "status", side_effect=error):
+        with pytest.raises(KeyError) as caught:
+            backend.application_health(TEST_MODEL, "target")
+    assert caught.value is error
 
 
 @dataclass
@@ -2596,6 +2644,12 @@ class TestJubilantBackend:
             bootstrap_calls: int = 0
             add_model_calls: int = 0
             switch_calls: int = 0
+            add_model_clouds: list[str | None] = field(default_factory=list)
+            cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = field(default_factory=list)
+            add_cloud_calls: list[tuple[str, str, bool, str | None]] = field(default_factory=list)
+            add_credential_calls: list[tuple[str, Any, bool, str | None]] = field(default_factory=list)
+            add_cloud_error: str | None = None
+            add_credential_error: str | None = None
 
             def bootstrap(
                 self,
@@ -2610,16 +2664,40 @@ class TestJubilantBackend:
                     self.bootstrap_failures_remaining -= 1
                     raise RuntimeError("transient bootstrap failure")
 
-            def add_model(self, model: str, controller: str, config: dict[str, str]) -> None:
+            def add_model(self, model: str, controller: str, config: dict[str, str], cloud: str | None = None) -> None:
                 self.add_model_calls += 1
+                self.add_model_clouds.append(cloud)
                 if self.add_model_failures_remaining > 0:
                     self.add_model_failures_remaining -= 1
                     raise RuntimeError("transient add-model failure")
 
-            def cli(self, *args: str, include_model: bool = True) -> str:
+            def cli(self, *args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                self.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
                 if args and args[0] == "switch":
                     self.switch_calls += 1
                 return ""
+
+            def add_cloud(
+                self, cloud: str, definition: Any, *, client: bool = False, controller: str | None = None
+            ) -> None:
+                self.add_cloud_calls.append((cloud, str(definition), client, controller))
+                if self.add_cloud_error is not None:
+                    raise jubilant.CLIError(1, ["juju", "add-cloud"], "", self.add_cloud_error)
+
+            def add_credential(
+                self, cloud: str, credential: Any, *, client: bool = False, controller: str | None = None
+            ) -> None:
+                self.add_credential_calls.append((cloud, credential, client, controller))
+                if self.add_credential_error is not None:
+                    raise jubilant.CLIError(1, ["juju", "add-credential"], "", self.add_credential_error)
+
+        @staticmethod
+        def _generic_cloud_files(tmp_path: Path, cloud: str) -> tuple[Path, Path]:
+            definition = tmp_path / "cloud.yaml"
+            definition.write_text(yaml.safe_dump({"clouds": {cloud: {"type": "lxd"}}}))
+            credentials = tmp_path / "credentials.yaml"
+            credentials.write_text(yaml.safe_dump({"credentials": {cloud: {"test": {"auth-type": "certificate"}}}}))
+            return definition, credentials
 
         def test_bootstrap_controller_retries_then_succeeds(self) -> None:
             stub = self.SetupStub(bootstrap_failures_remaining=2)
@@ -2667,6 +2745,160 @@ class TestJubilantBackend:
 
             assert stub.add_model_calls == 3
             assert stub.switch_calls == 0
+
+        def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            backend.add_cloud(cloud="my-k8s", controller="test-controller")
+
+            assert stub.cli_calls == [
+                (
+                    ("add-k8s", "my-k8s", "--controller", "test-controller"),
+                    {"include_model": False, "stdin": "kubeconfig-content"},
+                )
+            ]
+
+        def test_register_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            backend.register_cloud(cloud="my-k8s")
+
+            assert stub.cli_calls == [
+                (
+                    ("add-k8s", "my-k8s", "--client"),
+                    {"include_model": False, "stdin": "kubeconfig-content"},
+                )
+            ]
+
+        def test_add_cloud_missing_connection_details(self) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            with pytest.raises(ValueError, match="No connection details configured for cloud"):
+                backend.add_cloud(cloud="my-k8s", controller="test-controller")
+
+            assert stub.cli_calls == []
+
+        def test_add_k8s_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            def already_exists_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
+                raise jubilant.CLIError(1, ["juju", "add-k8s"], "", 'ERROR cloud "my-k8s" already exists')
+
+            stub.cli = already_exists_cli
+
+            # A pre-existing controller reusing the same cloud (e.g. --current-state
+            # reruns) must not fail just because the cloud is already registered.
+            backend.add_cloud(cloud="my-k8s", controller="test-controller")
+
+            assert len(stub.cli_calls) == 1
+
+        def test_add_k8s_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+            )
+            (tmp_path / "kubeconfig").write_text("kubeconfig-content")
+
+            def failing_cli(*args: str, include_model: bool = True, stdin: str | None = None) -> str:
+                stub.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
+                raise jubilant.CLIError(1, ["juju", "add-k8s"], "", "ERROR unrelated failure")
+
+            stub.cli = failing_cli
+
+            with pytest.raises(jubilant.CLIError, match="unrelated failure"):
+                backend.add_cloud(cloud="my-k8s", controller="test-controller")
+
+        def test_add_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+
+            backend.add_cloud(cloud="my-openstack", controller="test-controller")
+
+            assert stub.add_cloud_calls == [("my-openstack", str(definition), False, "test-controller")]
+            assert stub.add_credential_calls == [
+                (
+                    "my-openstack",
+                    {"credentials": {"my-openstack": {"test": {"auth-type": "certificate"}}}},
+                    False,
+                    "test-controller",
+                )
+            ]
+
+        def test_register_cloud_dispatches_to_add_cloud_for_definition_based_cloud(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+
+            backend.register_cloud(cloud="my-openstack")
+
+            assert stub.add_cloud_calls == [("my-openstack", str(definition), True, None)]
+            assert stub.add_credential_calls == [
+                ("my-openstack", {"credentials": {"my-openstack": {"test": {"auth-type": "certificate"}}}}, True, None)
+            ]
+
+        def test_add_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+            stub.add_cloud_error = 'ERROR cloud "my-openstack" already exists'
+            stub.add_credential_error = 'ERROR cloud "my-openstack" already exists'
+
+            # A pre-existing controller reusing the same cloud (e.g. --current-state
+            # reruns) must not fail just because the cloud/credential is already
+            # registered.
+            backend.add_cloud(cloud="my-openstack", controller="test-controller")
+            backend.add_cloud(cloud="my-openstack", controller="test-controller")
+            assert len(stub.add_cloud_calls) == 2
+            assert len(stub.add_credential_calls) == 2
+
+        def test_add_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+
+            stub.add_cloud_error = "ERROR unrelated failure"
+
+            with pytest.raises(jubilant.CLIError, match="unrelated failure"):
+                backend.add_cloud(cloud="my-openstack", controller="test-controller")
+
+        def test_add_credential_reraises_other_errors(self, tmp_path: Path) -> None:
+            stub = self.SetupStub()
+            definition, credentials = self._generic_cloud_files(tmp_path, "my-openstack")
+            backend = JubilantBackend(
+                JubilantClientStub(client=stub),
+                cloud_definitions={"my-openstack": (definition, credentials)},
+            )
+            stub.add_credential_error = "ERROR unrelated failure"
+
+            with pytest.raises(jubilant.CLIError, match="unrelated failure"):
+                backend.add_cloud(cloud="my-openstack", controller="test-controller")
 
 
 class TestParseBundleFile:
@@ -3005,3 +3237,361 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
+
+
+FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
+FOLLOWER_RESTART_TIMEOUT = timedelta(seconds=10)
+FOLLOWER_BOOT_ID = "11111111-1111-1111-1111-111111111111"
+FOLLOWER_NEW_BOOT_ID = "22222222-2222-2222-2222-222222222222"
+
+
+def follower_status() -> jubilant.Status:
+    return jubilant.Status(
+        model=ModelStatus(name="model", type="iaas", controller="controller", cloud="cloud", version="3.6"),
+        machines={},
+        apps={
+            "target": AppStatus(
+                charm="target",
+                charm_origin="charmhub",
+                charm_name="target",
+                charm_rev=1,
+                exposed=False,
+                units={
+                    "target/0": UnitStatus(leader=True, machine="0"),
+                    "target/1": UnitStatus(machine="1"),
+                    "target/2": UnitStatus(machine="2"),
+                },
+            )
+        },
+    )
+
+
+class FollowerRestartKubernetesStub:
+    def __init__(self) -> None:
+        self.pods = [
+            V1Pod(metadata=V1ObjectMeta(name="target-1", uid="old", annotations={"unit.juju.is/id": "target/1"}))
+        ]
+        self.calls: list[tuple[object, ...]] = []
+
+    def get_charm_pods(self, application: str, namespace: str) -> list[V1Pod]:
+        return self.pods
+
+    def restart_pod(
+        self,
+        namespace: str,
+        name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: set[str],
+    ) -> None:
+        assert application == "target"
+        assert unit == "target/1"
+        assert existing_uids == {pod.metadata.uid for pod in self.pods}
+        self.calls.append((namespace, name, uid, timeout))
+
+
+class FollowerRestartSshStub:
+    def __init__(self) -> None:
+        self.boots: list[str | Exception] = [FOLLOWER_BOOT_ID, FOLLOWER_NEW_BOOT_ID]
+        self.calls: list[tuple[str, str]] = []
+        self.timeouts: list[float] = []
+
+    def ssh(self, model: JujuModelHandle, machine: str, command: str, timeout: float) -> str:
+        self.calls.append((machine, command))
+        self.timeouts.append(timeout)
+        if command.startswith("cat "):
+            result = self.boots.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return ""
+
+
+class FollowerRestartBackendStub(JubilantBackend):
+    def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
+        self.stub = FollowerRestartSshStub()
+        super().__init__()
+        self.snapshots = [follower_status(), follower_status()]
+        self.kube = kube
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        assert timeout is not None
+        return self.stub.ssh(model, application, command, timeout)
+
+    def status(self, model: JujuModelHandle) -> jubilant.Status:
+        return self.snapshots.pop(0)
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        return cast(KubernetesClient | None, self.kube)
+
+
+def test_restarts_only_follower_pod() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods.append(
+        V1Pod(metadata=V1ObjectMeta(name="target-2", uid="sibling", annotations={"unit.juju.is/id": "target/2"}))
+    )
+    backend = FollowerRestartBackendStub(kube)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert kube.calls == [("model", "target-1", "old", FOLLOWER_RESTART_TIMEOUT)]
+
+
+@pytest.mark.parametrize("change", ["leader", "membership", "no-leader"])
+def test_rechecks_leadership_before_deletion(change: str) -> None:
+    kube = FollowerRestartKubernetesStub()
+    backend = FollowerRestartBackendStub(kube)
+    units = backend.snapshots[1].apps["target"].units
+    if change == "leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+        units["target/1"] = replace(units["target/1"], leader=True)
+    elif change == "membership":
+        del units["target/2"]
+    else:
+        units["target/0"] = replace(units["target/0"], leader=False)
+    with pytest.raises(RuntimeError, match="changed"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert kube.calls == []
+
+
+@pytest.mark.parametrize("leaders", [0, 2])
+def test_rejects_ambiguous_leadership(leaders: int) -> None:
+    backend = FollowerRestartBackendStub(FollowerRestartKubernetesStub())
+    units = backend.snapshots[0].apps["target"].units
+    for index, name in enumerate(units):
+        units[name] = replace(units[name], leader=index < leaders)
+    with pytest.raises(RuntimeError, match="exactly one"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_missing_target_pod_does_not_delete_another_unit() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods[0].metadata.annotations = {"unit.juju.is/id": "target/0"}
+    with pytest.raises(RuntimeError, match="single live Pod"):
+        FollowerRestartBackendStub(kube).restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert kube.calls == []
+
+
+def test_machine_reboot_waits_for_changed_boot_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, FOLLOWER_BOOT_ID, FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert all(target == "1" for target, _ in backend.stub.calls)
+    assert len(backend.stub.calls) == 4
+    assert "systemctl reboot" in backend.stub.calls[1][1]
+
+
+@pytest.mark.parametrize("placement", ["1", "1/lxd/0"])
+def test_shared_machine_is_not_rebooted(placement: str) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.snapshots[0].apps["other"] = replace(
+        backend.snapshots[0].apps["target"], units={"other/0": UnitStatus(machine=placement)}
+    )
+    with pytest.raises(NotImplementedError, match="also restart"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.calls == []
+
+
+def test_unassigned_unit_does_not_prevent_follower_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    # Simulate a null placement from status despite Jubilant's str annotation.
+    unassigned = UnitStatus(machine=cast(str, None))
+    for snapshot in backend.snapshots:
+        snapshot.apps["other"] = replace(snapshot.apps["target"], units={"other/0": unassigned})
+
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert all(target == "1" for target, _ in backend.stub.calls)
+    assert len(backend.stub.calls) == 3
+    assert "systemctl reboot" in backend.stub.calls[1][1]
+
+
+def test_machine_without_reboot_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    ticks = iter([0.0, 0.0, 0.0, 11.0])
+    monkeypatch.setattr("juju_jubilant.backend.time.monotonic", lambda: next(ticks))
+    with pytest.raises(TimeoutError, match="did not reboot"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_placement_change_prevents_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    units = backend.snapshots[1].apps["target"].units
+    units["target/1"] = replace(units["target/1"], machine="3")
+    with pytest.raises(RuntimeError, match="placement changed"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+def test_nested_container_is_not_rebooted() -> None:
+    backend = FollowerRestartBackendStub()
+    units = backend.snapshots[0].apps["target"].units
+    units["target/1"] = replace(units["target/1"], machine="1/lxd/0")
+    with pytest.raises(NotImplementedError, match="nested container"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.calls == []
+
+
+def test_ssh_failure_during_reboot_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, jubilant.CLIError(1, ["ssh"], "", "disconnected"), FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+
+
+def test_invalid_boot_id_prevents_reboot() -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [""]
+    with pytest.raises(RuntimeError, match="Invalid boot ID"):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+def test_client_delegates_without_adding_an_abstract_backend_requirement() -> None:
+    kube = FollowerRestartKubernetesStub()
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__))
+    assert client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT) == "target/1"
+    assert "restart_follower" not in JujuCmdBackend.__abstractmethods__
+    with pytest.raises(NotImplementedError, match="does not support"):
+        JujuBackend.restart_follower(client.backend, FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+
+class FollowerRestartExtension(JujuExtension):
+    def __init__(self, kube: FollowerRestartKubernetesStub, *, fail: bool = False) -> None:
+        self.kube = kube
+        self.fail = fail
+        self.calls: list[tuple[JujuModelHandle, str]] = []
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        assert self.kube.calls == [("model", "target-1", "old", FOLLOWER_RESTART_TIMEOUT)]
+        self.calls.append((model, unit))
+        if self.fail:
+            raise RuntimeError("restart hook failed")
+
+
+def test_client_runs_hook_after_restart() -> None:
+    kube = FollowerRestartKubernetesStub()
+    extension = FollowerRestartExtension(kube)
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
+    client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+    assert extension.calls == [(FOLLOWER_MODEL, "target/1")]
+
+
+def test_restart_failure_does_not_run_hook() -> None:
+    kube = FollowerRestartKubernetesStub()
+    kube.pods = []
+    extension = FollowerRestartExtension(kube)
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
+    with pytest.raises(RuntimeError, match="single live Pod"):
+        client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+    assert extension.calls == []
+
+
+def test_hook_failure_is_not_hidden() -> None:
+    kube = FollowerRestartKubernetesStub()
+    client = JujuClient(
+        FollowerRestartBackendStub(kube), logging.getLogger(__name__), [FollowerRestartExtension(kube, fail=True)]
+    )
+    with pytest.raises(RuntimeError, match="restart hook failed"):
+        client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+
+
+def test_each_ssh_call_uses_remaining_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 4.0])
+    monkeypatch.setattr("juju_jubilant.backend.time.monotonic", lambda: next(ticks))
+    backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert backend.stub.timeouts == [9.0, 8.0, 6.0]
+
+
+def test_ssh_timeout_during_reboot_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [FOLLOWER_BOOT_ID, subprocess.TimeoutExpired("juju ssh", 1), FOLLOWER_NEW_BOOT_ID]
+    monkeypatch.setattr("juju_jubilant.backend.time.sleep", lambda _: None)
+    assert backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT) == "target/1"
+
+
+def test_ssh_timeout_before_reboot_fails() -> None:
+    backend = FollowerRestartBackendStub()
+    backend.stub.boots = [subprocess.TimeoutExpired("juju ssh", 1)]
+    with pytest.raises(subprocess.TimeoutExpired):
+        backend.restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+    assert len(backend.stub.calls) == 1
+
+
+SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
+
+
+def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
+        assert check and capture_output and text
+        assert timeout == 7.5
+        return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    result = JubilantBackend().ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=7.5)
+    assert result == "boot-id\n"
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) -> None:
+    def run(
+        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if timed_out:
+            raise subprocess.TimeoutExpired(args, timeout)
+        raise subprocess.CalledProcessError(255, args, output="", stderr="connection refused")
+
+    monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
+    with pytest.raises(subprocess.TimeoutExpired if timed_out else jubilant.CLIError):
+        JubilantBackend().ssh(SSH_MODEL, "1", "command", timeout=1)
+
+
+@pytest.mark.parametrize("change", ["none", "membership", "leader", "no-leader"])
+def test_follower_check_uses_explicit_snapshot(change: str) -> None:
+    # GIVEN the selected follower and the original membership
+    current = follower_status()
+    units = current.apps["target"].units
+    expected = set(units)
+    if change == "membership":
+        del units["target/1"]
+    elif change == "leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+        units["target/1"] = replace(units["target/1"], leader=True)
+    elif change == "no-leader":
+        units["target/0"] = replace(units["target/0"], leader=False)
+
+    # WHEN checking a fresh snapshot, THEN only unchanged membership and leadership pass
+    if change == "none":
+        JubilantBackend._check_follower(current, "target", expected, "target/1")
+    else:
+        with pytest.raises(RuntimeError, match="membership or leadership changed"):
+            JubilantBackend._check_follower(current, "target", expected, "target/1")
+
+
+@pytest.mark.parametrize("other_machine", [None, "3", "1", "1/lxd/0"])
+def test_placement_check_uses_explicit_snapshot(other_machine: str | None) -> None:
+    # GIVEN another application's unit with an optional machine placement
+    current = follower_status()
+    current.apps["other"] = replace(
+        current.apps["target"], units={"other/0": UnitStatus(machine=cast(str, other_machine))}
+    )
+
+    # WHEN checking placement, THEN shared machines and their nested containers are rejected
+    if other_machine in {"1", "1/lxd/0"}:
+        with pytest.raises(JujuRestartNotSupportedError, match="also restart"):
+            JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
+    else:
+        JubilantBackend._check_follower_placement(current, "target", "target/1", "1")

@@ -16,11 +16,21 @@ from pydantic.dataclasses import dataclass
 from validators.base.validator import ValidationResult
 
 from .handles import JujuModelHandle
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .models import (
+    JujuApplicationHealth,
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+)
 from .version import JujuVersion
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+class JujuRestartNotSupportedError(NotImplementedError):
+    """The backend or placement does not support restarting a follower; no restart was attempted."""
 
 
 class JujuPerformanceWarning(UserWarning):
@@ -142,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        """Restart one Juju non-leader without changing the application unit count."""
+        raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")
+
     @abstractmethod
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         raise NotImplementedError
@@ -230,6 +244,10 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        """Read application and unit health from a single status snapshot."""
         raise NotImplementedError
 
     @abstractmethod
@@ -387,7 +405,17 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def register_cloud(self, cloud: str) -> None:
+        """Register a cloud with the local Juju client."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a cloud (Kubernetes, OpenStack, LXD, manual, etc.) on an existing controller."""
         raise NotImplementedError
 
     @abstractmethod
