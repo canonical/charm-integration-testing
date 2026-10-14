@@ -11,12 +11,51 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment:
-          - ps6-sqa-stg_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_openstack-1
-          - ps7-sqa-prod_charm_qa_kubernetes-1
-          - ps7-sqa-prod_charm_qa_openstack-1
+        include:
+          - environment: ps6-sqa-stg_charm_qa_kubernetes-1
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1
+          - environment: ps6-sqa-stg_charm_qa_kubernetes-2
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-1
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-2
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-3
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-4
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-5
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5
+          - environment: ps6-sqa-prod_charm_qa_kubernetes-6
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6
+          - environment: ps6-sqa-prod_charm_qa_openstack-1
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1
+          - environment: ps6-sqa-prod_charm_qa_openstack-2
+            s3_swift_secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-1
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-2
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-3
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-4
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-5
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-6
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-7
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-8
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-9
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9
+          - environment: ps7-sqa-prod_charm_qa_kubernetes-10
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10
+          - environment: ps7-sqa-prod_charm_qa_openstack-1
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1
+          - environment: ps7-sqa-prod_charm_qa_openstack-2
+            s3_swift_secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2
     uses: ./.github/workflows/cleanup-environment.yaml
     with:
       environment: ${{ matrix.environment }}
@@ -26,3 +65,4 @@ jobs:
       PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
       PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
       PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets[matrix.s3_swift_secret] }}  # zizmor: ignore[overprovisioned-secrets] Matrix values are repo-owned secret names.

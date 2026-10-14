@@ -366,12 +366,29 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
+      - name: Check target Swift storage credentials
+        if: ${{ steps.target_env_info.outputs.swift-storage == 'true' }}
+        shell: bash
+        env:
+          SWIFT_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-swift-secret }}
+          SWIFT_CONFIG: ${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Key comes from the repo-owned environment map.
+        run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --prefix
+          TARGET_
+      - name: Check neighbor Swift storage credentials
+        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.swift-storage == 'true' }}
+        shell: bash
+        env:
+          SWIFT_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-swift-secret }}
+          SWIFT_CONFIG: ${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Key comes from the repo-owned environment map.
+        run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --prefix
+          NEIGHBOR_
       - name: Run charm CMR tests
         id: run_tests_cmr
         if: ${{ inputs.neighbor_environment != '' }}
         continue-on-error: true
         shell: bash
         env:
+          S3_BUCKET_NAMESPACE: ${{ steps.target_env_info.outputs.s3-swift-secret }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
@@ -464,6 +481,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          S3_BUCKET_NAMESPACE: ${{ steps.target_env_info.outputs.s3-swift-secret }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
           CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
