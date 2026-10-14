@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,9 +20,17 @@ from .provider import CredentialProvider, S3Bucket, S3Credentials, S3Provider, S
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
-    from mypy_boto3_s3.type_defs import ObjectIdentifierTypeDef
+    from mypy_boto3_s3.type_defs import ObjectIdentifierTypeDef, TagTypeDef
 
 S3_PATH = "charmqa"
+S3_OWNER_TAG = "charmqa-storage-owner"
+S3_ACCESS_KEY_TAG = "charmqa-ec2-access"
+
+
+def _stable_bucket_owner(*values: str) -> str:
+    """Return a stable opaque ownership marker for bucket tags."""
+    serialized = json.dumps(values, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode()).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -74,6 +83,7 @@ class S3Storage(S3Provider):
         region: str = "us-east-1",
         client_factory: Callable[[S3Credentials], S3Client] | None = None,
         identity: str | None = None,
+        bucket_owner_identity: str | None = None,
     ) -> None:
         url = urlsplit(endpoint)
         if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
@@ -84,9 +94,13 @@ class S3Storage(S3Provider):
         self._region = region
         self._handle = S3StorageHandle(namespace, identity)
         self._credential_provider = credential_provider
+        self._bucket_owner = bucket_owner_identity or _stable_bucket_owner(
+            "s3-storage", self._endpoint, namespace, region, credential_provider.cleanup_credentials.access_key
+        )
         self._prefix = f"charmqa-s3-{hashlib.sha256(namespace.encode()).hexdigest()[:8]}-"
         self._client_factory = client_factory or self._make_client
         self._pending_revocations: set[str] = set()
+        self._pending_bucket_deletions: set[_S3Bucket] = set()
 
     @property
     def endpoint(self) -> str:
@@ -126,12 +140,27 @@ class S3Storage(S3Provider):
             self._credential_provider,
             self._client_factory,
             self._pending_revocations,
+            self._pending_bucket_deletions,
+            self._bucket_owner,
         )
 
-    def cleanup_pending_credentials(self) -> None:
-        """Retry revocation of keys whose bucket resource could not finish cleanup."""
+    def cleanup_pending_resources(self) -> None:
+        """Retry bucket deletion and credential revocation left pending by child teardown."""
         failures: list[Exception] = []
+        for bucket in list(self._pending_bucket_deletions):
+            try:
+                bucket.cleanup()
+            except Exception as exc:
+                failures.append(exc)
+
+        pending_bucket_keys = {
+            bucket._credentials.access_key
+            for bucket in self._pending_bucket_deletions
+            if bucket._credentials is not None and not bucket._credentials_revoked
+        }
         for access_key in list(self._pending_revocations):
+            if access_key in pending_bucket_keys:
+                continue
             try:
                 self._credential_provider.revoke(access_key)
             except Exception as exc:
@@ -139,7 +168,7 @@ class S3Storage(S3Provider):
             else:
                 self._pending_revocations.discard(access_key)
         if failures:
-            raise RuntimeError(f"Failed to revoke {len(failures)} pending S3 credential(s)") from failures[0]
+            raise RuntimeError(f"Failed to clean {len(failures)} pending S3 resource(s)") from failures[0]
 
     @staticmethod
     def _delete_bucket(client: S3Client, name: str) -> None:
@@ -181,20 +210,24 @@ class S3Storage(S3Provider):
                     if match is None or now - datetime.fromtimestamp(int(match[1]), timezone.utc) <= age:
                         continue
                     try:
-                        access_key: str | None = None
+                        try:
+                            tags = client.get_bucket_tagging(Bucket=name)["TagSet"]
+                        except ClientError as exc:
+                            code = exc.response.get("Error", {}).get("Code")
+                            if code == "NoSuchBucket":
+                                continue
+                            if code != "NoSuchTagSet":
+                                raise
+                            raise RuntimeError("Missing ownership tags; retaining bucket") from exc
+                        owner = next((tag["Value"] for tag in tags if tag["Key"] == S3_OWNER_TAG), None)
+                        if owner is None:
+                            raise RuntimeError("Missing ownership tag; retaining bucket")
+                        if owner != self._bucket_owner:
+                            continue
                         if self._credential_provider.per_bucket_credentials:
-                            try:
-                                tags = client.get_bucket_tagging(Bucket=name)["TagSet"]
-                            except ClientError as exc:
-                                if exc.response.get("Error", {}).get("Code") == "NoSuchBucket":
-                                    continue
-                                if exc.response.get("Error", {}).get("Code") != "NoSuchTagSet":
-                                    raise
-                            else:
-                                access_key = next(
-                                    (tag["Value"] for tag in tags if tag["Key"] == "charmqa-ec2-access"), None
-                                )
-                        if access_key is not None:
+                            access_key = next((tag["Value"] for tag in tags if tag["Key"] == S3_ACCESS_KEY_TAG), None)
+                            if access_key is None:
+                                raise RuntimeError("Missing EC2 access-key tag; retaining bucket")
                             self._credential_provider.revoke(access_key)
                         self._delete_bucket(client, name)
                         removed.append(name)
@@ -217,11 +250,15 @@ class _S3Bucket(S3Bucket):
         credential_provider: CredentialProvider,
         client_factory: Callable[[S3Credentials], S3Client],
         pending_revocations: set[str],
+        pending_bucket_deletions: set[_S3Bucket],
+        bucket_owner: str,
     ) -> None:
         self._handle = handle
         self._credential_provider = credential_provider
         self._client_factory = client_factory
         self._pending_revocations = pending_revocations
+        self._pending_bucket_deletions = pending_bucket_deletions
+        self._bucket_owner = bucket_owner
         self._credentials: S3Credentials | None = None
         self._credentials_revoked = False
         self._client: S3Client | None = None
@@ -238,7 +275,9 @@ class _S3Bucket(S3Bucket):
                 self._pending_revocations.add(self._credentials.access_key)
         if self._client is None:
             try:
-                self._client = self._client_factory(self._credentials)
+                self._client = self._client_factory(
+                    self._credential_provider.provisioning_credentials(self._credentials)
+                )
             except Exception as client_error:
                 try:
                     access_key = self._credentials.access_key
@@ -267,9 +306,12 @@ class _S3Bucket(S3Bucket):
             self._client.create_bucket(Bucket=self._handle.name)
 
         if self._credential_provider.per_bucket_credentials:
+            tags: list[TagTypeDef] = [{"Key": S3_OWNER_TAG, "Value": self._bucket_owner}]
+            tags.append({"Key": S3_ACCESS_KEY_TAG, "Value": self._credentials.access_key})
+            self._client.put_bucket_tagging(Bucket=self._handle.name, Tagging={"TagSet": tags})
+        else:
             self._client.put_bucket_tagging(
-                Bucket=self._handle.name,
-                Tagging={"TagSet": [{"Key": "charmqa-ec2-access", "Value": self._credentials.access_key}]},
+                Bucket=self._handle.name, Tagging={"TagSet": [{"Key": S3_OWNER_TAG, "Value": self._bucket_owner}]}
             )
         self._client.put_object(Bucket=self._handle.name, Key=f"{S3_PATH}/", Body=b"")
         self._client.head_bucket(Bucket=self._handle.name)
@@ -283,14 +325,11 @@ class _S3Bucket(S3Bucket):
                 self._client.close()
             return
 
-        if self._credential_provider.per_bucket_credentials:
-            try:
+        completed = False
+        try:
+            if self._credential_provider.per_bucket_credentials:
                 if not self._credentials_revoked:
-                    try:
-                        self._credential_provider.revoke(self._credentials.access_key)
-                    except Exception:
-                        self._pending_revocations.add(self._credentials.access_key)
-                        raise
+                    self._credential_provider.revoke(self._credentials.access_key)
                     self._pending_revocations.discard(self._credentials.access_key)
                     self._credentials_revoked = True
                 if self._create_attempted:
@@ -299,19 +338,28 @@ class _S3Bucket(S3Bucket):
                         S3Storage._delete_bucket(cleanup_client, self._handle.name)
                     finally:
                         cleanup_client.close()
-            finally:
-                if self._client is not None:
-                    self._client.close()
-            return
-
-        if self._client is not None and self._create_attempted:
-            S3Storage._delete_bucket(self._client, self._handle.name)
-        if self._client is not None:
-            self._client.close()
+            elif self._client is not None and self._create_attempted:
+                S3Storage._delete_bucket(self._client, self._handle.name)
+            completed = True
+        except Exception:
+            if self._create_attempted:
+                self._pending_bucket_deletions.add(self)
+            if self._credential_provider.per_bucket_credentials and self._credentials is not None:
+                if not self._credentials_revoked:
+                    self._pending_revocations.add(self._credentials.access_key)
+            raise
+        finally:
+            if self._client is not None and (
+                self._credential_provider.per_bucket_credentials or completed or not self._create_attempted
+            ):
+                self._client.close()
+                self._client = None
+        if completed:
+            self._pending_bucket_deletions.discard(self)
 
 
 class StaticS3Provider(S3Storage):
-    """Provide isolated buckets using externally managed, shared S3 credentials."""
+    """Provide isolated buckets using managed application and optional cleanup credentials."""
 
     def __init__(
         self,
@@ -321,12 +369,16 @@ class StaticS3Provider(S3Storage):
         region: str = "us-east-1",
         client_factory: Callable[[S3Credentials], S3Client] | None = None,
         identity: str | None = None,
+        cleanup_credentials: S3Credentials | None = None,
     ) -> None:
         super().__init__(
             endpoint,
             namespace,
-            StaticCredentialProvider(credentials),
+            StaticCredentialProvider(credentials, cleanup_credentials),
             region=region,
             client_factory=client_factory,
             identity=identity,
+            bucket_owner_identity=_stable_bucket_owner(
+                "static", endpoint.rstrip("/"), namespace, region, credentials.access_key
+            ),
         )

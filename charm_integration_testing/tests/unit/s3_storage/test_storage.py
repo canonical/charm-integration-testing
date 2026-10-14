@@ -83,6 +83,13 @@ def empty_bucket(stubber: Stubber, name: str = ANY) -> None:
     stubber.add_response("delete_bucket", {}, {"Bucket": name})
 
 
+def expected_tagging(access_key: str | None = None) -> dict[str, Any]:
+    tags = [{"Key": "charmqa-storage-owner", "Value": ANY}]
+    if access_key is not None:
+        tags.append({"Key": "charmqa-ec2-access", "Value": access_key})
+    return {"TagSet": tags}
+
+
 def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
     # GIVEN Keystone-backed storage and an empty S3 bucket
     keystone = KeystoneStub()
@@ -101,7 +108,7 @@ def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
         stubber.add_response(
             "put_bucket_tagging",
             {},
-            {"Bucket": ANY, "Tagging": {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "test-access-1"}]}},
+            {"Bucket": ANY, "Tagging": expected_tagging("test-access-1")},
         )
         stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": ANY})
@@ -109,7 +116,7 @@ def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
         stubber.add_response(
             "put_bucket_tagging",
             {},
-            {"Bucket": ANY, "Tagging": {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "test-access-1"}]}},
+            {"Bucket": ANY, "Tagging": expected_tagging("test-access-1")},
         )
         stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": ANY})
@@ -163,7 +170,7 @@ def test_incomplete_bucket_provisioning_retries_tagging(client: S3Client) -> Non
         stubber.add_response(
             "put_bucket_tagging",
             {},
-            {"Bucket": ANY, "Tagging": {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "test-access-1"}]}},
+            {"Bucket": ANY, "Tagging": expected_tagging("test-access-1")},
         )
         stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": ANY})
@@ -240,7 +247,7 @@ def test_client_initialization_retry_issues_fresh_bucket_key(client: S3Client) -
         stubber.add_response(
             "put_bucket_tagging",
             {},
-            {"Bucket": ANY, "Tagging": {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "test-access-2"}]}},
+            {"Bucket": ANY, "Tagging": expected_tagging("test-access-2")},
         )
         stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": ANY})
@@ -301,7 +308,7 @@ def test_registry_retries_pending_credential_revocation() -> None:
     )
     bucket = storage.new_bucket()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle, destroyer=storage.cleanup_pending_credentials)
+    registry.register(handle=storage.handle, destroyer=storage.cleanup_pending_resources)
     registry.register(handle=bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
 
     with pytest.raises(RuntimeError, match="could not be revoked"):
@@ -312,7 +319,7 @@ def test_registry_retries_pending_credential_revocation() -> None:
     # The bucket teardown fails, then the parent provider retries the pending key.
     assert keystone.delete_attempts == ["test-access-1"] * 3
     assert keystone.deleted == ["test-access-1"]
-    storage.cleanup_pending_credentials()
+    storage.cleanup_pending_resources()
 
 
 def test_cleanup_removes_versions_markers_and_multipart(client: S3Client) -> None:
@@ -386,6 +393,7 @@ def test_registry_tears_down_each_bucket_and_continues_after_failure(client: S3C
         for bucket in buckets:
             name = bucket.handle.name
             stubber.add_response("create_bucket", {}, {"Bucket": name})
+            stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
             stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
             stubber.add_response("head_bucket", {}, {"Bucket": name})
             bucket.provision()
@@ -408,6 +416,7 @@ def test_static_bucket_cleanup_keeps_client_open_for_retry(client: S3Client) -> 
     with patch.object(client, "close", wraps=client.close) as close, Stubber(client) as stubber:
         name = bucket.handle.name
         stubber.add_response("create_bucket", {}, {"Bucket": name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
         stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": name})
         bucket.provision()
@@ -423,6 +432,35 @@ def test_static_bucket_cleanup_keeps_client_open_for_retry(client: S3Client) -> 
         bucket.cleanup()
         close.assert_called_once()
         stubber.assert_no_pending_responses()
+
+
+def test_static_provider_uses_management_credentials_for_bucket_lifecycle(client: S3Client) -> None:
+    client_credentials: list[S3Credentials] = []
+
+    def client_factory(credentials: S3Credentials) -> S3Client:
+        client_credentials.append(credentials)
+        return client
+
+    storage = StaticS3Provider(
+        "https://s3.test",
+        NAMESPACE,
+        CREDS,
+        client_factory=client_factory,
+        cleanup_credentials=CLEANUP_CREDS,
+    )
+    bucket = storage.new_bucket()
+    with Stubber(client) as stubber:
+        name = bucket.handle.name
+        stubber.add_response("create_bucket", {}, {"Bucket": name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": name})
+        assert bucket.provision() == (name, CREDS)
+        empty_bucket(stubber, name)
+        bucket.cleanup()
+
+    assert client_credentials == [CLEANUP_CREDS]
+    stubber.assert_no_pending_responses()
 
 
 def test_cleanup_retries_bucket_when_credential_revocation_fails(client: S3Client) -> None:
@@ -528,7 +566,12 @@ def test_stale_cleanup_is_scoped_and_revokes_owned_keys(client: S3Client) -> Non
         )
         stubber.add_response(
             "get_bucket_tagging",
-            {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "old-key"}]},
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": storage._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": "old-key"},
+                ]
+            },
             {"Bucket": OLD_BUCKET},
         )
         empty_bucket(stubber, OLD_BUCKET)
@@ -540,10 +583,83 @@ def test_stale_cleanup_is_scoped_and_revokes_owned_keys(client: S3Client) -> Non
         stubber.assert_no_pending_responses()
 
 
-def test_static_storage_never_requests_bucket_tags(client: S3Client) -> None:
+def test_stale_cleanup_does_not_delete_bucket_owned_by_another_provider(client: S3Client) -> None:
+    storage = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, client_factory=lambda _: client)
+    other_storage = StaticS3Provider(
+        "https://s3.test",
+        NAMESPACE,
+        S3Credentials("other-access", "other-secret"),
+        client_factory=lambda _: client,
+    )
+    other_bucket = f"{PREFIX}{int((NOW - timedelta(hours=6)).timestamp())}-{'c' * 16}"
+    assert storage._bucket_owner != other_storage._bucket_owner
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}, {"Name": other_bucket}]}, {})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {"TagSet": [{"Key": "charmqa-storage-owner", "Value": storage._bucket_owner}]},
+            {"Bucket": OLD_BUCKET},
+        )
+        empty_bucket(stubber, OLD_BUCKET)
+        stubber.add_response(
+            "get_bucket_tagging",
+            {"TagSet": [{"Key": "charmqa-storage-owner", "Value": other_storage._bucket_owner}]},
+            {"Bucket": other_bucket},
+        )
+
+        assert storage.cleanup_stale(timedelta(hours=4), NOW) == [OLD_BUCKET]
+        stubber.assert_no_pending_responses()
+
+
+def test_stale_cleanup_retains_bucket_without_owner_tag(client: S3Client) -> None:
+    keystone = KeystoneStub()
+    storage = S3Storage(
+        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+    )
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
+        stubber.add_client_error(
+            "get_bucket_tagging", service_error_code="NoSuchTagSet", expected_params={"Bucket": OLD_BUCKET}
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources") as error:
+            storage.cleanup_stale(timedelta(hours=4), NOW)
+
+        assert str(error.value.__cause__) == "Missing ownership tags; retaining bucket"
+        assert keystone.deleted == []
+        stubber.assert_no_pending_responses()
+
+
+def test_stale_cleanup_retains_owned_bucket_without_credential_tag(client: S3Client) -> None:
+    keystone = KeystoneStub()
+    storage = S3Storage(
+        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+    )
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {"TagSet": [{"Key": "charmqa-storage-owner", "Value": storage._bucket_owner}]},
+            {"Bucket": OLD_BUCKET},
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources") as error:
+            storage.cleanup_stale(timedelta(hours=4), NOW)
+
+        assert str(error.value.__cause__) == "Missing EC2 access-key tag; retaining bucket"
+        assert keystone.deleted == []
+        stubber.assert_no_pending_responses()
+
+
+def test_static_stale_cleanup_checks_ownership_tag(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     with Stubber(client) as stubber:
         stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {"TagSet": [{"Key": "charmqa-storage-owner", "Value": storage._bucket_owner}]},
+            {"Bucket": OLD_BUCKET},
+        )
         empty_bucket(stubber, OLD_BUCKET)
         assert storage.cleanup_stale(timedelta(hours=4), NOW) == [OLD_BUCKET]
         stubber.assert_no_pending_responses()
@@ -559,7 +675,12 @@ def test_stale_cleanup_retains_tagged_bucket_when_key_revocation_fails(client: S
         stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
         stubber.add_response(
             "get_bucket_tagging",
-            {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "old-key"}]},
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": storage._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": "old-key"},
+                ]
+            },
             {"Bucket": OLD_BUCKET},
         )
 
@@ -586,7 +707,12 @@ def test_stale_cleanup_continues_after_bucket_failure(client: S3Client, failure:
         stubber.add_response("list_buckets", {"Buckets": [{"Name": failed_bucket}, {"Name": later_bucket}]}, {})
         stubber.add_response(
             "get_bucket_tagging",
-            {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "failed-key"}]},
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": storage._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": "failed-key"},
+                ]
+            },
             {"Bucket": failed_bucket},
         )
         if failure == "bucket-deletion":
@@ -597,7 +723,12 @@ def test_stale_cleanup_continues_after_bucket_failure(client: S3Client, failure:
             )
         stubber.add_response(
             "get_bucket_tagging",
-            {"TagSet": [{"Key": "charmqa-ec2-access", "Value": "later-key"}]},
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": storage._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": "later-key"},
+                ]
+            },
             {"Bucket": later_bucket},
         )
         empty_bucket(stubber, later_bucket)
@@ -611,6 +742,32 @@ def test_stale_cleanup_continues_after_bucket_failure(client: S3Client, failure:
             ["later-key"] if failure == "credential-revocation" else ["failed-key", "later-key"]
         )
         close.assert_called_once()
+        stubber.assert_no_pending_responses()
+
+
+def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> None:
+    storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    registry.register(storage.handle, destroyer=storage.cleanup_pending_resources)
+    bucket = storage.new_bucket()
+    registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+
+    with Stubber(client) as stubber:
+        name = bucket.handle.name
+        stubber.add_response("create_bucket", {}, {"Bucket": name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": name})
+        bucket.provision()
+        stubber.add_client_error(
+            "list_multipart_uploads", service_error_code="AccessDenied", expected_params={"Bucket": name}
+        )
+        empty_bucket(stubber, name)
+
+        with pytest.warns(ResourceTeardownWarning):
+            registry.teardown_all()
+
+        assert registry.registered_handles() == []
         stubber.assert_no_pending_responses()
 
 
@@ -785,6 +942,23 @@ def test_static_environment_constructs_provider() -> None:
     assert provider.endpoint == environ["S3_ENDPOINT"]
     assert provider.region == "local-region"
     assert provider.handle.namespace == NAMESPACE
+
+
+def test_static_environment_accepts_separate_management_credentials() -> None:
+    environ = {
+        "S3_ENDPOINT": "http://sandbox.test:8333",
+        "S3_ACCESS_KEY": CREDS.access_key,
+        "S3_SECRET_KEY": CREDS.secret_key,
+        "S3_CLEANUP_ACCESS_KEY": CLEANUP_CREDS.access_key,
+        "S3_CLEANUP_SECRET_KEY": CLEANUP_CREDS.secret_key,
+    }
+
+    with requests.Session() as session:
+        provider = provider_from_environment(environ, session)
+
+    assert isinstance(provider, StaticS3Provider)
+    assert provider._credential_provider.issue() == CREDS
+    assert provider._credential_provider.cleanup_credentials == CLEANUP_CREDS
 
 
 def test_environment_provider_selects_credentials_by_prefix() -> None:

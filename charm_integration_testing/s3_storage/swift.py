@@ -9,7 +9,7 @@ import requests
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from .provider import CredentialProvider, S3Credentials
-from .storage import S3Storage
+from .storage import S3Storage, _stable_bucket_owner
 
 
 @dataclass(frozen=True)
@@ -167,4 +167,16 @@ class SwiftS3Provider(S3Storage):
             SwiftCredentialProvider(keystone, cleanup_credentials),
             region=region,
             identity=identity,
+            bucket_owner_identity=_stable_bucket_owner(
+                "swift",
+                endpoint.rstrip("/"),
+                namespace,
+                region,
+                keystone.credentials.auth_url,
+                keystone.credentials.username,
+                keystone.credentials.user_domain_name,
+                keystone.credentials.project_name,
+                keystone.credentials.project_domain_name,
+                keystone.credentials.storage_url,
+            ),
         )
