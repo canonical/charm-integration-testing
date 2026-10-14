@@ -817,8 +817,13 @@ class JujuClient:
         target = JujuModelHandle(controller=target_controller, model=model_name)
         try:
             source_existed_before_migration: bool | None = self.backend.model_exists(source)
-        except NotImplementedError:
+        except Exception as exc:
             source_existed_before_migration = None
+            self.logger.warning(
+                "Could not determine source model visibility before migration; proceeding without preflight: %r",
+                exc,
+                exc_info=True,
+            )
         try:
             self.backend.migrate_model(
                 model_name=model_name, source_controller=source_controller, target_controller=target_controller
