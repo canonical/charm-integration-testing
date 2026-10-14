@@ -794,6 +794,30 @@ def test_stress_checks_only_selected_tool_and_retains_failed_cleanup(failure: bo
         client.check_stress(TEST_MODEL, UNIT)
 
 
+@pytest.mark.parametrize("failure", [False, True])
+def test_io_latency_checks_only_selected_tool_and_retains_failed_cleanup(failure: bool) -> None:
+    from unittest.mock import Mock
+
+    unsupported, selected, unused = [Mock(spec=ChaosClient) for _ in range(3)]
+    unsupported.io_latency.side_effect = NotImplementedError
+    selected.io_latency.return_value = IoLatencyInjection(duration=DURATION, injected_at=0.0)
+    client = MetaChaosClient([unsupported, selected, unused], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+    client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    selected.check_io_latency.assert_called_once_with(TEST_MODEL, UNIT, "/data", allow_completed=False)
+    unsupported.check_io_latency.assert_not_called()
+    unused.check_io_latency.assert_not_called()
+    selected.cleanup.side_effect = RuntimeError("cleanup failed") if failure else None
+    if failure:
+        with pytest.raises(ChaosCleanupError):
+            client.cleanup_all()
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+        selected.cleanup.side_effect = None
+    client.cleanup_all()
+    with pytest.raises(RuntimeError, match="No active I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+
+
 @pytest.mark.parametrize("injection_failed", [False, True])
 def test_no_successful_stress_cannot_pass_status_check(injection_failed: bool) -> None:
     from unittest.mock import Mock
@@ -816,3 +840,20 @@ def test_selected_tool_without_status_support_fails() -> None:
     client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
     with pytest.raises(NotImplementedError, match="status checks"):
         client.check_stress(TEST_MODEL, UNIT)
+
+
+@pytest.mark.parametrize("injection_failed", [False, True])
+def test_no_successful_io_latency_cannot_pass_status_check(injection_failed: bool) -> None:
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    if injection_failed:
+        tool.io_latency.side_effect = RuntimeError("injection failed")
+        with pytest.raises(RuntimeError, match="injection failed"):
+            client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+    with pytest.raises(RuntimeError, match="No active I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_not_called()
+    client.cleanup_all()
+    assert tool.cleanup.call_count == int(injection_failed)

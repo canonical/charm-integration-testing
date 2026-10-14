@@ -43,7 +43,7 @@ class _CleanupAction:
     scope: tuple[str, str]
     path: str
     run: Callable[[], None]
-    stress_tool: ChaosClient | None = None
+    check_tool: ChaosClient | None = None
 
 
 class MetaChaosClient(ChaosClient):
@@ -221,9 +221,9 @@ class MetaChaosClient(ChaosClient):
 
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         tools = [
-            action.stress_tool
+            action.check_tool
             for action in self._cleanups
-            if action.scope == (model.uri, unit) and action.stress_tool is not None
+            if action.scope == (model.uri, unit) and action.check_tool is not None
         ]
         if not tools:
             raise RuntimeError(f"No active stress experiment recorded for {model.uri}/{unit}.")
@@ -233,7 +233,14 @@ class MetaChaosClient(ChaosClient):
     def check_io_latency(
         self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
     ) -> None:
-        for tool in self._tools:
+        tools = [
+            action.check_tool
+            for action in self._cleanups
+            if action.scope == (model.uri, unit) and action.path == volume_path and action.check_tool is not None
+        ]
+        if not tools:
+            raise RuntimeError(f"No active I/O latency experiment recorded for {model.uri}/{unit}:{volume_path}.")
+        for tool in dict.fromkeys(tools):
             tool.check_io_latency(model, unit, volume_path, allow_completed=allow_completed)
 
     def cleanup_all(self) -> None:
@@ -327,8 +334,8 @@ class MetaChaosClient(ChaosClient):
                 # Failed calls may have created resources.
                 pending.append(action)
                 raise
-            if operation in {"stress_cpu", "stress_memory"}:
-                action = replace(action, stress_tool=tool)
+            if operation in {"stress_cpu", "stress_memory", "io_latency"}:
+                action = replace(action, check_tool=tool)
             pending.append(action)
             return
         self._on_unsupported(operation)
