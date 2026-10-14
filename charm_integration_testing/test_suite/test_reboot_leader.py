@@ -76,8 +76,11 @@ def test_reboot_leader(
                 timeout=timedelta(minutes=15),
             )
         else:
-            juju_client.ssh(leader, "sudo reboot", model=target_model_ref)
-            juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+            juju_client.ssh(
+                leader,
+                "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
+                model=target_model_ref,
+            )
 
     def wait_for_recovery() -> None:
         if target_platform == "kubernetes":
@@ -110,6 +113,7 @@ def test_reboot_leader(
 
     try:
         restart_leader()
+        juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
         if neighbor_application is not None:
             juju_client.validate_model(

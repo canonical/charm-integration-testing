@@ -116,7 +116,7 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
     assert client.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
-        ("ssh", "target/1", "sudo reboot", MODEL),
+        ("ssh", "target/1", "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
@@ -193,6 +193,7 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
     assert juju.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
+        ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
