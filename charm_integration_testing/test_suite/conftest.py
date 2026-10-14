@@ -187,7 +187,7 @@ def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str
     return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs, cloud_definitions=cloud_definitions)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def register_test_clouds(
     juju_backend: JujuBackend,
     cloud_kubeconfigs: dict[str, Path],
@@ -382,6 +382,7 @@ def _build_juju_client(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
+    register_test_clouds: None,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -998,7 +999,6 @@ def ubuntu_pro_token() -> str | None:
 
 failure_message: StashKey[str] = StashKey()
 skipped_message: StashKey[str] = StashKey()
-failure_exception: StashKey[BaseException] = StashKey()
 
 
 # Get failure message for logging
@@ -1016,6 +1016,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = reprcrash.message
         else:
             item.stash[failure_message] = str(report.longrepr)
+        exc = call.excinfo.value if call.excinfo else None
+        _add_failure_execution_metadata(item.user_properties, item.stash[failure_message], exc)
 
     # Save skip message
     if report.skipped:
@@ -1028,28 +1030,31 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             else:
                 skipreason = str(report.longrepr)
             item.stash[skipped_message] = skipreason.removeprefix("Skipped: ")
-
-    # Save failure exception
-    if call.excinfo:
-        item.stash[failure_exception] = call.excinfo.value
+        _append_execution_metadata(
+            item.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
+        )
 
 
 @pytest.fixture(autouse=True)
 def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _print_all_model_statuses() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                try:
-                    juju_client.print_status(model=handle)
-                except Exception:
-                    logger.warning(f"Failed to print status for model '{handle.uri}'")
+        model_handles = [
+            handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+        ]
+        if not model_handles:
+            return
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
+            try:
+                juju_client.print_status(model=handle)
+            except Exception:
+                logger.warning(f"Failed to print status for model '{handle.uri}'")
 
     # Print starting state for all registered models
     _print_all_model_statuses()
@@ -1098,7 +1103,6 @@ def execution_metadata(record_property: Callable[[str, object], None]) -> Iterat
 @pytest.fixture(autouse=True)
 def record_execution_metadata(
     record_warning_execution_metadata: None,
-    record_failure_execution_metadata: None,
     record_juju_execution_metadata: None,
     record_charm_info_execution_metadata: None,
     record_pipeline_version_execution_metadata: None,
@@ -1203,15 +1207,20 @@ def record_charm_info_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charm_info_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
+        model_handles = [
+            handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+        ]
+        if not model_handles:
+            return
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
+            record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -1376,101 +1385,108 @@ def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str,
     return []
 
 
-@pytest.fixture
-def record_failure_execution_metadata(
-    request: pytest.FixtureRequest, execution_metadata: Callable[[str, str | int], None]
-) -> Iterator[None]:
-    # Let the test run
-    yield
+def _append_execution_metadata(user_properties: list[tuple[str, object]], entries: list[tuple[str, str]]) -> None:
+    metadata: dict[str, set[str]] = {}
+    for category, value in entries:
+        if not category.strip() or not value.strip():
+            continue
+        metadata.setdefault(category, set()).add(value)
 
-    # Save the failure message
-    if failure_message in request.node.stash:
-        execution_metadata("failure:message", normalize_string(request.node.stash[failure_message]))
+    for category, values in metadata.items():
+        user_properties.append((category, json.dumps(sorted(values))))
 
-    # Save the skip message
-    if skipped_message in request.node.stash:
-        execution_metadata("skipped:message", normalize_string(request.node.stash[skipped_message]))
 
-    # Save extra metadata from exception
-    if failure_exception in request.node.stash:
-        exc = request.node.stash[failure_exception]
-
-        if isinstance(exc, JujuWaitTimeoutError):
-            for application in exc.wait_state.noncompliant_applications.values():
-                if application is None:
-                    continue
-                execution_metadata("failure:charm", application.charm)
-                execution_metadata(
+def _failure_exception_metadata(exc: BaseException) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    if isinstance(exc, JujuWaitTimeoutError):
+        for application in exc.wait_state.noncompliant_applications.values():
+            if application is None:
+                continue
+            entries.append(("failure:charm", application.charm))
+            entries.append(
+                (
                     f"failure:charm:{application.charm}:status",
                     f"application:{application.status}:{normalize_string(application.message)}",
                 )
-            for unit in exc.wait_state.noncompliant_units.values():
-                if unit is None:
-                    continue
-                execution_metadata("failure:charm", unit.charm)
-                execution_metadata(
+            )
+        for unit in exc.wait_state.noncompliant_units.values():
+            if unit is None:
+                continue
+            entries.append(("failure:charm", unit.charm))
+            entries.append(
+                (
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
                 )
-            for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
-                if unit_agent is None:
-                    continue
-                execution_metadata("failure:charm", unit_agent.charm)
-                execution_metadata(
+            )
+        for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
+            if unit_agent is None:
+                continue
+            entries.append(("failure:charm", unit_agent.charm))
+            entries.append(
+                (
                     f"failure:charm:{unit_agent.charm}:status",
                     f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",
                 )
-        elif isinstance(exc, CalledProcessError):
-            cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
-            execution_metadata("failure:cli:cmd", normalize_string(cmd))
-            execution_metadata("failure:cli:return_code", str(exc.returncode))
-            if exc.stdout:
-                for line in normalize_string_multiline(exc.stdout):
-                    execution_metadata("failure:cli:stdout", line)
-            if exc.stderr:
-                for line in normalize_string_multiline(exc.stderr):
-                    execution_metadata("failure:cli:stderr", line)
-        elif isinstance(exc, JujuValidationError):
-            for results in exc.failed_validations.values():
-                for result in results:
-                    execution_metadata(f"failure:validator:interface:{result.interface}", result.status)
-                    for check in result.checks:
-                        if not check.passed:
-                            execution_metadata(
+            )
+    elif isinstance(exc, CalledProcessError):
+        cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd
+        entries.append(("failure:cli:cmd", normalize_string(cmd)))
+        entries.append(("failure:cli:return_code", str(exc.returncode)))
+        if exc.stdout:
+            entries.extend(("failure:cli:stdout", line) for line in normalize_string_multiline(exc.stdout))
+        if exc.stderr:
+            entries.extend(("failure:cli:stderr", line) for line in normalize_string_multiline(exc.stderr))
+    elif isinstance(exc, JujuValidationError):
+        for results in exc.failed_validations.values():
+            for result in results:
+                entries.append((f"failure:validator:interface:{result.interface}", result.status))
+                for check in result.checks:
+                    if not check.passed:
+                        entries.append(
+                            (
                                 f"failure:validator:interface:{result.interface}:check",
                                 normalize_string(f"{check.name}: {check.message}"),
                             )
-                    if result.error:
-                        execution_metadata(
+                        )
+                if result.error:
+                    entries.append(
+                        (
                             f"failure:validator:interface:{result.interface}:error",
                             normalize_string(result.error),
                         )
-        elif isinstance(exc, UncompletableBundleError):
-            for diagnostic in exc.diagnostics:
-                for category, value in _bundle_diagnostic_metadata(diagnostic):
-                    execution_metadata(category, value)
-        elif isinstance(exc, ResourceDiscrepancyError):
-            # Only the generically-applicable dimensions (resource_type and
-            # qualifier) go in the key so downstream attachment rules can select
-            # on them; run-specific context (state, model, snapshot detail) is
-            # carried in the value.
-            for discrepancy in exc.discrepancies:
-                for entry in discrepancy.entries():
-                    detail = (
-                        f"state={entry.state} controller={entry.controller} model={entry.model} "
-                        f"{entry.resource_type}={entry.snapshot.name}"
                     )
-                    attributes = _format_discrepancy_attributes(entry)
-                    value = f"{detail} {attributes}" if attributes else detail
-                    execution_metadata(
-                        f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
-                        normalize_string(value),
-                    )
+    elif isinstance(exc, UncompletableBundleError):
+        for diagnostic in exc.diagnostics:
+            entries.extend(_bundle_diagnostic_metadata(diagnostic))
+    elif isinstance(exc, ResourceDiscrepancyError):
+        # Keep run-specific details in the value so metadata keys remain useful for filtering.
+        for discrepancy in exc.discrepancies:
+            for entry in discrepancy.entries():
+                detail = (
+                    f"state={entry.state} controller={entry.controller} model={entry.model} "
+                    f"{entry.resource_type}={entry.snapshot.name}"
+                )
+                attributes = _format_discrepancy_attributes(entry)
+                value = f"{detail} {attributes}" if attributes else detail
+                entries.append(
+                    (f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}", normalize_string(value))
+                )
+    return entries
+
+
+def _add_failure_execution_metadata(
+    user_properties: list[tuple[str, object]], message: str, exc: BaseException | None
+) -> None:
+    entries = [("failure:message", normalize_string(message))]
+    if exc is not None:
+        entries.extend(_failure_exception_metadata(exc))
+    _append_execution_metadata(user_properties, entries)
 
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
     require_temp_juju_controller_alive: None,
@@ -1478,8 +1494,12 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version for each registered model
-    for handle in session_resource_registry.registered_handles():
-        if isinstance(handle, JujuModelHandle):
+    model_handles = [
+        handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+    ]
+    if model_handles:
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
             execution_metadata("juju:version", str(juju_client.version(handle)))
 
 

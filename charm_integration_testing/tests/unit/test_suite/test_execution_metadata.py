@@ -1,12 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 
 import pytest
+from jubilant import CLIError
 from juju import JujuClient, JujuModelHandle
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from test_suite.conftest import (
+    _add_failure_execution_metadata,
     _bundle_diagnostic_metadata,
     _release_resolution_metadata,
     record_charm_info_execution_metadata_instantaneous,
@@ -32,6 +35,27 @@ from bundle_builder_x import (
 )
 
 from ..extensions.shared import NullJujuBackend
+
+
+def test_cli_error_is_written_to_failure_report_metadata() -> None:
+    user_properties: list[tuple[str, object]] = []
+    error = CLIError(
+        1,
+        ["juju", "add-k8s", "neighbor-cloud", "--client"],
+        "",
+        "ERROR etcdserver: mvcc: database space exceeded",
+    )
+
+    _add_failure_execution_metadata(user_properties, "failed during fixture setup", error)
+
+    metadata: dict[str, str] = {}
+    for category, value in user_properties:
+        assert isinstance(value, str)
+        metadata[category] = value
+    assert json.loads(metadata["failure:message"]) == ["failed during fixture setup"]
+    assert json.loads(metadata["failure:cli:cmd"]) == ["juju add-k8s neighbor-cloud --client"]
+    assert json.loads(metadata["failure:cli:return_code"]) == ["1"]
+    assert json.loads(metadata["failure:cli:stderr"]) == ["ERROR etcdserver: mvcc: database space exceeded"]
 
 
 def test_platform_mismatch_metadata_uses_atomic_stable_values() -> None:
