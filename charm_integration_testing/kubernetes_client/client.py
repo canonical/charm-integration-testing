@@ -3,6 +3,7 @@
 
 import logging
 import math
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import monotonic, sleep
@@ -24,6 +25,13 @@ class PodStatus(Enum):
     SUCCEEDED = "Succeeded"
     FAILED = "Failed"
     UNKNOWN = "Unknown"
+
+
+@dataclass(frozen=True)
+class CharmPod:
+    unit: str
+    name: str
+    uid: str
 
 
 class KubernetesClient:
@@ -86,6 +94,48 @@ class KubernetesClient:
             label_selector=f"app.kubernetes.io/name={application_name}",
         )
         return list(pods.items)
+
+    def get_ready_charm_pods_by_unit(
+        self,
+        application: str,
+        namespace: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, CharmPod]:
+        """Return each ready charm pod's stable identity, keyed by its Juju unit."""
+        pods = self.wait_for_charm_pods_ready(
+            application,
+            namespace,
+            expected_count=len(units),
+            timeout=timeout,
+        )
+        if len(pods) != len(units):
+            raise RuntimeError(
+                f"Expected one workload pod per Juju unit for {application}, "
+                f"found {len(pods)} pods for {len(units)} units."
+            )
+
+        unit_names = set(units)
+        pods_by_unit: dict[str, CharmPod] = {}
+        for pod in pods:
+            metadata = pod.metadata
+            if metadata is None or metadata.name is None or metadata.uid is None:
+                raise RuntimeError("Kubernetes pod metadata is incomplete before unit rotation.")
+            unit = (metadata.annotations or {}).get("unit.juju.is/id")
+            if unit not in unit_names or unit in pods_by_unit:
+                raise RuntimeError(f"Unable to uniquely map Kubernetes pod {metadata.name} to a Juju unit.")
+            pods_by_unit[unit] = CharmPod(unit=unit, name=metadata.name, uid=metadata.uid)
+        if set(pods_by_unit) != unit_names:
+            raise RuntimeError(f"Unable to find a Kubernetes pod for every Juju unit in {application}.")
+        return pods_by_unit
+
+    def get_charm_pod_uids(self, application: str, namespace: str) -> set[str]:
+        """Return UIDs for the application's currently observed pods."""
+        return {
+            pod.metadata.uid
+            for pod in self.get_charm_pods(application, namespace)
+            if pod.metadata is not None and pod.metadata.uid is not None
+        }
 
     def list_model_pvcs(self, model: str) -> list[K8sClient.V1PersistentVolumeClaim]:
         """
@@ -281,7 +331,7 @@ class KubernetesClient:
         unit: str,
         existing_uids: Collection[str],
     ) -> str:
-        """Delete this Pod instance and return its unit's replacement Pod name.
+        """Delete this Pod instance, run replacement hooks, and return its replacement Pod name.
 
         ``existing_uids`` contains all application Pod UIDs observed before deletion.
         Deletion and replacement polling share one timeout budget.
@@ -334,6 +384,8 @@ class KubernetesClient:
                     and replacements[0].status is not None
                     and replacements[0].status.phase == PodStatus.RUNNING.value
                 ):
+                    for extension in self.extensions:
+                        extension.post_delete_pod(namespace, replacements[0].metadata.name)
                     return replacements[0].metadata.name
             sleep(min(self.default_delay.total_seconds(), remaining()))
 

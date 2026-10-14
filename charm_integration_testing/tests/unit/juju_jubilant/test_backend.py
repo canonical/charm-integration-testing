@@ -34,7 +34,7 @@ from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityE
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -3301,6 +3301,11 @@ class FollowerRestartKubernetesStub:
             V1Pod(metadata=V1ObjectMeta(name="target-1", uid="old", annotations={"unit.juju.is/id": "target/1"}))
         ]
         self.calls: list[tuple[object, ...]] = []
+        self.extensions: list[KubernetesExtension] = []
+
+    def register_extension(self, extension: KubernetesExtension) -> None:
+        if extension not in self.extensions:
+            self.extensions.append(extension)
 
     def get_charm_pods(self, application: str, namespace: str) -> list[V1Pod]:
         return self.pods
@@ -3320,6 +3325,8 @@ class FollowerRestartKubernetesStub:
         assert unit == "target/1"
         assert existing_uids == {pod.metadata.uid for pod in self.pods}
         self.calls.append((namespace, name, uid, timeout))
+        for extension in self.extensions:
+            extension.post_delete_pod(namespace, name)
 
 
 class FollowerRestartSshStub:
@@ -3363,6 +3370,9 @@ class FollowerRestartBackendStub(JubilantBackend):
 
     def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
         return cast(KubernetesClient | None, self.kube)
+
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return self.kube is not None
 
 
 def test_restarts_only_follower_pod() -> None:
@@ -3507,12 +3517,42 @@ class FollowerRestartExtension(JujuExtension):
             raise RuntimeError("restart hook failed")
 
 
+class FollowerRestartKubernetesExtension(FollowerRestartExtension, KubernetesExtension):
+    def __init__(self, kube: FollowerRestartKubernetesStub) -> None:
+        super().__init__(kube)
+        self.deleted_pods: list[tuple[str, str]] = []
+
+    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
+        self.deleted_pods.append((namespace, pod_name))
+
+
 def test_client_runs_hook_after_restart() -> None:
     kube = FollowerRestartKubernetesStub()
     extension = FollowerRestartExtension(kube)
     client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
     client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
     assert extension.calls == [(FOLLOWER_MODEL, "target/1")]
+
+
+def test_client_registers_shared_kubernetes_restart_hook_once() -> None:
+    kube = FollowerRestartKubernetesStub()
+    extension = FollowerRestartKubernetesExtension(kube)
+    client = JujuClient(FollowerRestartBackendStub(kube), logging.getLogger(__name__), [extension])
+
+    client.restart_follower("target", FOLLOWER_MODEL, FOLLOWER_RESTART_TIMEOUT)
+
+    assert extension.deleted_pods == [("model", "target-1")]
+    assert extension.calls == []
+
+
+def test_direct_backend_follower_restart_runs_registered_kubernetes_hook() -> None:
+    kube = FollowerRestartKubernetesStub()
+    extension = FollowerRestartKubernetesExtension(kube)
+    kube.register_extension(extension)
+
+    FollowerRestartBackendStub(kube).restart_follower(FOLLOWER_MODEL, "target", FOLLOWER_RESTART_TIMEOUT)
+
+    assert extension.deleted_pods == [("model", "target-1")]
 
 
 def test_restart_failure_does_not_run_hook() -> None:

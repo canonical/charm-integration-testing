@@ -6,7 +6,6 @@ from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient, KubernetesExtension
 
 from validators.base import ValidationResult
@@ -62,8 +61,15 @@ class JujuClient:
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
+        kubernetes_client = (
+            self.backend.get_kubernetes_client_for_model(model) if self.backend.is_k8s_model(model) else None
+        )
+        if kubernetes_client is not None:
+            self._register_kubernetes_extensions(kubernetes_client)
         unit = self.backend.restart_follower(model, application, timeout)
         for extension in self.extensions:
+            if kubernetes_client is not None and isinstance(extension, KubernetesExtension):
+                continue
             extension.post_restart_unit(model, unit)
         self.logger.info(f"Restarted follower {unit}.")
         return unit
@@ -101,11 +107,7 @@ class JujuClient:
             raise RuntimeError(f"Cannot restart workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
 
         self.logger.info(f"Restarting workload pod {pod_name} in model {model.uri}.")
-        kubernetes_extensions = [
-            extension for extension in self.extensions if isinstance(extension, KubernetesExtension)
-        ]
-        for extension in kubernetes_extensions:
-            kubernetes_client.register_extension(extension)
+        self._register_kubernetes_extensions(kubernetes_client)
         kubernetes_client.restart_pod(
             namespace=model.model,
             pod_name=pod_name,
@@ -115,6 +117,11 @@ class JujuClient:
             unit=unit,
             existing_uids=existing_uids,
         )
+
+    def _register_kubernetes_extensions(self, kubernetes_client: KubernetesClient) -> None:
+        for extension in self.extensions:
+            if isinstance(extension, KubernetesExtension):
+                kubernetes_client.register_extension(extension)
 
     def rotate_application_units(
         self,
@@ -158,31 +165,13 @@ class JujuClient:
         models: list[JujuModelHandle],
         timeout: timedelta,
     ) -> None:
-        pods = kubernetes_client.wait_for_charm_pods_ready(
+        pods_by_unit = kubernetes_client.get_ready_charm_pods_by_unit(
             application,
             model.model,
-            expected_count=len(units),
-            timeout=timeout,
+            units,
+            timeout,
         )
-        if len(pods) != len(units):
-            raise RuntimeError(
-                f"Expected one workload pod per Juju unit for {application}, "
-                f"found {len(pods)} pods for {len(units)} units."
-            )
-        unit_names = set(units)
-        pods_by_unit: dict[str, K8sClient.V1Pod] = {}
-        original_uids: set[str] = set()
-        for pod in pods:
-            metadata = pod.metadata
-            if metadata is None or metadata.name is None or metadata.uid is None:
-                raise RuntimeError("Kubernetes pod metadata is incomplete before unit rotation.")
-            unit = (metadata.annotations or {}).get("unit.juju.is/id")
-            if unit not in unit_names or unit in pods_by_unit:
-                raise RuntimeError(f"Unable to uniquely map Kubernetes pod {metadata.name} to a Juju unit.")
-            pods_by_unit[unit] = pod
-            original_uids.add(metadata.uid)
-        if set(pods_by_unit) != unit_names:
-            raise RuntimeError(f"Unable to find a Kubernetes pod for every Juju unit in {application}.")
+        original_uids = {pod.uid for pod in pods_by_unit.values()}
 
         try:
             self.scale_application(application, len(units) + 1, model=model)
@@ -194,22 +183,15 @@ class JujuClient:
             )
             self.multi_model_idle_for_period(models, timeout=timeout)
             for unit in units:
-                metadata = pods_by_unit[unit].metadata
-                if metadata is None or metadata.name is None or metadata.uid is None:
-                    raise RuntimeError(f"Kubernetes pod metadata is incomplete for unit {unit}.")
-                current_pods = kubernetes_client.get_charm_pods(application, model=model.model)
-                existing_uids = {
-                    current_pod.metadata.uid
-                    for current_pod in current_pods
-                    if current_pod.metadata is not None and current_pod.metadata.uid is not None
-                }
-                if metadata.uid not in existing_uids:
+                pod = pods_by_unit[unit]
+                existing_uids = kubernetes_client.get_charm_pod_uids(application, model.model)
+                if pod.uid not in existing_uids:
                     raise RuntimeError(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
 
                 self.restart_workload_pod(
                     model=model,
-                    pod_name=metadata.name,
-                    pod_uid=metadata.uid,
+                    pod_name=pod.name,
+                    pod_uid=pod.uid,
                     timeout=timeout,
                     application=application,
                     unit=unit,

@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from juju import JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient
+from kubernetes_client import CharmPod, KubernetesClient
 
 from bundle_builder_x import Charm, CharmChannel
 
@@ -40,6 +40,7 @@ class RecordingJujuClient:
         self.fail_scale_after_callback_on_call: int | None = None
         self.fail_next_multi_model_idle = False
         self.fail_multi_model_idle_on_call: int | None = None
+        self.fail_multi_model_idle_on_calls: set[int] = set()
         self.fail_next_remove_after_callback = False
         self.defer_next_remove = False
         self.pending_unit_removals: list[str] = []
@@ -114,7 +115,7 @@ class RecordingJujuClient:
         if self.fail_next_multi_model_idle:
             self.fail_next_multi_model_idle = False
             raise TimeoutError("model failed to become idle")
-        if self.fail_multi_model_idle_on_call == idle_calls:
+        if self.fail_multi_model_idle_on_call == idle_calls or idle_calls in self.fail_multi_model_idle_on_calls:
             raise TimeoutError("cleanup idle wait failed")
         for unit in self.pending_unit_removals:
             self.units.remove(unit)
@@ -203,6 +204,29 @@ class RecordingKubernetesClient:
 
     def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
         return list(self.pods)
+
+    def get_ready_charm_pods_by_unit(
+        self,
+        application: str,
+        namespace: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, CharmPod]:
+        pods = self.wait_for_charm_pods_ready(application, namespace, len(units), timeout)
+        result: dict[str, CharmPod] = {}
+        for pod in pods:
+            metadata = pod.metadata
+            assert metadata is not None and metadata.name is not None and metadata.uid is not None
+            unit = (metadata.annotations or {})["unit.juju.is/id"]
+            result[unit] = CharmPod(unit=unit, name=metadata.name, uid=metadata.uid)
+        return result
+
+    def get_charm_pod_uids(self, application: str, namespace: str) -> set[str]:
+        return {
+            pod.metadata.uid
+            for pod in self.get_charm_pods(application, namespace)
+            if pod.metadata is not None and pod.metadata.uid is not None
+        }
 
     def restart_pod(
         self,

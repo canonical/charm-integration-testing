@@ -16,7 +16,7 @@ from kubernetes.client import (  # type: ignore[import-untyped]
     V1PodCondition,
     V1PodStatus,
 )
-from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
+from kubernetes_client import CharmPod, KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
 from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 
@@ -919,6 +919,51 @@ class TestKubernetesClientInit:
             # THEN it returns only after the desired pods are Running and Ready
             assert result == [ready_pod]
             assert mock_sleep.call_count == 1
+
+        def test_returns_ready_pod_references_keyed_by_juju_unit(self) -> None:
+            first = create_sample_pod("app-0", "test-namespace", uid="uid-0")
+            first.metadata.annotations = {"unit.juju.is/id": "app/0"}
+            second = create_sample_pod("app-1", "test-namespace", uid="uid-1")
+            second.metadata.annotations = {"unit.juju.is/id": "app/1"}
+            client = KubernetesClient(backend=MagicMock())
+
+            with patch.object(client, "wait_for_charm_pods_ready", return_value=[first, second]) as wait:
+                result = client.get_ready_charm_pods_by_unit(
+                    "app",
+                    "test-namespace",
+                    ["app/0", "app/1"],
+                    timedelta(seconds=10),
+                )
+
+            assert result == {
+                "app/0": CharmPod(unit="app/0", name="app-0", uid="uid-0"),
+                "app/1": CharmPod(unit="app/1", name="app-1", uid="uid-1"),
+            }
+            wait.assert_called_once_with("app", "test-namespace", expected_count=2, timeout=timedelta(seconds=10))
+
+        @pytest.mark.parametrize(
+            ("pods", "message"),
+            [
+                ([create_sample_pod("app-0", uid="uid-0")], "Expected one workload pod per Juju unit"),
+                (
+                    [
+                        create_sample_pod("app-0", uid="uid-0"),
+                        create_sample_pod("app-other", uid="uid-other"),
+                    ],
+                    "Unable to uniquely map Kubernetes pod",
+                ),
+            ],
+        )
+        def test_rejects_pod_sets_that_do_not_map_one_to_one(self, pods: list[V1Pod], message: str) -> None:
+            client = KubernetesClient(backend=MagicMock())
+            with patch.object(client, "wait_for_charm_pods_ready", return_value=pods):
+                with pytest.raises(RuntimeError, match=message):
+                    client.get_ready_charm_pods_by_unit(
+                        "app",
+                        "test-namespace",
+                        ["app/0", "app/1"],
+                        timedelta(seconds=10),
+                    )
 
         @patch("kubernetes_client.client.sleep")
         def test_waits_for_terminating_pod_to_be_replaced(self, mock_sleep: MagicMock) -> None:

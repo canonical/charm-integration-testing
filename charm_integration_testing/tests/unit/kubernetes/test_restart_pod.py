@@ -118,7 +118,7 @@ def test_waits_for_running_replacement_and_returns_name(clock: Clock, new_name: 
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 5
     assert replacement_name == new_name
-    assert hook.calls == []
+    assert hook.calls == [("model", new_name)]
 
 
 @pytest.mark.parametrize("candidate", ["sibling", "wrong-unit", "unannotated", "deleting", "no-uid"])
@@ -138,7 +138,7 @@ def test_ignores_pods_that_are_not_a_live_replacement(clock: Clock, candidate: s
     hook = Hook()
     restart(api, hook)
     assert api.reads == 2
-    assert hook.calls == []
+    assert hook.calls == [("model", "replacement")]
 
 
 @pytest.mark.parametrize("becomes_running", [True, False])
@@ -156,7 +156,7 @@ def test_replacement_without_status_waits_for_running(clock: Clock, becomes_runn
         restart(api, hook)
         assert api.reads == 2
         assert clock.now > 0
-        assert hook.calls == []
+        assert hook.calls == [("model", "target-1")]
     else:
         with pytest.raises(TimeoutError, match="was not replaced"):
             restart(api, hook)
