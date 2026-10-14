@@ -105,5 +105,10 @@ def provider_from_environment(
                 require("S3_ACCESS_KEY"),
                 require("S3_SECRET_KEY"),
             ),
+            cleanup_credentials=(
+                S3Credentials(require("S3_CLEANUP_ACCESS_KEY"), require("S3_CLEANUP_SECRET_KEY"))
+                if any(get(name) for name in _S3_CLEANUP_VARIABLES)
+                else None
+            ),
         )
     return None

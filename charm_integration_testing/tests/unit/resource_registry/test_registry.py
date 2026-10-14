@@ -278,6 +278,27 @@ class TestResourceRegistryTeardown:
         # THEN child is destroyed before parent
         assert order == ["child", "parent"]
 
+    def test_teardown_continues_after_child_failure(self) -> None:
+        order: list[str] = []
+        registry = _registry()
+        parent = HandleStub("parent")
+        failed_child = HandleStub("failed-child")
+        next_child = HandleStub("next-child")
+
+        registry.register(parent, destroyer=lambda: order.append("parent"))
+        registry.register(
+            failed_child,
+            destroyer=lambda: (_ for _ in ()).throw(RuntimeError("child teardown failed")),
+            parent=parent,
+        )
+        registry.register(next_child, destroyer=lambda: order.append("next-child"), parent=parent)
+
+        with pytest.raises(RuntimeError, match="child teardown failed"):
+            registry.teardown(parent)
+
+        assert order == ["next-child", "parent"]
+        assert registry.registered_handles() == []
+
     def test_teardown_failing_destroyer_raises(self) -> None:
         # GIVEN a resource with a failing destroyer
         registry = _registry()
