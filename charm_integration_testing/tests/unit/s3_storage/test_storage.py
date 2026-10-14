@@ -720,6 +720,27 @@ def test_stale_cleanup_retains_bucket_without_owner_tag(client: S3Client) -> Non
         stubber.assert_no_pending_responses()
 
 
+def test_stale_cleanup_retains_bucket_with_empty_owner_tag(client: S3Client) -> None:
+    keystone = KeystoneStub()
+    storage = S3Storage(
+        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+    )
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]}, {})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {"TagSet": [{"Key": "charmqa-storage-owner", "Value": ""}]},
+            {"Bucket": OLD_BUCKET},
+        )
+
+        with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources") as error:
+            storage.cleanup_stale(timedelta(hours=4), NOW)
+
+        assert str(error.value.__cause__) == "Missing ownership tag; retaining bucket"
+        assert keystone.deleted == []
+        stubber.assert_no_pending_responses()
+
+
 def test_stale_cleanup_retains_owned_bucket_without_credential_tag(client: S3Client) -> None:
     keystone = KeystoneStub()
     storage = S3Storage(
@@ -1178,6 +1199,34 @@ def test_environment_provider_identity_distinguishes_storage_credentials() -> No
     assert target.handle.resource_id != neighbor.handle.resource_id
     assert target.handle.resource_id == same_target.handle.resource_id
     assert "target-secret" not in target.handle.resource_id
+
+
+def test_environment_provider_identity_distinguishes_cleanup_credentials() -> None:
+    common_credentials = {
+        "S3_ENDPOINT": "https://s3.test",
+        "S3_ACCESS_KEY": "application-access",
+        "S3_SECRET_KEY": "application-secret",
+        "S3_BUCKET_NAMESPACE": "shared-environment",
+    }
+    target_environment = {
+        **common_credentials,
+        "S3_CLEANUP_ACCESS_KEY": "target-cleanup-access",
+        "S3_CLEANUP_SECRET_KEY": "target-cleanup-secret",
+    }
+    neighbor_environment = {
+        **common_credentials,
+        "S3_CLEANUP_ACCESS_KEY": "neighbor-cleanup-access",
+        "S3_CLEANUP_SECRET_KEY": "neighbor-cleanup-secret",
+    }
+
+    with requests.Session() as session:
+        target = provider_from_environment(target_environment, session)
+        neighbor = provider_from_environment(neighbor_environment, session)
+
+    assert target is not None
+    assert neighbor is not None
+    assert target.handle.resource_id != neighbor.handle.resource_id
+    assert "target-cleanup-secret" not in target.handle.resource_id
 
 
 def test_direct_provider_handles_distinguish_endpoints_and_credentials() -> None:
