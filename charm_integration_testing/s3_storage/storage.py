@@ -92,11 +92,11 @@ class S3Storage(S3Provider):
             raise ValueError("S3_BUCKET_NAMESPACE must not be empty")
         self._endpoint = endpoint.rstrip("/")
         self._region = region
-        self._handle = S3StorageHandle(namespace, identity)
         self._credential_provider = credential_provider
         self._bucket_owner = bucket_owner_identity or _stable_bucket_owner(
             "s3-storage", self._endpoint, namespace, region, credential_provider.cleanup_credentials.access_key
         )
+        self._handle = S3StorageHandle(namespace, identity if identity is not None else self._bucket_owner)
         self._prefix = f"charmqa-s3-{hashlib.sha256(namespace.encode()).hexdigest()[:8]}-"
         self._client_factory = client_factory or self._make_client
         self._pending_revocations: set[str] = set()
@@ -226,7 +226,7 @@ class S3Storage(S3Provider):
                             continue
                         if self._credential_provider.per_bucket_credentials:
                             access_key = next((tag["Value"] for tag in tags if tag["Key"] == S3_ACCESS_KEY_TAG), None)
-                            if access_key is None:
+                            if not access_key:
                                 raise RuntimeError("Missing EC2 access-key tag; retaining bucket")
                             self._credential_provider.revoke(access_key)
                         self._delete_bucket(client, name)
