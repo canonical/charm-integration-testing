@@ -29,7 +29,7 @@ class JujuResourceRegistryExtension(JujuExtension):
 
     def pre_bootstrap_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
-        if self._registry.has_destroyer(handle):
+        if self._registry.is_registered(handle):
             return
         self._registry.register(
             handle=handle,
