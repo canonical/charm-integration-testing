@@ -48,7 +48,7 @@ class S3IntegratorExtension(JujuExtension):
             if not self.resource_registry.is_registered(provider.handle):
                 self.resource_registry.register(
                     handle=provider.handle,
-                    destroyer=provider.cleanup_pending_credentials,
+                    destroyer=provider.cleanup_pending_resources,
                 )
             self.resource_registry.register(
                 handle=bucket_resource.handle,

@@ -258,7 +258,7 @@ def session_resource_registry(
         logger=logger,
     )
     for provider in {provider.handle.resource_id: provider for provider in s3_providers.values()}.values():
-        registry.register(handle=provider.handle, destroyer=provider.cleanup_pending_credentials)
+        registry.register(handle=provider.handle, destroyer=provider.cleanup_pending_resources)
     try:
         yield registry
     finally:
