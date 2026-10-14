@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuClient, JujuModelHandle, WorkloadInstance, WorkloadInstanceAdapter
 from kubernetes_client import KubernetesClient
 
 from validators.base import ValidationResult
@@ -49,25 +49,24 @@ class RecordingRotationJujuClient(JujuClient):
         self.recorder.validate_model(model, level or "simple")
         return {}
 
-    def restart_workload_pod(
+    def restart_workload_instance(
         self,
         model: JujuModelHandle,
-        pod_name: str,
-        pod_uid: str,
+        instance: WorkloadInstance,
         timeout: timedelta,
         *,
         application: str,
-        unit: str,
-        existing_uids: Collection[str],
+        existing_ids: Collection[str],
+        adapter: WorkloadInstanceAdapter | None = None,
     ) -> None:
         self.recorder.restart_workload_pod(
             model,
-            pod_name,
-            pod_uid,
+            instance.name,
+            instance.instance_id,
             timeout,
             application=application,
-            unit=unit,
-            existing_uids=set(existing_uids),
+            unit=instance.unit,
+            existing_uids=set(existing_ids),
         )
 
 
@@ -124,7 +123,7 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
 def test_rotation_requires_a_kubernetes_client_for_kubernetes_models() -> None:
     client = RecordingJujuClient(current_units=2)
 
-    with pytest.raises(RuntimeError, match="No KubernetesClient available"):
+    with pytest.raises(RuntimeError, match="No workload-instance adapter available"):
         _rotate_units(client, k8s_model=True)
 
 

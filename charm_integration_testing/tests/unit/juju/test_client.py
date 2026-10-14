@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from juju import JujuModelHandle, JujuValidationError
+from juju import JujuModelHandle, JujuValidationError, WorkloadInstance, WorkloadInstanceAdapter
 from juju.client import JujuClient
 from juju.extension import JujuExtension
 from juju.models import (
@@ -19,6 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
+from juju_jubilant.backend import KubernetesWorkloadInstanceAdapter
 from kubernetes_client import KubernetesClient, KubernetesExtension
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
@@ -133,9 +134,11 @@ class WorkloadPodBackendStub(UnitOperationsBackendStub):
     kubernetes_client: KubernetesClient | None = None
     resolved_models: list[JujuModelHandle] = field(default_factory=list)
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+    def get_workload_instance_adapter_for_model(self, model: JujuModelHandle) -> WorkloadInstanceAdapter | None:
         self.resolved_models.append(model)
-        return self.kubernetes_client
+        if self.kubernetes_client is None:
+            return None
+        return KubernetesWorkloadInstanceAdapter(self.kubernetes_client)
 
 
 class ExtensionStub(JujuExtension):
@@ -412,7 +415,7 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
-    def test_restart_workload_pod_registers_juju_kubernetes_extensions_on_shared_client(self) -> None:
+    def test_restart_workload_instance_registers_extensions_on_shared_adapter(self) -> None:
         kubernetes_extension = PodDeleteExtensionStub()
         juju_extension = PodDeleteExtensionStub()
         kubernetes_backend = MagicMock()
@@ -432,23 +435,19 @@ class TestJujuClientUnitOperations:
             "restart_pod",
             side_effect=restart_and_dispatch_hooks,
         ) as restart_pod:
-            client.restart_workload_pod(
+            client.restart_workload_instance(
                 model=model,
-                pod_name="pod",
-                pod_uid="old",
+                instance=WorkloadInstance(unit="app/1", name="pod", instance_id="old"),
                 timeout=timeout,
                 application="app",
-                unit="app/1",
-                existing_uids=existing_uids,
+                existing_ids=existing_uids,
             )
-            client.restart_workload_pod(
+            client.restart_workload_instance(
                 model=model,
-                pod_name="pod",
-                pod_uid="old",
+                instance=WorkloadInstance(unit="app/1", name="pod", instance_id="old"),
                 timeout=timeout,
                 application="app",
-                unit="app/1",
-                existing_uids=existing_uids,
+                existing_ids=existing_uids,
             )
 
         assert backend.resolved_models == [model, model]
@@ -466,20 +465,18 @@ class TestJujuClientUnitOperations:
         assert kubernetes_extension.deleted_pods == [("model", "replacement")] * 2
         assert juju_extension.deleted_pods == [("model", "replacement")] * 2
 
-    def test_restart_workload_pod_rejects_machine_models(self) -> None:
+    def test_restart_workload_instance_requires_adapter(self) -> None:
         backend = WorkloadPodBackendStub()
         client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
         model = JujuModelHandle(controller="controller", model="model")
 
-        with pytest.raises(RuntimeError, match="is not Kubernetes-backed"):
-            client.restart_workload_pod(
+        with pytest.raises(RuntimeError, match="no adapter is available"):
+            client.restart_workload_instance(
                 model=model,
-                pod_name="pod",
-                pod_uid="old",
+                instance=WorkloadInstance(unit="app/1", name="pod", instance_id="old"),
                 timeout=timedelta(minutes=5),
                 application="app",
-                unit="app/1",
-                existing_uids={"old"},
+                existing_ids={"old"},
             )
 
         assert backend.resolved_models == [model]

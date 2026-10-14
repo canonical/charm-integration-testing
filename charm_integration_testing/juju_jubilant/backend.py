@@ -13,6 +13,7 @@ import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable, overload
@@ -34,10 +35,12 @@ from juju import (
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
+    WorkloadInstance,
+    WorkloadInstanceAdapter,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -120,6 +123,71 @@ def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: Ju
         or "did not appear in cache timeout" in err_msg
     )
     return is_missing or is_migrating
+
+
+class KubernetesWorkloadInstanceAdapter:
+    def __init__(self, client: KubernetesClient) -> None:
+        self.client = client
+
+    def register_extensions(self, extensions: Collection[object]) -> list[object]:
+        handled: list[object] = []
+        for extension in extensions:
+            if isinstance(extension, KubernetesExtension):
+                self.client.register_extension(extension)
+                handled.append(extension)
+        return handled
+
+    def get_ready_instances(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, WorkloadInstance]:
+        pods = self.client.get_ready_charm_pods_by_unit(application, model.model, units, timeout)
+        return {unit: WorkloadInstance(unit=pod.unit, name=pod.name, instance_id=pod.uid) for unit, pod in pods.items()}
+
+    def get_instance_ids(self, application: str, model: JujuModelHandle) -> set[str]:
+        return self.client.get_charm_pod_uids(application, model.model)
+
+    def restart_instance(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        instance: WorkloadInstance,
+        timeout: timedelta,
+        existing_ids: Collection[str],
+    ) -> None:
+        self.client.restart_pod(
+            namespace=model.model,
+            pod_name=instance.name,
+            uid=instance.instance_id,
+            timeout=timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_instances(
+        self, application: str, model: JujuModelHandle, expected_count: int, timeout: timedelta
+    ) -> None:
+        self.client.wait_for_charm_pods_ready(application, model.model, expected_count, timeout)
+
+    def wait_for_replacements(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self.client.wait_for_charm_pods_replaced(
+            application,
+            model.model,
+            expected_count,
+            previous_ids,
+            timeout=timeout,
+        )
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -1009,6 +1077,12 @@ class JubilantBackend(JujuCmdBackend):
         if model_info.type != "kubernetes":
             return None
         return self.get_kubernetes_client(model_info.cloud)
+
+    def get_workload_instance_adapter_for_model(self, model: JujuModelHandle) -> WorkloadInstanceAdapter | None:
+        client = self.get_kubernetes_client_for_model(model)
+        if client is None:
+            return None
+        return KubernetesWorkloadInstanceAdapter(client)
 
     def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller

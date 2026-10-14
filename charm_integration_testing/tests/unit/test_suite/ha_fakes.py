@@ -3,8 +3,9 @@
 
 from collections.abc import Callable, Collection
 from datetime import timedelta
+from typing import cast
 
-from juju import JujuModelHandle
+from juju import JujuModelHandle, WorkloadInstance, WorkloadInstanceAdapter
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import CharmPod, KubernetesClient
 
@@ -136,6 +137,11 @@ class RecordingJujuBackend(NullJujuBackend):
     def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
         return self.kubernetes_client
 
+    def get_workload_instance_adapter_for_model(self, model: JujuModelHandle) -> WorkloadInstanceAdapter | None:
+        if self.kubernetes_client is None:
+            return None
+        return cast(WorkloadInstanceAdapter, self.kubernetes_client)
+
 
 class RecordingKubernetesClient:
     def __init__(self, application: str, unit_count: int, *, statefulset: bool = True) -> None:
@@ -227,6 +233,55 @@ class RecordingKubernetesClient:
             for pod in self.get_charm_pods(application, namespace)
             if pod.metadata is not None and pod.metadata.uid is not None
         }
+
+    def register_extensions(self, extensions: Collection[object]) -> list[object]:
+        return []
+
+    def get_ready_instances(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, WorkloadInstance]:
+        pods = self.get_ready_charm_pods_by_unit(application, model.model, units, timeout)
+        return {unit: WorkloadInstance(unit=pod.unit, name=pod.name, instance_id=pod.uid) for unit, pod in pods.items()}
+
+    def get_instance_ids(self, application: str, model: JujuModelHandle) -> set[str]:
+        return self.get_charm_pod_uids(application, model.model)
+
+    def restart_instance(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        instance: WorkloadInstance,
+        timeout: timedelta,
+        existing_ids: Collection[str],
+    ) -> None:
+        self.restart_pod(
+            model.model,
+            instance.name,
+            instance.instance_id,
+            timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_instances(
+        self, application: str, model: JujuModelHandle, expected_count: int, timeout: timedelta
+    ) -> None:
+        self.wait_for_charm_pods_ready(application, model.model, expected_count, timeout)
+
+    def wait_for_replacements(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self.wait_for_charm_pods_replaced(application, model.model, expected_count, previous_ids, timeout)
 
     def restart_pod(
         self,

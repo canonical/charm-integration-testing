@@ -13,6 +13,8 @@ from .backend import (
     JujuUnitState,
     JujuWaitState,
     JujuWaitTimeoutError,
+    WorkloadInstance,
+    WorkloadInstanceAdapter,
     warn_performance,
 )
 from .client import JujuClient, JujuValidationError
@@ -55,6 +57,8 @@ __all__ = [
     "JujuVersion",
     "JujuWaitState",
     "JujuWaitTimeoutError",
+    "WorkloadInstance",
+    "WorkloadInstanceAdapter",
     "ParsedOfferUrl",
     "PersistenceKey",
     "rekey_persistence_state_controller",

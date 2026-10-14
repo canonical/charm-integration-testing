@@ -6,11 +6,9 @@ from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesClient, KubernetesExtension
-
 from validators.base import ValidationResult
 
-from .backend import JujuBackend
+from .backend import JujuBackend, WorkloadInstance, WorkloadInstanceAdapter
 from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
 from .extension import JujuExtension
 from .handles import JujuModelHandle
@@ -61,14 +59,11 @@ class JujuClient:
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
-        kubernetes_client = (
-            self.backend.get_kubernetes_client_for_model(model) if self.backend.is_k8s_model(model) else None
-        )
-        if kubernetes_client is not None:
-            self._register_kubernetes_extensions(kubernetes_client)
+        adapter = self.backend.get_workload_instance_adapter_for_model(model)
+        handled_extensions = adapter.register_extensions(self.extensions) if adapter is not None else []
         unit = self.backend.restart_follower(model, application, timeout)
         for extension in self.extensions:
-            if kubernetes_client is not None and isinstance(extension, KubernetesExtension):
+            if any(extension is handled for handled in handled_extensions):
                 continue
             extension.post_restart_unit(model, unit)
         self.logger.info(f"Restarted follower {unit}.")
@@ -90,38 +85,23 @@ class JujuClient:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
 
-    def restart_workload_pod(
+    def restart_workload_instance(
         self,
         model: JujuModelHandle,
-        pod_name: str,
-        pod_uid: str,
+        instance: WorkloadInstance,
         timeout: timedelta,
         *,
         application: str,
-        unit: str,
-        existing_uids: Collection[str],
+        existing_ids: Collection[str],
+        adapter: WorkloadInstanceAdapter | None = None,
     ) -> None:
-        """Restart a workload pod and dispatch configured lifecycle hooks on its replacement."""
-        kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
-        if kubernetes_client is None:
-            raise RuntimeError(f"Cannot restart workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
-
-        self.logger.info(f"Restarting workload pod {pod_name} in model {model.uri}.")
-        self._register_kubernetes_extensions(kubernetes_client)
-        kubernetes_client.restart_pod(
-            namespace=model.model,
-            pod_name=pod_name,
-            uid=pod_uid,
-            timeout=timeout,
-            application=application,
-            unit=unit,
-            existing_uids=existing_uids,
-        )
-
-    def _register_kubernetes_extensions(self, kubernetes_client: KubernetesClient) -> None:
-        for extension in self.extensions:
-            if isinstance(extension, KubernetesExtension):
-                kubernetes_client.register_extension(extension)
+        """Restart a workload instance and register configured adapter lifecycle hooks."""
+        adapter = adapter or self.backend.get_workload_instance_adapter_for_model(model)
+        if adapter is None:
+            raise RuntimeError(f"Cannot restart workload instance for model {model.uri}: no adapter is available.")
+        adapter.register_extensions(self.extensions)
+        self.logger.info(f"Restarting workload instance {instance.name} in model {model.uri}.")
+        adapter.restart_instance(application, model, instance, timeout, existing_ids)
 
     def rotate_application_units(
         self,
@@ -142,10 +122,10 @@ class JujuClient:
             raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
         models = list(dict.fromkeys([model, *(related_models or [])]))
         if self.backend.is_k8s_model(model):
-            kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
-            if kubernetes_client is None:
-                raise RuntimeError(f"No KubernetesClient available for Kubernetes model {model.uri}.")
-            self._rotate_kubernetes_units(kubernetes_client, application, model, units, models, timeout)
+            adapter = self.backend.get_workload_instance_adapter_for_model(model)
+            if adapter is None:
+                raise RuntimeError(f"No workload-instance adapter available for Kubernetes model {model.uri}.")
+            self._rotate_kubernetes_units(adapter, application, model, units, models, timeout)
         else:
             self._rotate_machine_units(application, model, units, models, timeout)
 
@@ -158,74 +138,63 @@ class JujuClient:
 
     def _rotate_kubernetes_units(
         self,
-        kubernetes_client: KubernetesClient,
+        adapter: WorkloadInstanceAdapter,
         application: str,
         model: JujuModelHandle,
         units: list[str],
         models: list[JujuModelHandle],
         timeout: timedelta,
     ) -> None:
-        pods_by_unit = kubernetes_client.get_ready_charm_pods_by_unit(
+        instances_by_unit = adapter.get_ready_instances(
             application,
-            model.model,
+            model,
             units,
             timeout,
         )
-        original_uids = {pod.uid for pod in pods_by_unit.values()}
+        original_ids = {instance.instance_id for instance in instances_by_unit.values()}
 
         try:
             self.scale_application(application, len(units) + 1, model=model)
-            kubernetes_client.wait_for_charm_pods_ready(
-                application,
-                model.model,
-                expected_count=len(units) + 1,
-                timeout=timeout,
-            )
+            adapter.wait_for_instances(application, model, len(units) + 1, timeout)
             self.multi_model_idle_for_period(models, timeout=timeout)
             for unit in units:
-                pod = pods_by_unit[unit]
-                existing_uids = kubernetes_client.get_charm_pod_uids(application, model.model)
-                if pod.uid not in existing_uids:
-                    raise RuntimeError(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
+                instance = instances_by_unit[unit]
+                existing_ids = adapter.get_instance_ids(application, model)
+                if instance.instance_id not in existing_ids:
+                    raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                self.restart_workload_pod(
-                    model=model,
-                    pod_name=pod.name,
-                    pod_uid=pod.uid,
+                self.restart_workload_instance(
+                    model,
+                    instance,
                     timeout=timeout,
                     application=application,
-                    unit=unit,
-                    existing_uids=existing_uids,
+                    existing_ids=existing_ids,
+                    adapter=adapter,
                 )
-                kubernetes_client.wait_for_charm_pods_ready(
-                    application,
-                    model.model,
-                    expected_count=len(units) + 1,
-                    timeout=timeout,
-                )
+                adapter.wait_for_instances(application, model, len(units) + 1, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:
                     self.validate_model(model=model_ref, level="simple")
         except BaseException as rotation_error:
             try:
-                self._restore_kubernetes_unit_count(kubernetes_client, application, model, len(units), models, timeout)
+                self._restore_kubernetes_unit_count(adapter, application, model, len(units), models, timeout)
             except BaseException as cleanup_error:
                 raise rotation_error from cleanup_error
             raise
         else:
-            self._restore_kubernetes_unit_count(kubernetes_client, application, model, len(units), models, timeout)
+            self._restore_kubernetes_unit_count(adapter, application, model, len(units), models, timeout)
 
-        kubernetes_client.wait_for_charm_pods_replaced(
+        adapter.wait_for_replacements(
             application,
-            model.model,
-            expected_count=len(units),
-            previous_uids=original_uids,
-            timeout=timeout,
+            model,
+            len(units),
+            original_ids,
+            timeout,
         )
 
     def _restore_kubernetes_unit_count(
         self,
-        kubernetes_client: KubernetesClient,
+        adapter: WorkloadInstanceAdapter,
         application: str,
         model: JujuModelHandle,
         unit_count: int,
@@ -242,12 +211,7 @@ class JujuClient:
         except Exception as error:
             cleanup_errors.append(error)
         try:
-            kubernetes_client.wait_for_charm_pods_ready(
-                application,
-                model.model,
-                expected_count=unit_count,
-                timeout=timeout,
-            )
+            adapter.wait_for_instances(application, model, unit_count, timeout)
         except Exception as convergence_error:
             cleanup_errors.append(convergence_error)
 

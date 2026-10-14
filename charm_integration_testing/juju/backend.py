@@ -3,12 +3,12 @@
 
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, Protocol, TypeVar
 
 from kubernetes_client import KubernetesClient
 from pydantic.dataclasses import dataclass
@@ -39,6 +39,51 @@ class JujuPerformanceWarning(UserWarning):
 
 class JujuStatusPerformanceWarning(JujuPerformanceWarning):
     """Warning when juju status operations are slow."""
+
+
+@dataclass(frozen=True)
+class WorkloadInstance:
+    unit: str
+    name: str
+    instance_id: str
+
+
+class WorkloadInstanceAdapter(Protocol):
+    def register_extensions(self, extensions: Collection[object]) -> list[object]:
+        """Register substrate-specific extensions and return those handled by the adapter."""
+        ...
+
+    def get_ready_instances(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, WorkloadInstance]: ...
+
+    def get_instance_ids(self, application: str, model: JujuModelHandle) -> set[str]: ...
+
+    def restart_instance(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        instance: WorkloadInstance,
+        timeout: timedelta,
+        existing_ids: Collection[str],
+    ) -> None: ...
+
+    def wait_for_instances(
+        self, application: str, model: JujuModelHandle, expected_count: int, timeout: timedelta
+    ) -> None: ...
+
+    def wait_for_replacements(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None: ...
 
 
 def warn_performance(
@@ -499,3 +544,7 @@ class JujuBackend(ABC):
         Unsupported backends raise rather than infer the cloud from the controller.
         """
         raise NotImplementedError("Model-aware Kubernetes client resolution is not supported by this backend.")
+
+    def get_workload_instance_adapter_for_model(self, model: JujuModelHandle) -> WorkloadInstanceAdapter | None:
+        """Return substrate-neutral workload operations for a model, when supported."""
+        return None
