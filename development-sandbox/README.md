@@ -17,7 +17,7 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
-Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
+Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/setup-s3`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
@@ -29,6 +29,7 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 | `bin/setup-k8s.sh` | Install Canonical k8s and Chaos Mesh, and register as Juju cloud |
 | `bash bin/setup-chaos-mesh.sh` | Install or verify Chaos Mesh on an existing sandbox cluster |
 | `bin/setup-lxd.sh` | Install/initialize LXD for Juju's built-in `localhost` cloud |
+| `bash bin/setup-s3.sh` | Start a local S3-compatible SeaweedFS service without a charm |
 | `bin/verify-validator.sh` | Run quality gates and workload-up/down evidence |
 | `bin/dev-validate.py` | Inject validators into a unit and report results |
 
@@ -62,6 +63,14 @@ For manual bootstrap:
 juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
 juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
 ```
+
+## S3 storage
+
+For tests whose bundles include s3-integrator, use the
+[setup-s3 skill](../.agents/skills/setup-s3/SKILL.md) and load
+`$HOME/.local/share/charmqa-s3/s3.env` before running the suite. The endpoint must
+be reachable from deployed units, not just from the VM. Local S3 uses generated
+keys and does not need production Swift credentials.
 
 ## Token setup
 
