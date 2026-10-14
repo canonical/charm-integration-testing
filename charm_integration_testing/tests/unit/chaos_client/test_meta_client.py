@@ -1020,3 +1020,41 @@ def test_no_successful_io_latency_cannot_pass_status_check(injection_failed: boo
     tool.check_io_latency.assert_not_called()
     client.cleanup_all()
     assert tool.cleanup.call_count == int(injection_failed)
+
+
+def test_status_checks_do_not_cross_operations() -> None:
+    """A successful I/O latency injection must not make check_stress report success, and vice versa."""
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    tool.io_latency.return_value = IoLatencyInjection(duration=DURATION, injected_at=0.0)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+
+    # GIVEN only an I/O latency experiment was successfully injected for the unit
+    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+
+    # THEN checking stress must not be satisfied by the unrelated I/O latency action
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
+        client.check_stress(TEST_MODEL, UNIT)
+    tool.check_stress.assert_not_called()
+
+    # AND checking I/O latency still succeeds against its own action
+    client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_called_once_with(TEST_MODEL, UNIT, "/data", allow_completed=False)
+
+    client.cleanup_all()
+
+    # GIVEN only a stress experiment was successfully injected for the unit
+    tool.reset_mock()
+    client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+
+    # THEN checking I/O latency must not be satisfied by the unrelated stress action
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_not_called()
+
+    # AND checking stress still succeeds against its own action
+    client.check_stress(TEST_MODEL, UNIT)
+    tool.check_stress.assert_called_once_with(TEST_MODEL, UNIT, allow_completed=False)
+
+    client.cleanup_all()

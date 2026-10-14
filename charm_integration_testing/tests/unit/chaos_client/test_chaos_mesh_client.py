@@ -302,6 +302,18 @@ class TestExperimentAvailability:
         assert client._created == []
         assert client._scopes == {}
 
+    def test_io_latency_rejects_before_looking_up_the_pod(self) -> None:
+        # GIVEN a backend without the IOChaos CRD and no resolvable pod for the unit
+        backend = BackendStub(crds=("stresschaos.chaos-mesh.org",))
+        backend.core_v1_api.pods = []
+        client = ChaosMeshChaosClient(backend)
+
+        # WHEN requesting I/O latency injection
+        # THEN the unsupported-operation error is raised without querying Kubernetes for the pod
+        with pytest.raises(NotImplementedError, match="iochaos"):
+            client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10))
+        assert backend.core_v1_api.calls == []
+
     def test_missing_capability_falls_back_to_next_client(self) -> None:
         # GIVEN stress-only Mesh followed by a client capable of I/O latency
         first = BackendStub(crds=("stresschaos.chaos-mesh.org",))

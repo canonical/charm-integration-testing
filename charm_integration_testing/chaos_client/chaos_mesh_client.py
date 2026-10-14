@@ -83,6 +83,8 @@ class ChaosMeshChaosClient(ChaosClient):
         percent: int,
         duration: timedelta,
     ) -> IoLatencyInjection:
+        if "iochaos.chaos-mesh.org" in self._missing_crds:
+            raise NotImplementedError("IOChaos experiments require the 'iochaos.chaos-mesh.org' CRD.")
         application = unit.split("/")[0]
         pod, _ = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {

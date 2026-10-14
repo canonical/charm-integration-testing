@@ -44,6 +44,7 @@ class _CleanupAction:
     path: str
     run: Callable[[], None]
     check_tool: ChaosClient | None = None
+    operation: str = ""
 
 
 class MetaChaosClient(ChaosClient):
@@ -122,7 +123,9 @@ class MetaChaosClient(ChaosClient):
         tools = {
             id(action.check_tool): action.check_tool
             for action in self._cleanups
-            if action.scope == (model.uri, unit) and action.check_tool is not None
+            if action.scope == (model.uri, unit)
+            and action.operation in {"stress_cpu", "stress_memory"}
+            and action.check_tool is not None
         }
         if not tools:
             raise RuntimeError(f"No successfully started stress for {model.uri}/{unit}.")
@@ -247,7 +250,10 @@ class MetaChaosClient(ChaosClient):
         tools = {
             id(action.check_tool): action.check_tool
             for action in self._cleanups
-            if action.scope == (model.uri, unit) and action.path == volume_path and action.check_tool is not None
+            if action.scope == (model.uri, unit)
+            and action.path == volume_path
+            and action.operation == "io_latency"
+            and action.check_tool is not None
         }
         if not tools:
             raise RuntimeError(f"No successfully started I/O latency experiment for {model.uri}/{unit}:{volume_path}.")
@@ -361,7 +367,7 @@ class MetaChaosClient(ChaosClient):
                 pending.append(action)
                 raise
             if operation in {"stress_cpu", "stress_memory", "io_latency"}:
-                action = replace(action, check_tool=tool)
+                action = replace(action, check_tool=tool, operation=operation)
             pending.append(action)
             return
         self._on_unsupported(operation)
