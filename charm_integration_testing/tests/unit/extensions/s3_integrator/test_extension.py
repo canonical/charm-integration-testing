@@ -69,6 +69,9 @@ class StorageStub(S3Provider):
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
         return []
 
+    def cleanup_pending_resources(self) -> None:
+        pass
+
 
 class BucketStub(S3Bucket):
     def __init__(self, handle: S3BucketHandle) -> None:
