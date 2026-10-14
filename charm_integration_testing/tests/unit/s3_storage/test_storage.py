@@ -911,6 +911,56 @@ def test_environment_reports_partial_credentials_without_values() -> None:
             )
 
 
+def test_environment_reports_prefixed_missing_credentials() -> None:
+    prefix = "TARGET_"
+    swift_environment = {
+        f"{prefix}S3_OS_AUTH_URL": SWIFT.auth_url,
+        f"{prefix}S3_OS_USERNAME": SWIFT.username,
+        f"{prefix}S3_OS_PASSWORD": SWIFT.password,
+        f"{prefix}S3_OS_USER_DOMAIN_NAME": SWIFT.user_domain_name,
+        f"{prefix}S3_OS_PROJECT_NAME": SWIFT.project_name,
+        f"{prefix}S3_OS_PROJECT_DOMAIN_NAME": SWIFT.project_domain_name,
+        f"{prefix}S3_OS_STORAGE_URL": SWIFT.storage_url,
+    }
+    static_environment = {
+        f"{prefix}S3_ENDPOINT": "https://s3.test",
+        f"{prefix}S3_ACCESS_KEY": CREDS.access_key,
+        f"{prefix}S3_SECRET_KEY": CREDS.secret_key,
+    }
+
+    with requests.Session() as session:
+        with pytest.raises(ValueError, match="TARGET_S3_SECRET_KEY"):
+            provider_from_environment(
+                {f"{prefix}S3_ENDPOINT": "https://s3.test", f"{prefix}S3_ACCESS_KEY": CREDS.access_key},
+                session,
+                prefix=prefix,
+            )
+        with pytest.raises(ValueError, match="TARGET_S3_OS_AUTH_URL"):
+            provider_from_environment(
+                {f"{prefix}S3_OS_STORAGE_URL": SWIFT.storage_url},
+                session,
+                prefix=prefix,
+            )
+        with pytest.raises(ValueError, match="TARGET_S3_CLEANUP_SECRET_KEY"):
+            provider_from_environment(
+                {
+                    **swift_environment,
+                    f"{prefix}S3_CLEANUP_ACCESS_KEY": CLEANUP_CREDS.access_key,
+                },
+                session,
+                prefix=prefix,
+            )
+        with pytest.raises(ValueError, match="TARGET_S3_CLEANUP_SECRET_KEY"):
+            provider_from_environment(
+                {
+                    **static_environment,
+                    f"{prefix}S3_CLEANUP_ACCESS_KEY": CLEANUP_CREDS.access_key,
+                },
+                session,
+                prefix=prefix,
+            )
+
+
 def test_non_rgw_swift_url_needs_explicit_endpoint() -> None:
     swift = SwiftCredentials(
         SWIFT.auth_url,
