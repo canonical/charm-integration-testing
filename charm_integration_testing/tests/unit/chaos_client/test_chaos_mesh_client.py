@@ -1190,10 +1190,26 @@ def test_io_latency_injected_at_follows_slow_resource_creation() -> None:
     now = 0.0
 
     class SlowCreateApi(FakeCustomObjectsApi):
-        def create_namespaced_custom_object(self, **kwargs: object) -> dict[str, Any]:
+        def create_namespaced_custom_object(
+            self,
+            *,
+            group: str,
+            version: str,
+            namespace: str,
+            plural: str,
+            body: dict[str, object],
+            _request_timeout: float | None = None,
+        ) -> dict[str, Any]:
             nonlocal now
             now += 5.0  # Simulate a slow Kubernetes API response.
-            return super().create_namespaced_custom_object(**kwargs)
+            return super().create_namespaced_custom_object(
+                group=group,
+                version=version,
+                namespace=namespace,
+                plural=plural,
+                body=body,
+                _request_timeout=_request_timeout,
+            )
 
     backend.custom_objects_api = SlowCreateApi(inject_stress=True)
     mesh = ChaosMeshChaosClient(backend, clock=lambda: now)
