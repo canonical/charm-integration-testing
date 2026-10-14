@@ -44,16 +44,16 @@ def provider_from_environment(
     def require(name: str) -> str:
         value = get(name)
         if not value:
-            raise ValueError(f"Missing S3 credential variable: {name}")
+            raise ValueError(f"Missing S3 credential variable: {prefix}{name}")
         return value
 
     namespace = get("S3_BUCKET_NAMESPACE") or "local"
     region = get("S3_REGION") or "us-east-1"
     if get("S3_OS_STORAGE_URL"):
-        missing = [name for name in _SWIFT_VARIABLES if not get(name)]
+        missing = [f"{prefix}{name}" for name in _SWIFT_VARIABLES if not get(name)]
         if missing:
             raise ValueError("Missing Swift credential variables: " + ", ".join(missing))
-        missing_cleanup = [name for name in _S3_CLEANUP_VARIABLES if not get(name)]
+        missing_cleanup = [f"{prefix}{name}" for name in _S3_CLEANUP_VARIABLES if not get(name)]
         if missing_cleanup:
             raise ValueError("Missing S3 cleanup credential variables: " + ", ".join(missing_cleanup))
         credentials = SwiftCredentials(
@@ -89,7 +89,7 @@ def provider_from_environment(
             ),
         )
     if any(get(name) for name in _S3_VARIABLES):
-        missing = [name for name in _S3_VARIABLES if not get(name)]
+        missing = [f"{prefix}{name}" for name in _S3_VARIABLES if not get(name)]
         if missing:
             raise ValueError("Missing S3 credential variables: " + ", ".join(missing))
         return StaticS3Provider(
