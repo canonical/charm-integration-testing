@@ -1192,8 +1192,8 @@ def test_environment_provider_identity_distinguishes_storage_credentials() -> No
         neighbor = provider_from_environment(neighbor_environment, session)
         same_target = provider_from_environment(target_environment, session)
 
-    assert target is not None
-    assert neighbor is not None
+    assert isinstance(target, StaticS3Provider)
+    assert isinstance(neighbor, StaticS3Provider)
     assert same_target is not None
     assert target.handle.namespace == neighbor.handle.namespace == shared_namespace
     assert target.handle.resource_id != neighbor.handle.resource_id
@@ -1223,8 +1223,8 @@ def test_environment_provider_identity_distinguishes_cleanup_credentials() -> No
         target = provider_from_environment(target_environment, session)
         neighbor = provider_from_environment(neighbor_environment, session)
 
-    assert target is not None
-    assert neighbor is not None
+    assert isinstance(target, StaticS3Provider)
+    assert isinstance(neighbor, StaticS3Provider)
     assert target.handle.resource_id != neighbor.handle.resource_id
     assert target._bucket_owner != neighbor._bucket_owner
     assert "target-cleanup-secret" not in target.handle.resource_id
