@@ -3,363 +3,229 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 from typing import Any
 
 import pytest
 import yaml
-from extensions.remote_logging.extension import (
-    CONTROLLER_APPLICATION,
-    DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
-    EXTERNAL_CONFIG_ENDPOINT,
-    INTEGRATOR_CHARM,
-    JUJU_INFO_ENDPOINT,
-    KUBERNETES_COLLECTOR_CHARM,
-    MACHINE_COLLECTOR_CHARM,
-    RemoteLoggingExtension,
-)
-from juju import JujuModelHandle, JujuWaitTimeoutError
+from extensions.remote_logging.extension import RemoteLoggingExtension, controller_namespace, scraper_namespace
+from extensions.remote_logging.scraper import KUBERNETES_NAMESPACES_KEY, KUBERNETES_SCRAPER_NAME, USERDATA_KEY
+from juju.handles import JujuControllerHandle
+from kubernetes_client import KubernetesClient
+from resource_registry import ResourceRegistry
 
-from ..shared import JujuStub as JujuStubBase
+from ..shared import NullJujuBackend
 
 CONTROLLER = "test-controller"
-CONTROLLER_MODEL = JujuModelHandle(controller=CONTROLLER, model="controller")
 OTLP_ENDPOINT = "observability.example:4317"
 
 
 @dataclass
-class JujuStub(JujuStubBase):
-    deployments: list[tuple[str, str, str | None, dict[str, Any] | None, bool]] = field(default_factory=list)
-    deployment_error_for: str | None = None
-    wait_error_for: str | None = None
-    status_error_calls: set[int] = field(default_factory=set)
-    status_models: list[str] = field(default_factory=list)
-    events: list[str] = field(default_factory=list)
+class KubernetesStub:
+    config_maps: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
+    daemon_sets: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    namespaces: list[str] = field(default_factory=list)
+    deleted_namespaces: list[str] = field(default_factory=list)
+    restarts: list[tuple[str, str]] = field(default_factory=list)
 
-    def deploy_application(
-        self,
-        model: JujuModelHandle,
-        charm: str,
-        application: str | None = None,
-        config: dict[str, Any] | None = None,
-        trust: bool = False,
-        force: bool = False,
-        channel: str | None = None,
-    ) -> None:
-        self.events.append(f"deploy:{charm}")
-        if charm == self.deployment_error_for:
-            raise RuntimeError(f"failed to deploy {charm}")
-        self.deployments.append((model.uri, charm, application, config, trust))
-        super().deploy_application(
-            model,
-            charm,
-            application=application,
-            config=config,
-            trust=trust,
-            force=force,
-            channel=channel,
-        )
+    def ensure_namespace(self, name: str) -> None:
+        self.namespaces.append(name)
 
-    def wait_application_settled(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        timeout: timedelta | None,
-    ) -> None:
-        self.events.append(f"wait:{application}")
-        super().wait_application_settled(model, application, timeout)
-        if application == self.wait_error_for:
-            raise JujuWaitTimeoutError()
+    def delete_namespace(self, name: str) -> None:
+        self.deleted_namespaces.append(name)
 
-    def juju_status_text(self, model: JujuModelHandle) -> str:
-        call = len(self.status_models) + 1
-        self.status_models.append(model.uri)
-        self.events.append("status")
-        if call in self.status_error_calls:
-            raise RuntimeError(f"status call {call} failed")
-        return "controller status\n"
+    def apply_config_map(self, namespace: str, body: dict[str, Any]) -> None:
+        self.config_maps[(namespace, body["metadata"]["name"])] = body
+
+    def read_config_map_data(self, namespace: str, name: str) -> dict[str, str] | None:
+        body = self.config_maps.get((namespace, name))
+        return None if body is None else dict(body["data"])
+
+    def apply_daemon_set(self, namespace: str, body: dict[str, Any]) -> None:
+        self.daemon_sets.append((namespace, body))
+
+    def restart_daemon_set(self, namespace: str, name: str) -> None:
+        self.restarts.append((namespace, name))
 
 
-class TestRemoteLoggingExtension:
-    @pytest.fixture
-    def logger(self) -> logging.Logger:
-        return logging.getLogger("test")
+@dataclass
+class JujuStub(NullJujuBackend):
+    k8s_clouds: set[str] = field(default_factory=set)
+    kubernetes: KubernetesStub = field(default_factory=KubernetesStub)
 
-    def test_skips_controller_without_endpoint(
-        self,
-        caplog: pytest.LogCaptureFixture,
-        logger: logging.Logger,
-    ) -> None:
-        # GIVEN no remote logging endpoint for this controller
-        juju = JujuStub()
-        extension = RemoteLoggingExtension(juju, logger, {})
+    def is_k8s_cloud(self, cloud: str) -> bool:
+        return cloud in self.k8s_clouds
 
-        # WHEN the controller is bootstrapped
-        with caplog.at_level(logging.DEBUG):
-            extension.post_bootstrap_controller(CONTROLLER)
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        return self.kubernetes if controller in self.k8s_clouds else None  # type: ignore[return-value]
 
-        # THEN no controller-model operations are performed
-        assert juju.deployments == []
-        assert juju.integrations == []
-        assert juju.waited_settled == []
-        assert juju.status_models == []
-        assert f"Skipping remote logging setup for controller '{CONTROLLER}'" in caplog.text
 
-    @pytest.mark.parametrize(
-        ("is_k8s", "collector_charm", "collector_trust"),
-        [
-            pytest.param(True, KUBERNETES_COLLECTOR_CHARM, True, id="kubernetes"),
-            pytest.param(False, MACHINE_COLLECTOR_CHARM, False, id="machine"),
-        ],
+@pytest.fixture
+def logger() -> logging.Logger:
+    return logging.getLogger("test-remote-logging")
+
+
+def _registry_with_controller(logger: logging.Logger) -> ResourceRegistry:
+    registry = ResourceRegistry([], logger)
+    registry.register(JujuControllerHandle(CONTROLLER))
+    return registry
+
+
+def _extension(
+    juju: JujuStub,
+    logger: logging.Logger,
+    endpoints: dict[str, str] | None = None,
+    registry: ResourceRegistry | None = None,
+) -> RemoteLoggingExtension:
+    return RemoteLoggingExtension(
+        juju,
+        logger,
+        {CONTROLLER: OTLP_ENDPOINT} if endpoints is None else endpoints,
+        registry or _registry_with_controller(logger),
     )
-    def test_deploys_configures_integrates_and_waits(
-        self,
-        caplog: pytest.LogCaptureFixture,
-        logger: logging.Logger,
-        is_k8s: bool,
-        collector_charm: str,
-        collector_trust: bool,
-    ) -> None:
-        # GIVEN a configured controller with no existing telemetry applications
-        juju = JujuStub(is_k8s=is_k8s)
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+
+
+class TestMachineControllers:
+    def test_bootstrap_adds_userdata_for_the_controller_machine(self, logger: logging.Logger) -> None:
+        # GIVEN a machine cloud and a configured endpoint
+        extension = _extension(JujuStub(), logger)
+
+        # WHEN the bootstrap configuration is prepared
+        config = extension.pre_bootstrap_controller("lxd", CONTROLLER, {"foo": "bar"})
+
+        # THEN the userdata installs a collector exporting to the endpoint, labelled with the controller
+        assert config["foo"] == "bar"
+        userdata = yaml.safe_load(config[USERDATA_KEY])
+        collector_config = yaml.safe_load(userdata["write_files"][0]["content"])
+        assert collector_config["exporters"]["otlp"]["endpoint"] == OTLP_ENDPOINT
+        assert collector_config["receivers"]["filelog"]["include"] == ["/var/log/juju/*.log"]
+        assert collector_config["receivers"]["filelog"]["resource"] == {
+            "juju_controller": CONTROLLER,
+            "juju_model": "controller",
+        }
+        assert any("systemctl enable --now otelcol-scraper" in command for command in userdata["postruncmd"])
+
+    def test_bootstrap_leaves_kubernetes_clouds_unchanged(self, logger: logging.Logger) -> None:
+        extension = _extension(JujuStub(k8s_clouds={"k8s"}), logger)
+
+        assert extension.pre_bootstrap_controller("k8s", CONTROLLER, {"foo": "bar"}) == {"foo": "bar"}
+
+    def test_bootstrap_leaves_unconfigured_controllers_unchanged(self, logger: logging.Logger) -> None:
+        extension = _extension(JujuStub(), logger, endpoints={})
+
+        assert extension.pre_bootstrap_controller("lxd", CONTROLLER, {}) == {}
+
+    def test_add_model_adds_userdata_labelled_with_the_model(self, logger: logging.Logger) -> None:
+        extension = _extension(JujuStub(), logger)
+
+        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"})
+
+        collector_config = yaml.safe_load(yaml.safe_load(config[USERDATA_KEY])["write_files"][0]["content"])
+        assert config["foo"] == "bar"
+        assert collector_config["receivers"]["filelog"]["resource"]["juju_model"] == "my-model"
+
+    def test_add_model_keeps_userdata_provided_by_the_user(self, logger: logging.Logger) -> None:
+        # GIVEN user provided cloud-init data
+        existing = yaml.safe_dump({"packages": ["jq"], "postruncmd": ["echo user"]})
+        extension = _extension(JujuStub(), logger)
+
+        # WHEN the model config is extended
+        config = extension.pre_add_model(CONTROLLER, "my-model", {USERDATA_KEY: existing})
+
+        # THEN the user's entries are preserved ahead of ours
+        userdata = yaml.safe_load(config[USERDATA_KEY])
+        assert userdata["packages"] == ["jq"]
+        assert userdata["postruncmd"][0] == "echo user"
+        assert len(userdata["postruncmd"]) > 1
+
+    def test_add_model_leaves_unconfigured_controllers_unchanged(self, logger: logging.Logger) -> None:
+        extension = _extension(JujuStub(), logger, endpoints={})
+
+        assert extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}) == {"foo": "bar"}
+
+
+class TestKubernetesControllers:
+    def test_bootstrap_deploys_the_scraper_for_the_controller_namespace(self, logger: logging.Logger) -> None:
+        # GIVEN a Kubernetes controller
+        juju = JujuStub(k8s_clouds={CONTROLLER})
+        extension = _extension(juju, logger)
 
         # WHEN the controller is bootstrapped
-        with caplog.at_level(logging.DEBUG):
-            extension.post_bootstrap_controller(CONTROLLER)
-
-        # THEN the substrate-specific collector and configured integrator are deployed
-        assert juju.deployments[0] == (CONTROLLER_MODEL.uri, collector_charm, collector_charm, None, collector_trust)
-        integrator_deployment = juju.deployments[1]
-        assert integrator_deployment[:3] == (CONTROLLER_MODEL.uri, INTEGRATOR_CHARM, INTEGRATOR_CHARM)
-        assert integrator_deployment[4] is False
-        assert integrator_deployment[3] is not None
-        assert integrator_deployment[3]["metrics_pipeline"] is False
-        assert integrator_deployment[3]["traces_pipeline"] is False
-        assert integrator_deployment[3]["logs_pipeline"] is True
-        assert yaml.safe_load(integrator_deployment[3]["config_yaml"]) == {
-            "receivers": {
-                "syslog": {
-                    "tcp": {"listen_address": "0.0.0.0:5424"},
-                    "protocol": "rfc5424",
-                }
-            },
-            "exporters": {
-                "otlp": {
-                    "endpoint": OTLP_ENDPOINT,
-                    "tls": {"insecure": True},
-                }
-            },
-        }
-        expected_integrations = []
-        if not is_k8s:
-            expected_integrations.append(
-                (
-                    CONTROLLER_MODEL.uri,
-                    collector_charm,
-                    JUJU_INFO_ENDPOINT,
-                    CONTROLLER_APPLICATION,
-                    JUJU_INFO_ENDPOINT,
-                )
-            )
-        expected_integrations.append(
-            (
-                CONTROLLER_MODEL.uri,
-                INTEGRATOR_CHARM,
-                EXTERNAL_CONFIG_ENDPOINT,
-                collector_charm,
-                EXTERNAL_CONFIG_ENDPOINT,
-            )
-        )
-        assert juju.integrations == expected_integrations
-        timeout = str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)
-        assert juju.waited_settled == [
-            (CONTROLLER_MODEL.uri, CONTROLLER_APPLICATION, timeout),
-            (CONTROLLER_MODEL.uri, collector_charm, timeout),
-            (CONTROLLER_MODEL.uri, INTEGRATOR_CHARM, timeout),
-        ]
-        assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
-        assert juju.events == [
-            "status",
-            f"wait:{CONTROLLER_APPLICATION}",
-            f"deploy:{collector_charm}",
-            f"deploy:{INTEGRATOR_CHARM}",
-            f"wait:{collector_charm}",
-            f"wait:{INTEGRATOR_CHARM}",
-            "status",
-        ]
-        assert f"Juju status before remote logging changes for controller model '{CONTROLLER_MODEL.uri}'" in caplog.text
-        assert f"Juju status after remote logging changes for controller model '{CONTROLLER_MODEL.uri}'" in caplog.text
-        assert "controller status" in caplog.text
-        assert f"Selected collector charm '{collector_charm}'" in caplog.text
-        assert f"Waiting for application '{collector_charm}' to settle" in caplog.text
-        assert f"Completed remote logging setup for controller model '{CONTROLLER_MODEL.uri}'" in caplog.text
-
-    def test_reuses_existing_applications_and_integration(self, logger: logging.Logger) -> None:
-        # GIVEN the stack already exists under custom application names and is integrated
-        juju = JujuStub(
-            applications={
-                "collector": KUBERNETES_COLLECTOR_CHARM,
-                "integrator": INTEGRATOR_CHARM,
-            }
-        )
-        juju.integrations.append(
-            (
-                CONTROLLER_MODEL.uri,
-                "integrator",
-                EXTERNAL_CONFIG_ENDPOINT,
-                "collector",
-                EXTERNAL_CONFIG_ENDPOINT,
-            )
-        )
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
-
-        # WHEN the hook runs again
         extension.post_bootstrap_controller(CONTROLLER)
 
-        # THEN it updates the integrator config without redeploying or duplicating the relation
-        assert juju.deployments == []
-        assert len(juju.integrations) == 1
-        assert juju.configured_applications == [
-            (
-                CONTROLLER_MODEL.uri,
-                "integrator",
-                {
-                    "config_yaml": (
-                        "receivers:\n"
-                        "  syslog:\n"
-                        "    tcp:\n"
-                        "      listen_address: 0.0.0.0:5424\n"
-                        "    protocol: rfc5424\n"
-                        "exporters:\n"
-                        "  otlp:\n"
-                        f"    endpoint: {OTLP_ENDPOINT}\n"
-                        "    tls:\n"
-                        "      insecure: true\n"
-                    ),
-                    "metrics_pipeline": "false",
-                    "traces_pipeline": "false",
-                    "logs_pipeline": "true",
-                },
-            )
+        # THEN a scraper exports the controller namespace's pod logs to the endpoint
+        namespace = scraper_namespace(CONTROLLER)
+        assert juju.kubernetes.namespaces == [namespace]
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert data[KUBERNETES_NAMESPACES_KEY] == controller_namespace(CONTROLLER)
+        collector_config = yaml.safe_load(data["config.yaml"])
+        assert collector_config["exporters"]["otlp"]["endpoint"] == OTLP_ENDPOINT
+        assert collector_config["receivers"]["filelog"]["include"] == [
+            f"/var/log/pods/{controller_namespace(CONTROLLER)}_*/*/*.log"
         ]
+        assert [(ns, body["kind"]) for ns, body in juju.kubernetes.daemon_sets] == [(namespace, "DaemonSet")]
 
-    def test_reuses_existing_machine_collector_relations(self, logger: logging.Logger) -> None:
-        # GIVEN the machine stack and both required relations already exist
-        juju = JujuStub(
-            is_k8s=False,
-            applications={
-                "collector": MACHINE_COLLECTOR_CHARM,
-                "integrator": INTEGRATOR_CHARM,
-            },
-        )
-        juju.integrations.extend(
-            [
-                (
-                    CONTROLLER_MODEL.uri,
-                    "collector",
-                    JUJU_INFO_ENDPOINT,
-                    CONTROLLER_APPLICATION,
-                    JUJU_INFO_ENDPOINT,
-                ),
-                (
-                    CONTROLLER_MODEL.uri,
-                    "integrator",
-                    EXTERNAL_CONFIG_ENDPOINT,
-                    "collector",
-                    EXTERNAL_CONFIG_ENDPOINT,
-                ),
-            ]
-        )
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+    def test_bootstrap_skips_controller_without_endpoint(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER})
 
-        # WHEN the hook runs again
+        _extension(juju, logger, endpoints={}).post_bootstrap_controller(CONTROLLER)
+
+        assert juju.kubernetes.daemon_sets == []
+
+    def test_add_model_extends_the_scraper_and_restarts_it(self, logger: logging.Logger) -> None:
+        # GIVEN a deployed scraper
+        juju = JujuStub(k8s_clouds={CONTROLLER})
+        extension = _extension(juju, logger)
         extension.post_bootstrap_controller(CONTROLLER)
 
-        # THEN neither relation is duplicated
-        assert len(juju.integrations) == 2
+        # WHEN a model is added
+        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"})
 
-    def test_propagates_deployment_failure_and_logs_final_status(self, logger: logging.Logger) -> None:
-        # GIVEN the collector deployment fails and no concurrent deployment appears
-        juju = JujuStub(deployment_error_for=KUBERNETES_COLLECTOR_CHARM)
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
-
-        # WHEN/THEN the failure is surfaced
-        with pytest.raises(RuntimeError, match=f"failed to deploy {KUBERNETES_COLLECTOR_CHARM}"):
-            extension.post_bootstrap_controller(CONTROLLER)
-
-        # AND status is captured before and after the failed change
-        assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
-        assert juju.events == [
-            "status",
-            f"wait:{CONTROLLER_APPLICATION}",
-            f"deploy:{KUBERNETES_COLLECTOR_CHARM}",
-            "status",
+        # THEN the model config is untouched and its namespace is scraped
+        namespace = scraper_namespace(CONTROLLER)
+        assert config == {"foo": "bar"}
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert data[KUBERNETES_NAMESPACES_KEY].split("\n") == [controller_namespace(CONTROLLER), "my-model"]
+        assert yaml.safe_load(data["config.yaml"])["receivers"]["filelog"]["include"] == [
+            f"/var/log/pods/{controller_namespace(CONTROLLER)}_*/*/*.log",
+            "/var/log/pods/my-model_*/*/*.log",
         ]
+        assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
 
-    def test_propagates_wait_timeout_and_logs_final_status(self, logger: logging.Logger) -> None:
-        # GIVEN the collector does not settle before the remote logging timeout
-        juju = JujuStub(wait_error_for=KUBERNETES_COLLECTOR_CHARM)
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+    def test_add_model_already_scraped_does_not_restart(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER})
+        extension = _extension(juju, logger)
+        extension.post_bootstrap_controller(CONTROLLER)
+        extension.pre_add_model(CONTROLLER, "my-model", {})
 
-        # WHEN/THEN the timeout remains visible to the caller
-        with pytest.raises(JujuWaitTimeoutError):
-            extension.post_bootstrap_controller(CONTROLLER)
+        # AND a fresh extension instance, as created for every test
+        _extension(juju, logger).pre_add_model(CONTROLLER, "my-model", {})
 
-        # AND status is captured after the timeout without waiting for the integrator
-        assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
-        assert juju.waited_settled == [
-            (CONTROLLER_MODEL.uri, CONTROLLER_APPLICATION, str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT)),
-            (
-                CONTROLLER_MODEL.uri,
-                KUBERNETES_COLLECTOR_CHARM,
-                str(DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT),
-            ),
-        ]
-        assert juju.events[-2:] == [f"wait:{KUBERNETES_COLLECTOR_CHARM}", "status"]
+        assert len(juju.kubernetes.restarts) == 1
 
-    def test_status_failures_do_not_fail_successful_setup(
-        self,
-        caplog: pytest.LogCaptureFixture,
-        logger: logging.Logger,
-    ) -> None:
-        # GIVEN both diagnostic status commands fail
-        juju = JujuStub(status_error_calls={1, 2})
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+    def test_add_model_without_scraper_does_nothing(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER})
 
-        # WHEN the remote logging stack is configured
-        with caplog.at_level(logging.WARNING):
-            extension.post_bootstrap_controller(CONTROLLER)
+        _extension(juju, logger).pre_add_model(CONTROLLER, "my-model", {})
 
-        # THEN setup still completes and both diagnostic failures are logged
-        assert len(juju.waited_settled) == 3
-        assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
-        assert caplog.text.count("Failed to collect Juju status") == 2
+        assert juju.kubernetes.restarts == []
 
-    def test_final_status_failure_does_not_mask_setup_failure(self, logger: logging.Logger) -> None:
-        # GIVEN deployment and the final diagnostic status command both fail
-        juju = JujuStub(
-            deployment_error_for=KUBERNETES_COLLECTOR_CHARM,
-            status_error_calls={2},
-        )
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+    def test_registry_teardown_removes_the_scraper_namespace(self, logger: logging.Logger) -> None:
+        # GIVEN a deployed scraper and a registered controller
+        juju = JujuStub(k8s_clouds={CONTROLLER})
+        registry = _registry_with_controller(logger)
+        controller_handle = JujuControllerHandle(CONTROLLER)
+        _extension(juju, logger, registry=registry).post_bootstrap_controller(CONTROLLER)
+        assert juju.kubernetes.deleted_namespaces == []
 
-        # WHEN/THEN the original setup failure is preserved
-        with pytest.raises(RuntimeError, match=f"failed to deploy {KUBERNETES_COLLECTOR_CHARM}"):
-            extension.post_bootstrap_controller(CONTROLLER)
+        # WHEN the controller is torn down
+        registry.teardown(controller_handle)
 
-        assert juju.status_models == [CONTROLLER_MODEL.uri, CONTROLLER_MODEL.uri]
+        # THEN the scraper namespace is deleted
+        assert juju.kubernetes.deleted_namespaces == [scraper_namespace(CONTROLLER)]
 
-    def test_waits_for_controller_before_making_changes(self, logger: logging.Logger) -> None:
-        # GIVEN the controller application does not settle
-        juju = JujuStub(wait_error_for=CONTROLLER_APPLICATION)
-        extension = RemoteLoggingExtension(juju, logger, {CONTROLLER: OTLP_ENDPOINT})
+    def test_machine_controller_registers_nothing(self, logger: logging.Logger) -> None:
+        registry = ResourceRegistry([], logger)
 
-        # WHEN/THEN the timeout is surfaced
-        with pytest.raises(JujuWaitTimeoutError):
-            extension.post_bootstrap_controller(CONTROLLER)
+        _extension(JujuStub(), logger, registry=registry).post_bootstrap_controller(CONTROLLER)
 
-        # AND nothing is deployed or integrated
-        assert juju.events == ["status", f"wait:{CONTROLLER_APPLICATION}", "status"]
-        assert juju.deployments == []
-        assert juju.integrations == []
+        assert registry.registered_handles() == []

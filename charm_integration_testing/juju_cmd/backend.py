@@ -50,6 +50,12 @@ class JujuCmdBackend(JujuBackend):
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.show_model(model).type == "kubernetes"
 
+    def is_k8s_cloud(self, cloud: str) -> bool:
+        clouds = json.loads(
+            self._call_juju(CmdArg(value="clouds"), CmdArg(value="--client"), CmdArg(name="format", value="json"))
+        )
+        return bool(clouds[cloud]["type"] == "k8s")
+
     def show_model(self, model: JujuModelHandle) -> JujuModel:
         return JujuModel(
             **(

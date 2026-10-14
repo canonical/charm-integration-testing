@@ -203,6 +203,11 @@ class JujuBackend(ABC):
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         raise NotImplementedError
 
+    @abstractmethod
+    def is_k8s_cloud(self, cloud: str) -> bool:
+        """Return True if *cloud*, as known to the Juju client, is a Kubernetes cloud."""
+        raise NotImplementedError
+
     def is_k8s_controller(self, controller: str) -> bool:
         """Return True if the controller is Kubernetes-based."""
         return self.is_k8s_model(JujuModelHandle(controller=controller, model="controller"))

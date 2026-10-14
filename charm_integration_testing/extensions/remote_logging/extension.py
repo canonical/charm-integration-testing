@@ -2,37 +2,81 @@
 # See LICENSE file for licensing details.
 
 import logging
-from datetime import timedelta
-from typing import Any
+from dataclasses import dataclass
 
-import yaml
-from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuIntegrationApplication, JujuModelHandle
+from juju import JujuBackend, JujuExtension
+from juju.handles import JujuControllerHandle
+from kubernetes_client import KubernetesClient
+from resource_registry import ResourceRegistry
 
-KUBERNETES_COLLECTOR_CHARM = "opentelemetry-collector-k8s"
-MACHINE_COLLECTOR_CHARM = "opentelemetry-collector"
-INTEGRATOR_CHARM = "opentelemetry-collector-integrator"
-EXTERNAL_CONFIG_ENDPOINT = "external-config"
-CONTROLLER_APPLICATION = "controller"
-JUJU_INFO_ENDPOINT = "juju-info"
+from .scraper import (
+    KUBERNETES_NAMESPACES_KEY,
+    KUBERNETES_SCRAPER_NAME,
+    USERDATA_KEY,
+    kubernetes_config_map,
+    kubernetes_daemon_set,
+    machine_userdata,
+    merge_userdata,
+)
 
-COLLECTOR_CHANNEL = "dev/edge"
-INTEGRATOR_CHANNEL = "3.0/stable"
+CONTROLLER_MODEL = "controller"
 
-DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT = timedelta(minutes=15)
+
+def scraper_namespace(controller: str) -> str:
+    return f"log-scraper-{controller}"
+
+
+def controller_namespace(controller: str) -> str:
+    return f"controller-{controller}"
+
+
+@dataclass(frozen=True)
+class LogScraperHandle:
+    """Registry handle of the log scraper deployed for a Kubernetes controller."""
+
+    controller: str
+
+    @property
+    def resource_id(self) -> str:
+        return f"remote-logging:scraper:{self.controller}"
+
+    @property
+    def resource_type(self) -> str:
+        return "remote-logging:scraper"
+
+    @property
+    def path_segment(self) -> str:
+        return f"remote-logging-scraper-{self.controller}"
 
 
 class RemoteLoggingExtension(JujuExtension):
-    """Deploy a remote logging stack into configured controller models after bootstrap."""
+    """Ship the logs of a controller and its models to a remote OTLP receiver.
+
+    Machine controllers and models get a collector installed on every machine through the
+    ``cloudinit-userdata`` model config. Kubernetes controllers get a single DaemonSet scraping the pod logs of
+    the controller and model namespaces.
+    """
 
     def __init__(
         self,
         juju: JujuBackend,
         logger: logging.Logger,
         endpoints_by_controller: dict[str, str],
+        resource_registry: ResourceRegistry,
     ) -> None:
         self.juju = juju
         self.logger = logger
         self.endpoints_by_controller = endpoints_by_controller
+        self.resource_registry = resource_registry
+
+    def pre_bootstrap_controller(
+        self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
+    ) -> dict[str, str]:
+        endpoint = self.endpoints_by_controller.get(controller)
+        if endpoint is None or self.juju.is_k8s_cloud(cloud):
+            return bootstrap_configuration
+        self.logger.debug(f"Shipping logs of controller '{controller}' to '{endpoint}' from its machines.")
+        return self._with_userdata(bootstrap_configuration, endpoint, controller, CONTROLLER_MODEL)
 
     def post_bootstrap_controller(self, controller: str) -> None:
         endpoint = self.endpoints_by_controller.get(controller)
@@ -40,191 +84,53 @@ class RemoteLoggingExtension(JujuExtension):
             self.logger.debug(f"Skipping remote logging setup for controller '{controller}': no endpoint configured.")
             return
 
-        model = JujuModelHandle(controller=controller, model="controller")
-        self.logger.debug(f"Starting remote logging setup for controller model '{model.uri}'.")
-        self._log_status(model, phase="before")
-
-        try:
-            self.logger.debug(f"Waiting for application '{CONTROLLER_APPLICATION}' to settle in '{model.uri}'.")
-            self.juju.wait_application_settled(
-                model,
-                CONTROLLER_APPLICATION,
-                timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
-            )
-
-            collector_charm = (
-                KUBERNETES_COLLECTOR_CHARM if self.juju.is_k8s_controller(controller) else MACHINE_COLLECTOR_CHARM
-            )
-            self.logger.debug(f"Selected collector charm '{collector_charm}' for controller model '{model.uri}'.")
-
-            applications = self.juju.list_applications(model)
-            self.logger.debug(f"Found {len(applications)} application(s) in controller model '{model.uri}'.")
-
-            collector = self._ensure_deployed(
-                model,
-                applications,
-                charm=collector_charm,
-                config=None,
-                trust=collector_charm == KUBERNETES_COLLECTOR_CHARM,
-                channel=COLLECTOR_CHANNEL,
-            )
-            integrator_config = self._integrator_config(endpoint)
-            integrator = self._ensure_deployed(
-                model,
-                applications,
-                charm=INTEGRATOR_CHARM,
-                config=integrator_config,
-                trust=False,
-                channel=INTEGRATOR_CHANNEL,
-            )
-
-            if integrator in applications:
-                self.logger.debug(f"Updating configuration for existing application '{integrator}' in '{model.uri}'.")
-                self.juju.configure_application(
-                    model,
-                    integrator,
-                    {
-                        key: str(value).lower() if isinstance(value, bool) else value
-                        for key, value in integrator_config.items()
-                    },
-                )
-
-            if collector_charm == MACHINE_COLLECTOR_CHARM:
-                if self.juju.integration_exists(
-                    collector,
-                    JUJU_INFO_ENDPOINT,
-                    CONTROLLER_APPLICATION,
-                    JUJU_INFO_ENDPOINT,
-                    model,
-                ):
-                    self.logger.debug(
-                        f"Reusing integration between '{collector}' and '{CONTROLLER_APPLICATION}' in '{model.uri}'."
-                    )
-                else:
-                    self.logger.debug(f"Integrating '{collector}' with '{CONTROLLER_APPLICATION}' in '{model.uri}'.")
-                    self.juju.integrate(
-                        model,
-                        JujuIntegrationApplication(collector, JUJU_INFO_ENDPOINT),
-                        JujuIntegrationApplication(CONTROLLER_APPLICATION, JUJU_INFO_ENDPOINT),
-                    )
-
-            if self.juju.integration_exists(
-                integrator,
-                EXTERNAL_CONFIG_ENDPOINT,
-                collector,
-                EXTERNAL_CONFIG_ENDPOINT,
-                model,
-            ):
-                self.logger.debug(f"Reusing integration between '{integrator}' and '{collector}' in '{model.uri}'.")
-            else:
-                self.logger.debug(f"Integrating '{integrator}' with '{collector}' in '{model.uri}'.")
-                self.juju.integrate(
-                    model,
-                    JujuIntegrationApplication(integrator, EXTERNAL_CONFIG_ENDPOINT),
-                    JujuIntegrationApplication(collector, EXTERNAL_CONFIG_ENDPOINT),
-                )
-
-            for application in (collector, integrator):
-                self.logger.debug(f"Waiting for application '{application}' to settle in '{model.uri}'.")
-                self.juju.wait_application_settled(
-                    model,
-                    application,
-                    timeout=DEFAULT_REMOTE_LOGGING_DEPLOY_TIMEOUT,
-                )
-                self.logger.debug(f"Application '{application}' settled in '{model.uri}'.")
-        except Exception:
-            self.logger.debug(f"Remote logging setup failed for controller model '{model.uri}'.", exc_info=True)
-            raise
-        else:
-            self.logger.debug(f"Completed remote logging setup for controller model '{model.uri}'.")
-        finally:
-            self._log_status(model, phase="after")
-
-    def _log_status(self, model: JujuModelHandle, *, phase: str) -> None:
-        try:
-            status = self.juju.juju_status_text(model)
-        except Exception:
-            self.logger.warning(
-                f"Failed to collect Juju status {phase} remote logging changes for controller model '{model.uri}'.",
-                exc_info=True,
-            )
+        kubernetes = self.juju.get_kubernetes_client_for_controller(controller)
+        if kubernetes is None:
             return
-
-        separator = "-" * 80
-        self.logger.info(
-            f"Juju status {phase} remote logging changes for controller model '{model.uri}':\n"
-            f"{separator}\n{status}{separator}"
+        namespace = scraper_namespace(controller)
+        self.logger.debug(f"Deploying log scraper to namespace '{namespace}' for controller '{controller}'.")
+        kubernetes.ensure_namespace(namespace)
+        kubernetes.apply_config_map(
+            namespace, kubernetes_config_map(namespace, endpoint, controller, [controller_namespace(controller)])
+        )
+        kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
+        # Torn down with the controller, before it is killed: the controller's own teardown bypasses extension hooks.
+        self.resource_registry.register(
+            handle=LogScraperHandle(controller),
+            destroyer=lambda: kubernetes.delete_namespace(namespace),
+            parent=JujuControllerHandle(controller),
         )
 
-    def _ensure_deployed(
-        self,
-        model: JujuModelHandle,
-        applications: dict[str, JujuApplicationInfo],
-        *,
-        charm: str,
-        config: dict[str, Any] | None,
-        trust: bool,
-        channel: str,
-    ) -> str:
-        existing = self._find_application(applications, charm)
-        if existing is not None:
-            self.logger.debug(f"Reusing application '{existing}' for charm '{charm}' in '{model.uri}'.")
-            return existing
+    def pre_add_model(self, controller: str, model: str, model_config: dict[str, str]) -> dict[str, str]:
+        endpoint = self.endpoints_by_controller.get(controller)
+        if endpoint is None:
+            return model_config
 
-        self.logger.debug(f"Deploying charm '{charm}' as application '{charm}' in '{model.uri}'.")
-        try:
-            self.juju.deploy_application(
-                model,
-                charm,
-                application=charm,
-                config=config,
-                trust=trust,
-                channel=channel,
-            )
-            self.logger.info(f"Deployed '{charm}' into '{model.uri}'.")
-            return charm
-        except Exception as error:
-            self.logger.debug(
-                f"Deployment of charm '{charm}' in '{model.uri}' raised; checking for a concurrent deployment.",
-                exc_info=True,
-            )
-            existing = self._find_application(self.juju.list_applications(model), charm)
-            if existing is None:
-                raise error from None
-            self.logger.debug(
-                f"Using concurrently deployed application '{existing}' for charm '{charm}' in '{model.uri}'."
-            )
-            return existing
+        kubernetes = self.juju.get_kubernetes_client_for_controller(controller)
+        if kubernetes is None:
+            self.logger.debug(f"Shipping logs of model '{model}' to '{endpoint}' from its machines.")
+            return self._with_userdata(model_config, endpoint, controller, model)
+
+        self._scrape_namespace(kubernetes, endpoint, controller, model)
+        return model_config
 
     @staticmethod
-    def _find_application(applications: dict[str, JujuApplicationInfo], charm: str) -> str | None:
-        for application, info in applications.items():
-            if info.charm == charm:
-                return application
-        return None
+    def _with_userdata(config: dict[str, str], endpoint: str, controller: str, model: str) -> dict[str, str]:
+        userdata = merge_userdata(config.get(USERDATA_KEY), machine_userdata(endpoint, controller, model))
+        return {**config, USERDATA_KEY: userdata}
 
-    @staticmethod
-    def _integrator_config(endpoint: str) -> dict[str, Any]:
-        config_yaml = yaml.safe_dump(
-            {
-                "receivers": {
-                    "syslog": {
-                        "tcp": {"listen_address": "0.0.0.0:5424"},
-                        "protocol": "rfc5424",
-                    }
-                },
-                "exporters": {
-                    "otlp": {
-                        "endpoint": endpoint,
-                        "tls": {"insecure": True},
-                    }
-                },
-            },
-            sort_keys=False,
+    def _scrape_namespace(self, kubernetes: KubernetesClient, endpoint: str, controller: str, model: str) -> None:
+        """Add the namespace of *model* to the scraper, restarting it so the new path is picked up."""
+        namespace = scraper_namespace(controller)
+        data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
+        if data is None:
+            self.logger.debug(f"Not scraping logs of model '{model}': no scraper in namespace '{namespace}'.")
+            return
+        scraped = [name for name in data[KUBERNETES_NAMESPACES_KEY].split("\n") if name]
+        if model in scraped:
+            return
+        self.logger.debug(f"Adding namespace '{model}' to the log scraper of controller '{controller}'.")
+        kubernetes.apply_config_map(
+            namespace, kubernetes_config_map(namespace, endpoint, controller, [*scraped, model])
         )
-        return {
-            "config_yaml": config_yaml,
-            "metrics_pipeline": False,
-            "traces_pipeline": False,
-            "logs_pipeline": True,
-        }
+        kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)

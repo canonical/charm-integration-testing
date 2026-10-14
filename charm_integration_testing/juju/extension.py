@@ -43,8 +43,18 @@ class JujuExtension(ABC):
         """Run the persistence lifecycle for *application*, auto-deciding the op from tracked state."""
         return {}
 
+    def pre_bootstrap_controller(
+        self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
+    ) -> dict[str, str]:
+        """Return the bootstrap configuration to create *controller* with; extensions may extend it."""
+        return bootstrap_configuration
+
     def post_bootstrap_controller(self, controller: str) -> None:
         pass
+
+    def pre_add_model(self, controller: str, model: str, model_config: dict[str, str]) -> dict[str, str]:
+        """Return the model configuration to create *model* with; extensions may extend *model_config*."""
+        return model_config
 
     def post_add_model(self, controller: str, model: str) -> None:
         pass

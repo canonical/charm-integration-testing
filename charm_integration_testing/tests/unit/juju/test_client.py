@@ -1533,6 +1533,44 @@ class AddModelCloudBackendStub(NullJujuBackend):
         self.register_cloud_calls.append(cloud)
 
 
+class BootstrapBackendStub(NullJujuBackend):
+    """Backend stub that records the bootstrap configuration it is given."""
+
+    def __init__(self) -> None:
+        self.bootstrap_configurations: list[dict[str, str]] = []
+
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Path | None = None,
+        agent_version: str | None = None,
+    ) -> None:
+        self.bootstrap_configurations.append(bootstrap_configuration)
+
+
+class TestJujuClientBootstrapConfiguration:
+    def test_bootstrap_applies_extension_configuration(self) -> None:
+        # GIVEN an extension adding a bootstrap config key
+        class ConfigExtension(JujuExtension):
+            def pre_bootstrap_controller(
+                self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
+            ) -> dict[str, str]:
+                return {**bootstrap_configuration, "extra": f"{cloud}-{controller}"}
+
+        backend = BootstrapBackendStub()
+
+        # WHEN a controller is bootstrapped
+        _client(backend, [ConfigExtension()]).bootstrap_controller(
+            cloud="lxd", controller="ctrl", controller_constraints={}, bootstrap_configuration={"foo": "bar"}
+        )
+
+        # THEN the backend receives the extended configuration
+        assert backend.bootstrap_configurations == [{"foo": "bar", "extra": "lxd-ctrl"}]
+
+
 class TestJujuClientAddModelCloud:
     """Verify add_model passes cloud through to backend and add_cloud delegates."""
 
@@ -1547,6 +1585,21 @@ class TestJujuClientAddModelCloud:
         _client(backend).add_model(controller="ctrl-a", model="model-a", model_config={})
 
         assert backend.add_model_calls == [("ctrl-a", "model-a", {}, None)]
+
+    def test_add_model_applies_extension_model_config(self) -> None:
+        # GIVEN an extension adding a model config key
+        class ConfigExtension(JujuExtension):
+            def pre_add_model(self, controller: str, model: str, model_config: dict[str, str]) -> dict[str, str]:
+                return {**model_config, "extra": "value"}
+
+        backend = AddModelCloudBackendStub()
+        client = _client(backend, [ConfigExtension()])
+
+        # WHEN a model is added
+        client.add_model(controller="ctrl-a", model="model-a", model_config={"foo": "bar"})
+
+        # THEN the backend receives the extended configuration
+        assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar", "extra": "value"}, None)]
 
     def test_add_cloud_delegates_to_backend(self) -> None:
         backend = AddModelCloudBackendStub()
