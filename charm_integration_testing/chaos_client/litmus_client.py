@@ -17,6 +17,7 @@ from .litmus_detection import LITMUS_CRDS
 from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
 from .meta_client import ChaosCleanupError
+from .target import workload_target
 
 _GROUP = "litmuschaos.io"
 _VERSION = "v1alpha1"
@@ -166,32 +167,9 @@ class LitmusChaosClient(ChaosClient):
             raise ChaosCleanupError(errors) from errors[0]
 
     def _target(self, namespace: str, unit: str) -> tuple[str, str]:
-        application = unit.split("/")[0]
-        pods = self._backend.core_v1_api.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=f"app.kubernetes.io/name={application}",
-            _request_timeout=REQUEST_TIMEOUT,
+        return workload_target(
+            self._backend, namespace, unit, request_timeout=REQUEST_TIMEOUT, target_container=self._target_container
         )
-        matches = [
-            pod
-            for pod in pods.items
-            if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
-            and pod.metadata.deletion_timestamp is None
-            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(f"Expected one live Pod for {namespace}/{unit}, found {len(matches)}.")
-        pod = matches[0]
-        containers = [
-            container.name
-            for container in pod.spec.containers
-            if any(env.name == "JUJU_CONTAINER_NAME" and env.value == container.name for env in container.env or [])
-        ]
-        if self._target_container is not None:
-            containers = [name for name in containers if name == self._target_container]
-        if len(containers) != 1:
-            raise RuntimeError(f"Specify one workload container for {namespace}/{unit}; candidates: {containers}.")
-        return str(pod.metadata.name), containers[0]
 
     def _create(
         self,

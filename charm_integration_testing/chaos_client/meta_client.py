@@ -92,29 +92,42 @@ class MetaChaosClient(ChaosClient):
         duration: timedelta,
         *,
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
-    ) -> None:
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
-            match scenario:
-                case "exhaustion":
-                    merged_workers = self._merged_int(constraints.cpu_exhaustion_workers, workers)
-                    merged_duration = self._merged_duration(constraints.cpu_exhaustion_duration_seconds, duration)
-                case "moderate_pressure":
-                    merged_workers = self._merged_int(constraints.cpu_moderate_pressure_workers, workers)
-                    merged_duration = self._merged_duration(
-                        constraints.cpu_moderate_pressure_duration_seconds, duration
-                    )
-                case _:
-                    raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
-            return lambda tool: tool.stress_cpu(model, unit, merged_workers, merged_duration)
-
-        self._dispatch_constrained(
+        duration_margin: timedelta = timedelta(0),
+    ) -> timedelta:
+        """Inject CPU stress for the resolved duration plus margin; return the duration without margin."""
+        constraints = self._stress_constraints("stress_cpu", model, unit, duration_margin)
+        match scenario:
+            case "exhaustion":
+                worker_override = constraints.cpu_exhaustion_workers
+                duration_override = constraints.cpu_exhaustion_duration_seconds
+            case "moderate_pressure":
+                worker_override = constraints.cpu_moderate_pressure_workers
+                duration_override = constraints.cpu_moderate_pressure_duration_seconds
+            case _:
+                raise ValueError(f"Unsupported CPU stress scenario: {scenario!r}")
+        return self._dispatch_stress(
             "stress_cpu",
             model,
             unit,
-            build_invoke,
-            lambda tool: self._experiment_cleanup(tool, model, unit),
-            self._cleanups,
+            workers,
+            duration,
+            duration_margin,
+            worker_override,
+            duration_override,
+            lambda tool, count, seconds: tool.stress_cpu(model, unit, count, seconds),
         )
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Check only successful stress owners, retaining them until cleanup succeeds."""
+        tools = {
+            id(action.stress_tool): action.stress_tool
+            for action in self._cleanups
+            if action.scope == (model.uri, unit) and action.stress_tool is not None
+        }
+        if not tools:
+            raise RuntimeError(f"No successfully started stress for {model.uri}/{unit}.")
+        for tool in tools.values():
+            tool.check_stress(model, unit, allow_completed=allow_completed)
 
     def stress_memory(
         self,
@@ -127,40 +140,63 @@ class MetaChaosClient(ChaosClient):
         scenario: Literal["exhaustion", "moderate_pressure"] = "exhaustion",
         duration_margin: timedelta = timedelta(),
     ) -> timedelta:
-        if duration_margin < timedelta():
-            raise ValueError("Stress duration margin must not be negative.")
-
-        resolved_duration = duration
-
-        def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
-            nonlocal resolved_duration
-            match scenario:
-                case "exhaustion":
-                    merged_workers = self._merged_int(constraints.memory_exhaustion_workers, workers)
-                    merged_size_mb = self._merged_int(constraints.memory_exhaustion_size_mb, size_mb)
-                    merged_duration = self._merged_duration(constraints.memory_exhaustion_duration_seconds, duration)
-                case "moderate_pressure":
-                    merged_workers = self._merged_int(constraints.memory_moderate_pressure_workers, workers)
-                    merged_size_mb = self._merged_int(constraints.memory_moderate_pressure_size_mb, size_mb)
-                    merged_duration = self._merged_duration(
-                        constraints.memory_moderate_pressure_duration_seconds, duration
-                    )
-                case _:
-                    raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
-            resolved_duration = merged_duration
-            # Apply startup allowance after resolving the configured observation duration.
-            experiment_duration = merged_duration + duration_margin
-            return lambda tool: tool.stress_memory(model, unit, merged_workers, merged_size_mb, experiment_duration)
-
-        self._dispatch_constrained(
+        constraints = self._stress_constraints("stress_memory", model, unit, duration_margin)
+        match scenario:
+            case "exhaustion":
+                worker_override = constraints.memory_exhaustion_workers
+                size_override = constraints.memory_exhaustion_size_mb
+                duration_override = constraints.memory_exhaustion_duration_seconds
+            case "moderate_pressure":
+                worker_override = constraints.memory_moderate_pressure_workers
+                size_override = constraints.memory_moderate_pressure_size_mb
+                duration_override = constraints.memory_moderate_pressure_duration_seconds
+            case _:
+                raise ValueError(f"Unsupported memory stress scenario: {scenario!r}")
+        merged_size_mb = self._merged_int(size_override, size_mb)
+        return self._dispatch_stress(
             "stress_memory",
             model,
             unit,
-            build_invoke,
+            workers,
+            duration,
+            duration_margin,
+            worker_override,
+            duration_override,
+            lambda tool, count, seconds: tool.stress_memory(model, unit, count, merged_size_mb, seconds),
+        )
+
+    def _stress_constraints(
+        self, operation: str, model: JujuModelHandle, unit: str, duration_margin: timedelta
+    ) -> CharmResourceConstraints:
+        """Reject invalid margins and unsupported stress before looking up charm settings."""
+        if duration_margin < timedelta(0):
+            raise ValueError("Stress duration margin must be nonnegative.")
+        if not self.supports(operation):
+            self._on_unsupported(operation)
+        return self._resolve_constraints(model, unit)
+
+    def _dispatch_stress(
+        self,
+        operation: str,
+        model: JujuModelHandle,
+        unit: str,
+        workers: int,
+        duration: timedelta,
+        duration_margin: timedelta,
+        worker_override: int | None,
+        duration_override: int | None,
+        inject: Callable[[ChaosClient, int, timedelta], object],
+    ) -> timedelta:
+        """Apply overrides and startup margin, retaining the configured observation duration."""
+        merged_workers = self._merged_int(worker_override, workers)
+        merged_duration = self._merged_duration(duration_override, duration)
+        self._dispatch(
+            operation,
+            lambda tool: inject(tool, merged_workers, merged_duration + duration_margin),
             lambda tool: self._experiment_cleanup(tool, model, unit),
             self._cleanups,
         )
-        return resolved_duration
+        return merged_duration
 
     def io_latency(
         self,
@@ -200,17 +236,6 @@ class MetaChaosClient(ChaosClient):
 
     def remove_network_isolation(self, model: str, unit: str) -> None:
         self._cleanup(self._network_cleanups, (model, unit), "")
-
-    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        tools = [
-            action.stress_tool
-            for action in self._cleanups
-            if action.scope == (model.uri, unit) and action.stress_tool is not None
-        ]
-        if not tools:
-            raise RuntimeError(f"No active stress experiment recorded for {model.uri}/{unit}.")
-        for tool in dict.fromkeys(tools):
-            tool.check_stress(model, unit, allow_completed=allow_completed)
 
     def cleanup_all(self) -> None:
         """Clean up all pending experiments, including network isolation."""
