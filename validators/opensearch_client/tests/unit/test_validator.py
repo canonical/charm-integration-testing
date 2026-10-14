@@ -734,6 +734,23 @@ class TestOpenSearchClientPersistenceValidatorConnection:
             with pytest.raises(RuntimeError, match="index"):
                 validator.prepare()
 
+    @pytest.mark.parametrize(
+        "index_name", ["a,b", "logs-*", "te?t", "*", "_all", "-other", "remote:index", "<d-{now}>", ".."]
+    )
+    def test_prepare_raises_when_index_is_not_a_single_literal_name(self, index_name: str) -> None:
+        # GIVEN a provider-controlled "index" that OpenSearch would resolve as a multi-index
+        # selector (or otherwise not a single literal name), so canary reads/cleanup could reach
+        # unrelated indices
+        validator = _make_persistence_validator({**PERSISTENCE_VALID_DATABAG, "index": index_name})
+        client = PersistenceOpenSearchClientStub()
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN it is rejected before any request is made
+            with pytest.raises(RuntimeError, match="literal index name"):
+                validator.prepare()
+        assert client.indices == {}
+        assert client.search_calls == []
+
 
 class TestOpenSearchClientPersistenceValidatorPrepare:
     def test_writes_canary_document_and_returns_state(self) -> None:
@@ -858,6 +875,7 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert result.status == "PASS"
         assert new_state.ref == 3
         assert len(client.indices["test-index"].documents) == 3
+        assert "previous attempt" in next(c for c in result.checks if c.name == "document_count").message
 
     @pytest.mark.parametrize("refs", [[1, 2, 4], [1, 2, 3, 4], [1, 3]])
     def test_fails_when_extra_documents_are_not_exactly_the_next_ref(self, refs: list[int]) -> None:

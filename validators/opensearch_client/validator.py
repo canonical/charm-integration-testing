@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import re
 import tempfile
 import uuid
 from typing import Any
@@ -54,6 +55,10 @@ _KIND_VALUE = "opensearchclientpersistencecanary"
 # _delete_matching_documents() pages through results (see its docstring), so this bounds memory per
 # page rather than the total number of documents cleanup() can remove.
 _CLEANUP_SEARCH_SIZE = 10_000
+
+# A literal index/alias name only: rejects the comma lists, wildcards, date math, ``-exclusions`` and
+# ``cluster:index`` forms that OpenSearch search APIs would treat as selectors for other indices.
+_LITERAL_INDEX_NAME = re.compile(r"[a-z0-9.][a-z0-9._-]*")
 
 # Keep-alive for the scroll context _collect_matching_refs() opens - see its docstring for why
 # scroll (not search_after) is used to page through same-token documents.
@@ -459,7 +464,12 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             name="document_count",
             passed=passed,
             message=(
-                f"Found expected {expected.ref} marked document(s) in '{index_name}'."
+                f"Found expected {matching} marked document(s) in '{index_name}'"
+                + (
+                    " (including the next checkpoint document written by a previous attempt)."
+                    if already_written
+                    else "."
+                )
                 if passed
                 else (
                     f"Expected {expected.ref} marked document(s) with matching identity in "
@@ -535,6 +545,11 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         index_name = self.databag.get("index", "").strip()
         if not index_name:
             raise RuntimeError(f"Cannot run persistence checks for {self.endpoint}: no 'index' in relation databag.")
+        if not _LITERAL_INDEX_NAME.fullmatch(index_name) or index_name in {".", ".."}:
+            raise RuntimeError(
+                f"Cannot run persistence checks for {self.endpoint}: 'index' value {index_name!r} is not a "
+                "single literal index name (multi-index selectors and wildcards are not allowed)."
+            )
         return index_name
 
     def _write_canary_document(
