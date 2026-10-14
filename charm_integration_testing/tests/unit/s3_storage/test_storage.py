@@ -4,6 +4,7 @@
 import hashlib
 import json
 import logging
+import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -20,7 +21,6 @@ from s3_storage import (
     S3Credentials,
     S3Provider,
     S3Storage,
-    S3StorageHandle,
     StaticCredentialProvider,
     StaticS3Provider,
     SwiftCredentialProvider,
@@ -420,7 +420,7 @@ def test_client_initialization_retry_uses_fresh_credentials(client: S3Client) ->
 
 def test_registry_retries_pending_credential_revocation() -> None:
     keystone = KeystoneStub()
-    keystone.fail_delete_attempts["test-access-1"] = 2
+    keystone.fail_delete_attempts["test-access-1"] = 1
 
     def fail(_: S3Credentials) -> S3Client:
         raise RuntimeError("Client initialization failed")
@@ -430,22 +430,19 @@ def test_registry_retries_pending_credential_revocation() -> None:
     )
     bucket = storage.new_bucket()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle, destroyer=storage.cleanup_pending_resources)
-    registry.register(handle=bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+    registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with pytest.raises(RuntimeError, match="could not be revoked"):
         bucket.provision()
-    with pytest.warns(ResourceTeardownWarning):
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceTeardownWarning)
         registry.teardown_all()
 
-    # The provider retries the pending key after bucket teardown.
+    # The bucket destroyer retries the pending key after bucket teardown.
     assert keystone.delete_attempts == ["test-access-1"] * 2
-    assert keystone.deleted == []
-
-    # A later session cleanup retries the still-pending key.
-    storage.cleanup_pending_resources()
-    assert keystone.delete_attempts == ["test-access-1"] * 3
     assert keystone.deleted == ["test-access-1"]
+    assert not caught
 
 
 def test_cleanup_removes_versions_markers_and_multipart(client: S3Client) -> None:
@@ -510,10 +507,9 @@ def test_cleanup_surfaces_per_object_errors(client: S3Client) -> None:
 def test_registry_tears_down_each_bucket_and_continues_after_failure(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(storage.handle)
     buckets = [storage.new_bucket(), storage.new_bucket()]
     for bucket in buckets:
-        registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+        registry.register(bucket.handle, destroyer=storage._bucket_destroyer(bucket, True))
 
     with Stubber(client) as stubber:
         for bucket in buckets:
@@ -953,9 +949,8 @@ def test_stale_cleanup_continues_after_bucket_failure(client: S3Client, failure:
 def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(storage.handle, destroyer=storage.cleanup_pending_resources)
     bucket = storage.new_bucket()
-    registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+    registry.register(bucket.handle, destroyer=storage._bucket_destroyer(bucket, True))
 
     with Stubber(client) as stubber:
         name = bucket.handle.name
@@ -969,8 +964,7 @@ def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> Non
         )
         empty_bucket(stubber, name)
 
-        with pytest.warns(ResourceTeardownWarning):
-            registry.teardown_all()
+        registry.teardown_all()
 
         assert registry.registered_handles() == []
         stubber.assert_no_pending_responses()
@@ -990,22 +984,18 @@ def test_cleanup_stale_failure_does_not_create_temporary_key(client: S3Client) -
         stubber.assert_no_pending_responses()
 
 
-def test_registry_stops_consumers_before_storage() -> None:
+def test_registry_stops_consumers_before_bucket() -> None:
     from juju import JujuControllerHandle
 
-    # GIVEN bucket resources registered beneath storage before controllers are bootstrapped
+    # GIVEN bucket resources registered before their consumers are bootstrapped
     events: list[str] = []
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    storage_handle = S3StorageHandle(NAMESPACE)
-    registry.register(storage_handle)
-    registry.register(
-        S3BucketHandle(NAMESPACE, "bucket"), destroyer=lambda: events.append("bucket"), parent=storage_handle
-    )
+    registry.register(S3BucketHandle(NAMESPACE, "bucket"), destroyer=lambda: events.append("bucket"))
     registry.register(JujuControllerHandle("target"), destroyer=lambda: events.append("target"))
     registry.register(JujuControllerHandle("neighbor"), destroyer=lambda: events.append("neighbor"))
     # WHEN a failed or successful session tears down
     registry.teardown_all()
-    # THEN cross-model consumers stop before each registered bucket is removed
+    # THEN consumers stop before the independent bucket root is removed
     assert events == ["neighbor", "target", "bucket"]
 
 
