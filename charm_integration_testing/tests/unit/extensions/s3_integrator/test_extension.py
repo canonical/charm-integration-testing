@@ -22,12 +22,17 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 @dataclass
 class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"storage": "s3-integrator"})
+    application_charm_calls: list[str] = field(default_factory=list)
     action_status: str = "completed"
     action_return_code: int = 0
     unit_count: int = 1
 
     def num_units(self, model: JujuModelHandle, application: str) -> int:
         return self.unit_count
+
+    def application_charm(self, model: JujuModelHandle, application: str) -> str:
+        self.application_charm_calls.append(application)
+        return self.applications[application]
 
     def deploy_bundle_file(
         self,
@@ -89,6 +94,22 @@ class MigrationFailureBeforeMoveStub(JujuStub):
 
     def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         self.waited_for.append(model)
+
+
+@dataclass
+class MigrationPreflightErrorStub(JujuStub):
+    model_exists_calls: int = 0
+    migration_attempted: bool = False
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        self.model_exists_calls += 1
+        if self.model_exists_calls == 1:
+            raise RuntimeError("show-model access denied")
+        return True
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.migration_attempted = True
+        raise RuntimeError("migration command failed")
 
 
 class StorageStub(S3Provider):
@@ -177,6 +198,7 @@ def test_deploy_configures_integrator_on_either_substrate(tmp_path: Path, is_k8s
         )
     ]
     assert backend.deployed == []
+    assert backend.application_charm_calls == []
     assert len(backend.waited_scaled) == len(backend.waited_settled) == 1
     registry.teardown_all()
     assert storage.buckets[0].cleanup_calls == 1
@@ -371,6 +393,18 @@ def test_failed_migration_does_not_wait_when_source_was_already_missing() -> Non
     assert backend.checked_models == [MODEL]
     assert backend.waited_for == []
     assert providers == {MODEL.resource_id: storage}
+
+
+def test_migration_proceeds_when_source_visibility_preflight_fails(caplog: pytest.LogCaptureFixture) -> None:
+    backend = MigrationPreflightErrorStub()
+    client = JujuClient(backend, logging.getLogger(__name__))
+
+    with pytest.raises(RuntimeError, match="migration command failed"):
+        client.migrate_model(MODEL.model, MODEL.controller, "neighbor-controller")
+
+    assert backend.migration_attempted
+    assert backend.model_exists_calls == 2
+    assert "proceeding without preflight" in caplog.text
 
 
 def test_migration_does_not_replace_target_provider() -> None:

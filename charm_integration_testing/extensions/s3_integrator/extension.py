@@ -31,8 +31,8 @@ class S3IntegratorExtension(JujuExtension):
             self.providers.setdefault(target_handle.resource_id, provider)
 
     def post_deploy(self, model: JujuModelHandle) -> None:
-        for application in self.juju.list_applications(model):
-            if self.juju.application_charm(model, application) != "s3-integrator":
+        for application, info in self.juju.list_applications(model).items():
+            if info.charm != "s3-integrator":
                 continue
             if self.juju.get_application_config(model, application).get("endpoint"):
                 continue
