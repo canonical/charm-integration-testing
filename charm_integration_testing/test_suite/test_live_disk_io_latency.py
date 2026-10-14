@@ -1,6 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+"""Live Chaos Mesh IOChaos disk-latency lifecycle test.
+
+This test does not perform or time actual disk I/O inside the workload; it verifies the
+IOChaos experiment lifecycle instead, relying on Chaos Mesh's own confirmed-injection and
+recovery signals (see chaos_mesh_client._experiment_injected): the fault is injected, remains
+injected for its resolved duration without being stopped or interrupted early, and the unit
+and its neighbor recover and pass deep validation afterwards.
+"""
+
 from datetime import timedelta
 from time import monotonic, sleep
 
@@ -27,10 +36,20 @@ def observe_io_latency(
     """Poll IOChaos health until the resolved duration elapses, detecting early interruption."""
     deadline = monotonic() + seconds
     while True:
+        exhausted = monotonic() >= deadline
+        try:
+            chaos.check_io_latency(model, unit, volume_path, allow_completed=exhausted)
+        except RuntimeError:
+            # The status read itself can be slow enough that the deadline passes while it is
+            # in flight: the request was sent tolerating only active injection, but by the time
+            # it failed the experiment may have completed normally. Recheck tolerating
+            # completion before treating this as a genuine early-interruption failure.
+            if exhausted or monotonic() < deadline:
+                raise
+            chaos.check_io_latency(model, unit, volume_path, allow_completed=True)
+            return
         remaining = deadline - monotonic()
-        exhausted = remaining <= 0
-        chaos.check_io_latency(model, unit, volume_path, allow_completed=exhausted)
-        if exhausted:
+        if remaining <= 0:
             return
         sleep(min(CHECK_INTERVAL.total_seconds(), remaining))
 
@@ -43,6 +62,10 @@ def test_live_disk_io_latency(
     target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
 ) -> None:
+    """Verify the IOChaos lifecycle: confirmed injection, no early stop, and recovery.
+
+    Does not measure actual I/O latency in the workload; see module docstring.
+    """
     if not require_chaos_tool.supports("io_latency"):
         # Skip before the baseline wait, not after.
         pytest.skip(f"No available chaos client supports 'io_latency' for {target_model_ref.uri}.")
@@ -51,7 +74,7 @@ def test_live_disk_io_latency(
     juju_client.multi_model_idle_for_period(models=models, timeout=RECOVER_TIMEOUT, strict_timeout=True)
     unit = f"{target_application}/0"
 
-    observation_error: Exception | None = None
+    observation_error: BaseException | None = None
     try:
         # io_latency() blocks until Chaos Mesh's controller confirms the IOChaos resource was
         # actually injected. The returned injected_at is when the experiment resource was
@@ -71,17 +94,16 @@ def test_live_disk_io_latency(
         # and detect if the fault stops or is removed before then.
         remaining = injection.duration.total_seconds() - (monotonic() - injection.injected_at)
         observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, max(0.0, remaining))
-    except Exception as error:
+    except BaseException as error:
         observation_error = error
         raise
     finally:
         try:
             require_chaos_tool.cleanup_all()
-        except Exception as cleanup_error:
+        except BaseException as cleanup_error:
             if observation_error is not None:
-                raise RuntimeError(
-                    f"Disk I/O latency injection failed: {observation_error!r}; cleanup also failed: {cleanup_error!r}"
-                ) from cleanup_error
+                # Preserve the observation traceback and chain the cleanup failure.
+                raise observation_error from cleanup_error
             raise
 
     # Recovery must happen without operator intervention.

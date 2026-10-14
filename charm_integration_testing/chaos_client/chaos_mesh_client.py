@@ -12,7 +12,7 @@ from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient, IoLatencyInjection
 from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
-from .target import workload_target
+from .target import unit_pod_name, workload_target
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
@@ -86,7 +86,7 @@ class ChaosMeshChaosClient(ChaosClient):
         if "iochaos.chaos-mesh.org" in self._missing_crds:
             raise NotImplementedError("IOChaos experiments require the 'iochaos.chaos-mesh.org' CRD.")
         application = unit.split("/")[0]
-        pod, _ = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
+        pod = unit_pod_name(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {
             "action": "latency",
             "mode": "all",
@@ -97,11 +97,13 @@ class ChaosMeshChaosClient(ChaosClient):
             "duration": f"{int(duration.total_seconds())}s",
         }
         name = self._name("io-latency", application)
-        # Sampled just before submitting the resource: Chaos Mesh's controller starts counting
-        # down the duration from creation, and the POST itself (awaited inside _create()) can
-        # be slow, so capturing the clock after it returns would miss that elapsed time.
-        injected_at = self._clock()
         self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
+        # Sampled right after the POST returns: Chaos Mesh's controller starts counting down
+        # the duration from the resource's actual creation, so this is the closest available
+        # approximation. Sampling before submitting would miss however long the POST itself
+        # took, making the reported start earlier than the real one and letting callers end
+        # observation (and clean up) before the configured duration has actually elapsed.
+        injected_at = self._clock()
         self._wait(
             lambda timeout: self._experiment_injected("iochaos", "IOChaos", model.model, name, timeout),
             self._clock() + self._startup_timeout,

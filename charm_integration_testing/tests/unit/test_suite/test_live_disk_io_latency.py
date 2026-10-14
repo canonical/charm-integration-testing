@@ -125,9 +125,24 @@ def test_reports_both_errors_when_observation_and_cleanup_fail(monkeypatch: pyte
     with pytest.raises(RuntimeError, match="fault not injected") as excinfo:
         run_disk_io_latency(juju, chaos, MODEL, "target", None)
 
-    assert "cleanup unreachable" in str(excinfo.value)
+    # The original observation error must be preserved (not replaced), chained from the
+    # cleanup failure so neither error is lost.
     assert isinstance(excinfo.value.__cause__, RuntimeError)
     assert "cleanup unreachable" in str(excinfo.value.__cause__)
+
+
+def test_keyboard_interrupt_during_observation_still_runs_cleanup_and_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator interruption must not be swallowed, and cleanup must still run."""
+    juju, chaos = MagicMock(), MagicMock()
+    chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
+    monkeypatch.setattr(module, "observe_io_latency", MagicMock(side_effect=KeyboardInterrupt))
+
+    with pytest.raises(KeyboardInterrupt):
+        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+
+    chaos.cleanup_all.assert_called_once()
 
 
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
@@ -171,4 +186,73 @@ def test_observation_allows_completion_without_extra_pause(monkeypatch: pytest.M
     monkeypatch.setattr(module, "sleep", pause)
     module.observe_io_latency(chaos, MODEL, "target/0", VOLUME_PATH, 0)
     chaos.check_io_latency.assert_called_once_with(MODEL, "target/0", VOLUME_PATH, allow_completed=True)
+    pause.assert_not_called()
+
+
+def test_observation_tolerates_completion_detected_during_slow_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow status read can straddle the deadline; normal completion then must not fail."""
+    now = [0.0]
+
+    def fake_monotonic() -> float:
+        return now[0]
+
+    def slow_check(*args: object, **kwargs: object) -> None:
+        # The read is slow enough that the deadline passes while it is in flight.
+        now[0] = 25.0
+        if not kwargs["allow_completed"]:
+            raise RuntimeError("fault not injected")
+
+    chaos = MagicMock()
+    chaos.check_io_latency.side_effect = slow_check
+    monkeypatch.setattr(module, "monotonic", fake_monotonic)
+    monkeypatch.setattr(module, "sleep", MagicMock())
+
+    module.observe_io_latency(chaos, MODEL, "target/0", VOLUME_PATH, 25)
+
+    assert chaos.check_io_latency.call_count == 2
+    chaos.check_io_latency.assert_called_with(MODEL, "target/0", VOLUME_PATH, allow_completed=True)
+
+
+def test_observation_still_fails_when_slow_read_completion_is_not_tolerated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A genuine failure during a slow read must still propagate, not just a timing straddle."""
+    now = [0.0]
+
+    def fake_monotonic() -> float:
+        return now[0]
+
+    def slow_check(*args: object, **kwargs: object) -> None:
+        now[0] = 25.0
+        raise RuntimeError("fault not injected")
+
+    chaos = MagicMock()
+    chaos.check_io_latency.side_effect = slow_check
+    monkeypatch.setattr(module, "monotonic", fake_monotonic)
+    monkeypatch.setattr(module, "sleep", MagicMock())
+
+    with pytest.raises(RuntimeError, match="fault not injected"):
+        module.observe_io_latency(chaos, MODEL, "target/0", VOLUME_PATH, 25)
+
+    assert chaos.check_io_latency.call_count == 2
+
+
+def test_observation_skips_sleep_when_successful_read_crosses_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow but successful read must not sleep using a stale, already-expired remaining time."""
+    now = [0.0]
+
+    def fake_monotonic() -> float:
+        return now[0]
+
+    def slow_check(*args: object, **kwargs: object) -> None:
+        # The read itself takes longer than the originally remaining time.
+        now[0] = 30.0
+
+    chaos = MagicMock()
+    chaos.check_io_latency.side_effect = slow_check
+    pause = MagicMock()
+    monkeypatch.setattr(module, "monotonic", fake_monotonic)
+    monkeypatch.setattr(module, "sleep", pause)
+
+    module.observe_io_latency(chaos, MODEL, "target/0", VOLUME_PATH, 25)
+
+    chaos.check_io_latency.assert_called_once_with(MODEL, "target/0", VOLUME_PATH, allow_completed=False)
     pause.assert_not_called()

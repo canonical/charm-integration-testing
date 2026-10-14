@@ -1013,13 +1013,22 @@ class TestStressTargetScope:
             pods[0].spec.containers.append(extra)
         client = ChaosMeshChaosClient(backend)
 
-        with pytest.raises(RuntimeError, match="one live Pod|one workload container"):
+        def invoke() -> None:
             if operation == "cpu":
                 client.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=30))
             elif operation == "memory":
                 client.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=30))
             else:
                 client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=30))
+
+        if operation == "io" and problem in {"no-workload", "multiple-workloads"}:
+            # IOChaos targets the whole Pod, so container-count ambiguity does not apply to it.
+            invoke()
+            assert backend.custom_objects_api.create_calls != []
+            return
+
+        with pytest.raises(RuntimeError, match="one live Pod|one workload container"):
+            invoke()
         assert backend.custom_objects_api.create_calls == []
         assert client._created == []
 
@@ -1169,12 +1178,13 @@ def test_stress_waits_for_injection_before_returning(operation: str, recovered_s
     assert not api.objects
 
 
-def test_io_latency_injected_at_precedes_slow_resource_creation() -> None:
-    """A slow Kubernetes API response must count against the experiment's duration.
+def test_io_latency_injected_at_follows_slow_resource_creation() -> None:
+    """A slow Kubernetes API response must not count against the experiment's duration.
 
-    injected_at must be sampled before submitting the IOChaos resource, not after, since the
-    duration starts counting down from creation and the POST itself (awaited inside _create())
-    may be slow.
+    injected_at must be sampled after submitting the IOChaos resource, not before, since the
+    duration starts counting down from Chaos Mesh's creation of the resource and the POST itself
+    (awaited inside _create()) may be slow; sampling before would make the reported start
+    earlier than the real one and let callers end observation before the duration has elapsed.
     """
     backend = BackendStub()
     now = 0.0
@@ -1190,9 +1200,9 @@ def test_io_latency_injected_at_precedes_slow_resource_creation() -> None:
 
     injection = mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
 
-    # THEN injected_at reflects the pre-submission time, not the time after the slow POST
-    # returned, so callers correctly account for the delay as part of the experiment's duration.
-    assert injection.injected_at == 0.0
+    # THEN injected_at reflects the post-submission time, not the time before the slow POST
+    # was issued, so callers do not shorten their observation window by the POST's duration.
+    assert injection.injected_at == 5.0
     assert now == 5.0
 
 
