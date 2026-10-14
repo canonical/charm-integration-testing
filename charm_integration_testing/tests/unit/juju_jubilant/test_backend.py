@@ -16,6 +16,7 @@ import yaml
 from jubilant.statustypes import AppStatus, ModelStatus, UnitStatus
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuClient,
     JujuConsumedOfferInfo,
@@ -316,6 +317,44 @@ class TestJubilantClient:
 
         # THEN the jubilant.Juju has the composed controller:model uri
         assert model.model == "test-controller:my-model"
+
+
+def test_application_health_uses_one_real_status_snapshot() -> None:
+    # GIVEN Jubilant status types with mixed application, workload and agent states
+    status = StatusStub(
+        application_statuses={"app": "active"},
+        unit_workload_statuses={"app/2": "active", "app/7": "blocked"},
+        unit_juju_statuses={"app/2": "executing", "app/7": "error"},
+    )
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN reading health, THEN the adapter preserves all unit statuses from one snapshot
+    assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
+        "active", {"app/2": "active", "app/7": "blocked"}, {"app/2": "executing", "app/7": "error"}
+    )
+    assert status.call_count == 1
+
+
+def test_application_health_missing_application_fails() -> None:
+    # GIVEN an empty status snapshot
+    status = StatusStub()
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN checking a disappeared application, THEN absence does not count as healthy
+    with pytest.raises(RuntimeError, match="missing") as caught:
+        backend.application_health(TEST_MODEL, "missing")
+    assert TEST_MODEL.uri in str(caught.value)
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert status.call_count == 1
+
+
+def test_application_health_does_not_relabel_status_errors() -> None:
+    backend = JubilantBackend()
+    error = KeyError("status parsing failed")
+    with patch.object(backend, "status", side_effect=error):
+        with pytest.raises(KeyError) as caught:
+            backend.application_health(TEST_MODEL, "target")
+    assert caught.value is error
 
 
 @dataclass
@@ -3198,55 +3237,6 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
-
-
-def test_application_health_uses_one_status_snapshot() -> None:
-    from types import SimpleNamespace
-    from unittest.mock import Mock
-
-    from juju import JujuApplicationHealth
-
-    status = SimpleNamespace(
-        apps={
-            "app": SimpleNamespace(
-                app_status=SimpleNamespace(current="active"),
-                units={
-                    "app/0": SimpleNamespace(
-                        workload_status=SimpleNamespace(current="active"), juju_status=SimpleNamespace(current="idle")
-                    ),
-                    "app/1": SimpleNamespace(
-                        workload_status=SimpleNamespace(current="blocked"), juju_status=SimpleNamespace(current="error")
-                    ),
-                },
-            )
-        }
-    )
-    backend = JubilantBackend()
-    with patch.object(backend, "status", Mock(return_value=status)) as read_status:
-        assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
-            "active", {"app/0": "active", "app/1": "blocked"}, {"app/0": "idle", "app/1": "error"}
-        )
-        read_status.assert_called_once_with(TEST_MODEL)
-
-
-def test_application_health_missing_application_has_context() -> None:
-    backend = JubilantBackend()
-    with patch.object(backend, "status", return_value=follower_status()) as read_status:
-        with pytest.raises(RuntimeError, match="missing") as caught:
-            backend.application_health(TEST_MODEL, "absent-app")
-    assert "absent-app" in str(caught.value)
-    assert TEST_MODEL.uri in str(caught.value)
-    assert isinstance(caught.value.__cause__, KeyError)
-    read_status.assert_called_once_with(TEST_MODEL)
-
-
-def test_application_health_does_not_relabel_status_errors() -> None:
-    backend = JubilantBackend()
-    error = KeyError("status parsing failed")
-    with patch.object(backend, "status", side_effect=error):
-        with pytest.raises(KeyError) as caught:
-            backend.application_health(TEST_MODEL, "target")
-    assert caught.value is error
 
 
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")

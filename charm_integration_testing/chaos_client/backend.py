@@ -33,24 +33,6 @@ class ChaosClient(ABC):
     Use NotImplementedError only for unsupported operations, before any side effects.
     """
 
-    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        """Report known errors; allow completion only after independent fault confirmation.
-
-        This check is not proof of sustained stress. Allowing completion
-        must not suppress experiment errors or cleanup verification.
-        """
-        raise NotImplementedError("Stress status checks are not supported by this client.")
-
-    def check_io_latency(
-        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
-    ) -> None:
-        """Report known errors; allow completion only once the latency duration has elapsed.
-
-        This optional check is not proof of sustained latency injection. Allowing completion
-        must not suppress experiment errors or cleanup verification.
-        """
-        raise NotImplementedError("Stress status checks are not supported by this client.")
-
     @abstractmethod
     def supports(self, operation: str) -> bool:
         """Report whether this client can currently run the named experiment operation.
@@ -66,7 +48,14 @@ class ChaosClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
+    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> timedelta | None:
+        raise NotImplementedError
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active stress unless independent fault evidence permits normal completion.
+
+        Allowing completion must not suppress experiment errors or cleanup checks.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -86,6 +75,15 @@ class ChaosClient(ABC):
         duration: timedelta,
     ) -> IoLatencyInjection:
         """Inject I/O latency and report the duration and start time actually used."""
+        raise NotImplementedError
+
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        """Require active latency injection unless independent fault evidence permits normal completion.
+
+        Allowing completion must not suppress experiment errors or cleanup checks.
+        """
         raise NotImplementedError
 
     @abstractmethod

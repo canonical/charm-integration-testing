@@ -519,6 +519,219 @@ def test_startup_waits_for_injection_not_engine_creation(context: ClientContext)
     assert not context.engines
 
 
+class TestCheckStress:
+    @pytest.mark.parametrize("completion_source", ["engine", "result"])
+    def test_completion_between_reads_preserves_oom_retry(self, context: ClientContext, completion_source: str) -> None:
+        # GIVEN completion becomes visible on the next API read after active injection
+        chaos = context.chaos_client()
+        chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        active_engine = deepcopy(next(iter(context.engines.values())))
+        completed_engine = deepcopy(active_engine)
+        active_results = {"items": deepcopy(context.results)}
+        completed_results = deepcopy(active_results)
+        if completion_source == "engine":
+            completed_engine["status"]["engineStatus"] = "completed"
+        else:
+            completed_results["items"][0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+        api = context.backend.custom_objects_api
+        api.get_namespaced_custom_object.reset_mock()
+        api.list_namespaced_custom_object.reset_mock()
+        api.get_namespaced_custom_object.side_effect = [active_engine, completed_engine, completed_engine]
+        api.list_namespaced_custom_object.side_effect = [active_results, completed_results, completed_results]
+
+        # WHEN observing, THEN each resource is read once and early completion remains retryable
+        chaos.check_stress(MODEL, UNIT)
+        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 1
+        with pytest.raises(StressEndedEarlyError):
+            chaos.check_stress(MODEL, UNIT)
+        chaos.check_stress(MODEL, UNIT, allow_completed=True)
+        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 3
+
+    @dataclass(frozen=True)
+    class CompletionParams:
+        label: str
+        engine_status: str = "initialized"
+        phase: str | None = "Running"
+        target_status: str = "injected"
+        verdict: str = "Awaited"
+        stop_requested: bool = False
+        recheck: bool = False
+        accepted: bool = False
+
+    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+    @pytest.mark.parametrize(
+        "params",
+        [
+            CompletionParams("running-missing-results", phase=None),
+            CompletionParams("completed-missing-results", engine_status="completed", phase=None, accepted=True),
+            CompletionParams("running-targeted", target_status="targeted"),
+            CompletionParams("completed-targeted", engine_status="completed", target_status="targeted", accepted=True),
+            CompletionParams("running-reverted", target_status="reverted"),
+            CompletionParams("completed-reverted", engine_status="completed", target_status="reverted", accepted=True),
+            CompletionParams("running-stopped-result", phase="Stopped"),
+            CompletionParams("completed-stopped-result", engine_status="completed", phase="Stopped"),
+            CompletionParams(
+                "recheck-completed",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Pass",
+                recheck=True,
+                accepted=True,
+            ),
+            CompletionParams(
+                "recheck-failed",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Fail",
+                recheck=True,
+            ),
+            CompletionParams(
+                "recheck-missing-results", engine_status="completed", phase=None, recheck=True, accepted=True
+            ),
+            CompletionParams(
+                "recheck-stop-request",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Pass",
+                stop_requested=True,
+                recheck=True,
+            ),
+            CompletionParams(
+                "recheck-result-lag",
+                engine_status="completed",
+                phase="Completed",
+                verdict="Pass",
+                recheck=True,
+                accepted=True,
+            ),
+        ],
+        ids=lambda params: params.label,
+    )
+    def test_completion_contract_through_meta(
+        self, context: ClientContext, operation: str, params: CompletionParams
+    ) -> None:
+        # GIVEN confirmed stress and completion, interruption or delayed result evidence
+        chaos = context.chaos_client()
+        meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
+        if operation == "stress_cpu":
+            meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
+        else:
+            meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        meta.check_stress(MODEL, UNIT)
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+        engine = next(iter(context.engines.values()))
+        engine["status"]["engineStatus"] = params.engine_status
+        if params.stop_requested:
+            engine["spec"]["engineState"] = "stop"
+        result = context.results[0]
+        if params.phase is None:
+            context.results.clear()
+        else:
+            result["status"]["experimentStatus"] = {"phase": params.phase, "verdict": params.verdict}
+            result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.target_status}
+
+        # WHEN OOM is detected after an early-end error, retry with completion permitted
+        if params.recheck:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT)
+        # THEN completion permits result lag, but never interruption or missing active evidence
+        if params.accepted:
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT, allow_completed=True)
+        assert len(chaos._created) == 1
+
+    @dataclass(frozen=True)
+    class Params:
+        change: str
+        message: str
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params("engine-missing", "requested stress duration"),
+            Params("result-missing", "no longer confirmed active"),
+            Params("completed", "requested stress duration"),
+            Params("stopped", "requested stress duration"),
+            Params("reverted", "requested stress duration"),
+            Params("targeted", "no longer confirmed active"),
+            Params("failed", "failed"),
+            Params("replaced", "was replaced"),
+            Params("owner", "Cannot verify ownership"),
+            Params("deleting", "requested stress duration"),
+            Params("stop-requested", "requested stress duration"),
+        ],
+        ids=lambda params: params.change,
+    )
+    def test_rejects_loss_of_active_stress(self, context: ClientContext, params: Params) -> None:
+        # GIVEN successfully injected CPU stress
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        chaos.check_stress(MODEL, UNIT)
+        engine = next(iter(context.engines.values()))
+        result = context.results[0]
+
+        # WHEN the experiment ends, disappears or loses identity
+        match params.change:
+            case "engine-missing":
+                context.engines.clear()
+            case "result-missing":
+                context.results.clear()
+            case "completed" | "stopped":
+                engine["status"]["engineStatus"] = params.change
+            case "reverted" | "targeted":
+                result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.change}
+            case "failed":
+                result["status"]["experimentStatus"] = {"phase": "Error", "verdict": "Error"}
+            case "replaced":
+                engine["metadata"]["uid"] = "replacement"
+            case "owner":
+                engine["metadata"]["annotations"].clear()
+            case "deleting":
+                engine["metadata"]["deletionTimestamp"] = "2026-10-05T00:00:00Z"
+            case "stop-requested":
+                engine["spec"]["engineState"] = "stop"
+
+        # THEN observation fails immediately and retains cleanup tracking
+        with pytest.raises(RuntimeError, match=params.message):
+            chaos.check_stress(MODEL, UNIT)
+        assert context.now == 0
+        assert len(chaos._created) == 1
+
+    def test_unknown_scope_and_cleaned_run_are_not_reported_active(self, context: ClientContext) -> None:
+        # GIVEN a successfully started run
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+
+        # WHEN checking unrelated scopes, THEN no active run is reported
+        for model, unit in [
+            (JujuModelHandle(controller="other", model=MODEL.model), UNIT),
+            (MODEL, "postgresql/1"),
+        ]:
+            with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+                chaos.check_stress(model, unit)
+        chaos.cleanup(MODEL, UNIT, "")
+        with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+            chaos.check_stress(MODEL, UNIT)
+
+    def test_api_error_is_not_hidden(self, context: ClientContext) -> None:
+        # GIVEN active stress followed by an observation API failure
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        error = ApiException(status=503)
+        context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = error
+
+        # WHEN observing, THEN the original failure propagates
+        with pytest.raises(ApiException) as exc_info:
+            chaos.check_stress(MODEL, UNIT)
+        assert exc_info.value is error
+        assert len(chaos._created) == 1
+
+
 @pytest.mark.parametrize("verdict", ["Fail", "Error"])
 def test_startup_reports_failed_result(context: ClientContext, verdict: str) -> None:
     context.auto_inject = False
@@ -931,126 +1144,3 @@ def test_recheck_early_completion_after_oom(context: ClientContext, failed: bool
         chaos.check_stress(MODEL, UNIT, allow_completed=True)
     chaos.cleanup(MODEL, UNIT, "")
     assert not context.engines
-
-
-class TestCheckStress:
-    @pytest.mark.parametrize("completion_source", ["engine", "result"])
-    def test_completion_between_reads_preserves_oom_retry(self, context: ClientContext, completion_source: str) -> None:
-        # GIVEN completion becomes visible on the next API read after active injection
-        chaos = context.chaos_client()
-        chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
-        active_engine = deepcopy(next(iter(context.engines.values())))
-        completed_engine = deepcopy(active_engine)
-        active_results = {"items": deepcopy(context.results)}
-        completed_results = deepcopy(active_results)
-        if completion_source == "engine":
-            completed_engine["status"]["engineStatus"] = "completed"
-        else:
-            completed_results["items"][0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
-        api = context.backend.custom_objects_api
-        api.get_namespaced_custom_object.reset_mock()
-        api.list_namespaced_custom_object.reset_mock()
-        api.get_namespaced_custom_object.side_effect = [active_engine, completed_engine, completed_engine]
-        api.list_namespaced_custom_object.side_effect = [active_results, completed_results, completed_results]
-
-        # WHEN observing, THEN each resource is read once and early completion remains retryable
-        chaos.check_stress(MODEL, UNIT)
-        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 1
-        with pytest.raises(StressEndedEarlyError):
-            chaos.check_stress(MODEL, UNIT)
-        chaos.check_stress(MODEL, UNIT, allow_completed=True)
-        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 3
-
-    @dataclass(frozen=True)
-    class Params:
-        label: str
-        engine_status: str = "initialized"
-        phase: str | None = "Running"
-        target_status: str = "injected"
-        verdict: str = "Awaited"
-        stop_requested: bool = False
-        recheck: bool = False
-        accepted: bool = False
-
-    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
-    @pytest.mark.parametrize(
-        "params",
-        [
-            Params("running-missing-results", phase=None),
-            Params("completed-missing-results", engine_status="completed", phase=None, accepted=True),
-            Params("running-targeted", target_status="targeted"),
-            Params("completed-targeted", engine_status="completed", target_status="targeted", accepted=True),
-            Params("running-reverted", target_status="reverted"),
-            Params("completed-reverted", engine_status="completed", target_status="reverted", accepted=True),
-            Params("running-stopped-result", phase="Stopped"),
-            Params("completed-stopped-result", engine_status="completed", phase="Stopped"),
-            Params(
-                "recheck-completed",
-                engine_status="completed",
-                phase="Completed",
-                target_status="reverted",
-                verdict="Pass",
-                recheck=True,
-                accepted=True,
-            ),
-            Params(
-                "recheck-failed",
-                engine_status="completed",
-                phase="Completed",
-                target_status="reverted",
-                verdict="Fail",
-                recheck=True,
-            ),
-            Params("recheck-missing-results", engine_status="completed", phase=None, recheck=True, accepted=True),
-            Params(
-                "recheck-stop-request",
-                engine_status="completed",
-                phase="Completed",
-                target_status="reverted",
-                verdict="Pass",
-                stop_requested=True,
-                recheck=True,
-            ),
-            Params(
-                "recheck-result-lag",
-                engine_status="completed",
-                phase="Completed",
-                verdict="Pass",
-                recheck=True,
-                accepted=True,
-            ),
-        ],
-        ids=lambda params: params.label,
-    )
-    def test_completion_contract_through_meta(self, context: ClientContext, operation: str, params: Params) -> None:
-        # GIVEN confirmed stress and completion, interruption or delayed result evidence
-        chaos = context.chaos_client()
-        meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
-        if operation == "stress_cpu":
-            meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
-        else:
-            meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
-        meta.check_stress(MODEL, UNIT)
-        meta.check_stress(MODEL, UNIT, allow_completed=True)
-        engine = next(iter(context.engines.values()))
-        engine["status"]["engineStatus"] = params.engine_status
-        if params.stop_requested:
-            engine["spec"]["engineState"] = "stop"
-        result = context.results[0]
-        if params.phase is None:
-            context.results.clear()
-        else:
-            result["status"]["experimentStatus"] = {"phase": params.phase, "verdict": params.verdict}
-            result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.target_status}
-
-        # WHEN OOM is detected after an early-end error, retry with completion permitted
-        if params.recheck:
-            with pytest.raises(RuntimeError):
-                meta.check_stress(MODEL, UNIT)
-        # THEN completion permits result lag, but never interruption or missing active evidence
-        if params.accepted:
-            meta.check_stress(MODEL, UNIT, allow_completed=True)
-        else:
-            with pytest.raises(RuntimeError):
-                meta.check_stress(MODEL, UNIT, allow_completed=True)
-        assert len(chaos._created) == 1

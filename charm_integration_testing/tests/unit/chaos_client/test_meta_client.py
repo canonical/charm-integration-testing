@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable
+from typing import Callable, Literal
 
 import pytest
 from chaos_client import (
@@ -97,6 +97,9 @@ class ClientStub(ChaosClient):
 
     def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
         self._call("stress_cpu", model, unit, workers, duration)
+
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        self._call("check_stress", model, unit, allow_completed)
 
     def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
         self._call("stress_memory", model, unit, workers, size_mb, duration)
@@ -596,7 +599,7 @@ def test_stress_memory_rejects_negative_duration_margin() -> None:
     tool = ClientStub({"stress_memory"})
     client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
 
-    with pytest.raises(ValueError, match="duration margin must not be negative"):
+    with pytest.raises(ValueError, match="duration margin must be nonnegative"):
         client.stress_memory(TEST_MODEL, UNIT, 1, 512, DURATION, duration_margin=timedelta(seconds=-1))
 
     assert tool.calls == []
@@ -727,6 +730,166 @@ def test_io_latency_without_matching_constraints_preserves_caller_values() -> No
     assert injection.duration == DURATION
 
 
+class TestCpuObservationDuration:
+    @dataclass(frozen=True)
+    class Params:
+        scenario: Literal["exhaustion", "moderate_pressure"]
+        constraints: CharmResourceConstraints
+        workers: int
+        duration: timedelta
+
+    @pytest.mark.parametrize("margin", [timedelta(0), timedelta(seconds=15)], ids=["zero", "positive"])
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params("exhaustion", CharmResourceConstraints(), 2, DURATION),
+            Params("moderate_pressure", CharmResourceConstraints(), 2, DURATION),
+            Params(
+                "exhaustion",
+                CharmResourceConstraints(cpu_exhaustion_workers=3, cpu_exhaustion_duration_seconds=60),
+                3,
+                timedelta(seconds=60),
+            ),
+            Params(
+                "moderate_pressure",
+                CharmResourceConstraints(
+                    cpu_exhaustion_workers=9,
+                    cpu_exhaustion_duration_seconds=90,
+                    cpu_moderate_pressure_workers=1,
+                    cpu_moderate_pressure_duration_seconds=45,
+                ),
+                1,
+                timedelta(seconds=45),
+            ),
+        ],
+        ids=["default-exhaustion", "default-moderate", "override-exhaustion", "override-moderate"],
+    )
+    def test_returns_resolved_duration_and_adds_margin_after_overrides(self, params: Params, margin: timedelta) -> None:
+        # GIVEN a fallback tool and scenario-specific constraints
+        unsupported = ClientStub(set())
+        selected = ClientStub({"stress_cpu"})
+        constraints = ConstraintsClientStub(params.constraints)
+        meta = MetaChaosClient([unsupported, selected], backend_with_application(), constraints)
+
+        # WHEN starting CPU stress with an observation margin
+        observed = meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION, scenario=params.scenario, duration_margin=margin)
+
+        # THEN the caller observes the configured base time and lookup happens only once
+        assert observed == params.duration
+        expected = ("stress_cpu", (TEST_MODEL, UNIT, params.workers, params.duration + margin))
+        assert unsupported.calls == selected.calls == [expected]
+        assert len(constraints.calls) == 1
+
+    def test_negative_margin_fails_before_lookup_or_dispatch(self) -> None:
+        # GIVEN a backend that would fail constraint resolution
+        tool = ClientStub({"stress_cpu"})
+        constraints = ConstraintsClientStub()
+        meta = MetaChaosClient([tool], BackendStub(error=RuntimeError()), constraints)
+
+        # WHEN a negative margin is supplied, THEN no side effects occur
+        with pytest.raises(ValueError, match="margin must be nonnegative"):
+            meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION, duration_margin=timedelta(microseconds=-1))
+        assert constraints.calls == []
+        assert tool.calls == []
+
+
+def test_check_stress_uses_only_selected_owner_and_does_not_resolve_again() -> None:
+    # GIVEN stress selected after an unsupported tool, followed by an unused capable tool
+    unsupported = ClientStub({"check_stress"})
+    selected = ClientStub({"stress_cpu", "check_stress", "cleanup"})
+    unused = ClientStub({"stress_cpu", "check_stress"})
+    constraints = ConstraintsClientStub()
+    meta = MetaChaosClient([unsupported, selected, unused], backend_with_application(), constraints)
+    meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION)
+
+    # WHEN observing, THEN only the selected tool is consulted
+    meta.check_stress(TEST_MODEL, UNIT)
+    assert selected.calls[-1] == ("check_stress", (TEST_MODEL, UNIT, False))
+    assert len(unsupported.calls) == 1
+    assert unused.calls == []
+    assert len(constraints.calls) == 1
+
+
+@pytest.mark.parametrize("error", [NotImplementedError("unsupported check"), RuntimeError("ended early")])
+def test_check_stress_never_falls_back_after_owner_failure(error: Exception) -> None:
+    # GIVEN a selected owner whose observation fails
+    selected = ClientStub({"stress_cpu", "check_stress", "cleanup"})
+    selected.errors["check_stress"] = error
+    unused = ClientStub({"stress_cpu", "check_stress"})
+    meta = MetaChaosClient([selected, unused], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION)
+
+    # WHEN observing, THEN the original failure propagates but cleanup remains available
+    with pytest.raises(type(error)) as exc_info:
+        meta.check_stress(TEST_MODEL, UNIT)
+    assert exc_info.value is error
+    assert unused.calls == []
+    meta.cleanup_all()
+    assert selected.calls[-1] == ("cleanup", (TEST_MODEL, UNIT, ""))
+
+
+@pytest.mark.parametrize("cleanup_all", [False, True], ids=["scoped", "all"])
+def test_stress_owner_is_retained_until_cleanup_succeeds(cleanup_all: bool) -> None:
+    # GIVEN a successfully started owner whose cleanup fails
+    tool = ClientStub({"stress_cpu", "check_stress", "cleanup"})
+    tool.errors["cleanup"] = RuntimeError("cleanup failed")
+    meta = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION)
+
+    def cleanup() -> None:
+        if cleanup_all:
+            meta.cleanup_all()
+        else:
+            meta.cleanup(TEST_MODEL, UNIT, "")
+
+    # WHEN cleanup fails, THEN the selected owner remains observable and retryable
+    with pytest.raises(ChaosCleanupError):
+        cleanup()
+    meta.check_stress(TEST_MODEL, UNIT)
+    tool.errors.clear()
+    cleanup()
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
+        meta.check_stress(TEST_MODEL, UNIT)
+    assert [operation for operation, _ in tool.calls].count("cleanup") == 2
+
+
+def test_failed_start_is_not_a_successful_stress_owner() -> None:
+    # GIVEN a tool that fails after potentially creating resources
+    tool = ClientStub({"stress_cpu", "check_stress", "cleanup"})
+    tool.errors["stress_cpu"] = RuntimeError("startup failed")
+    meta = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    with pytest.raises(RuntimeError, match="startup failed"):
+        meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION)
+
+    # WHEN observing, THEN the failed start is rejected without losing cleanup
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
+        meta.check_stress(TEST_MODEL, UNIT)
+    meta.cleanup_all()
+    assert [operation for operation, _ in tool.calls] == ["stress_cpu", "cleanup"]
+
+
+def test_stress_checks_respect_controller_unit_and_path_scopes() -> None:
+    # GIVEN stress and IO on a unit
+    tool = ClientStub({"stress_cpu", "io_latency", "check_stress", "cleanup"})
+    meta = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    meta.stress_cpu(TEST_MODEL, UNIT, 2, DURATION)
+    meta.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+
+    # WHEN checking unrelated scopes, THEN no tool is probed
+    for model, unit in [
+        (JujuModelHandle(controller="other", model=TEST_MODEL.model), UNIT),
+        (TEST_MODEL, "postgresql/1"),
+    ]:
+        with pytest.raises(RuntimeError, match="No successfully started stress"):
+            meta.check_stress(model, unit)
+    assert len(tool.calls) == 2
+
+    # WHEN IO is cleaned, THEN stress remains observable
+    meta.cleanup(TEST_MODEL, UNIT, "/data")
+    meta.check_stress(TEST_MODEL, UNIT)
+    assert tool.calls[-1] == ("check_stress", (TEST_MODEL, UNIT, False))
+
+
 @pytest.mark.parametrize("configured_seconds", [None, 20])
 def test_memory_moderate_margin_is_added_after_constraints(configured_seconds: int | None) -> None:
     # GIVEN different exhaustion settings and an optional moderate duration override
@@ -790,7 +953,7 @@ def test_stress_checks_only_selected_tool_and_retains_failed_cleanup(failure: bo
         client.check_stress(TEST_MODEL, UNIT)
         selected.cleanup.side_effect = None
     client.cleanup_all()
-    with pytest.raises(RuntimeError, match="No active stress"):
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
         client.check_stress(TEST_MODEL, UNIT)
 
 
@@ -814,7 +977,7 @@ def test_io_latency_checks_only_selected_tool_and_retains_failed_cleanup(failure
         client.check_io_latency(TEST_MODEL, UNIT, "/data")
         selected.cleanup.side_effect = None
     client.cleanup_all()
-    with pytest.raises(RuntimeError, match="No active I/O latency"):
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
         client.check_io_latency(TEST_MODEL, UNIT, "/data")
 
 
@@ -828,7 +991,7 @@ def test_no_successful_stress_cannot_pass_status_check(injection_failed: bool) -
         tool.stress_memory.side_effect = RuntimeError("injection failed")
         with pytest.raises(RuntimeError, match="injection failed"):
             client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
-    with pytest.raises(RuntimeError, match="No active stress"):
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
         client.check_stress(TEST_MODEL, UNIT)
     tool.check_stress.assert_not_called()
     client.cleanup_all()
@@ -838,7 +1001,7 @@ def test_no_successful_stress_cannot_pass_status_check(injection_failed: bool) -
 def test_selected_tool_without_status_support_fails() -> None:
     client = MetaChaosClient([ClientStub({"stress_memory"})], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
     client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
-    with pytest.raises(NotImplementedError, match="status checks"):
+    with pytest.raises(NotImplementedError):
         client.check_stress(TEST_MODEL, UNIT)
 
 
@@ -852,7 +1015,7 @@ def test_no_successful_io_latency_cannot_pass_status_check(injection_failed: boo
         tool.io_latency.side_effect = RuntimeError("injection failed")
         with pytest.raises(RuntimeError, match="injection failed"):
             client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
-    with pytest.raises(RuntimeError, match="No active I/O latency"):
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
         client.check_io_latency(TEST_MODEL, UNIT, "/data")
     tool.check_io_latency.assert_not_called()
     client.cleanup_all()
