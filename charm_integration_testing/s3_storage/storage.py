@@ -387,14 +387,20 @@ class StaticS3Provider(S3Storage):
         identity: str | None = None,
         cleanup_credentials: S3Credentials | None = None,
     ) -> None:
+        credential_provider = StaticCredentialProvider(credentials, cleanup_credentials)
         super().__init__(
             endpoint,
             namespace,
-            StaticCredentialProvider(credentials, cleanup_credentials),
+            credential_provider,
             region=region,
             client_factory=client_factory,
             identity=identity,
             bucket_owner_identity=_stable_bucket_owner(
-                "static", endpoint.rstrip("/"), namespace, region, credentials.access_key
+                "static",
+                endpoint.rstrip("/"),
+                namespace,
+                region,
+                credentials.access_key,
+                credential_provider.cleanup_credentials.access_key,
             ),
         )
