@@ -137,19 +137,27 @@ def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
     # GIVEN numbered test environments sharing the same physical substrates
     environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
-    scheduled = schedule["jobs"]["cleanup-schedule"]["strategy"]["matrix"]["include"]
+    scheduled = list(schedule["jobs"].items())
 
-    # WHEN the cleanup schedule is mapped to each environment's Swift configuration
-    scheduled_environments = [entry["environment"] for entry in scheduled]
-    scheduled_secret_names = [entry["s3_swift_secret"] for entry in scheduled]
+    # WHEN the schedule chains reusable cleanup jobs to avoid dropping matrix entries
+    scheduled_environments = [job["with"]["environment"] for _, job in scheduled]
+    scheduled_secret_names = [
+        job["secrets"]["S3_SWIFT_CONFIG"].removeprefix("${{ secrets.").removesuffix(" }}") for _, job in scheduled
+    ]
     assert len(scheduled_environments) == len(set(scheduled_environments))
     assert len(scheduled_secret_names) == len(set(scheduled_secret_names))
 
-    scheduled_secrets = {entry["environment"]: entry["s3_swift_secret"] for entry in scheduled}
+    scheduled_secrets = dict(zip(scheduled_environments, scheduled_secret_names, strict=True))
     expected_secrets = {name: str(environment["s3-swift-secret"]) for name, environment in environments.items()}
     assert len(expected_secrets.values()) == len(set(expected_secrets.values()))
     assert len(scheduled) == len(environments)
     assert scheduled_secrets == expected_secrets
+    assert all(job["uses"] == "./.github/workflows/cleanup-environment.yaml" for _, job in scheduled)
+    assert all("strategy" not in job for _, job in scheduled)
+    assert "needs" not in scheduled[0][1]
+    for (previous_id, _), (_, job) in zip(scheduled, scheduled[1:], strict=False):
+        assert job["needs"] == previous_id
+        assert job["if"] == "${{ !cancelled() }}"
     # THEN every Swift-enabled environment selects its configured secret
     for name, environment in environments.items():
         assert environment.get("swift-storage") is True
@@ -157,9 +165,6 @@ def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
     reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     workflow_events = reusable.get("on", reusable.get(True))
     reusable_secrets = workflow_events["workflow_call"]["secrets"]
-    assert schedule["jobs"]["cleanup-schedule"]["secrets"]["S3_SWIFT_CONFIG"] == (
-        "${{ secrets[matrix.s3_swift_secret] }}"
-    )
     assert reusable_secrets["S3_SWIFT_CONFIG"]["required"] is False
 
 
@@ -167,7 +172,7 @@ def test_cleanup_workflows_serialize_shared_substrate_cleanup() -> None:
     schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
     reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
 
-    assert schedule["jobs"]["cleanup-schedule"]["strategy"]["max-parallel"] == 1
+    assert len(schedule["jobs"]) == 22
     assert reusable["concurrency"] == {
         "group": "charm-qa-environment-cleanup",
         "cancel-in-progress": False,
