@@ -1036,6 +1036,8 @@ class JubilantBackend(JujuCmdBackend):
         try:
             self.client.model(model).show_model()
         except jubilant.CLIError as exc:
+            if _is_transient_model_unavailability_error(exc, model):
+                return False
             message = f"{exc.stderr or ''}\n{exc.stdout or ''}".casefold()
             if "model" in message and ("not found" in message or "does not exist" in message):
                 return False

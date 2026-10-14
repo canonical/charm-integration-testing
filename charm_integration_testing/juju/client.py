@@ -562,7 +562,8 @@ class JujuClient:
             try:
                 source = JujuModelHandle(controller=source_controller, model=model_name)
                 target = JujuModelHandle(controller=target_controller, model=model_name)
-                if not self.backend.model_exists(source) and self.backend.model_exists(target):
+                if not self.backend.model_exists(source):
+                    self.backend.wait_for_model_to_exist(target, timeout=None)
                     for extension in self.extensions:
                         extension.post_migrate_model(model_name, source_controller, target_controller)
             except NotImplementedError as exc:
