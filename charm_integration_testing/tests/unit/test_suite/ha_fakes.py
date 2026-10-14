@@ -148,6 +148,7 @@ class RecordingKubernetesClient:
         self.defer_next_scale_down = False
         self.fail_restart_pod = False
         self.unready_pod_uids: set[str] = set()
+        self.terminating_pod_uids: set[str] = set()
 
     def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
         pod = K8sClient.V1Pod()
@@ -196,6 +197,8 @@ class RecordingKubernetesClient:
             return -1
         if uid.startswith("replacement-"):
             return int(uid.removeprefix("replacement-"))
+        if uid.startswith("rotated-"):
+            return int(uid.rsplit("-", maxsplit=1)[-1])
         return int(uid.removeprefix("uid-").removeprefix("scaled-"))
 
     def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
@@ -223,7 +226,12 @@ class RecordingKubernetesClient:
         self.pods.remove(pod)
         self._deleted_index = self._index_for_uid(uid)
         assert self._deleted_index is not None
-        pod = self._pod(self._deleted_index, f"replacement-{self._deleted_index}")
+        replacement_uid = (
+            f"rotated-{self._pod_name_counter}-{self._deleted_index}"
+            if uid.startswith("replacement-")
+            else f"replacement-{self._deleted_index}"
+        )
+        pod = self._pod(self._deleted_index, replacement_uid)
         self.pods.append(pod)
 
     def wait_for_charm_pods_ready(
@@ -234,6 +242,9 @@ class RecordingKubernetesClient:
         timeout: timedelta,
     ) -> list[K8sClient.V1Pod]:
         self.calls.append(("wait_for_charm_pods_ready", application_name, namespace, expected_count, timeout))
+        self.pods = [
+            pod for pod in self.pods if pod.metadata is None or pod.metadata.uid not in self.terminating_pod_uids
+        ]
         if len(self.pods) > expected_count and self.scale_down_uid is not None:
             pod = next(pod for pod in self.pods if pod.metadata is not None and pod.metadata.uid == self.scale_down_uid)
             self.pods.remove(pod)

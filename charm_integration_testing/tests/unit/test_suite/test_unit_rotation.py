@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import pytest
@@ -226,6 +226,7 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
     assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [
+        ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15)),
         ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
         ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
         ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
@@ -235,6 +236,24 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert not {f"uid-{index}" for index in range(2)} & {
         pod.metadata.uid for pod in kubernetes_client.pods if pod.metadata is not None
     }
+
+
+def test_unit_rotation_snapshots_ready_pods_after_terminating_pod_converges() -> None:
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
+    terminating_pod = kubernetes_client.pods[0]
+    assert terminating_pod.metadata is not None
+    assert terminating_pod.metadata.uid is not None
+    terminating_pod.metadata.deletion_timestamp = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    kubernetes_client.terminating_pod_uids.add(terminating_pod.metadata.uid)
+    kubernetes_client.pods.append(kubernetes_client._pod(0, "replacement-0"))
+    client.scale_callback = kubernetes_client.scale_to
+
+    _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
+
+    first_restart = next(call for call in kubernetes_client.calls if call[0] == "restart_pod")
+    assert first_restart[3] == "replacement-0"
+    assert len(kubernetes_client.pods) == 2
 
 
 def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> None:
@@ -252,7 +271,7 @@ def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> Non
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 2]
 
 
 def test_unit_rotation_waits_for_kubernetes_surge_readiness_before_deleting_originals() -> None:
@@ -269,7 +288,7 @@ def test_unit_rotation_waits_for_kubernetes_surge_readiness_before_deleting_orig
         ("scale_application", "target", 2, MODEL),
     ]
     assert not [call for call in kubernetes_client.calls if call[0] == "restart_pod"]
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 2]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
 
@@ -286,7 +305,7 @@ def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
 
     assert isinstance(error.value.__cause__, TimeoutError)
     assert str(error.value.__cause__) == "cleanup idle wait failed"
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 2]
 
 
 def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
@@ -304,7 +323,7 @@ def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 3, 2]
 
 
 def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
@@ -322,7 +341,7 @@ def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 2]
 
 
 def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fails() -> None:
@@ -336,7 +355,7 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fail
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 3, 3, 2]
 
 
 def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails() -> None:
@@ -350,4 +369,4 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails(
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [2, 3, 3, 3, 2]

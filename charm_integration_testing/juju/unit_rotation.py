@@ -52,7 +52,12 @@ def _rotate_kubernetes_units(
     models: list[JujuModelHandle],
     timeout: timedelta,
 ) -> None:
-    pods = kubernetes_client.get_charm_pods(application, model=model.model)
+    pods = kubernetes_client.wait_for_charm_pods_ready(
+        application,
+        model.model,
+        expected_count=len(units),
+        timeout=timeout,
+    )
     if len(pods) != len(units):
         raise RuntimeError(
             f"Expected one workload pod per Juju unit for {application}, found {len(pods)} pods for {len(units)} units."
