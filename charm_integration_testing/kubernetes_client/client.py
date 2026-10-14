@@ -395,19 +395,7 @@ class KubernetesClient:
 
         def check() -> list[K8sClient.V1Pod] | None:
             pods = self.get_charm_pods(application_name, model=namespace)
-            if len(pods) != expected_count:
-                return None
-            for pod in pods:
-                if pod.metadata is not None and pod.metadata.deletion_timestamp is not None:
-                    return None
-                if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
-                    return None
-                if not any(
-                    condition.type == "Ready" and condition.status == "True"
-                    for condition in pod.status.conditions or []
-                ):
-                    return None
-            return pods
+            return pods if len(pods) == expected_count and self._are_pods_running_and_ready(pods) else None
 
         return self.wait(
             check=check,
@@ -418,6 +406,49 @@ class KubernetesClient:
             timeout=timeout,
             delay=delay,
         )
+
+    def wait_for_charm_pods_replaced(
+        self,
+        application_name: str,
+        namespace: str,
+        expected_count: int,
+        previous_uids: Collection[str],
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> list[K8sClient.V1Pod]:
+        """Wait until the ready application pods no longer include any previous pod UIDs."""
+
+        def check() -> list[K8sClient.V1Pod] | None:
+            pods = self.get_charm_pods(application_name, model=namespace)
+            if len(pods) != expected_count or not self._are_pods_running_and_ready(pods):
+                return None
+            pod_uids = [pod.metadata.uid for pod in pods if pod.metadata is not None and pod.metadata.uid is not None]
+            if len(pod_uids) != expected_count or set(pod_uids) & set(previous_uids):
+                return None
+            return pods
+
+        return self.wait(
+            check=check,
+            timeout_message=(
+                f"Application '{application_name}' in namespace '{namespace}' did not reach {expected_count} "
+                "ready replacement pods within timeout"
+            ),
+            timeout=timeout,
+            delay=delay,
+        )
+
+    @staticmethod
+    def _are_pods_running_and_ready(pods: list[K8sClient.V1Pod]) -> bool:
+        for pod in pods:
+            if pod.metadata is not None and pod.metadata.deletion_timestamp is not None:
+                return False
+            if pod.status is None or pod.status.phase != PodStatus.RUNNING.value:
+                return False
+            if not any(
+                condition.type == "Ready" and condition.status == "True" for condition in pod.status.conditions or []
+            ):
+                return False
+        return True
 
     def delete_pod(
         self,

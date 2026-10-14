@@ -1,15 +1,74 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
+from collections.abc import Collection
 from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import pytest
-from juju import JujuClient
-from juju.unit_rotation import rotate_application_units
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient
 
+from validators.base import ValidationResult
+
 from .ha_fakes import MODEL, RecordingJujuBackend, RecordingJujuClient, RecordingKubernetesClient
+
+
+class RecordingRotationJujuClient(JujuClient):
+    def __init__(self, recorder: RecordingJujuClient, backend: RecordingJujuBackend) -> None:
+        super().__init__(backend, logging.getLogger(__name__))
+        self.recorder = recorder
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        return self.recorder.application_units(application, model)
+
+    def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
+        self.recorder.scale_application(application, num, model)
+
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.recorder.remove_unit(unit, model)
+
+    def multi_model_idle_for_period(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None = None,
+        count: int = 10,
+        strict_timeout: bool = False,
+    ) -> None:
+        self.recorder.multi_model_idle_for_period(models, timeout)
+
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+        *,
+        applications: list[str] | None = None,
+        endpoints: set[tuple[str, str]] | None = None,
+    ) -> dict[str, list[ValidationResult]]:
+        self.recorder.validate_model(model, level or "simple")
+        return {}
+
+    def restart_workload_pod(
+        self,
+        model: JujuModelHandle,
+        pod_name: str,
+        pod_uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> None:
+        self.recorder.restart_workload_pod(
+            model,
+            pod_name,
+            pod_uid,
+            timeout,
+            application=application,
+            unit=unit,
+            existing_uids=set(existing_uids),
+        )
 
 
 def _rotate_units(
@@ -22,7 +81,7 @@ def _rotate_units(
         k8s_model=k8s_model,
         kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
     )
-    client.backend = backend
+    juju_client = RecordingRotationJujuClient(client, backend)
     if kubernetes_client is not None:
         client.workload_pod_restarter = lambda model, pod_name, pod_uid, timeout, application, unit, existing_uids: (
             kubernetes_client.restart_pod(
@@ -35,11 +94,7 @@ def _rotate_units(
                 existing_uids=existing_uids,
             )
         )
-    rotate_application_units(
-        cast(JujuClient, client),
-        "target",
-        MODEL,
-    )
+    juju_client.rotate_application_units("target", MODEL)
 
 
 def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
@@ -232,7 +287,16 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
         ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
         ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15)),
     ]
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait"]) == 1
+    assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_replaced"] == [
+        (
+            "wait_for_charm_pods_replaced",
+            "target",
+            "model",
+            2,
+            {"uid-0", "uid-1"},
+            timedelta(minutes=15),
+        )
+    ]
     assert not {f"uid-{index}" for index in range(2)} & {
         pod.metadata.uid for pod in kubernetes_client.pods if pod.metadata is not None
     }

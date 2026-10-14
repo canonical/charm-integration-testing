@@ -466,24 +466,16 @@ class TestJujuClientUnitOperations:
 
         assert backend.resolved_models == [model]
 
-    @patch("juju.client.rotate_application_units")
-    def test_rotate_application_units_delegates_cloud_workflow(self, rotate: MagicMock) -> None:
+    def test_rotate_application_units_rejects_applications_without_units(self) -> None:
         backend = UnitOperationsBackendStub()
         logger = LoggerStub()
         client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
         model = JujuModelHandle(controller="controller", model="model")
-        related_model = JujuModelHandle(controller="controller", model="related")
 
-        client.rotate_application_units("app", model, related_models=[related_model], timeout=timedelta(minutes=5))
+        with pytest.raises(ValueError, match="it has no units"):
+            client.rotate_application_units("app", model, timeout=timedelta(minutes=5))
 
-        rotate.assert_called_once_with(
-            client,
-            "app",
-            model,
-            related_models=[related_model],
-            timeout=timedelta(minutes=5),
-        )
-        assert logger.infos == ["Rotating all units for app."]
+        assert logger.infos == ["Rotating all units for app.", "Getting the units for app."]
 
 
 class TestJujuValidationError:

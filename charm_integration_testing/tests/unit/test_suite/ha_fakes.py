@@ -4,7 +4,7 @@
 from collections.abc import Callable, Collection
 from datetime import timedelta
 
-from juju import JujuBackend, JujuModelHandle
+from juju import JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 
@@ -32,7 +32,6 @@ def charm(*, ha_units: int = 3, scale_down: bool = True, subordinate: bool = Fal
 
 class RecordingJujuClient:
     def __init__(self, current_units: int) -> None:
-        self.backend: JujuBackend
         self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None
@@ -254,6 +253,24 @@ class RecordingKubernetesClient:
             raise TimeoutError(f"expected {expected_count} ready pods")
         if any(pod.metadata is not None and pod.metadata.uid in self.unready_pod_uids for pod in self.pods):
             raise TimeoutError("a charm pod is not ready")
+        return list(self.pods)
+
+    def wait_for_charm_pods_replaced(
+        self,
+        application_name: str,
+        namespace: str,
+        expected_count: int,
+        previous_uids: Collection[str],
+        timeout: timedelta | None = None,
+        delay: timedelta | None = None,
+    ) -> list[K8sClient.V1Pod]:
+        self.calls.append(
+            ("wait_for_charm_pods_replaced", application_name, namespace, expected_count, set(previous_uids), timeout)
+        )
+        if len(self.pods) != expected_count or {
+            pod.metadata.uid for pod in self.pods if pod.metadata is not None
+        } & set(previous_uids):
+            raise TimeoutError("pods were not replaced")
         return list(self.pods)
 
     def wait(

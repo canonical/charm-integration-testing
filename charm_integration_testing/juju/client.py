@@ -6,7 +6,8 @@ from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesExtension
+from kubernetes import client as K8sClient  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClient, KubernetesExtension
 
 from validators.base import ValidationResult
 
@@ -20,7 +21,6 @@ from .models import (
     JujuIntegration,
     JujuIntegrationApplication,
 )
-from .unit_rotation import rotate_application_units
 from .version import JujuVersion
 
 
@@ -127,13 +127,245 @@ class JujuClient:
         because scale-down may select any pod for Deployment-backed workloads.
         """
         self.logger.info(f"Rotating all units for {application}.")
-        rotate_application_units(
-            self,
+        units = self.application_units(application, model=model)
+        if not units:
+            raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
+        models = list(dict.fromkeys([model, *(related_models or [])]))
+        if self.backend.is_k8s_model(model):
+            kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
+            if kubernetes_client is None:
+                raise RuntimeError(f"No KubernetesClient available for Kubernetes model {model.uri}.")
+            self._rotate_kubernetes_units(kubernetes_client, application, model, units, models, timeout)
+        else:
+            self._rotate_machine_units(application, model, units, models, timeout)
+
+        current_units = self.application_units(application, model=model)
+        if len(current_units) != len(units):
+            raise RuntimeError(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
+        self.multi_model_idle_for_period(models, timeout=timeout)
+        for model_ref in models:
+            self.validate_model(model=model_ref, level="deep")
+
+    def _rotate_kubernetes_units(
+        self,
+        kubernetes_client: KubernetesClient,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        pods = kubernetes_client.wait_for_charm_pods_ready(
             application,
-            model,
-            related_models=related_models,
+            model.model,
+            expected_count=len(units),
             timeout=timeout,
         )
+        if len(pods) != len(units):
+            raise RuntimeError(
+                f"Expected one workload pod per Juju unit for {application}, "
+                f"found {len(pods)} pods for {len(units)} units."
+            )
+        unit_names = set(units)
+        pods_by_unit: dict[str, K8sClient.V1Pod] = {}
+        original_uids: set[str] = set()
+        for pod in pods:
+            metadata = pod.metadata
+            if metadata is None or metadata.name is None or metadata.uid is None:
+                raise RuntimeError("Kubernetes pod metadata is incomplete before unit rotation.")
+            unit = (metadata.annotations or {}).get("unit.juju.is/id")
+            if unit not in unit_names or unit in pods_by_unit:
+                raise RuntimeError(f"Unable to uniquely map Kubernetes pod {metadata.name} to a Juju unit.")
+            pods_by_unit[unit] = pod
+            original_uids.add(metadata.uid)
+        if set(pods_by_unit) != unit_names:
+            raise RuntimeError(f"Unable to find a Kubernetes pod for every Juju unit in {application}.")
+
+        try:
+            self.scale_application(application, len(units) + 1, model=model)
+            kubernetes_client.wait_for_charm_pods_ready(
+                application,
+                model.model,
+                expected_count=len(units) + 1,
+                timeout=timeout,
+            )
+            self.multi_model_idle_for_period(models, timeout=timeout)
+            for unit in units:
+                metadata = pods_by_unit[unit].metadata
+                if metadata is None or metadata.name is None or metadata.uid is None:
+                    raise RuntimeError(f"Kubernetes pod metadata is incomplete for unit {unit}.")
+                current_pods = kubernetes_client.get_charm_pods(application, model=model.model)
+                existing_uids = {
+                    current_pod.metadata.uid
+                    for current_pod in current_pods
+                    if current_pod.metadata is not None and current_pod.metadata.uid is not None
+                }
+                if metadata.uid not in existing_uids:
+                    raise RuntimeError(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
+
+                self.restart_workload_pod(
+                    model=model,
+                    pod_name=metadata.name,
+                    pod_uid=metadata.uid,
+                    timeout=timeout,
+                    application=application,
+                    unit=unit,
+                    existing_uids=existing_uids,
+                )
+                kubernetes_client.wait_for_charm_pods_ready(
+                    application,
+                    model.model,
+                    expected_count=len(units) + 1,
+                    timeout=timeout,
+                )
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+        except BaseException as rotation_error:
+            try:
+                self._restore_kubernetes_unit_count(kubernetes_client, application, model, len(units), models, timeout)
+            except BaseException as cleanup_error:
+                raise rotation_error from cleanup_error
+            raise
+        else:
+            self._restore_kubernetes_unit_count(kubernetes_client, application, model, len(units), models, timeout)
+
+        kubernetes_client.wait_for_charm_pods_replaced(
+            application,
+            model.model,
+            expected_count=len(units),
+            previous_uids=original_uids,
+            timeout=timeout,
+        )
+
+    def _restore_kubernetes_unit_count(
+        self,
+        kubernetes_client: KubernetesClient,
+        application: str,
+        model: JujuModelHandle,
+        unit_count: int,
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        cleanup_errors: list[Exception] = []
+        try:
+            self.scale_application(application, unit_count, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            self.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            kubernetes_client.wait_for_charm_pods_ready(
+                application,
+                model.model,
+                expected_count=unit_count,
+                timeout=timeout,
+            )
+        except Exception as convergence_error:
+            cleanup_errors.append(convergence_error)
+
+        self._raise_cleanup_errors(cleanup_errors)
+
+    def _rotate_machine_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        for unit in units:
+            original_units = set(self.application_units(application, model=model))
+            unit_removal_attempted = False
+            try:
+                self.scale_application(application, len(units) + 1, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                unit_removal_attempted = True
+                self.remove_unit(unit, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) != len(units):
+                    raise RuntimeError(
+                        f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}."
+                    )
+                if unit in current_units:
+                    raise RuntimeError(f"Unit {unit} was not removed after rotation.")
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+            except BaseException as rotation_error:
+                try:
+                    self._cleanup_machine_surge(
+                        application,
+                        model,
+                        original_units,
+                        len(units),
+                        models,
+                        unit,
+                        timeout,
+                        unit_removal_attempted,
+                    )
+                except BaseException as cleanup_error:
+                    raise rotation_error from cleanup_error
+                raise
+
+    def _cleanup_machine_surge(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        original_units: set[str],
+        unit_count: int,
+        models: list[JujuModelHandle],
+        rotated_unit: str,
+        timeout: timedelta,
+        unit_removal_attempted: bool,
+    ) -> None:
+        current_units = self.application_units(application, model=model)
+        cleanup_errors: list[Exception] = []
+        settling_wait_succeeded = True
+        if set(current_units) != original_units:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+            except Exception as error:
+                cleanup_errors.append(error)
+                settling_wait_succeeded = False
+            try:
+                current_units = self.application_units(application, model=model)
+            except Exception as error:
+                cleanup_errors.append(error)
+                self._raise_cleanup_errors(cleanup_errors)
+
+        if not settling_wait_succeeded and unit_removal_attempted and rotated_unit in current_units:
+            self._raise_cleanup_errors(cleanup_errors)
+
+        surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
+        cleanup_changed_state = False
+        if len(current_units) > unit_count and not surge_units:
+            cleanup_errors.append(
+                RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
+            )
+        elif surge_units:
+            surge_unit_count = max(0, len(current_units) - unit_count)
+            for surge_unit in surge_units[:surge_unit_count]:
+                cleanup_changed_state = True
+                try:
+                    self.remove_unit(surge_unit, model=model)
+                except Exception as error:
+                    cleanup_errors.append(error)
+        if cleanup_changed_state or set(current_units) != original_units:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+            except Exception as error:
+                cleanup_errors.append(error)
+        self._raise_cleanup_errors(cleanup_errors)
+
+    @staticmethod
+    def _raise_cleanup_errors(errors: list[Exception]) -> None:
+        if errors:
+            if len(errors) > 1:
+                raise errors[0] from errors[-1]
+            raise errors[0]
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

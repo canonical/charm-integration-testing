@@ -949,6 +949,63 @@ class TestKubernetesClientInit:
             assert result == [ready_pod]
             assert mock_sleep.call_count == 1
 
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_previous_uids_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a ready pod set that is replaced by a new ready pod set
+            old_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", uid="old-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            old_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            new_pod = create_sample_pod(
+                "app-hash-pod-2", "test-namespace", uid="new-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            new_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[old_pod]),
+                V1PodListStub(items=[new_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for replacement pod identities
+            result = client.wait_for_charm_pods_replaced(
+                "app",
+                "test-namespace",
+                expected_count=1,
+                previous_uids={"old-uid"},
+            )
+
+            # THEN returns only after the original pod UID is gone
+            assert result == [new_pod]
+            assert mock_sleep.call_count == 1
+
+        def test_does_not_accept_unready_replacement_pods(self) -> None:
+            # GIVEN a replacement pod that has not become Ready
+            pod = create_sample_pod(
+                "app-hash-pod-2", "test-namespace", uid="new-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.return_value = V1PodListStub(items=[pod])
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(microseconds=1),
+                default_delay=timedelta(microseconds=1),
+            )
+
+            # WHEN waiting for replacement pod identities
+            with pytest.raises(TimeoutError, match="ready replacement pods"):
+                client.wait_for_charm_pods_replaced(
+                    "app",
+                    "test-namespace",
+                    expected_count=1,
+                    previous_uids={"old-uid"},
+                )
+
         def test_waits_when_expected_pod_is_not_ready(self) -> None:
             # GIVEN the expected number of pods, but one is not Ready
             pod = create_sample_pod("app-0", "test-namespace", labels={"app.kubernetes.io/name": "app"})
