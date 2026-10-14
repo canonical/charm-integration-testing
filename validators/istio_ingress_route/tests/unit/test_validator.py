@@ -68,6 +68,21 @@ def _make_validator(
     return IstioIngressRouteValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
 
 
+class _RejectLocalAppDatabagReads(dict[ApplicationStub | UnitStub | None, dict[str, str]]):
+    def __init__(
+        self,
+        data: dict[ApplicationStub | UnitStub | None, dict[str, str]],
+        local_app: ApplicationStub,
+    ) -> None:
+        super().__init__(data)
+        self._local_app = local_app
+
+    def __getitem__(self, key: ApplicationStub | UnitStub | None) -> dict[str, str]:
+        if key is self._local_app:
+            raise AssertionError("local app databag read")
+        return super().__getitem__(key)
+
+
 def _mock_http_response(status: int = 200) -> MagicMock:
     resp = MagicMock()
     resp.__enter__.return_value = resp
@@ -85,6 +100,8 @@ def _mock_http_response(status: int = 200) -> MagicMock:
 class TestIstioIngressRouteValidatorSimple:
     def test_skips_non_leader_when_local_listener_config_is_required(self) -> None:
         validator = _make_validator(VALID_HTTP_DATABAG, leader=False)
+        relation = cast(RelationStub, validator.relation)
+        relation.data = _RejectLocalAppDatabagReads(relation.data, cast(ApplicationStub, validator.charm.app))
 
         result = validator.validate(level="simple")
 
