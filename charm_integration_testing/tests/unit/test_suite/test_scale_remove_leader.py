@@ -35,10 +35,15 @@ class RecordingJujuClient:
         current_units: int = 3,
         validation_error: Exception | None = None,
         removal_timeout_once: bool = False,
+        removal_error: Exception | None = None,
+        removal_mutated_before_error: bool = False,
     ) -> None:
         self.current_units = current_units
         self.validation_error = validation_error
         self.removal_timeout_once = removal_timeout_once
+        self.removal_error = removal_error
+        self.removal_mutated_before_error = removal_mutated_before_error
+        self.leader_present = True
         self.calls: list[tuple[object, ...]] = []
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -51,6 +56,11 @@ class RecordingJujuClient:
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
+        if self.removal_error is not None:
+            if self.removal_mutated_before_error:
+                self.current_units -= 1
+                self.leader_present = False
+            raise self.removal_error
 
     def wait_for_unit_removal(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_removal", unit, model, timeout))
@@ -58,6 +68,7 @@ class RecordingJujuClient:
             self.removal_timeout_once = False
             raise TimeoutError("removal is still pending")
         self.current_units -= 1
+        self.leader_present = False
 
     def idle_for_period(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("idle_for_period", model, timeout))
@@ -159,6 +170,32 @@ def test_scale_remove_leader_waits_for_pending_removal_before_restoring_scale() 
     scale_index = next(i for i, call in enumerate(client.calls) if call[0] == "scale_application")
     assert len(wait_indices) == 2
     assert wait_indices[-1] < scale_index
+    assert client.current_units == 3
+
+
+@pytest.mark.parametrize("mutated_before_error", [False, True], ids=["not-accepted", "accepted"])
+def test_scale_remove_leader_restores_after_remove_command_error(mutated_before_error: bool) -> None:
+    removal_error = RuntimeError("remove command failed")
+    client = RecordingJujuClient(
+        removal_error=removal_error,
+        removal_mutated_before_error=mutated_before_error,
+    )
+
+    with pytest.raises(RuntimeError, match="remove command failed") as error:
+        scale_remove_leader.test_scale_remove_leader(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            "machine",
+            _charm(),
+            None,
+            None,
+        )
+
+    assert error.value is removal_error
+    assert ("idle_for_period", MODEL, timedelta(minutes=15)) in client.calls
+    assert ("num_units", "target", MODEL) in client.calls
+    assert ("scale_application", "target", 3, MODEL) in client.calls
     assert client.current_units == 3
 
 

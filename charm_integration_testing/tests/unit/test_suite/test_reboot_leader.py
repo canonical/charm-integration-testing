@@ -31,8 +31,9 @@ def _charm(*, ha_units: int = 3, subordinate: bool = False) -> Charm:
 
 
 class RecordingJujuClient:
-    def __init__(self) -> None:
+    def __init__(self, ssh_error: Exception | None = None) -> None:
         self.calls: list[tuple[object, ...]] = []
+        self.ssh_error = ssh_error
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -44,6 +45,8 @@ class RecordingJujuClient:
 
     def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
         self.calls.append(("ssh", unit, command, model))
+        if self.ssh_error is not None:
+            raise self.ssh_error
 
     def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_unavailable", unit, model, timeout))
@@ -149,6 +152,30 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
         )
 
     assert client.calls[-1] == ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
+
+
+def test_reboot_leader_waits_for_unavailability_before_recovery_after_ssh_error() -> None:
+    ssh_error = RuntimeError("SSH disconnected after reboot request")
+    client = RecordingJujuClient(ssh_error=ssh_error)
+
+    with pytest.raises(RuntimeError, match="SSH disconnected after reboot request") as error:
+        reboot_leader.test_reboot_leader(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            "machine",
+            _charm(),
+            None,
+            None,
+            None,
+        )
+
+    assert error.value is ssh_error
+    assert client.calls[3:] == [
+        ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
+        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
+        ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
+    ]
 
 
 def test_reboot_leader_validates_same_model_neighbor() -> None:

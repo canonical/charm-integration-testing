@@ -56,8 +56,16 @@ def test_reboot_leader(
             pytest.fail(f"Leader Pod for {leader} has no UID.")
 
     models = [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
+    reboot_attempted = False
+    unit_unavailability_observed = False
+
+    def wait_for_unit_unavailability() -> None:
+        nonlocal unit_unavailability_observed
+        juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+        unit_unavailability_observed = True
 
     def restart_leader() -> None:
+        nonlocal reboot_attempted
         if target_platform == "kubernetes":
             assert kubernetes_client is not None
             assert leader_pod_name is not None
@@ -76,6 +84,7 @@ def test_reboot_leader(
                 timeout=timedelta(minutes=15),
             )
         else:
+            reboot_attempted = True
             juju_client.ssh(
                 leader,
                 "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
@@ -113,7 +122,7 @@ def test_reboot_leader(
 
     try:
         restart_leader()
-        juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+        wait_for_unit_unavailability()
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
         if neighbor_application is not None:
             juju_client.validate_model(
@@ -121,6 +130,8 @@ def test_reboot_leader(
             )
     except Exception as operation_error:
         try:
+            if reboot_attempted and not unit_unavailability_observed:
+                wait_for_unit_unavailability()
             wait_for_recovery()
         except Exception as recovery_error:
             raise operation_error from recovery_error
