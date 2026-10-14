@@ -254,7 +254,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find all charmqa-related cluster roles and bindings older than the age threshold
+      - name: Find old QA cluster RBAC
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -282,15 +282,13 @@ jobs:
               cluster_resources+=("$line")
             fi
           done < resources_to_remove.txt
-
           failed=0
-
           pids=()
           descriptions=()
 
           # Delete cluster-scoped resources
           if [ ${#cluster_resources[@]} -gt 0 ]; then
-            kubectl delete "${cluster_resources[@]}" --timeout=25m &
+            kubectl delete "${cluster_resources[@]}" --ignore-not-found=true --timeout=25m &
             pids+=("$!")
             descriptions+=("cluster-scoped resources")
           fi
@@ -298,11 +296,10 @@ jobs:
           # Delete namespaced resources (one command per namespace)
           for namespace in "${!namespaced_resources[@]}"; do
             read -r -a resources <<< "${namespaced_resources[$namespace]}"
-            kubectl delete "${resources[@]}" --namespace="$namespace" --timeout=25m &
+            kubectl delete "${resources[@]}" --namespace="$namespace" --ignore-not-found=true --timeout=25m &
             pids+=("$!")
             descriptions+=("resources in namespace $namespace")
           done
-
           for i in "${!pids[@]}"; do
             if wait "${pids[$i]}"; then
               echo "Cleanup succeeded for ${descriptions[$i]}"
