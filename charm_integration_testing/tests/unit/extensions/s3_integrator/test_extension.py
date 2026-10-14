@@ -170,7 +170,6 @@ def test_deploy_configures_integrator_on_either_substrate(tmp_path: Path, is_k8s
     backend = JujuStub(is_k8s=is_k8s)
     storage = StorageStub()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle)
     extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
     client = JujuClient(backend, logging.getLogger(__name__), extensions=[extension])
     # WHEN the deployment lifecycle runs twice
@@ -180,6 +179,7 @@ def test_deploy_configures_integrator_on_either_substrate(tmp_path: Path, is_k8s
     assert len(storage.buckets) == 1
     assert storage.buckets[0].cleanup_calls == 0
     assert registry.is_registered(storage.buckets[0].handle)
+    assert not registry.is_registered(storage.handle)
     assert backend.actions == [
         (MODEL.uri, "storage/leader", "sync-s3-credentials", {"access-key": "access", "secret-key": "secret"})
     ]
@@ -242,7 +242,6 @@ def test_failed_action_does_not_mark_integrator_configured(status: str, code: in
     backend = JujuStub(action_status=status, action_return_code=code)
     storage = StorageStub()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle)
     extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
     # WHEN credential synchronization fails
     with pytest.raises(RuntimeError, match="synchronization failed"):
@@ -262,7 +261,6 @@ def test_bucket_is_registered_before_external_provisioning() -> None:
     backend = JujuStub()
     storage = StorageStub()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle)
     storage.fail_next_provision = True
     extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
 
@@ -279,7 +277,6 @@ def test_resumed_runs_register_bucket_without_destroyer() -> None:
     backend = JujuStub()
     storage = StorageStub()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle)
     extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=False)
 
     extension.post_deploy(MODEL)
@@ -294,8 +291,6 @@ def test_each_model_uses_its_environment_provider() -> None:
     target_storage = StorageStub("https://target-s3.test", "target")
     neighbor_storage = StorageStub("https://neighbor-s3.test", "neighbor")
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=target_storage.handle)
-    registry.register(handle=neighbor_storage.handle)
     extension = S3IntegratorExtension(
         backend,
         {MODEL.resource_id: target_storage, neighbor.resource_id: neighbor_storage},

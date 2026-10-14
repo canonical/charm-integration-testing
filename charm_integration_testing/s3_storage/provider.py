@@ -6,7 +6,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
+
+from resource_registry import ResourceRegistry
 
 if TYPE_CHECKING:
     from .storage import S3BucketHandle, S3StorageHandle
@@ -34,18 +36,32 @@ class S3Provider(ABC):
     @property
     @abstractmethod
     def handle(self) -> S3StorageHandle:
-        """Parent resource-registry identity for this provider's buckets."""
+        """Provider identity used to namespace bucket handles."""
 
     @abstractmethod
     def new_bucket(self) -> S3Bucket:
         """Create a bucket resource before provisioning any external state."""
+
+    def make_bucket(self, registry: ResourceRegistry, destroy_on_teardown: bool = True) -> tuple[str, S3Credentials]:
+        """Register and provision a bucket, returning its name and consumer credentials."""
+        bucket = self.new_bucket()
+        # Buckets are independent roots so model migration does not couple their lifecycles.
+        # Full-session teardown may remove one before its consumer; both are being torn down.
+        registry.register(
+            handle=bucket.handle,
+            destroyer=self._bucket_destroyer(bucket, destroy_on_teardown),
+        )
+        return bucket.provision()
+
+    def _bucket_destroyer(self, bucket: S3Bucket, destroy_on_teardown: bool) -> Callable[[], None] | None:
+        return bucket.cleanup if destroy_on_teardown else None
 
     @abstractmethod
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
         """Remove old buckets owned by this provider's namespace."""
 
     def cleanup_pending_resources(self) -> None:
-        """Retry provider-owned resource cleanup that failed during child teardown."""
+        """Retry provider-owned resource cleanup left pending by bucket teardown."""
 
 
 class S3Bucket(ABC):

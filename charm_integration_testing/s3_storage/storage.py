@@ -122,6 +122,21 @@ class S3Storage(S3Provider):
     def handle(self) -> S3StorageHandle:
         return self._handle
 
+    def _bucket_destroyer(self, bucket: S3Bucket, destroy_on_teardown: bool) -> Callable[[], None] | None:
+        if not destroy_on_teardown:
+            return None
+
+        def cleanup_bucket() -> None:
+            try:
+                bucket.cleanup()
+            except Exception as cleanup_error:
+                try:
+                    self.cleanup_pending_resources()
+                except Exception as retry_error:
+                    raise retry_error from cleanup_error
+
+        return cleanup_bucket
+
     def _make_client(self, credentials: S3Credentials) -> S3Client:
         client: S3Client = boto3.client(
             "s3",
@@ -154,7 +169,7 @@ class S3Storage(S3Provider):
         )
 
     def cleanup_pending_resources(self) -> None:
-        """Retry bucket deletion and credential revocation left pending by child teardown."""
+        """Retry bucket deletion and credential revocation left pending by bucket cleanup."""
         failures: list[Exception] = []
         for bucket in list(self._pending_bucket_deletions):
             try:
