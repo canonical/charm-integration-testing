@@ -31,11 +31,12 @@ class JujuResourceRegistryExtension(JujuExtension):
         self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
     ) -> dict[str, str]:
         handle = JujuControllerHandle(controller=controller)
-        if not self._registry.has_destroyer(handle):
-            self._registry.register(
-                handle=handle,
-                destroyer=lambda: self._backend.kill_controller(controller=controller),
-            )
+        if self._registry.is_registered(handle):
+            return bootstrap_configuration
+        self._registry.register(
+            handle=handle,
+            destroyer=lambda: self._backend.kill_controller(controller=controller),
+        )
         return bootstrap_configuration
 
     def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:

@@ -356,6 +356,24 @@ class TestJujuResourceRegistryExtensionPostBootstrap:
         registry.teardown(handle)
         assert backend.killed == ["my-ctrl"]
 
+    def test_pre_registered_controller_without_destroyer_is_not_re_registered(self) -> None:
+        # GIVEN a controller registered as pre-existing for a resumed test run
+        backend = BootstrapKillBackendStub()
+        registry = self._make_registry()
+        handle = JujuControllerHandle(controller="my-ctrl")
+        registry.register(handle=handle, destroyer=None)
+        client = JujuClient(backend, LoggerStub(), [JujuResourceRegistryExtension(backend, registry)])
+
+        # WHEN bootstrap is retried for the same controller name
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+
+        # THEN bootstrap proceeds and the pre-existing no-destroyer entry remains unchanged
+        assert backend.bootstrapped == ["my-ctrl"]
+        assert registry.registered_handles().count(handle) == 1
+        assert registry._entries[handle.resource_id].destroyer is None
+
 
 class TestJujuResourceRegistryExtensionPreKill:
     def _make_registry(self) -> ResourceRegistry:
