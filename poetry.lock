@@ -290,6 +290,7 @@ files = []
 develop = true
 
 [package.dependencies]
+boto3 = ">=1.40.0,<2.0.0"
 bundle-builder-x = "*"
 jubilant = ">=1.9.0,<2.0.0"
 kubernetes = ">=32.0.0,<33.0.0"
@@ -1317,6 +1318,21 @@ install-types = ["pip"]
 mypyc = ["setuptools (>=50)"]
 native-parser = ["ast-serialize (>=0.1.1,<1.0.0)"]
 reports = ["lxml"]
+
+[[package]]
+name = "mypy-boto3-s3"
+version = "1.43.106"
+description = "Type annotations for boto3 S3 1.43.106 service generated with mypy-boto3-builder 8.12.0"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "mypy_boto3_s3-1.43.106-py3-none-any.whl", hash = "sha256:e233d04dbcf3925522dff4346e75c37344ec3d1cbb82337e5eed2af263847668"},
+    {file = "mypy_boto3_s3-1.43.106.tar.gz", hash = "sha256:731195f15830699a36e29d3c8abb2918bccd3587eb2edcb233f8046967893279"},
+]
+
+[package.dependencies]
+typing-extensions = {version = "*", markers = "python_version < \"3.12\""}
 
 [[package]]
 name = "mypy-extensions"
@@ -4162,4 +4178,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "aa87afc7fb9acdcbe28ba83692626114048421bd09745b01824d75c4d254e17f"
+content-hash = "e9d34d8ecc1228b8bc7629578a26b03af3ca8ebf10759c2a4575ee583783b111"
