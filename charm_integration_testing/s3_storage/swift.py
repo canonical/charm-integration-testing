@@ -178,5 +178,6 @@ class SwiftS3Provider(S3Storage):
                 keystone.credentials.project_name,
                 keystone.credentials.project_domain_name,
                 keystone.credentials.storage_url,
+                cleanup_credentials.access_key,
             ),
         )
