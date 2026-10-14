@@ -44,6 +44,8 @@ class S3IntegratorExtension(JujuExtension):
                 )
             self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
             self.juju.wait_application_settled(model, application, timedelta(minutes=10))
+            if self.juju.num_units(model, application) == 0:
+                continue
             bucket_resource = provider.new_bucket()
             if not self.resource_registry.is_registered(provider.handle):
                 self.resource_registry.register(

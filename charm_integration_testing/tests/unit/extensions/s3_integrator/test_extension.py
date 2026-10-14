@@ -24,6 +24,10 @@ class JujuStub(JujuStubBase):
     applications: dict[str, str] = field(default_factory=lambda: {"storage": "s3-integrator"})
     action_status: str = "completed"
     action_return_code: int = 0
+    unit_count: int = 1
+
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
+        return self.unit_count
 
     def deploy_bundle_file(
         self,
@@ -42,7 +46,7 @@ class JujuStub(JujuStubBase):
 
 @dataclass
 class MigrationFailureAfterMoveStub(JujuStub):
-    current_controller: str = MODEL.controller
+    current_controller: str | None = MODEL.controller
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.current_controller = target_controller
@@ -50,6 +54,25 @@ class MigrationFailureAfterMoveStub(JujuStub):
 
     def model_exists(self, model: JujuModelHandle) -> bool:
         return model.controller == self.current_controller
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        assert model.controller == self.current_controller
+
+
+@dataclass
+class MigrationFailureDuringVisibilityGapStub(MigrationFailureAfterMoveStub):
+    waited_for: list[JujuModelHandle] = field(default_factory=list)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.current_controller = None
+        raise RuntimeError("Migration command failed during the visibility gap")
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        return model.controller == self.current_controller
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        self.waited_for.append(model)
+        self.current_controller = model.controller
 
 
 class StorageStub(S3Provider):
@@ -141,6 +164,22 @@ def test_deploy_configures_integrator_on_either_substrate(tmp_path: Path, is_k8s
     assert len(backend.waited_scaled) == len(backend.waited_settled) == 1
     registry.teardown_all()
     assert storage.buckets[0].cleanup_calls == 1
+
+
+def test_zero_unit_machine_integrator_is_not_provisioned(tmp_path: Path) -> None:
+    backend = JujuStub(is_k8s=False, unit_count=0)
+    storage = StorageStub()
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), extensions=[extension])
+
+    client.deploy_bundle_file(str(tmp_path / "bundle.yaml"), MODEL)
+
+    assert storage.buckets == []
+    assert backend.actions == []
+    assert backend.configured_applications == []
+    assert backend.waited_scaled
+    assert backend.waited_settled
 
 
 def test_unrelated_or_externally_configured_apps_need_no_credentials() -> None:
@@ -280,6 +319,22 @@ def test_failed_migration_reconciles_provider_for_retry_with_new_client() -> Non
     retry_client.deploy_bundle_file("bundle.yaml", target_model)
 
     assert backend.configured_applications[0][2]["endpoint"] == storage.endpoint
+
+
+def test_failed_migration_waits_through_model_visibility_gap() -> None:
+    backend = MigrationFailureDuringVisibilityGapStub()
+    target_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="visibility gap"):
+        client.migrate_model(MODEL.model, MODEL.controller, target_model.controller)
+
+    assert backend.waited_for == [target_model]
+    assert providers == {target_model.resource_id: storage}
 
 
 def test_migration_does_not_replace_target_provider() -> None:

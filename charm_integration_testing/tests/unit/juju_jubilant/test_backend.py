@@ -268,6 +268,22 @@ class TestModelExists:
 
         assert not JubilantBackend(client=client).model_exists(TEST_MODEL)
 
+    @pytest.mark.parametrize(
+        "error_stderr",
+        [
+            'ERROR Model "test-model" has been migrated to controller "target-controller".',
+            "ERROR model migration in progress",
+        ],
+        ids=["already-migrated", "migration-in-progress"],
+    )
+    def test_returns_false_when_model_is_temporarily_unavailable_during_migration(self, error_stderr: str) -> None:
+        error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr=error_stderr)
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"), error=error)}
+        )
+
+        assert not JubilantBackend(client=client).model_exists(TEST_MODEL)
+
     def test_raises_unrelated_cli_errors(self) -> None:
         error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr="ERROR connection refused")
         client = ModelLookupClientStub(
