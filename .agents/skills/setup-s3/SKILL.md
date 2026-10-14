@@ -18,9 +18,12 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
    bash "$PROJECT_ROOT/development-sandbox/bin/setup-s3.sh"
    ```
 
-3. The script verifies an authenticated bucket/object write, read and delete.
-   It writes the mode-0600 credential file only after that probe succeeds. Load
-   it in the shell that runs the test suite:
+3. The server configuration file contains a bucket-management identity and a
+   separate test identity limited to harness buckets. The script verifies that
+   the test identity can read/write a harness bucket but cannot create a bucket
+   outside that scope. It writes the mode-0600 shell credential file only after
+   that probe succeeds; the server configuration is created earlier so SeaweedFS
+   can start. Load the shell file in the test shell:
 
    ```bash
    source "$HOME/.local/share/charmqa-s3/s3.env"
@@ -35,9 +38,10 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
    that both Kubernetes pods and LXD units can reach port 8333.
 
 The service stores data under `$HOME/.local/share/charmqa-s3/`, outside the source
-tree. Re-running setup keeps existing data and keys. An inactive existing service
-or a mismatched binary version requires inspection rather than automatic replacement.
-Use `sudo journalctl -u charmqa-s3` for diagnostics.
+tree. Re-running setup keeps existing data and keys. An inactive existing service,
+an unsupported older `s3.json` credential format, or a mismatched binary version
+requires inspection rather than automatic replacement. Use
+`sudo journalctl -u charmqa-s3` for diagnostics.
 
 Normal suite teardown removes its buckets after consumers stop. To remove buckets
 left by interrupted local runs:

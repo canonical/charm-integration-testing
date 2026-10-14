@@ -54,7 +54,8 @@ For tests whose bundles include s3-integrator, use the
 [setup-s3 skill](../.agents/skills/setup-s3/SKILL.md) and load
 `$HOME/.local/share/charmqa-s3/s3.env` before running the suite. The endpoint must
 be reachable from deployed units, not just from the VM. Local S3 uses generated
-keys and does not need production Swift credentials.
+test credentials scoped to harness buckets, plus a separate bucket-management
+identity kept for setup and cleanup; it does not need production Swift credentials.
 
 ## Token setup
 

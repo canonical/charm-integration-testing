@@ -69,9 +69,13 @@ use the RADOS Gateway or have a nonstandard endpoint, set the optional
 ``S3_ENDPOINT`` explicitly rather than treating a native Swift URL as an S3 URL.
 
 For a local S3-compatible server, supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY`` and
-``S3_SECRET_KEY`` instead, and unset ``S3_OS_STORAGE_URL``. In the development
-sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions this service.
-Load ``$HOME/.local/share/charmqa-s3/s3.env`` in the test shell.
+``S3_SECRET_KEY`` instead, and unset ``S3_OS_STORAGE_URL``. Optionally supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
+identity; the provider uses it for bucket creation and cleanup but sends only the
+``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development
+sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions the service with
+that separate identity and a test identity restricted to harness buckets. Load
+``$HOME/.local/share/charmqa-s3/s3.env`` in the test shell.
 ``S3_REGION`` defaults to ``us-east-1``.
 
 Each integrator gets an isolated bucket and an initial ``charmqa/`` directory
@@ -86,8 +90,10 @@ revoked before their buckets are deleted; local/static keys are never revoked.
 
 Interrupted runs are swept by the scheduled environment cleanup using the
 existing age threshold (240 minutes by default). Only strictly named harness
-buckets in the matching namespace are eligible; log containers and externally
-configured buckets are not touched. The four-hour threshold is longer than any
+buckets in the matching namespace and with the matching provider ownership tag
+are eligible; log containers, other providers' buckets, and externally
+configured buckets are not touched. Buckets without ownership tags are retained
+and reported for manual inspection. The four-hour threshold is longer than any
 supported test run. Swift-backed cleanup uses the
 pre-provisioned ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for S3
 operations, so it does not create temporary cleanup keys. If a process is
@@ -125,7 +131,8 @@ non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
    S3_ENDPOINT=https://s3.example
 
 The parser accepts comments and values containing ``=``; do not quote values or
-put them on multiple lines. In cross-model runs, each integrator uses the
+put them on multiple lines. Optional ``S3_ENDPOINT`` and ``S3_REGION`` values
+select a nonstandard endpoint or region. In cross-model runs, each integrator uses the
 provider selected by its own environment, so both environment secrets must be
 configured. The cleanup identity must be able to list buckets, read harness
 bucket tags, and remove buckets, object versions, and incomplete uploads. The
