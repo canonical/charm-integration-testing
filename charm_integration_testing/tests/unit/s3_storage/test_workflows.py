@@ -21,6 +21,8 @@ SWIFT_CONFIG_VARIABLES = (
     "S3_OS_STORAGE_URL",
     "S3_CLEANUP_ACCESS_KEY",
     "S3_CLEANUP_SECRET_KEY",
+    "S3_ENDPOINT",
+    "S3_REGION",
 )
 TARGET_SECRET_EXPRESSION = "${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}"
 NEIGHBOR_SECRET_EXPRESSION = "${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}"
@@ -106,7 +108,6 @@ def test_ci_preflight_checks_environment_secrets(
         output = Path(environment["GITHUB_ENV"]).read_text()
         assert output.splitlines() == [
             *(f"{prefix}{name}=configured" for name in SWIFT_CONFIG_VARIABLES),
-            f"{prefix}S3_ENDPOINT=",
             f"{prefix}S3_BUCKET_NAMESPACE={secret_name}",
         ]
     else:
@@ -238,16 +239,19 @@ def test_optional_swift_config_rejects_partial_values(tmp_path: Path) -> None:
     assert "S3_OS_PASSWORD" in result.stdout
 
 
-def test_swift_config_loader_exports_optional_endpoint(tmp_path: Path) -> None:
+def test_swift_config_loader_exports_optional_endpoint_and_region(tmp_path: Path) -> None:
     environment_file = tmp_path / "github-env"
-    config = "\n".join(f"{name}=configured" for name in SWIFT_CONFIG_VARIABLES)
+    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values["S3_ENDPOINT"] = "https://s3.example"
+    values["S3_REGION"] = "region-1"
+    config = "\n".join(f"{name}={value}" for name, value in values.items())
     result = subprocess.run(
         ["python3", "scripts/load-swift-config.py", "S3_SWIFT_TEST", "--prefix", "TARGET_"],
         capture_output=True,
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": config + "\nS3_ENDPOINT=https://s3.example",
+            "SWIFT_CONFIG": config,
             "GITHUB_ENV": str(environment_file),
         },
         text=True,
@@ -255,6 +259,7 @@ def test_swift_config_loader_exports_optional_endpoint(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert "TARGET_S3_ENDPOINT=https://s3.example" in environment_file.read_text().splitlines()
+    assert "TARGET_S3_REGION=region-1" in environment_file.read_text().splitlines()
 
 
 def test_swift_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -> None:
