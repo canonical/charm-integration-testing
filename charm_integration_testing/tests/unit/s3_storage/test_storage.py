@@ -1226,6 +1226,7 @@ def test_environment_provider_identity_distinguishes_cleanup_credentials() -> No
     assert target is not None
     assert neighbor is not None
     assert target.handle.resource_id != neighbor.handle.resource_id
+    assert target._bucket_owner != neighbor._bucket_owner
     assert "target-cleanup-secret" not in target.handle.resource_id
 
 
