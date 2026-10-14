@@ -30,6 +30,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ def _make_validator(
     endpoint: str = "kafka",
     role: RelationRoleStub = RelationRoleStub.requires,
     remote_extra: dict[str, str] | None = None,
+    leader: bool = True,
 ) -> KafkaClientValidator:
     remote_app = ApplicationStub(name="remote-app")
     # On the provider role, kafka_client fields live on the *local* app databag
@@ -49,6 +51,7 @@ def _make_validator(
     remote_databag = (remote_extra or {}) if role == RelationRoleStub.provides else databag
     relation = RelationStub(name=endpoint, id=0, app=remote_app, data={remote_app: remote_databag})
     charm_stub = make_charm_from_relation(relation, interface_name="kafka_client", role=role)
+    charm_stub.unit = UnitStub(leader=leader)
     if role == RelationRoleStub.provides:
         relation.data[charm_stub.app] = databag
     charm = cast(ops.CharmBase, charm_stub)
@@ -767,6 +770,14 @@ class TestKafkaClientValidatorDeep:
 
 
 class TestKafkaClientValidatorProvidesSimple:
+    def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
+        validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides, leader=False)
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
+
     def test_passes_with_all_required_fields(self) -> None:
         # GIVEN a complete provider-side databag and a successful Kafka connection
         validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides)

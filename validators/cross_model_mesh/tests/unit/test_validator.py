@@ -35,6 +35,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ def _make_requires_validator(
     endpoint: str = "require-cmr-mesh",
     local_app_name: str = _LOCAL_APP_NAME,
     local_model_name: str = _LOCAL_MODEL_NAME,
+    leader: bool = True,
 ) -> CrossModelMeshValidator:
     """Build a validator on the requirer side. Remote app publishes nothing."""
     remote_app = ApplicationStub(name="istio-beacon-k8s")
@@ -68,6 +70,7 @@ def _make_requires_validator(
         local_app_name=local_app_name,
         local_model_name=local_model_name,
     )
+    stub_charm.unit = UnitStub(leader=leader)
     # The requirer publishes cmr_data into its own local app databag.
     relation.data[stub_charm.app] = local_databag
     charm = cast(ops.CharmBase, stub_charm)
@@ -440,6 +443,17 @@ class TestDiscoverServicePorts:
 
 
 class TestRequiresSimple:
+    def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
+        validator = _make_requires_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))},
+            leader=False,
+        )
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
+
     def test_valid_self_published_data_passes(self) -> None:
         validator = _make_requires_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 

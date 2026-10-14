@@ -174,6 +174,15 @@ class BaseValidator(ABC):
             error=f"Role '{role}' is not supported by {self.__class__.__name__}.",
         )
 
+    def _skipped_result_due_to_non_leader(self, level: ValidationLevel) -> ValidationResult:
+        """Return a SKIPPED result when validation needs this unit's leader-only app databag."""
+        return self._make_result(
+            status="SKIPPED",
+            level=level,
+            checks=[],
+            error="This validation reads the local application databag and can only run on the leader unit.",
+        )
+
     @abstractmethod
     def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
         pass
