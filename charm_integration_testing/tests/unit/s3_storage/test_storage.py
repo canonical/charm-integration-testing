@@ -48,6 +48,7 @@ OLD_BUCKET = f"{PREFIX}{int((NOW - timedelta(hours=5)).timestamp())}-{'a' * 16}"
 
 class KeystoneStub(KeystoneClient):
     def __init__(self) -> None:
+        self.credentials = SWIFT
         self.created = 0
         self.deleted: list[str] = []
         self.delete_attempts: list[str] = []
@@ -155,6 +156,21 @@ def test_provision_sets_location_constraint_for_nondefault_region(client: S3Clie
         empty_bucket(stubber, bucket.handle.name)
         bucket.cleanup()
         stubber.assert_no_pending_responses()
+
+
+def test_generic_storage_owner_includes_application_identity() -> None:
+    first_storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        StaticCredentialProvider(S3Credentials("application-one", "secret-one"), CLEANUP_CREDS),
+    )
+    second_storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        StaticCredentialProvider(S3Credentials("application-two", "secret-two"), CLEANUP_CREDS),
+    )
+
+    assert first_storage._bucket_owner != second_storage._bucket_owner
 
 
 def test_retry_creation_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:

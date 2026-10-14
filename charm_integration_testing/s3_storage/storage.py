@@ -93,9 +93,17 @@ class S3Storage(S3Provider):
         self._endpoint = endpoint.rstrip("/")
         self._region = region
         self._credential_provider = credential_provider
-        self._bucket_owner = bucket_owner_identity or _stable_bucket_owner(
-            "s3-storage", self._endpoint, namespace, region, credential_provider.cleanup_credentials.access_key
-        )
+        if bucket_owner_identity is not None:
+            self._bucket_owner = bucket_owner_identity
+        elif credential_provider.ownership_identity is not None:
+            self._bucket_owner = _stable_bucket_owner(
+                "s3-storage", self._endpoint, namespace, region, *credential_provider.ownership_identity
+            )
+        else:
+            raise ValueError(
+                "S3 credential providers used with S3Storage must define ownership_identity or provide "
+                "bucket_owner_identity"
+            )
         self._handle = S3StorageHandle(namespace, identity if identity is not None else self._bucket_owner)
         self._prefix = f"charmqa-s3-{hashlib.sha256(namespace.encode()).hexdigest()[:8]}-"
         self._client_factory = client_factory or self._make_client
