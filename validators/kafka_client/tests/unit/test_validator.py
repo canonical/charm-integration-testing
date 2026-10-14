@@ -5,7 +5,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import patch
 
 import ops
@@ -769,11 +769,13 @@ class TestKafkaClientValidatorDeep:
 # ---------------------------------------------------------------------------
 
 
-class TestKafkaClientValidatorProvidesSimple:
-    def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
+class TestKafkaClientValidatorProvidesNonLeader:
+    @pytest.mark.parametrize("level", ["simple", "deep"])
+    def test_skips_non_leader_before_reading_local_app_databag(self, level: Literal["simple", "deep"]) -> None:
         validator = _make_validator(VALID_DATABAG, role=RelationRoleStub.provides, leader=False)
 
-        result = validator.validate(level="simple")
+        with patch.object(validator, "_connection_databag", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level=level)
 
         assert result.status == "SKIPPED"
         assert "leader" in (result.error or "")
