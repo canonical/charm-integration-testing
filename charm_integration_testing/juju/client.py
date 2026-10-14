@@ -177,7 +177,22 @@ class JujuClient:
                     self.validate_model(model=model_ref, level="simple")
         except BaseException as rotation_error:
             try:
-                self._restore_kubernetes_unit_count(adapter, application, model, len(units), models, timeout)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) > len(units):
+                    adapter.wait_for_replacements(
+                        application,
+                        model,
+                        len(units) + 1,
+                        original_ids,
+                        timeout,
+                    )
+                    self._restore_kubernetes_unit_count(adapter, application, model, len(units), models, timeout)
+                elif len(current_units) < len(units):
+                    raise RuntimeError(
+                        f"Expected at least {len(units)} units while recovering from rotation, found "
+                        f"{len(current_units)}."
+                    )
             except BaseException as cleanup_error:
                 raise rotation_error from cleanup_error
             raise

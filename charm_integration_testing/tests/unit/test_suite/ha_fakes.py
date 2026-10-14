@@ -154,6 +154,7 @@ class RecordingKubernetesClient:
         self.scale_down_uid: str | None = None
         self.defer_next_scale_down = False
         self.fail_restart_pod = False
+        self.fail_restart_after_delete = False
         self.unready_pod_uids: set[str] = set()
         self.terminating_pod_uids: set[str] = set()
 
@@ -303,6 +304,8 @@ class RecordingKubernetesClient:
             if pod.metadata is not None and pod.metadata.name == pod_name and pod.metadata.uid == uid
         )
         self.pods.remove(pod)
+        if self.fail_restart_after_delete:
+            raise TimeoutError("replacement pod did not appear")
         self._deleted_index = self._index_for_uid(uid)
         assert self._deleted_index is not None
         replacement_uid = (
