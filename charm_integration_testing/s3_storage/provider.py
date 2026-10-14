@@ -44,8 +44,8 @@ class S3Provider(ABC):
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
         """Remove old buckets owned by this provider's namespace."""
 
-    def cleanup_pending_credentials(self) -> None:
-        """Retry revocation of provider-owned credentials not attached to a bucket."""
+    def cleanup_pending_resources(self) -> None:
+        """Retry provider-owned resource cleanup that failed during child teardown."""
 
 
 class S3Bucket(ABC):
@@ -80,25 +80,33 @@ class CredentialProvider(ABC):
     def issue(self) -> S3Credentials:
         """Return credentials for a new bucket."""
 
+    def provisioning_credentials(self, bucket_credentials: S3Credentials) -> S3Credentials:
+        """Return the credentials used to create and initialize a bucket."""
+        return bucket_credentials
+
     @abstractmethod
     def revoke(self, access_key: str) -> None:
         """Revoke credentials returned by issue(); must be idempotent."""
 
 
 class StaticCredentialProvider(CredentialProvider):
-    """Share one externally managed identity across buckets; nothing to issue or revoke."""
+    """Use one application identity and optionally a separate bucket-management identity."""
 
     per_bucket_credentials = False
 
-    def __init__(self, credentials: S3Credentials) -> None:
+    def __init__(self, credentials: S3Credentials, cleanup_credentials: S3Credentials | None = None) -> None:
         self.credentials = credentials
+        self._cleanup_credentials = cleanup_credentials or credentials
 
     @property
     def cleanup_credentials(self) -> S3Credentials:
-        return self.credentials
+        return self._cleanup_credentials
 
     def issue(self) -> S3Credentials:
         return self.credentials
+
+    def provisioning_credentials(self, bucket_credentials: S3Credentials) -> S3Credentials:
+        return self.cleanup_credentials
 
     def revoke(self, access_key: str) -> None:
         return None
