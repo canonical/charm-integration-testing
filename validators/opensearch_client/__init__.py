@@ -1,6 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from .validator import OpenSearchClientValidator
+from .validator import OpenSearchClientPersistenceValidator, OpenSearchClientValidator
 
-__all__ = ["OpenSearchClientValidator"]
+__all__ = ["OpenSearchClientPersistenceValidator", "OpenSearchClientValidator"]
