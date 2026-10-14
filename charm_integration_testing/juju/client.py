@@ -813,9 +813,26 @@ class JujuClient:
         self.logger.info(
             f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"
         )
-        self.backend.migrate_model(
-            model_name=model_name, source_controller=source_controller, target_controller=target_controller
-        )
+        try:
+            self.backend.migrate_model(
+                model_name=model_name, source_controller=source_controller, target_controller=target_controller
+            )
+        except Exception:
+            try:
+                source = JujuModelHandle(controller=source_controller, model=model_name)
+                target = JujuModelHandle(controller=target_controller, model=model_name)
+                if not self.backend.model_exists(source) and self.backend.model_exists(target):
+                    for extension in self.extensions:
+                        extension.post_migrate_model(model_name, source_controller, target_controller)
+            except NotImplementedError as exc:
+                self.logger.warning("Could not reconcile model location after migration failure: %s", exc)
+            except Exception as exc:
+                self.logger.warning(
+                    "Could not reconcile model location after migration failure: %r",
+                    exc,
+                    exc_info=True,
+                )
+            raise
 
         # Call extensions
         for extension in self.extensions:
