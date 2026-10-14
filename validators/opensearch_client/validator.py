@@ -435,15 +435,21 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             if refs_are_valid:
                 sorted_refs = sorted(matching_refs)
                 matching = len(sorted_refs)
-                passed = matching == expected.ref and all(ref == index + 1 for index, ref in enumerate(sorted_refs))
+                is_sequence = all(ref == index + 1 for index, ref in enumerate(sorted_refs))
+                already_written = is_sequence and matching == expected.ref + 1
+                passed = is_sequence and matching in (expected.ref, expected.ref + 1)
             else:
                 matching = len(matching_refs)
+                already_written = False
                 passed = False
             # Only write the next canary document when this checkpoint passed: ValidatorRunner
             # only carries the advanced PersistenceState forward on a PASS result, so writing here
             # unconditionally would grow `actual` past what the harness will ever compare against
-            # again, masking the mismatch behind permanent drift.
-            if passed:
+            # again, masking the mismatch behind permanent drift. The exception is a retry after an
+            # ambiguous write: if the previous attempt's index() succeeded but its response was
+            # lost, the runner kept the old state, so exactly one document with ref
+            # `expected.ref + 1` already exists. Accept it and advance without writing a duplicate.
+            if passed and not already_written:
                 next_ref = expected.ref + 1
                 self._write_canary_document(client, index_name, scope, expected.token, checkpoint_ref=next_ref)
         finally:
@@ -453,7 +459,7 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             name="document_count",
             passed=passed,
             message=(
-                f"Found expected {matching} marked document(s) in '{index_name}'."
+                f"Found expected {expected.ref} marked document(s) in '{index_name}'."
                 if passed
                 else (
                     f"Expected {expected.ref} marked document(s) with matching identity in "
@@ -686,16 +692,21 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
         # repeating the same first page forever: without that exclusion a page entirely filled
         # with false positives would leave a genuine canary past that page undiscovered. The loop
         # stops once a page returns no hits at all (nothing left to delete or skip).
+        #
+        # A hit that matches scope and kind exactly but lacks the marker or ref field is a canary
+        # that was damaged after it was written. It is never deleted, since ownership can't be
+        # confirmed, but it is reported by raising once the search is exhausted: returning
+        # normally would let a following prepare()/checkpoint() pass while the damaged document
+        # (and whatever data loss it implies) is silently left behind.
         expected_fields = {_SCOPE_FIELD: scope, _KIND_FIELD: _KIND_VALUE}
         skipped_ids: set[str] = set()
+        damaged_ids: list[str] = []
         while True:
             query: dict[str, Any] = {
                 "bool": {
                     "filter": [
                         _exact_match_filter(_SCOPE_FIELD, scope),
                         _exact_match_filter(_KIND_FIELD, _KIND_VALUE),
-                        {"exists": {"field": _MARKER_FIELD}},
-                        {"exists": {"field": _REF_FIELD}},
                     ]
                 }
             }
@@ -716,6 +727,12 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
             self._reject_partial_response(response, f"Searching for canary documents to delete in '{index_name}'")
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
+                if damaged_ids:
+                    raise RuntimeError(
+                        f"Cleanup of '{index_name}' did not complete: {len(damaged_ids)} document(s) carry this "
+                        f"validator's scope but are missing '{_MARKER_FIELD}' or '{_REF_FIELD}', so ownership "
+                        f"cannot be confirmed and they were left in place (ids: {sorted(damaged_ids)})."
+                    )
                 return
             for hit in hits:
                 doc_id = hit.get("_id")
@@ -723,6 +740,11 @@ class OpenSearchClientPersistenceValidator(_OpenSearchConnectionMixin, BasePersi
                     continue
                 if not _hit_matches_exactly(hit, expected_fields):
                     skipped_ids.add(doc_id)
+                    continue
+                source = hit.get("_source", {})
+                if _MARKER_FIELD not in source or _REF_FIELD not in source:
+                    skipped_ids.add(doc_id)
+                    damaged_ids.append(doc_id)
                     continue
                 try:
                     client.delete(index=index_name, id=doc_id, refresh=True, request_timeout=_REQUEST_TIMEOUT)

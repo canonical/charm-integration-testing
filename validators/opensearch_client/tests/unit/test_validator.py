@@ -843,6 +843,38 @@ class TestOpenSearchClientPersistenceValidatorCheckpoint:
         assert len(documents) == 3
         assert any(doc["validator_checkpoint_ref"] == 3 and doc["validator_marker"] == TEST_TOKEN for doc in documents)
 
+    def test_retry_after_ambiguous_write_passes_without_writing_a_duplicate(self) -> None:
+        # GIVEN a previous checkpoint() whose index() of ref=3 succeeded but whose response was
+        # lost, so the runner kept the old state (ref=2) and retries with the same `expected`
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, ref) for ref in (1, 2, 3)])
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN it passes, advances the state, and does not write a second ref=3 document
+        assert result.status == "PASS"
+        assert new_state.ref == 3
+        assert len(client.indices["test-index"].documents) == 3
+
+    @pytest.mark.parametrize("refs", [[1, 2, 4], [1, 2, 3, 4], [1, 3]])
+    def test_fails_when_extra_documents_are_not_exactly_the_next_ref(self, refs: list[int]) -> None:
+        # GIVEN documents that are neither refs 1..expected.ref nor 1..expected.ref+1
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        self._seed(client, [_canary_doc(TEST_SCOPE, TEST_TOKEN, ref) for ref in refs])
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN
+            result, new_state = validator.checkpoint(PersistenceState(token=TEST_TOKEN, id=42, ref=2))
+
+        # THEN
+        assert result.status == "FAIL"
+        assert new_state.ref == 2
+        assert len(client.indices["test-index"].documents) == len(refs)
+
     def test_fails_without_raising_when_document_count_does_not_match(self) -> None:
         # GIVEN the shared index has fewer matching documents than expected
         validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
@@ -1249,6 +1281,44 @@ class TestOpenSearchClientPersistenceValidatorCleanup:
         # THEN only the genuine, validator_kind-tagged canary document is gone
         assert lookalike_app_doc_id in store.documents
         assert genuine_canary_id not in store.documents
+
+    @pytest.mark.parametrize("missing_field", ["validator_marker", "validator_checkpoint_ref"])
+    def test_raises_when_a_scoped_canary_is_missing_marker_or_ref(self, missing_field: str) -> None:
+        # GIVEN a canary document that lost its marker or ref after being written, next to an
+        # intact one. Cleanup must not report success while the damaged document remains.
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        damaged_doc = _canary_doc(TEST_SCOPE, "a", 1)
+        del damaged_doc[missing_field]
+        damaged_id = store.add(damaged_doc)
+        intact_id = store.add(_canary_doc(TEST_SCOPE, "b", 2))
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="did not complete"):
+                validator.cleanup()
+
+        # AND the damaged document was left alone while the intact one was still removed
+        assert damaged_id in store.documents
+        assert intact_id not in store.documents
+
+    def test_prepare_raises_when_a_scoped_canary_is_damaged(self) -> None:
+        # GIVEN a damaged leftover canary: prepare() must not silently start a fresh run over it
+        validator = _make_persistence_validator(PERSISTENCE_VALID_DATABAG)
+        client = PersistenceOpenSearchClientStub()
+        store = client.indices.setdefault("test-index", PersistenceIndexStub())
+        damaged_doc = _canary_doc(TEST_SCOPE, "a", 1)
+        del damaged_doc["validator_marker"]
+        store.add(damaged_doc)
+
+        with patch("validators.opensearch_client.validator.OpenSearch", return_value=client):
+            # WHEN / THEN
+            with pytest.raises(RuntimeError, match="did not complete"):
+                validator.prepare()
+
+        # AND no new baseline document was written
+        assert len(store.documents) == 1
 
     def test_raises_not_applicable_when_credentials_incomplete(self) -> None:
         # GIVEN a databag with incomplete credentials (relation still being set up)
