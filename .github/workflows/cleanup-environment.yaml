@@ -2,8 +2,8 @@
 name: Clean up environment
 run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}
-  cancel-in-progress: true
+  group: charm-qa-environment-cleanup
+  cancel-in-progress: false
 permissions:
   contents: read  # only needed for private repos
 on:

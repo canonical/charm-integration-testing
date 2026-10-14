@@ -1,9 +1,13 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import importlib.util
 import os
 import subprocess
+import sys
+from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -159,6 +163,17 @@ def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
     assert reusable_secrets["S3_SWIFT_CONFIG"]["required"] is False
 
 
+def test_cleanup_workflows_serialize_shared_substrate_cleanup() -> None:
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+
+    assert schedule["jobs"]["cleanup-schedule"]["strategy"]["max-parallel"] == 1
+    assert reusable["concurrency"] == {
+        "group": "charm-qa-environment-cleanup",
+        "cancel-in-progress": False,
+    }
+
+
 def test_cleanup_imports_storage_from_checkout() -> None:
     # GIVEN the reusable cleanup workflow
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
@@ -180,6 +195,88 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert credential_step["if"] == "${{ success() && steps.env_info.outputs.swift-storage == 'true' }}"
     assert install_step["if"] == "${{ success() && steps.s3_credentials.outputs.available == 'true' }}"
     assert step["if"] == "${{ success() && steps.s3_credentials.outputs.available == 'true' }}"
+
+
+def test_cleanup_entrypoint_passes_namespace_and_age_to_provider(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = importlib.util.spec_from_file_location("cleanup_s3", ROOT / "scripts/cleanup-s3.py")
+    assert spec is not None and spec.loader is not None
+    cleanup_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cleanup_script)
+
+    class SessionStub:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.age: timedelta | None = None
+
+        def cleanup_stale(self, age: timedelta) -> list[str]:
+            self.age = age
+            return ["stale-bucket"]
+
+    session = SessionStub()
+    provider = ProviderStub()
+    observed: dict[str, Any] = {}
+
+    def provider_factory(environ: Any, used_session: SessionStub) -> ProviderStub:
+        observed["namespace"] = environ["S3_BUCKET_NAMESPACE"]
+        observed["session"] = used_session
+        return provider
+
+    monkeypatch.setenv("S3_BUCKET_NAMESPACE", "test-storage-namespace")
+    monkeypatch.setattr(sys, "argv", ["cleanup-s3.py", "--age-minutes", "17.5"])
+    monkeypatch.setattr(cleanup_script.requests, "Session", lambda: session)
+    monkeypatch.setattr(cleanup_script, "provider_from_environment", provider_factory)
+
+    cleanup_script.main()
+
+    assert observed == {"namespace": "test-storage-namespace", "session": session}
+    assert provider.age == timedelta(minutes=17.5)
+    assert capsys.readouterr().out == "Removed S3 bucket stale-bucket\n"
+
+
+def test_cleanup_entrypoint_provider_errors_exit_nonzero() -> None:
+    runner = """
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("cleanup_s3", "scripts/cleanup-s3.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+class SessionStub:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+class FailingProviderStub:
+    def cleanup_stale(self, age):
+        raise RuntimeError("cleanup failed")
+
+module.requests.Session = SessionStub
+module.provider_from_environment = lambda environ, session: FailingProviderStub()
+sys.argv = ["cleanup-s3.py"]
+module.main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", runner],
+        capture_output=True,
+        check=False,
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "charm_integration_testing")},
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "cleanup failed" in result.stderr
 
 
 @pytest.mark.parametrize(
