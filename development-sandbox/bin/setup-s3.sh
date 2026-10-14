@@ -25,6 +25,15 @@ case "$(uname -m)" in
     *) echo "Unsupported architecture" >&2; exit 1 ;;
 esac
 mkdir -p "${state}/data" "${state}/bin"
+temporary_files=()
+remove_temporary_files() {
+    local file
+    for file in "${temporary_files[@]}"; do
+        rm -f -- "${file}"
+    done
+}
+trap remove_temporary_files EXIT
+
 if [[ ! -f "${state}/bin/weed" ]]; then
     archive="${state}/seaweedfs-${version}.tar.gz"
     curl --fail --silent --show-error --location \
@@ -43,19 +52,45 @@ if ! "${state}/bin/weed" version | grep -q " ${version} "; then
     exit 1
 fi
 if [[ ! -f "${state}/s3.json" ]]; then
-    export S3_ACCESS_KEY S3_SECRET_KEY
+    export S3_ACCESS_KEY S3_SECRET_KEY S3_CLEANUP_ACCESS_KEY S3_CLEANUP_SECRET_KEY
     S3_ACCESS_KEY="$(openssl rand -hex 16)"
     S3_SECRET_KEY="$(openssl rand -hex 32)"
-    jq -n '{identities: [{name: "charmqa", credentials: [{
-        accessKey: env.S3_ACCESS_KEY, secretKey: env.S3_SECRET_KEY #gitleaks:allow
-    }], actions: ["Admin", "Read", "Write", "List", "Tagging"]}]}' > "${state}/s3.json"
+    S3_CLEANUP_ACCESS_KEY="$(openssl rand -hex 16)"
+    S3_CLEANUP_SECRET_KEY="$(openssl rand -hex 32)"
+    config_tmp="$(mktemp "${state}/s3.json.XXXXXX")"
+    temporary_files+=("${config_tmp}")
+    jq -n '{identities: [
+        {name: "charmqa-cleanup", credentials: [{
+            accessKey: env.S3_CLEANUP_ACCESS_KEY, secretKey: env.S3_CLEANUP_SECRET_KEY #gitleaks:allow
+        }], actions: ["Admin"]},
+        {name: "charmqa-tests", credentials: [{
+            accessKey: env.S3_ACCESS_KEY, secretKey: env.S3_SECRET_KEY #gitleaks:allow
+        }], actions: [
+            "Read:charmqa-s3-*", "Write:charmqa-s3-*", "List:charmqa-s3-*", "Tagging:charmqa-s3-*"
+        ]}
+    ]}' > "${config_tmp}"
+    mv "${config_tmp}" "${state}/s3.json"
+fi
+if ! jq -e '
+    (.identities | length == 2)
+    and (.identities[0].name == "charmqa-cleanup")
+    and (.identities[1].name == "charmqa-tests")
+    and (.identities[0].credentials[0].accessKey | type == "string" and length > 0)
+    and (.identities[0].credentials[0].secretKey | type == "string" and length > 0)
+    and (.identities[1].credentials[0].accessKey | type == "string" and length > 0)
+    and (.identities[1].credentials[0].secretKey | type == "string" and length > 0)
+' "${state}/s3.json" >/dev/null; then
+    echo "Existing S3 credentials use an unsupported format; inspect ${state}/s3.json before replacing it" >&2
+    exit 1
 fi
 address="$(ip -4 route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
 [[ -n "${address}" ]] || { echo "Cannot determine a VM address reachable from units" >&2; exit 1; }
 export S3_ENDPOINT="http://${address}:8333"
-export S3_ACCESS_KEY S3_SECRET_KEY
-S3_ACCESS_KEY="$(jq -r '.identities[0].credentials[0].accessKey' "${state}/s3.json")"
-S3_SECRET_KEY="$(jq -r '.identities[0].credentials[0].secretKey' "${state}/s3.json")"
+export S3_ACCESS_KEY S3_SECRET_KEY S3_CLEANUP_ACCESS_KEY S3_CLEANUP_SECRET_KEY
+S3_CLEANUP_ACCESS_KEY="$(jq -r '.identities[0].credentials[0].accessKey' "${state}/s3.json")"
+S3_CLEANUP_SECRET_KEY="$(jq -r '.identities[0].credentials[0].secretKey' "${state}/s3.json")"
+S3_ACCESS_KEY="$(jq -r '.identities[1].credentials[0].accessKey' "${state}/s3.json")"
+S3_SECRET_KEY="$(jq -r '.identities[1].credentials[0].secretKey' "${state}/s3.json")"
 if ! sudo -n systemctl is-active --quiet charmqa-s3.service; then
     if sudo -n systemctl cat charmqa-s3.service >/dev/null 2>&1; then
         echo "Existing charmqa-s3 service is not active; inspect journalctl before restarting" >&2
@@ -89,30 +124,50 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-client = boto3.client(
-    "s3",
-    endpoint_url=os.environ["S3_ENDPOINT"],
-    aws_access_key_id=os.environ["S3_ACCESS_KEY"],
-    aws_secret_access_key=os.environ["S3_SECRET_KEY"],
-    region_name="us-east-1",
-    config=Config(s3={"addressing_style": "path"}, request_checksum_calculation="when_required"),
+
+def create_client(access_key: str, secret_key: str):
+    return boto3.client(
+        "s3",
+        endpoint_url=os.environ["S3_ENDPOINT"],
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="us-east-1",
+        config=Config(s3={"addressing_style": "path"}, request_checksum_calculation="when_required"),
+    )
+
+
+client = create_client(os.environ["S3_ACCESS_KEY"], os.environ["S3_SECRET_KEY"])
+cleanup_client = create_client(
+    os.environ["S3_CLEANUP_ACCESS_KEY"], os.environ["S3_CLEANUP_SECRET_KEY"]
 )
-bucket = "charmqa-local-probe-" + uuid4().hex
+bucket = "charmqa-s3-local-probe-" + uuid4().hex
+outside_bucket = "charmqa-outside-probe-" + uuid4().hex
 bucket_creation_attempted = False
+outside_bucket_created = False
 try:
     bucket_creation_attempted = True
-    client.create_bucket(Bucket=bucket)
+    cleanup_client.create_bucket(Bucket=bucket)
     client.put_object(Bucket=bucket, Key="probe", Body=b"local-s3")
     result = client.get_object(Bucket=bucket, Key="probe")
     try:
         assert result["Body"].read() == b"local-s3"
     finally:
         result["Body"].close()
+    try:
+        client.create_bucket(Bucket=outside_bucket)
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if error.get("Code") not in {"AccessDenied", "Forbidden"} and status != 403:
+            raise
+    else:
+        outside_bucket_created = True
+        raise RuntimeError("The test S3 identity can create buckets outside its harness scope")
 finally:
     try:
         if bucket_creation_attempted:
             try:
-                client.delete_object(Bucket=bucket, Key="probe")
+                cleanup_client.delete_object(Bucket=bucket, Key="probe")
             except ClientError as exc:
                 error = exc.response.get("Error", {})
                 status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
@@ -120,17 +175,25 @@ finally:
                     raise
             finally:
                 try:
-                    client.delete_bucket(Bucket=bucket)
+                    cleanup_client.delete_bucket(Bucket=bucket)
                 except ClientError as exc:
                     error = exc.response.get("Error", {})
                     status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                     if error.get("Code") != "NoSuchBucket" and status != 404:
                         raise
+        if outside_bucket_created:
+            cleanup_client.delete_bucket(Bucket=outside_bucket)
     finally:
         client.close()
-print("Local S3 write/read/delete passed")
+        cleanup_client.close()
+print("Local S3 read/write passed; test credentials cannot create out-of-scope buckets")
 PY
-printf 'export S3_ENDPOINT=%q\nexport S3_ACCESS_KEY=%q\nexport S3_SECRET_KEY=%q\nexport S3_BUCKET_NAMESPACE=local\n' \
-    "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" > "${state}/s3.env"
+env_tmp="$(mktemp "${state}/s3.env.XXXXXX")"
+temporary_files+=("${env_tmp}")
+printf 'export S3_ENDPOINT=%q\nexport S3_ACCESS_KEY=%q\nexport S3_SECRET_KEY=%q\n' \
+    "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" > "${env_tmp}"
+printf 'export S3_CLEANUP_ACCESS_KEY=%q\nexport S3_CLEANUP_SECRET_KEY=%q\nexport S3_BUCKET_NAMESPACE=local\n' \
+    "${S3_CLEANUP_ACCESS_KEY}" "${S3_CLEANUP_SECRET_KEY}" >> "${env_tmp}"
+mv "${env_tmp}" "${state}/s3.env"
 echo "Load credentials with: source ${state}/s3.env"
 echo "This service is for this disposable VM only; do not expose it publicly."
