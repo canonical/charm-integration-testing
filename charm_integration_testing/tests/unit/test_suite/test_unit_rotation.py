@@ -23,7 +23,17 @@ def _rotate_units(
         kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
     )
     if kubernetes_client is not None:
-        client.workload_pod_deleter = lambda model, pod_name: kubernetes_client.delete_pod(model.model, pod_name)
+        client.workload_pod_restarter = lambda model, pod_name, pod_uid, timeout, application, unit, existing_uids: (
+            kubernetes_client.restart_pod(
+                model.model,
+                pod_name,
+                pod_uid,
+                timeout,
+                application=application,
+                unit=unit,
+                existing_uids=existing_uids,
+            )
+        )
     rotate_application_units(
         cast(JujuClient, client),
         backend,
@@ -197,14 +207,9 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
         ("scale_application", "target", 3, MODEL),
         ("scale_application", "target", 2, MODEL),
     ]
-    assert [call[2] for call in kubernetes_client.calls if call[0] == "delete_pod"] == [
+    assert [call[2] for call in kubernetes_client.calls if call[0] == "restart_pod"] == [
         "target-0" if statefulset else "target-hash-pod-1",
         "target-1" if statefulset else "target-hash-pod-2",
-    ]
-    assert len([call for call in kubernetes_client.calls if call[0] == "wait_for_new_pod"]) == 2
-    assert [call[2] for call in kubernetes_client.calls if call[0] == "wait_for_pod_ready"] == [
-        "target-0" if statefulset else "target-hash-pod-4",
-        "target-1" if statefulset else "target-hash-pod-5",
     ]
     assert [call for call in client.calls if call[0] == "multi_model_idle_for_period"] == [
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
@@ -222,6 +227,8 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert len(kubernetes_client.pods) == 2
     assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [
         ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
+        ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
+        ("wait_for_charm_pods_ready", "target", "model", 3, timedelta(minutes=15)),
         ("wait_for_charm_pods_ready", "target", "model", 2, timedelta(minutes=15)),
     ]
     assert len([call for call in kubernetes_client.calls if call[0] == "wait"]) == 1
@@ -233,7 +240,7 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
 def test_unit_rotation_scales_back_after_kubernetes_replacement_failure() -> None:
     client = RecordingJujuClient(current_units=2)
     kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
-    kubernetes_client.fail_wait_for_new_pod = True
+    kubernetes_client.fail_restart_pod = True
     client.scale_callback = kubernetes_client.scale_to
 
     with pytest.raises(TimeoutError, match="replacement pod did not appear"):
@@ -261,7 +268,7 @@ def test_unit_rotation_waits_for_kubernetes_surge_readiness_before_deleting_orig
         ("scale_application", "target", 3, MODEL),
         ("scale_application", "target", 2, MODEL),
     ]
-    assert not [call for call in kubernetes_client.calls if call[0] == "delete_pod"]
+    assert not [call for call in kubernetes_client.calls if call[0] == "restart_pod"]
     assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
@@ -270,7 +277,7 @@ def test_unit_rotation_waits_for_kubernetes_surge_readiness_before_deleting_orig
 def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
     client = RecordingJujuClient(current_units=2)
     kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
-    kubernetes_client.fail_wait_for_new_pod = True
+    kubernetes_client.fail_restart_pod = True
     client.fail_multi_model_idle_on_call = 2
     client.scale_callback = kubernetes_client.scale_to
 
@@ -285,10 +292,10 @@ def test_unit_rotation_preserves_kubernetes_error_when_cleanup_fails() -> None:
 def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     client = RecordingJujuClient(current_units=2)
     kubernetes_client = RecordingKubernetesClient("target", 2, statefulset=False)
-    kubernetes_client.fail_wait_for_pod_ready = True
+    kubernetes_client.unready_pod_uids.add("replacement-0")
     client.scale_callback = kubernetes_client.scale_to
 
-    with pytest.raises(TimeoutError, match="replacement pod did not become ready"):
+    with pytest.raises(TimeoutError, match="a charm pod is not ready"):
         _rotate_units(client, k8s_model=True, kubernetes_client=kubernetes_client)
 
     assert [call for call in client.calls if call[0] == "scale_application"] == [
@@ -297,7 +304,7 @@ def test_unit_rotation_scales_back_after_kubernetes_readiness_failure() -> None:
     ]
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 2]
 
 
 def test_unit_rotation_scales_back_when_post_scale_hook_fails() -> None:
@@ -329,7 +336,7 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_cleanup_idle_wait_fail
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 3, 2]
 
 
 def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails() -> None:
@@ -343,4 +350,4 @@ def test_unit_rotation_waits_for_kubernetes_recovery_when_scale_down_hook_fails(
 
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
-    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 2]
+    assert [call[3] for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [3, 3, 3, 2]

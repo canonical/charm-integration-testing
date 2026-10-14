@@ -8,8 +8,8 @@ from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
 
 from bundle_builder_x import Charm
 
-from .scheduler.states import State
 from .fixtures.integration_spec import require_principal_charm
+from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)

@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import timedelta
 
 from juju import JujuModelHandle
@@ -44,7 +44,9 @@ class RecordingJujuClient:
         self.defer_next_remove = False
         self.pending_unit_removals: list[str] = []
         self.extra_units_on_scale_up = 0
-        self.workload_pod_deleter: Callable[[JujuModelHandle, str], None] | None = None
+        self.workload_pod_restarter: (
+            Callable[[JujuModelHandle, str, str, timedelta, str, str, set[str]], None] | None
+        ) = None
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -76,11 +78,21 @@ class RecordingJujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         return list(self.units)
 
-    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
-        self.calls.append(("delete_workload_pod", model, pod_name))
-        if self.workload_pod_deleter is None:
-            raise RuntimeError("No workload pod deleter configured.")
-        self.workload_pod_deleter(model, pod_name)
+    def restart_workload_pod(
+        self,
+        model: JujuModelHandle,
+        pod_name: str,
+        pod_uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: set[str],
+    ) -> None:
+        self.calls.append(("restart_workload_pod", model, pod_name, pod_uid, timeout, application, unit))
+        if self.workload_pod_restarter is None:
+            raise RuntimeError("No workload pod restarter configured.")
+        self.workload_pod_restarter(model, pod_name, pod_uid, timeout, application, unit, existing_uids)
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("remove_unit", unit, model))
@@ -134,8 +146,7 @@ class RecordingKubernetesClient:
         self._deleted_index: int | None = None
         self.scale_down_uid: str | None = None
         self.defer_next_scale_down = False
-        self.fail_wait_for_new_pod = False
-        self.fail_wait_for_pod_ready = False
+        self.fail_restart_pod = False
         self.unready_pod_uids: set[str] = set()
 
     def _pod(self, index: int, uid: str) -> K8sClient.V1Pod:
@@ -151,6 +162,7 @@ class RecordingKubernetesClient:
             name=pod_name,
             uid=uid,
             labels=labels,
+            annotations={"unit.juju.is/id": f"{self.application}/{index}"},
         )
         return pod
 
@@ -189,32 +201,30 @@ class RecordingKubernetesClient:
     def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
         return list(self.pods)
 
-    def delete_pod(self, namespace: str, pod_name: str) -> None:
-        pod = next(pod for pod in self.pods if pod.metadata is not None and pod.metadata.name == pod_name)
-        assert pod.metadata is not None
-        self._deleted_index = self._index_for_uid(pod.metadata.uid)
-        self.pods.remove(pod)
-        self.calls.append(("delete_pod", namespace, pod_name))
-
-    def wait_for_new_pod(
+    def restart_pod(
         self,
-        application_name: str,
         namespace: str,
-        existing_uids: set[str],
+        pod_name: str,
+        uid: str,
         timeout: timedelta,
-    ) -> K8sClient.V1Pod:
-        if self.fail_wait_for_new_pod:
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> None:
+        self.calls.append(("restart_pod", namespace, pod_name, uid, timeout, application, unit, set(existing_uids)))
+        if self.fail_restart_pod:
             raise TimeoutError("replacement pod did not appear")
+        pod = next(
+            pod
+            for pod in self.pods
+            if pod.metadata is not None and pod.metadata.name == pod_name and pod.metadata.uid == uid
+        )
+        self.pods.remove(pod)
+        self._deleted_index = self._index_for_uid(uid)
         assert self._deleted_index is not None
         pod = self._pod(self._deleted_index, f"replacement-{self._deleted_index}")
         self.pods.append(pod)
-        self.calls.append(("wait_for_new_pod", namespace, existing_uids, timeout))
-        return pod
-
-    def wait_for_pod_ready(self, pod_name: str, namespace: str, timeout: timedelta) -> None:
-        self.calls.append(("wait_for_pod_ready", namespace, pod_name, timeout))
-        if self.fail_wait_for_pod_ready:
-            raise TimeoutError("replacement pod did not become ready")
 
     def wait_for_charm_pods_ready(
         self,

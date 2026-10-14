@@ -57,7 +57,21 @@ def _rotate_kubernetes_units(
         raise RuntimeError(
             f"Expected one workload pod per Juju unit for {application}, found {len(pods)} pods for {len(units)} units."
         )
-    original_uids = {pod.metadata.uid for pod in pods if pod.metadata is not None and pod.metadata.uid is not None}
+    unit_names = set(units)
+    pods_by_unit: dict[str, K8sClient.V1Pod] = {}
+    original_uids: set[str] = set()
+    for pod in pods:
+        metadata = pod.metadata
+        if metadata is None or metadata.name is None or metadata.uid is None:
+            raise RuntimeError("Kubernetes pod metadata is incomplete before unit rotation.")
+        unit = (metadata.annotations or {}).get("unit.juju.is/id")
+        if unit not in unit_names or unit in pods_by_unit:
+            raise RuntimeError(f"Unable to uniquely map Kubernetes pod {metadata.name} to a Juju unit.")
+        pods_by_unit[unit] = pod
+        original_uids.add(metadata.uid)
+    if set(pods_by_unit) != unit_names:
+        raise RuntimeError(f"Unable to find a Kubernetes pod for every Juju unit in {application}.")
+
     try:
         juju_client.scale_application(application, len(units) + 1, model=model)
         kubernetes_client.wait_for_charm_pods_ready(
@@ -67,8 +81,9 @@ def _rotate_kubernetes_units(
             timeout=timeout,
         )
         juju_client.multi_model_idle_for_period(models, timeout=timeout)
-        for unit, pod in zip(units, pods, strict=True):
-            if pod.metadata is None or pod.metadata.name is None or pod.metadata.uid is None:
+        for unit in units:
+            metadata = pods_by_unit[unit].metadata
+            if metadata is None or metadata.name is None or metadata.uid is None:
                 raise RuntimeError(f"Kubernetes pod metadata is incomplete for unit {unit}.")
             current_pods = kubernetes_client.get_charm_pods(application, model=model.model)
             existing_uids = {
@@ -76,25 +91,22 @@ def _rotate_kubernetes_units(
                 for current_pod in current_pods
                 if current_pod.metadata is not None and current_pod.metadata.uid is not None
             }
-            if pod.metadata.uid not in existing_uids:
+            if metadata.uid not in existing_uids:
                 raise RuntimeError(f"Kubernetes pod for unit {unit} disappeared before its rotation.")
 
-            juju_client.delete_workload_pod(model=model, pod_name=pod.metadata.name)
-            replacement_pod = kubernetes_client.wait_for_new_pod(
-                application_name=application,
-                namespace=model.model,
-                existing_uids=existing_uids,
+            juju_client.restart_workload_pod(
+                model=model,
+                pod_name=metadata.name,
+                pod_uid=metadata.uid,
                 timeout=timeout,
+                application=application,
+                unit=unit,
+                existing_uids=existing_uids,
             )
-            if (
-                replacement_pod.metadata is None
-                or replacement_pod.metadata.name is None
-                or replacement_pod.metadata.uid is None
-            ):
-                raise RuntimeError(f"Replacement pod metadata is incomplete for unit {unit}.")
-            kubernetes_client.wait_for_pod_ready(
-                pod_name=replacement_pod.metadata.name,
-                namespace=model.model,
+            kubernetes_client.wait_for_charm_pods_ready(
+                application,
+                model.model,
+                expected_count=len(units) + 1,
                 timeout=timeout,
             )
             juju_client.multi_model_idle_for_period(models, timeout=timeout)

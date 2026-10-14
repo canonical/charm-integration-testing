@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
@@ -83,17 +84,32 @@ class JujuClient:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
 
-    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
-        """Delete a model's workload pod and dispatch configured lifecycle hooks."""
+    def restart_workload_pod(
+        self,
+        model: JujuModelHandle,
+        pod_name: str,
+        pod_uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> None:
+        """Restart a workload pod and dispatch configured lifecycle hooks on its replacement."""
         kubernetes_client = self.backend.get_kubernetes_client_for_model(model)
         if kubernetes_client is None:
-            raise RuntimeError(f"Cannot delete workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
+            raise RuntimeError(f"Cannot restart workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
 
-        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
+        self.logger.info(f"Restarting workload pod {pod_name} in model {model.uri}.")
         extension_hooks = [extension for extension in self.extensions if isinstance(extension, KubernetesExtension)]
-        kubernetes_client.delete_pod(
+        kubernetes_client.restart_pod(
             namespace=model.model,
             pod_name=pod_name,
+            uid=pod_uid,
+            timeout=timeout,
+            application=application,
+            unit=unit,
+            existing_uids=existing_uids,
             extension_hooks=extension_hooks,
         )
 

@@ -412,7 +412,7 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
-    def test_delete_workload_pod_dispatches_juju_kubernetes_extensions(self) -> None:
+    def test_restart_workload_pod_dispatches_juju_kubernetes_extensions(self) -> None:
         kubernetes_extension = PodDeleteExtensionStub()
         juju_extension = PodDeleteExtensionStub()
         kubernetes_backend = MagicMock()
@@ -420,21 +420,49 @@ class TestJujuClientUnitOperations:
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
         client = JujuClient(backend, LoggerStub(), [juju_extension])  # type: ignore[arg-type]
         model = JujuModelHandle(controller="controller", model="model")
+        timeout = timedelta(minutes=5)
+        existing_uids = {"old", "sibling"}
 
-        client.delete_workload_pod(model=model, pod_name="pod")
+        with patch.object(kubernetes_client, "restart_pod") as restart_pod:
+            client.restart_workload_pod(
+                model=model,
+                pod_name="pod",
+                pod_uid="old",
+                timeout=timeout,
+                application="app",
+                unit="app/1",
+                existing_uids=existing_uids,
+            )
 
         assert backend.resolved_models == [model]
-        kubernetes_backend.core_v1_api.delete_namespaced_pod.assert_called_once_with(name="pod", namespace="model")
+        restart_pod.assert_called_once_with(
+            namespace="model",
+            pod_name="pod",
+            uid="old",
+            timeout=timeout,
+            application="app",
+            unit="app/1",
+            existing_uids=existing_uids,
+            extension_hooks=[juju_extension],
+        )
         assert kubernetes_extension.deleted_pods == []
-        assert juju_extension.deleted_pods == [("model", "pod")]
+        assert juju_extension.deleted_pods == []
 
-    def test_delete_workload_pod_rejects_machine_models(self) -> None:
+    def test_restart_workload_pod_rejects_machine_models(self) -> None:
         backend = WorkloadPodBackendStub()
         client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
         model = JujuModelHandle(controller="controller", model="model")
 
         with pytest.raises(RuntimeError, match="is not Kubernetes-backed"):
-            client.delete_workload_pod(model=model, pod_name="pod")
+            client.restart_workload_pod(
+                model=model,
+                pod_name="pod",
+                pod_uid="old",
+                timeout=timedelta(minutes=5),
+                application="app",
+                unit="app/1",
+                existing_uids={"old"},
+            )
 
         assert backend.resolved_models == [model]
 

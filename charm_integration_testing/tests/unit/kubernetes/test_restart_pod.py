@@ -89,7 +89,7 @@ class Hook(KubernetesExtension):
         self.calls.append((namespace, pod_name))
 
 
-def restart(api: PodAPI, hook: Hook) -> None:
+def restart(api: PodAPI, hook: Hook, extension_hooks: list[KubernetesExtension] | None = None) -> None:
     KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
         "model",
         "target-1",
@@ -98,6 +98,7 @@ def restart(api: PodAPI, hook: Hook) -> None:
         application="target",
         unit="target/1",
         existing_uids={"old", "sibling"},
+        extension_hooks=extension_hooks,
     )
 
 
@@ -118,6 +119,17 @@ def test_waits_for_replacement_before_hook(clock: Clock, new_name: str) -> None:
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 5
     assert hook.calls == [("model", new_name)]
+
+
+def test_extension_hooks_override_client_extensions(clock: Clock) -> None:
+    api = PodAPI([[pod("new")]], clock)
+    client_hook = Hook()
+    supplied_hook = Hook()
+
+    restart(api, client_hook, extension_hooks=[supplied_hook])
+
+    assert client_hook.calls == []
+    assert supplied_hook.calls == [("model", "target-1")]
 
 
 @pytest.mark.parametrize("candidate", ["sibling", "wrong-unit", "unannotated", "deleting", "no-uid"])

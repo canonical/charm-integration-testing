@@ -275,11 +275,13 @@ class KubernetesClient:
         application: str,
         unit: str,
         existing_uids: Collection[str],
+        extension_hooks: Sequence[KubernetesExtension] | None = None,
     ) -> None:
         """Delete this Pod instance and rediscover its unit's replacement before running hooks.
 
         ``existing_uids`` contains all application Pod UIDs observed before deletion.
         Deletion and replacement polling share one timeout budget; hooks run afterwards.
+        ``extension_hooks`` overrides this client's extensions when provided.
         """
         deadline = monotonic() + timeout.total_seconds()
         old_uids = set(existing_uids) | {uid}
@@ -328,11 +330,10 @@ class KubernetesClient:
                     and replacements[0].status is not None
                     and replacements[0].status.phase == PodStatus.RUNNING.value
                 ):
-                    for extension in self.extensions:
+                    for extension in self.extensions if extension_hooks is None else extension_hooks:
                         extension.post_delete_pod(namespace, replacements[0].metadata.name)
                     return
             sleep(min(self.default_delay.total_seconds(), remaining()))
-
 
     def wait_for_pod_ready(
         self,

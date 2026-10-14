@@ -124,7 +124,7 @@ class FollowerClient(RecordingJujuClient):
         self.error = error
 
     def multi_model_idle_for_period(
-        self, models: list[JujuModelHandle], timeout: timedelta, strict_timeout: bool
+        self, models: list[JujuModelHandle], timeout: timedelta | None = None, strict_timeout: bool = False
     ) -> None:
         self.calls.append(("idle", models, strict_timeout))
         if self.error == "recovery" and any(call[0] == "restart" for call in self.calls):
