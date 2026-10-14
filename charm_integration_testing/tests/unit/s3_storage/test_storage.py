@@ -669,6 +669,38 @@ def test_stale_cleanup_does_not_delete_bucket_owned_by_another_provider(client: 
         stubber.assert_no_pending_responses()
 
 
+def test_stale_cleanup_is_scoped_to_swift_cleanup_identity(client: S3Client) -> None:
+    with requests.Session() as session:
+        storage = SwiftS3Provider("https://s3.test", NAMESPACE, KeystoneClient(SWIFT, session), CLEANUP_CREDS)
+        other_storage = SwiftS3Provider(
+            "https://s3.test",
+            NAMESPACE,
+            KeystoneClient(SWIFT, session),
+            S3Credentials("other-cleanup", "other-secret"),
+        )
+        storage._client_factory = lambda _: client
+
+        assert storage._bucket_owner != other_storage._bucket_owner
+        assert storage.handle.resource_id != other_storage.handle.resource_id
+
+        other_bucket = f"{PREFIX}{int((NOW - timedelta(hours=6)).timestamp())}-{'d' * 16}"
+        with Stubber(client) as stubber:
+            stubber.add_response("list_buckets", {"Buckets": [{"Name": other_bucket}]}, {})
+            stubber.add_response(
+                "get_bucket_tagging",
+                {
+                    "TagSet": [
+                        {"Key": "charmqa-storage-owner", "Value": other_storage._bucket_owner},
+                        {"Key": "charmqa-ec2-access", "Value": "other-key"},
+                    ]
+                },
+                {"Bucket": other_bucket},
+            )
+
+            assert storage.cleanup_stale(timedelta(hours=4), NOW) == []
+            stubber.assert_no_pending_responses()
+
+
 def test_stale_cleanup_retains_bucket_without_owner_tag(client: S3Client) -> None:
     keystone = KeystoneStub()
     storage = S3Storage(
