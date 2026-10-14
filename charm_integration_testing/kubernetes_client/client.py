@@ -6,7 +6,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from time import monotonic, sleep
-from typing import Any, Callable, Collection, Sequence, TypeVar
+from typing import Any, Callable, Collection, TypeVar
 
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes import watch
@@ -275,13 +275,11 @@ class KubernetesClient:
         application: str,
         unit: str,
         existing_uids: Collection[str],
-        extension_hooks: Sequence[KubernetesExtension] | None = None,
-    ) -> None:
-        """Delete this Pod instance and rediscover its unit's replacement before running hooks.
+    ) -> str:
+        """Delete this Pod instance and return its unit's replacement Pod name.
 
         ``existing_uids`` contains all application Pod UIDs observed before deletion.
-        Deletion and replacement polling share one timeout budget; hooks run afterwards.
-        ``extension_hooks`` overrides this client's extensions when provided.
+        Deletion and replacement polling share one timeout budget.
         """
         deadline = monotonic() + timeout.total_seconds()
         old_uids = set(existing_uids) | {uid}
@@ -327,12 +325,11 @@ class KubernetesClient:
                 ]
                 if (
                     len(replacements) == 1
+                    and isinstance(replacements[0].metadata.name, str)
                     and replacements[0].status is not None
                     and replacements[0].status.phase == PodStatus.RUNNING.value
                 ):
-                    for extension in self.extensions if extension_hooks is None else extension_hooks:
-                        extension.post_delete_pod(namespace, replacements[0].metadata.name)
-                    return
+                    return replacements[0].metadata.name
             sleep(min(self.default_delay.total_seconds(), remaining()))
 
     def wait_for_pod_ready(
@@ -454,8 +451,6 @@ class KubernetesClient:
         self,
         namespace: str,
         pod_name: str,
-        *,
-        extension_hooks: Sequence[KubernetesExtension] | None = None,
     ) -> None:
         """
         Deletes the specified pod.
@@ -463,7 +458,6 @@ class KubernetesClient:
         Args:
             namespace: Namespace where the pod is located
             pod_name: Name of the pod to delete
-            extension_hooks: Hooks to invoke after deletion; defaults to this client's extensions
 
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
@@ -476,7 +470,7 @@ class KubernetesClient:
             raise
 
         # Call extensions
-        for extension in self.extensions if extension_hooks is None else extension_hooks:
+        for extension in self.extensions:
             extension.post_delete_pod(namespace, pod_name)
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:

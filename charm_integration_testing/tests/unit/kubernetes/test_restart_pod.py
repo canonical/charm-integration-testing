@@ -89,8 +89,8 @@ class Hook(KubernetesExtension):
         self.calls.append((namespace, pod_name))
 
 
-def restart(api: PodAPI, hook: Hook, extension_hooks: list[KubernetesExtension] | None = None) -> None:
-    KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
+def restart(api: PodAPI, hook: Hook) -> str:
+    return KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
         "model",
         "target-1",
         "old",
@@ -98,12 +98,11 @@ def restart(api: PodAPI, hook: Hook, extension_hooks: list[KubernetesExtension] 
         application="target",
         unit="target/1",
         existing_uids={"old", "sibling"},
-        extension_hooks=extension_hooks,
     )
 
 
 @pytest.mark.parametrize("new_name", ["target-1", "target-replicaset-new"])
-def test_waits_for_replacement_before_hook(clock: Clock, new_name: str) -> None:
+def test_waits_for_running_replacement_and_returns_name(clock: Clock, new_name: str) -> None:
     api = PodAPI(
         [
             [pod("old")],
@@ -115,21 +114,11 @@ def test_waits_for_replacement_before_hook(clock: Clock, new_name: str) -> None:
         clock,
     )
     hook = Hook()
-    restart(api, hook)
+    replacement_name = restart(api, hook)
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 5
-    assert hook.calls == [("model", new_name)]
-
-
-def test_extension_hooks_override_client_extensions(clock: Clock) -> None:
-    api = PodAPI([[pod("new")]], clock)
-    client_hook = Hook()
-    supplied_hook = Hook()
-
-    restart(api, client_hook, extension_hooks=[supplied_hook])
-
-    assert client_hook.calls == []
-    assert supplied_hook.calls == [("model", "target-1")]
+    assert replacement_name == new_name
+    assert hook.calls == []
 
 
 @pytest.mark.parametrize("candidate", ["sibling", "wrong-unit", "unannotated", "deleting", "no-uid"])
@@ -149,7 +138,7 @@ def test_ignores_pods_that_are_not_a_live_replacement(clock: Clock, candidate: s
     hook = Hook()
     restart(api, hook)
     assert api.reads == 2
-    assert hook.calls == [("model", "replacement")]
+    assert hook.calls == []
 
 
 @pytest.mark.parametrize("becomes_running", [True, False])
@@ -167,7 +156,7 @@ def test_replacement_without_status_waits_for_running(clock: Clock, becomes_runn
         restart(api, hook)
         assert api.reads == 2
         assert clock.now > 0
-        assert hook.calls == [("model", "target-1")]
+        assert hook.calls == []
     else:
         with pytest.raises(TimeoutError, match="was not replaced"):
             restart(api, hook)

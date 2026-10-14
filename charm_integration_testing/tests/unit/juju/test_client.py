@@ -423,7 +423,7 @@ class TestJujuClientUnitOperations:
         timeout = timedelta(minutes=5)
         existing_uids = {"old", "sibling"}
 
-        with patch.object(kubernetes_client, "restart_pod") as restart_pod:
+        with patch.object(kubernetes_client, "restart_pod", return_value="replacement-pod") as restart_pod:
             client.restart_workload_pod(
                 model=model,
                 pod_name="pod",
@@ -443,10 +443,9 @@ class TestJujuClientUnitOperations:
             application="app",
             unit="app/1",
             existing_uids=existing_uids,
-            extension_hooks=[juju_extension],
         )
         assert kubernetes_extension.deleted_pods == []
-        assert juju_extension.deleted_pods == []
+        assert juju_extension.deleted_pods == [("model", "replacement-pod")]
 
     def test_restart_workload_pod_rejects_machine_models(self) -> None:
         backend = WorkloadPodBackendStub()

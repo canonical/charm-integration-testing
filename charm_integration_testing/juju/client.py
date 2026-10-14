@@ -101,8 +101,10 @@ class JujuClient:
             raise RuntimeError(f"Cannot restart workload pod {pod_name}: model {model.uri} is not Kubernetes-backed.")
 
         self.logger.info(f"Restarting workload pod {pod_name} in model {model.uri}.")
-        extension_hooks = [extension for extension in self.extensions if isinstance(extension, KubernetesExtension)]
-        kubernetes_client.restart_pod(
+        kubernetes_extensions = [
+            extension for extension in self.extensions if isinstance(extension, KubernetesExtension)
+        ]
+        replacement_pod = kubernetes_client.restart_pod(
             namespace=model.model,
             pod_name=pod_name,
             uid=pod_uid,
@@ -110,8 +112,9 @@ class JujuClient:
             application=application,
             unit=unit,
             existing_uids=existing_uids,
-            extension_hooks=extension_hooks,
         )
+        for extension in kubernetes_extensions:
+            extension.post_delete_pod(model.model, replacement_pod)
 
     def rotate_application_units(
         self,
