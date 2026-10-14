@@ -22,6 +22,7 @@ from extensions import (
     MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
+    S3IntegratorExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
@@ -47,6 +48,7 @@ from kubernetes_client import KubernetesBackend, KubernetesClient
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
+from s3_storage import S3Provider
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -91,6 +93,7 @@ pytest_plugins = [
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
+    "test_suite.fixtures.s3",
 ]
 
 
@@ -245,6 +248,7 @@ def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
     juju_backend: JujuBackend,
+    s3_providers: dict[str, S3Provider],
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
@@ -253,13 +257,19 @@ def session_resource_registry(
         ],
         logger=logger,
     )
+    for provider in {provider.handle.resource_id: provider for provider in s3_providers.values()}.values():
+        registry.register(handle=provider.handle, destroyer=provider.cleanup_pending_credentials)
     try:
         yield registry
     finally:
-        try:
-            registry.teardown_all()
-        except Exception as exc:
-            warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceTeardownWarning)
+            try:
+                registry.teardown_all()
+            except Exception as exc:
+                warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
+        for item in caught:
+            warnings.warn(item.message, item.category)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -358,6 +368,8 @@ def _build_juju_client(
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    cleanup_s3_buckets: bool,
+    s3_providers: dict[str, S3Provider],
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -371,6 +383,7 @@ def _build_juju_client(
             MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
+            S3IntegratorExtension(juju_backend, s3_providers, session_resource_registry, cleanup_s3_buckets),
             UnsealVaultJujuExtension(juju_backend, logger),
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             persistence_extension,
@@ -387,9 +400,18 @@ def juju_client(
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    cleanup_s3_buckets: bool,
+    s3_providers: dict[str, S3Provider],
 ) -> JujuClient:
     return _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        target_controller,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        cleanup_s3_buckets,
+        s3_providers,
     )
 
 
@@ -406,6 +428,8 @@ def seed_persistence_state_for_resumed_run(
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
     register_preexisting_resources: None,
+    cleanup_s3_buckets: bool,
+    s3_providers: dict[str, S3Provider],
 ) -> None:
     """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
 
@@ -441,7 +465,14 @@ def seed_persistence_state_for_resumed_run(
         return
 
     client = _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
+        juju_backend,
+        target_controller,
+        logger,
+        ubuntu_pro_token,
+        session_resource_registry,
+        persistence_extension,
+        cleanup_s3_buckets,
+        s3_providers,
     )
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:

@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-import warnings
 from dataclasses import dataclass
 from typing import Callable
 
@@ -279,24 +278,26 @@ class TestResourceRegistryTeardown:
         assert order == ["child", "parent"]
 
     def test_teardown_continues_after_child_failure(self) -> None:
+        # GIVEN a parent with a failing child and another child that can still be destroyed
         order: list[str] = []
         registry = _registry()
         parent = HandleStub("parent")
-        failed_child = HandleStub("failed-child")
-        next_child = HandleStub("next-child")
-
+        failing_child = HandleStub("failing-child")
+        later_child = HandleStub("later-child")
         registry.register(parent, destroyer=lambda: order.append("parent"))
         registry.register(
-            failed_child,
-            destroyer=lambda: (_ for _ in ()).throw(RuntimeError("child teardown failed")),
+            failing_child,
+            destroyer=lambda: (_ for _ in ()).throw(RuntimeError("child failed")),
             parent=parent,
         )
-        registry.register(next_child, destroyer=lambda: order.append("next-child"), parent=parent)
+        registry.register(later_child, destroyer=lambda: order.append("later-child"), parent=parent)
 
-        with pytest.raises(RuntimeError, match="child teardown failed"):
-            registry.teardown(parent)
+        # WHEN teardown_all runs
+        with pytest.warns(ResourceTeardownWarning):
+            registry.teardown_all()
 
-        assert order == ["next-child", "parent"]
+        # THEN sibling and parent cleanup still run after the child failure
+        assert order == ["later-child", "parent"]
         assert registry.registered_handles() == []
 
     def test_teardown_failing_destroyer_raises(self) -> None:
@@ -393,18 +394,18 @@ class TestResourceRegistryTeardownAll:
             registry.teardown_all()
 
     def test_teardown_all_continues_after_failure(self) -> None:
-        # GIVEN two resources, the first of which fails destruction
-        destroyed: list[str] = []
+        # GIVEN storage registered before a controller that fails destruction
+        cleanup_calls: list[str] = []
         registry = _registry()
-        registry.register(HandleStub("A"), destroyer=lambda: destroyed.append("A"))
-        registry.register(HandleStub("B"), destroyer=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        registry.register(HandleStub("storage"), destroyer=lambda: cleanup_calls.append("storage"))
+        registry.register(HandleStub("controller"), destroyer=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", ResourceTeardownWarning)
+        # WHEN the controller teardown fails
+        with pytest.warns(ResourceTeardownWarning):
             registry.teardown_all()
 
-        # THEN A is still destroyed despite B failing
-        assert "A" in destroyed
+        # THEN storage cleanup still runs afterward
+        assert cleanup_calls == ["storage"]
 
 
 class TestResourceRegistryRegisteredHandles:

@@ -27,12 +27,22 @@ class JujuResourceRegistryExtension(JujuExtension):
         self._backend = backend
         self._registry = registry
 
-    def post_bootstrap_controller(self, controller: str) -> None:
+    def pre_bootstrap_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
+        if self._registry.has_destroyer(handle):
+            return
         self._registry.register(
             handle=handle,
             destroyer=lambda: self._backend.kill_controller(controller=controller),
         )
+
+    def post_bootstrap_controller(self, controller: str) -> None:
+        handle = JujuControllerHandle(controller=controller)
+        if not self._registry.is_registered(handle):
+            self._registry.register(
+                handle=handle,
+                destroyer=lambda: self._backend.kill_controller(controller=controller),
+            )
 
     def post_add_model(self, controller: str, model: str) -> None:
         controller_handle = JujuControllerHandle(controller=controller)

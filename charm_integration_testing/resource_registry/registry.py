@@ -102,7 +102,7 @@ class ResourceRegistry:
         if entry is None:
             return
 
-        # Collect and destroy children first (depth-first)
+        # Collect and destroy children first (depth-first), continuing after failures.
         child_errors: list[Exception] = []
         for child_id in list(self._children.get(handle.resource_id, [])):
             child_entry = self._entries.get(child_id)
@@ -139,6 +139,8 @@ class ResourceRegistry:
                 raise destroy_exc from child_errors[0]
             raise destroy_exc
         if log_exc is not None:
+            if child_errors:
+                raise log_exc from child_errors[0]
             raise log_exc
         if child_errors:
             if len(child_errors) == 1:
@@ -176,3 +178,8 @@ class ResourceRegistry:
     def is_registered(self, handle: ResourceHandle) -> bool:
         """Return True if the handle is currently registered."""
         return handle.resource_id in self._entries
+
+    def has_destroyer(self, handle: ResourceHandle) -> bool:
+        """Return True if the registered handle has a destroyer."""
+        entry = self._entries.get(handle.resource_id)
+        return entry is not None and entry.destroyer is not None

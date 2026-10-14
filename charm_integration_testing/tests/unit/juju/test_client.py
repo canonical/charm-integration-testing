@@ -1032,6 +1032,7 @@ class BootstrapControllerBackendStub(NullJujuBackend):
 class HookRecordingExtension(JujuExtension):
     """Extension that records all lifecycle hook calls."""
 
+    pre_bootstrap_calls: list[str] = field(default_factory=list)
     post_bootstrap_calls: list[str] = field(default_factory=list)
     pre_kill_calls: list[str] = field(default_factory=list)
     post_migrate_calls: list[tuple[str, str, str]] = field(default_factory=list)
@@ -1039,6 +1040,9 @@ class HookRecordingExtension(JujuExtension):
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         self.post_deploy_calls.append(model)
+
+    def pre_bootstrap_controller(self, controller: str) -> None:
+        self.pre_bootstrap_calls.append(controller)
 
     def post_bootstrap_controller(self, controller: str) -> None:
         self.post_bootstrap_calls.append(controller)
@@ -1078,6 +1082,7 @@ class TestJujuClientBootstrapControllerHooks:
 
         # THEN the extension hook received the controller name
         assert ext.post_bootstrap_calls == ["my-ctrl"]
+        assert ext.pre_bootstrap_calls == ["my-ctrl"]
 
     def test_post_bootstrap_controller_hook_fires_for_all_extensions(self, logger: LoggerStub) -> None:
         # GIVEN a client with two extensions
@@ -1094,6 +1099,8 @@ class TestJujuClientBootstrapControllerHooks:
         # THEN both extensions received the hook
         assert ext1.post_bootstrap_calls == ["my-ctrl"]
         assert ext2.post_bootstrap_calls == ["my-ctrl"]
+        assert ext1.pre_bootstrap_calls == ["my-ctrl"]
+        assert ext2.pre_bootstrap_calls == ["my-ctrl"]
 
 
 class TestJujuClientKillControllerHooks:

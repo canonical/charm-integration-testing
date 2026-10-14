@@ -43,6 +43,9 @@ class JujuExtension(ABC):
         """Run the persistence lifecycle for *application*, auto-deciding the op from tracked state."""
         return {}
 
+    def pre_bootstrap_controller(self, controller: str) -> None:
+        pass
+
     def post_bootstrap_controller(self, controller: str) -> None:
         pass
 
