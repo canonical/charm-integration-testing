@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 
-from .backend import JujuBackend
 from .handles import JujuModelHandle
 
 if TYPE_CHECKING:
@@ -16,13 +15,13 @@ if TYPE_CHECKING:
 
 def rotate_application_units(
     juju_client: "JujuClient",
-    backend: JujuBackend,
     application: str,
     model: JujuModelHandle,
     *,
     related_models: list[JujuModelHandle] | None = None,
     timeout: timedelta = timedelta(minutes=15),
 ) -> None:
+    backend = juju_client.backend
     units = juju_client.application_units(application, model=model)
     if not units:
         raise ValueError(f"Cannot rotate units for application {application}: it has no units.")

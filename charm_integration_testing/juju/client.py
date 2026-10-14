@@ -129,7 +129,6 @@ class JujuClient:
         self.logger.info(f"Rotating all units for {application}.")
         rotate_application_units(
             self,
-            self.backend,
             application,
             model,
             related_models=related_models,

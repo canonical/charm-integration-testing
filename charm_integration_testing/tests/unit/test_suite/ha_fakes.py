@@ -4,7 +4,7 @@
 from collections.abc import Callable, Collection
 from datetime import timedelta
 
-from juju import JujuModelHandle
+from juju import JujuBackend, JujuModelHandle
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClient
 
@@ -32,6 +32,7 @@ def charm(*, ha_units: int = 3, scale_down: bool = True, subordinate: bool = Fal
 
 class RecordingJujuClient:
     def __init__(self, current_units: int) -> None:
+        self.backend: JujuBackend
         self.units = [f"target/{index}" for index in range(current_units)]
         self.calls: list[tuple[object, ...]] = []
         self.scale_callback: object | None = None

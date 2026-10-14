@@ -22,6 +22,7 @@ def _rotate_units(
         k8s_model=k8s_model,
         kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
     )
+    client.backend = backend
     if kubernetes_client is not None:
         client.workload_pod_restarter = lambda model, pod_name, pod_uid, timeout, application, unit, existing_uids: (
             kubernetes_client.restart_pod(
@@ -36,7 +37,6 @@ def _rotate_units(
         )
     rotate_application_units(
         cast(JujuClient, client),
-        backend,
         "target",
         MODEL,
     )

@@ -478,7 +478,6 @@ class TestJujuClientUnitOperations:
 
         rotate.assert_called_once_with(
             client,
-            backend,
             "app",
             model,
             related_models=[related_model],
