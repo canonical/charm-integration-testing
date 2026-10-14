@@ -75,6 +75,22 @@ class MigrationFailureDuringVisibilityGapStub(MigrationFailureAfterMoveStub):
         self.current_controller = model.controller
 
 
+@dataclass
+class MigrationFailureBeforeMoveStub(JujuStub):
+    checked_models: list[JujuModelHandle] = field(default_factory=list)
+    waited_for: list[JujuModelHandle] = field(default_factory=list)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise RuntimeError("Source model does not exist")
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        self.checked_models.append(model)
+        return False
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        self.waited_for.append(model)
+
+
 class StorageStub(S3Provider):
     def __init__(self, endpoint: str = "https://s3.test", namespace: str = "test") -> None:
         self._endpoint = endpoint
@@ -335,6 +351,26 @@ def test_failed_migration_waits_through_model_visibility_gap() -> None:
 
     assert backend.waited_for == [target_model]
     assert providers == {target_model.resource_id: storage}
+
+
+def test_failed_migration_does_not_wait_when_source_was_already_missing() -> None:
+    backend = MigrationFailureBeforeMoveStub()
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    extension = S3IntegratorExtension(
+        backend,
+        providers,
+        ResourceRegistry([], logging.getLogger(__name__)),
+        cleanup_buckets=True,
+    )
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="Source model does not exist"):
+        client.migrate_model(MODEL.model, MODEL.controller, "neighbor-controller")
+
+    assert backend.checked_models == [MODEL]
+    assert backend.waited_for == []
+    assert providers == {MODEL.resource_id: storage}
 
 
 def test_migration_does_not_replace_target_provider() -> None:

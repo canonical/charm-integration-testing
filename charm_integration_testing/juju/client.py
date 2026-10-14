@@ -554,15 +554,19 @@ class JujuClient:
         self.logger.info(
             f"Migrating model '{model_name}' from source controller '{source_controller}' to target controller '{target_controller}'"
         )
+        source = JujuModelHandle(controller=source_controller, model=model_name)
+        target = JujuModelHandle(controller=target_controller, model=model_name)
+        try:
+            source_existed_before_migration: bool | None = self.backend.model_exists(source)
+        except NotImplementedError:
+            source_existed_before_migration = None
         try:
             self.backend.migrate_model(
                 model_name=model_name, source_controller=source_controller, target_controller=target_controller
             )
         except Exception:
             try:
-                source = JujuModelHandle(controller=source_controller, model=model_name)
-                target = JujuModelHandle(controller=target_controller, model=model_name)
-                if not self.backend.model_exists(source):
+                if source_existed_before_migration is not False and not self.backend.model_exists(source):
                     self.backend.wait_for_model_to_exist(target, timeout=None)
                     for extension in self.extensions:
                         extension.post_migrate_model(model_name, source_controller, target_controller)
