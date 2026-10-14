@@ -141,6 +141,20 @@ class SwiftCredentialProvider(CredentialProvider):
     def cleanup_credentials(self) -> S3Credentials:
         return self._cleanup_credentials
 
+    @property
+    def ownership_identity(self) -> tuple[str, ...]:
+        credentials = self.keystone.credentials
+        return (
+            "swift",
+            credentials.auth_url,
+            credentials.username,
+            credentials.user_domain_name,
+            credentials.project_name,
+            credentials.project_domain_name,
+            credentials.storage_url,
+            self.cleanup_credentials.access_key,
+        )
+
     def issue(self) -> S3Credentials:
         return self.keystone.create_credentials()
 

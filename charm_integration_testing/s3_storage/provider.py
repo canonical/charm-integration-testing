@@ -72,6 +72,11 @@ class CredentialProvider(ABC):
     per_bucket_credentials: bool
 
     @property
+    def ownership_identity(self) -> tuple[str, ...] | None:
+        """Stable, non-secret identity for buckets when used by generic S3Storage."""
+        return None
+
+    @property
     @abstractmethod
     def cleanup_credentials(self) -> S3Credentials:
         """Independent identity used to delete buckets after bucket credentials are revoked."""
@@ -101,6 +106,10 @@ class StaticCredentialProvider(CredentialProvider):
     @property
     def cleanup_credentials(self) -> S3Credentials:
         return self._cleanup_credentials
+
+    @property
+    def ownership_identity(self) -> tuple[str, ...]:
+        return ("static", self.credentials.access_key, self.cleanup_credentials.access_key)
 
     def issue(self) -> S3Credentials:
         return self.credentials
