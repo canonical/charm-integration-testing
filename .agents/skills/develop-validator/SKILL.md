@@ -48,6 +48,16 @@ class MyValidator(BaseValidator):
         return self._make_result(level=level, checks=checks)
 ```
 
+### Leader-only application databags
+
+Juju permits only the leader unit to read its own application databag
+(`relation.data[charm.app]`). Guard local app reads against non-leader access:
+`BaseValidator.validate()` should return `SKIPPED`; persistence methods should
+raise `PersistenceNotApplicable`. If a path does not need local app data, avoid
+reading it and continue normally. Remote app data through `self.databag` or
+`relation.app` does not need a leader guard. Unit databags
+(`relation.data[unit]`) are separate and do not require it.
+
 ### Package structure for a new validator
 
 ```
