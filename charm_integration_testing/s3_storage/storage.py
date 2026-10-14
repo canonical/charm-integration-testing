@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -139,6 +139,7 @@ class S3Storage(S3Provider):
             S3BucketHandle(self._handle.namespace, name),
             self._credential_provider,
             self._client_factory,
+            self._region,
             self._pending_revocations,
             self._pending_bucket_deletions,
             self._bucket_owner,
@@ -249,6 +250,7 @@ class _S3Bucket(S3Bucket):
         handle: S3BucketHandle,
         credential_provider: CredentialProvider,
         client_factory: Callable[[S3Credentials], S3Client],
+        region: str,
         pending_revocations: set[str],
         pending_bucket_deletions: set[_S3Bucket],
         bucket_owner: str,
@@ -256,6 +258,7 @@ class _S3Bucket(S3Bucket):
         self._handle = handle
         self._credential_provider = credential_provider
         self._client_factory = client_factory
+        self._region = region
         self._pending_revocations = pending_revocations
         self._pending_bucket_deletions = pending_bucket_deletions
         self._bucket_owner = bucket_owner
@@ -300,10 +303,10 @@ class _S3Bucket(S3Bucket):
                 status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
                 if error.get("Code") not in {"404", "NoSuchBucket", "NotFound"} and status_code != 404:
                     raise
-                self._client.create_bucket(Bucket=self._handle.name)
+                self._create_bucket()
         else:
             self._create_attempted = True
-            self._client.create_bucket(Bucket=self._handle.name)
+            self._create_bucket()
 
         if self._credential_provider.per_bucket_credentials:
             tags: list[TagTypeDef] = [{"Key": S3_OWNER_TAG, "Value": self._bucket_owner}]
@@ -318,6 +321,19 @@ class _S3Bucket(S3Bucket):
         if self._credential_provider.per_bucket_credentials:
             self._pending_revocations.discard(self._credentials.access_key)
         return self._handle.name, self._credentials
+
+    def _create_bucket(self) -> None:
+        client = self._client
+        if client is None:
+            raise RuntimeError("Cannot create an S3 bucket before initializing its client")
+        if self._region == "us-east-1":
+            client.create_bucket(Bucket=self._handle.name)
+        else:
+            # Compatible S3 endpoints may use region names outside boto's AWS literals.
+            client.create_bucket(
+                Bucket=self._handle.name,
+                CreateBucketConfiguration={"LocationConstraint": cast(Any, self._region)},
+            )
 
     def cleanup(self) -> None:
         if self._credentials is None:
