@@ -133,6 +133,64 @@ def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
         stubber.assert_no_pending_responses()
 
 
+def test_provision_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:
+    storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        StaticCredentialProvider(CREDS),
+        region="eu-west-1",
+        client_factory=lambda _: client,
+    )
+    bucket = storage.new_bucket()
+    create_params = {
+        "Bucket": bucket.handle.name,
+        "CreateBucketConfiguration": {"LocationConstraint": "eu-west-1"},
+    }
+    with Stubber(client) as stubber:
+        stubber.add_response("create_bucket", {}, create_params)
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
+        bucket.provision()
+        empty_bucket(stubber, bucket.handle.name)
+        bucket.cleanup()
+        stubber.assert_no_pending_responses()
+
+
+def test_retry_creation_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:
+    storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        StaticCredentialProvider(CREDS),
+        region="eu-west-1",
+        client_factory=lambda _: client,
+    )
+    bucket = storage.new_bucket()
+    create_params = {
+        "Bucket": bucket.handle.name,
+        "CreateBucketConfiguration": {"LocationConstraint": "eu-west-1"},
+    }
+    with Stubber(client) as stubber:
+        stubber.add_client_error("create_bucket", service_error_code="InternalError", expected_params=create_params)
+        with pytest.raises(Exception, match="InternalError"):
+            bucket.provision()
+
+        stubber.add_client_error(
+            "head_bucket",
+            service_error_code="404",
+            http_status_code=404,
+            expected_params={"Bucket": bucket.handle.name},
+        )
+        stubber.add_response("create_bucket", {}, create_params)
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
+        bucket.provision()
+        empty_bucket(stubber, bucket.handle.name)
+        bucket.cleanup()
+        stubber.assert_no_pending_responses()
+
+
 def test_partial_provision_is_cleaned(client: S3Client) -> None:
     # GIVEN an S3 create call that reports failure after creating a bucket
     keystone = KeystoneStub()
