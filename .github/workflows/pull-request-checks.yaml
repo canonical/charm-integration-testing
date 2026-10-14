@@ -28,9 +28,12 @@ jobs:
           tar xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
           install -m 755 gitleaks /usr/local/bin/gitleaks
       - name: Scan git history for secrets
+        env:
+          GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
+            }}
         run: |
           gitleaks git --config .gitleaks.toml --redact -v \
-            --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+            --log-opts="$GITLEAKS_LOG_OPTS"
   lint:
     runs-on: ubuntu-latest
     steps:
