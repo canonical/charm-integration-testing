@@ -195,7 +195,7 @@ def test_scale_remove_leader_restores_after_remove_command_error(mutated_before_
     assert error.value is removal_error
     assert ("idle_for_period", MODEL, timedelta(minutes=15)) in client.calls
     assert ("num_units", "target", MODEL) in client.calls
-    assert ("scale_application", "target", 3, MODEL) in client.calls
+    assert (("scale_application", "target", 3, MODEL) in client.calls) is mutated_before_error
     assert client.current_units == 3
 
 
