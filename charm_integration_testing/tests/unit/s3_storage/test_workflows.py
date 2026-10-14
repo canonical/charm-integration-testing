@@ -136,8 +136,14 @@ def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
     scheduled = schedule["jobs"]["cleanup-schedule"]["strategy"]["matrix"]["include"]
 
     # WHEN the cleanup schedule is mapped to each environment's Swift configuration
+    scheduled_environments = [entry["environment"] for entry in scheduled]
+    scheduled_secret_names = [entry["s3_swift_secret"] for entry in scheduled]
+    assert len(scheduled_environments) == len(set(scheduled_environments))
+    assert len(scheduled_secret_names) == len(set(scheduled_secret_names))
+
     scheduled_secrets = {entry["environment"]: entry["s3_swift_secret"] for entry in scheduled}
     expected_secrets = {name: str(environment["s3-swift-secret"]) for name, environment in environments.items()}
+    assert len(expected_secrets.values()) == len(set(expected_secrets.values()))
     assert len(scheduled) == len(environments)
     assert scheduled_secrets == expected_secrets
     # THEN every Swift-enabled environment selects its configured secret
