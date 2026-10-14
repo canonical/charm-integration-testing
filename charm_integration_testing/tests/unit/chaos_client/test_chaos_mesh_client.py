@@ -26,7 +26,6 @@ from .shared import FakeCustomObjectsApi
 
 TEST_MODEL = JujuModelHandle(controller="test-controller", model="test-model")
 UNIT = "postgresql/0"
-SELECTOR = {"namespaces": ["test-model"], "labelSelectors": {"app.kubernetes.io/name": "postgresql"}}
 
 
 class BackendStub(KubernetesBackend):
@@ -352,7 +351,7 @@ class TestIoLatency:
         assert body["kind"] == "IOChaos"
         assert body["metadata"]["name"].startswith("chaos-io-latency-postgresql-")
         assert body["spec"]["action"] == "latency"
-        assert body["spec"]["selector"] == SELECTOR
+        assert body["spec"]["selector"] == {"pods": {"test-model": ["target-pod"]}}
         assert body["spec"]["volumePath"] == "/var/lib/postgresql"
         assert body["spec"]["delay"] == "5000ms"
         assert body["spec"]["percent"] == 100
@@ -579,7 +578,7 @@ class TestCleanupIdentity:
         assert mesh._uids == {}
 
 
-@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+@pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory", "io_latency"])
 @pytest.mark.parametrize("matches", [0, 1, 2])
 def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) -> None:
     # GIVEN other units and stale Pods sharing the selected unit annotation
@@ -600,8 +599,10 @@ def test_stress_targets_exactly_one_live_unit_pod(operation: str, matches: int) 
     def run() -> None:
         if operation == "stress_cpu":
             mesh.stress_cpu(TEST_MODEL, UNIT, 1, timedelta(seconds=10))
-        else:
+        elif operation == "stress_memory":
             mesh.stress_memory(TEST_MODEL, UNIT, 1, 128, timedelta(seconds=10))
+        else:
+            mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=10))
 
     # WHEN selecting a unit, THEN only its single live Pod can be stressed
     if matches == 1:

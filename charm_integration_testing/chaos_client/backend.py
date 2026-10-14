@@ -39,6 +39,7 @@ class ChaosClient(ABC):
         This check is not proof of sustained stress. Allowing completion
         must not suppress experiment errors or cleanup verification.
         """
+        raise NotImplementedError("Stress status checks are not supported by this client.")
 
     def check_io_latency(
         self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False

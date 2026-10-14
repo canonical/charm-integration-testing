@@ -7,7 +7,7 @@ from typing import Callable
 from uuid import uuid4
 
 from juju import JujuModelHandle
-from kubernetes.client import ApiException, V1DeleteOptions, V1Preconditions  # type: ignore[import-untyped]
+from kubernetes.client import ApiException, V1DeleteOptions, V1Pod, V1Preconditions  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient, IoLatencyInjection
@@ -80,10 +80,11 @@ class ChaosMeshChaosClient(ChaosClient):
         duration: timedelta,
     ) -> IoLatencyInjection:
         application = unit.split("/")[0]
+        pod = self._find_unit_pod(model, unit)
         spec: dict[str, object] = {
             "action": "latency",
             "mode": "all",
-            "selector": self._selector(model.model, application),
+            "selector": {"pods": {model.model: [pod.metadata.name]}},
             "volumePath": volume_path,
             "delay": f"{int(delay.total_seconds() * 1000)}ms",
             "percent": percent,
@@ -291,6 +292,31 @@ class ChaosMeshChaosClient(ChaosClient):
     ) -> None:
         if "stresschaos.chaos-mesh.org" in self._missing_crds:
             raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
+        pod = self._find_unit_pod(model, unit)
+        application = unit.split("/")[0]
+        spec: dict[str, object] = {
+            "mode": "all",
+            "selector": {"pods": {model.model: [pod.metadata.name]}},
+            "stressors": stressors,
+            "duration": f"{int(duration.total_seconds())}s",
+        }
+        if "memory" in stressors:
+            containers = [
+                item.name
+                for item in (pod.spec.containers if pod.spec else [])
+                if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
+            ]
+            if len(containers) != 1:
+                raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
+            spec["containerNames"] = containers
+        name = self._name(label, application)
+        if "memory" in stressors:
+            self._memory_stress.add(name)
+        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
+        self._wait_for_injection(model.model, "stresschaos", name, "StressChaos")
+
+    def _find_unit_pod(self, model: JujuModelHandle, unit: str) -> V1Pod:
+        """Find the single live Pod backing a Juju unit, for a per-unit (not per-application) selector."""
         pods = self._backend.core_v1_api.list_namespaced_pod(
             namespace=model.model,
             label_selector=f"app.kubernetes.io/name={unit.split('/')[0]}",
@@ -305,27 +331,7 @@ class ChaosMeshChaosClient(ChaosClient):
         ]
         if len(matches) != 1:
             raise RuntimeError(f"Expected one live Pod for {model.model}/{unit}, found {len(matches)}.")
-        application = unit.split("/")[0]
-        spec: dict[str, object] = {
-            "mode": "all",
-            "selector": {"pods": {model.model: [matches[0].metadata.name]}},
-            "stressors": stressors,
-            "duration": f"{int(duration.total_seconds())}s",
-        }
-        if "memory" in stressors:
-            containers = [
-                item.name
-                for item in (matches[0].spec.containers if matches[0].spec else [])
-                if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
-            ]
-            if len(containers) != 1:
-                raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
-            spec["containerNames"] = containers
-        name = self._name(label, application)
-        if "memory" in stressors:
-            self._memory_stress.add(name)
-        self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
-        self._wait_for_injection(model.model, "stresschaos", name, "StressChaos")
+        return matches[0]
 
     def _wait_for_injection(self, namespace: str, plural: str, name: str, kind: str) -> None:
         """Wait for controller-confirmed injection, retaining failed runs for cleanup."""
@@ -400,13 +406,6 @@ class ChaosMeshChaosClient(ChaosClient):
                 self._created.remove(resource)
                 del self._scopes[name]
             raise
-
-    @staticmethod
-    def _selector(namespace: str, application: str) -> dict[str, object]:
-        return {
-            "namespaces": [namespace],
-            "labelSelectors": {"app.kubernetes.io/name": application},
-        }
 
     @staticmethod
     def _name(label: str, application: str) -> str:
