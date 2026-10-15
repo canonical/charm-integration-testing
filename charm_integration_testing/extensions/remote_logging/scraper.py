@@ -139,11 +139,21 @@ def machine_userdata(endpoint: str, controller: str, model: str) -> dict[str, An
 
 def merge_userdata(existing: str | None, addition: dict[str, Any]) -> str:
     """Merge *addition* into an existing ``cloudinit-userdata`` value, keeping the user's entries."""
-    merged: dict[str, Any] = yaml.safe_load(existing) if existing else {}
-    merged = merged or {}
+    loaded = yaml.safe_load(existing) if existing else {}
+    if loaded is not None and not isinstance(loaded, dict):
+        raise ValueError("cloudinit-userdata must contain a YAML mapping.")
+    merged: dict[str, Any] = loaded or {}
     for key, value in addition.items():
+        if key not in merged:
+            merged[key] = value
+            continue
         current = merged.get(key)
-        merged[key] = [*current, *value] if isinstance(current, list) else value
+        if isinstance(current, list) and isinstance(value, list):
+            merged[key] = [*current, *value]
+        elif isinstance(current, list) != isinstance(value, list):
+            raise ValueError(f"cloudinit-userdata key '{key}' cannot merge list and non-list values.")
+        else:
+            merged[key] = value
     return yaml.safe_dump(merged, sort_keys=False)
 
 
@@ -190,7 +200,12 @@ def kubernetes_daemon_set(namespace: str, controller: str) -> dict[str, Any]:
                             "name": "otelcol",
                             "image": COLLECTOR_IMAGE,
                             "args": [f"--config=/etc/otelcol/{KUBERNETES_CONFIG_KEY}"],
-                            "securityContext": {"runAsUser": 0},
+                            "securityContext": {
+                                "runAsUser": 0,
+                                "allowPrivilegeEscalation": False,
+                                "readOnlyRootFilesystem": True,
+                                "capabilities": {"drop": ["ALL"]},
+                            },
                             "volumeMounts": [
                                 {"name": "config", "mountPath": "/etc/otelcol"},
                                 {"name": "pods", "mountPath": KUBERNETES_POD_LOG_ROOT, "readOnly": True},

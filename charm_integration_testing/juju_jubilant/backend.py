@@ -967,7 +967,11 @@ class JubilantBackend(JujuCmdBackend):
 
     def is_k8s_cloud(self, cloud: str) -> bool:
         clouds = json.loads(self.client.model(None).cli("clouds", "--client", "--format", "json", include_model=False))
-        return bool(clouds[cloud]["type"] == "k8s")
+        try:
+            cloud_type = clouds[cloud]["type"]
+        except KeyError as exc:
+            raise ValueError(f"Cloud '{cloud}' is not registered with the Juju client.") from exc
+        return bool(cloud_type == "k8s")
 
     def get_controller_kubeconfig(self, controller: str) -> pathlib.Path | None:
         """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers.

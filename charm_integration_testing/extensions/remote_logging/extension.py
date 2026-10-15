@@ -3,11 +3,11 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Protocol
 
 from juju import JujuBackend, JujuExtension, JujuModelHandle
 from juju.handles import JujuControllerHandle
-from kubernetes_client import KubernetesClient
-from resource_registry import ResourceRegistry
+from resource_registry import ResourceRegistry, sanitize_path_segment
 
 from .scraper import (
     KUBERNETES_NAMESPACES_KEY,
@@ -20,6 +20,22 @@ from .scraper import (
 )
 
 CONTROLLER_MODEL = "controller"
+
+
+class KubernetesScraperClient(Protocol):
+    """Kubernetes operations required to manage a remote logging scraper."""
+
+    def ensure_namespace(self, name: str) -> None: ...
+
+    def delete_namespace(self, name: str) -> None: ...
+
+    def read_config_map_data(self, namespace: str, name: str) -> dict[str, str] | None: ...
+
+    def apply_config_map(self, namespace: str, body: dict[str, object]) -> None: ...
+
+    def apply_daemon_set(self, namespace: str, body: dict[str, object]) -> None: ...
+
+    def restart_daemon_set(self, namespace: str, name: str) -> None: ...
 
 
 def scraper_namespace(controller: str) -> str:
@@ -49,11 +65,12 @@ class LogScraperHandle:
     @property
     def path_segment(self) -> str:
         suffix = f"-{self.cloud}" if self.cloud else ""
-        return f"remote-logging-scraper-{self.controller}{suffix}"
+        safe = sanitize_path_segment(f"{self.controller}{suffix}")
+        return f"remote-logging-scraper-{safe}"
 
 
 class RemoteLoggingExtension(JujuExtension):
-    """Ship the logs of a controller and its models to a remote OTLP receiver.
+    """Ship the logs of a controller and its models to a remote Loki endpoint.
 
     Machine controllers and models get a collector installed on every machine through the
     ``cloudinit-userdata`` model config. Kubernetes controllers get a single DaemonSet scraping the pod logs of
@@ -92,20 +109,16 @@ class RemoteLoggingExtension(JujuExtension):
             return
         namespace = scraper_namespace(controller)
         self.logger.debug(f"Deploying log scraper to namespace '{namespace}' for controller '{controller}'.")
-        kubernetes.ensure_namespace(namespace)
-        kubernetes.apply_config_map(
-            namespace, kubernetes_config_map(namespace, endpoint, controller, [controller_namespace(controller)])
-        )
-        kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
-        # Torn down with the controller, before it is killed: the controller's own teardown bypasses extension hooks.
-        self.resource_registry.register(
-            handle=LogScraperHandle(controller),
-            destroyer=lambda: kubernetes.delete_namespace(namespace),
-            parent=JujuControllerHandle(controller),
+        self._deploy_scraper(
+            kubernetes,
+            endpoint,
+            controller,
+            [controller_namespace(controller)],
+            LogScraperHandle(controller),
         )
 
     def pre_add_model(
-        self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None
+        self, controller: str, model: str, model_config: dict[str, str], cloud: str | None
     ) -> dict[str, str]:
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None:
@@ -122,7 +135,7 @@ class RemoteLoggingExtension(JujuExtension):
         self.logger.debug(f"Shipping logs of model '{model}' to '{endpoint}' from its machines.")
         return self._with_userdata(model_config, endpoint, controller, model)
 
-    def post_add_model_on_cloud(self, controller: str, model: str, cloud: str | None = None) -> None:
+    def post_add_model(self, controller: str, model: str, cloud: str | None) -> None:
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None:
             return
@@ -137,14 +150,17 @@ class RemoteLoggingExtension(JujuExtension):
         userdata = merge_userdata(config.get(USERDATA_KEY), machine_userdata(endpoint, controller, model))
         return {**config, USERDATA_KEY: userdata}
 
-    def _scrape_namespace(self, kubernetes: KubernetesClient, endpoint: str, controller: str, model: str) -> None:
+    def _scrape_namespace(
+        self,
+        kubernetes: KubernetesScraperClient,
+        endpoint: str,
+        controller: str,
+        model: str,
+        data: dict[str, str],
+    ) -> None:
         """Add the namespace of *model* to the scraper, restarting it so the new path is picked up."""
         namespace = scraper_namespace(controller)
-        data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
-        if data is None:
-            self.logger.debug(f"Not scraping logs of model '{model}': no scraper in namespace '{namespace}'.")
-            return
-        scraped = [name for name in data[KUBERNETES_NAMESPACES_KEY].split("\n") if name]
+        scraped = [name for name in data.get(KUBERNETES_NAMESPACES_KEY, "").split("\n") if name]
         if model in scraped:
             return
         self.logger.debug(f"Adding namespace '{model}' to the log scraper of controller '{controller}'.")
@@ -155,25 +171,45 @@ class RemoteLoggingExtension(JujuExtension):
 
     def _ensure_scraper(
         self,
-        kubernetes: KubernetesClient,
+        kubernetes: KubernetesScraperClient,
         endpoint: str,
         controller: str,
         model: str,
         cloud: str | None,
     ) -> None:
         namespace = scraper_namespace(controller)
-        if kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME) is not None:
-            self._scrape_namespace(kubernetes, endpoint, controller, model)
+        data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
+        if data is not None:
+            kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
+            self._scrape_namespace(kubernetes, endpoint, controller, model, data)
             return
 
         self.logger.debug(
             f"Deploying log scraper to namespace '{namespace}' for model '{model}' on controller '{controller}'."
         )
+        self._deploy_scraper(
+            kubernetes,
+            endpoint,
+            controller,
+            [model],
+            LogScraperHandle(controller, cloud),
+        )
+
+    def _deploy_scraper(
+        self,
+        kubernetes: KubernetesScraperClient,
+        endpoint: str,
+        controller: str,
+        scraped: list[str],
+        handle: LogScraperHandle,
+    ) -> None:
+        namespace = scraper_namespace(controller)
         kubernetes.ensure_namespace(namespace)
-        kubernetes.apply_config_map(namespace, kubernetes_config_map(namespace, endpoint, controller, [model]))
+        kubernetes.apply_config_map(namespace, kubernetes_config_map(namespace, endpoint, controller, scraped))
         kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
+        # Torn down with the controller, before it is killed: the controller's own teardown bypasses extension hooks.
         self.resource_registry.register(
-            handle=LogScraperHandle(controller, cloud),
+            handle=handle,
             destroyer=lambda: kubernetes.delete_namespace(namespace),
             parent=JujuControllerHandle(controller),
         )

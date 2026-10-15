@@ -53,17 +53,14 @@ class JujuExtension(ABC):
         pass
 
     def pre_add_model(
-        self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None
+        self, controller: str, model: str, model_config: dict[str, str], cloud: str | None
     ) -> dict[str, str]:
         """Return the model configuration to create *model* with; extensions may extend *model_config*."""
         return model_config
 
-    def post_add_model(self, controller: str, model: str) -> None:
-        pass
-
-    def post_add_model_on_cloud(self, controller: str, model: str, cloud: str | None = None) -> None:
+    def post_add_model(self, controller: str, model: str, cloud: str | None) -> None:
         """Notify the extension that *model* was added on *cloud*."""
-        self.post_add_model(controller, model)
+        pass
 
     def pre_kill_controller(self, controller: str) -> None:
         pass

@@ -187,6 +187,13 @@ class TestIsK8sCloud:
         assert cli.executions == [command]
         assert cli.execution_options == [{"include_model": False}]
 
+    def test_missing_cloud_raises_targeted_error(self) -> None:
+        command = ("clouds", "--client", "--format", "json")
+        backend = JubilantBackend(client=JubilantClientStub(JubilantCliStub(results={command: "{}"})))
+
+        with pytest.raises(ValueError, match="Cloud 'missing' is not registered"):
+            backend.is_k8s_cloud("missing")
+
 
 @dataclass
 class ModelInfoStub:

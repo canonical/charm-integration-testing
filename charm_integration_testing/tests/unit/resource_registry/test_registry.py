@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import pytest
+from resource_registry import sanitize_path_segment
 from resource_registry.protocols import LogCollector, ResourceHandle
 from resource_registry.registry import ResourceRegistry, ResourceTeardownWarning
 
@@ -62,6 +63,10 @@ def _registry(global_collectors: list[LogCollector] | None = None) -> ResourceRe
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+def test_sanitize_path_segment_replaces_unsafe_characters() -> None:
+    assert sanitize_path_segment("ctrl.with spaces/and:colons") == "ctrl-with-spaces-and-colons"
 
 
 class TestResourceRegistryRegister:

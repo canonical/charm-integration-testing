@@ -193,7 +193,7 @@ class TestKubernetesControllers:
 
         # WHEN a model is added
         config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, CONTROLLER)
-        extension.post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
+        extension.post_add_model(CONTROLLER, "my-model", CONTROLLER)
 
         # THEN the model config is untouched and its namespace is scraped
         namespace = scraper_namespace(CONTROLLER)
@@ -210,10 +210,10 @@ class TestKubernetesControllers:
         juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
         extension = _extension(juju, logger)
         extension.post_bootstrap_controller(CONTROLLER)
-        extension.post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
+        extension.post_add_model(CONTROLLER, "my-model", CONTROLLER)
 
         # AND a fresh extension instance, as created for every test
-        _extension(juju, logger).post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
+        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
 
         assert len(juju.kubernetes.restarts) == 1
 
@@ -224,7 +224,7 @@ class TestKubernetesControllers:
 
         # WHEN the model is configured and added
         config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, "workload-k8s")
-        extension.post_add_model_on_cloud(CONTROLLER, "my-model", "workload-k8s")
+        extension.post_add_model(CONTROLLER, "my-model", "workload-k8s")
 
         # THEN machine userdata is not added and a scraper is deployed in the model's cluster
         assert config == {"foo": "bar"}
@@ -240,7 +240,7 @@ class TestKubernetesControllers:
 
         # WHEN the model configuration is prepared
         config = extension.pre_add_model(CONTROLLER, "my-model", {}, "lxd")
-        extension.post_add_model_on_cloud(CONTROLLER, "my-model", "lxd")
+        extension.post_add_model(CONTROLLER, "my-model", "lxd")
 
         # THEN the model gets machine logging and no Kubernetes scraper is deployed for it
         assert USERDATA_KEY in config
@@ -258,8 +258,8 @@ class TestKubernetesControllers:
         extension = _extension(juju, logger)
 
         # WHEN both models are added
-        extension.post_add_model_on_cloud(CONTROLLER, "model-a", "first-k8s")
-        extension.post_add_model_on_cloud(CONTROLLER, "model-b", "second-k8s")
+        extension.post_add_model(CONTROLLER, "model-a", "first-k8s")
+        extension.post_add_model(CONTROLLER, "model-b", "second-k8s")
 
         # THEN each workload cluster has its own scraper and teardown handle
         namespace = scraper_namespace(CONTROLLER)
@@ -283,9 +283,35 @@ class TestKubernetesControllers:
         # THEN the scraper namespace is deleted
         assert juju.kubernetes.deleted_namespaces == [scraper_namespace(CONTROLLER)]
 
+    def test_missing_namespace_data_is_rebuilt(self, logger: logging.Logger) -> None:
+        # GIVEN a stale scraper ConfigMap without the namespace bookkeeping key
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
+        namespace = scraper_namespace(CONTROLLER)
+        juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)] = {
+            "metadata": {"name": KUBERNETES_SCRAPER_NAME},
+            "data": {"config.yaml": "stale"},
+        }
+
+        # WHEN the model is added
+        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
+
+        # THEN the generated ConfigMap is repaired and the scraper is restarted
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert data[KUBERNETES_NAMESPACES_KEY] == "my-model"
+        assert [(deployed_namespace, body["kind"]) for deployed_namespace, body in juju.kubernetes.daemon_sets] == [
+            (namespace, "DaemonSet")
+        ]
+        assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
+
     def test_machine_controller_registers_nothing(self, logger: logging.Logger) -> None:
         registry = ResourceRegistry([], logger)
 
         _extension(JujuStub(), logger, registry=registry).post_bootstrap_controller(CONTROLLER)
 
         assert registry.registered_handles() == []
+
+
+def test_log_scraper_handle_sanitizes_unsafe_path_characters() -> None:
+    handle = LogScraperHandle("ctrl.with spaces/and:colons", "cloud/with spaces")
+
+    assert handle.path_segment == "remote-logging-scraper-ctrl-with-spaces-and-colons-cloud-with-spaces"

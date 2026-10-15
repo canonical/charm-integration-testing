@@ -84,6 +84,10 @@ from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
 )
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
+from test_suite.remote_logging import (
+    build_remote_logging_endpoints_by_controller,
+    remote_logging_existing_state_warning,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -913,20 +917,6 @@ def neighbor_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | No
     return value
 
 
-def _build_remote_logging_endpoints_by_controller(
-    target_controller: str,
-    target_endpoint: str | None,
-    neighbor_controller: str | None,
-    neighbor_endpoint: str | None,
-) -> dict[str, str]:
-    endpoints: dict[str, str] = {}
-    if target_endpoint:
-        endpoints[target_controller] = target_endpoint
-    if neighbor_controller is not None and neighbor_controller != target_controller and neighbor_endpoint:
-        endpoints[neighbor_controller] = neighbor_endpoint
-    return endpoints
-
-
 @pytest.fixture(scope="session")
 def remote_logging_endpoints_by_controller(
     target_controller: str,
@@ -934,12 +924,30 @@ def remote_logging_endpoints_by_controller(
     neighbor_controller: str | None,
     neighbor_remote_logging_endpoint: str | None,
 ) -> dict[str, str]:
-    return _build_remote_logging_endpoints_by_controller(
+    return build_remote_logging_endpoints_by_controller(
         target_controller,
         target_remote_logging_endpoint,
         neighbor_controller,
         neighbor_remote_logging_endpoint,
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warn_remote_logging_unsupported_for_existing_state(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Warn when the requested starting state bypasses complete remote logging setup."""
+    current_state = State(request.config.getoption("--current-state"))
+    remote_logging_configured = bool(
+        request.config.getoption("--target-remote-logging-endpoint")
+        or request.config.getoption("--neighbor-remote-logging-endpoint")
+    )
+    message = remote_logging_existing_state_warning(
+        remote_logging_configured,
+        controller_already_exists=current_state not in STATES_WITHOUT_EXISTING_CONTROLLER,
+    )
+    if message is not None:
+        warnings.warn(message, UserWarning)
 
 
 @pytest.fixture

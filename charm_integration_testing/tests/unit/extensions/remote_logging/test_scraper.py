@@ -29,6 +29,17 @@ def test_merge_userdata_appends_to_lists_and_keeps_other_keys() -> None:
     assert merged == {"postruncmd": ["x", "a"], "packages": ["jq"], "write_files": [{"path": "/f"}]}
 
 
+@pytest.mark.parametrize("existing", ["- item", "plain text"])
+def test_merge_userdata_rejects_non_mapping_yaml(existing: str) -> None:
+    with pytest.raises(ValueError, match="YAML mapping"):
+        merge_userdata(existing, {"postruncmd": ["a"]})
+
+
+def test_merge_userdata_rejects_list_scalar_conflicts() -> None:
+    with pytest.raises(ValueError, match="cannot merge list and non-list"):
+        merge_userdata(yaml.safe_dump({"postruncmd": "echo existing"}), {"postruncmd": ["echo new"]})
+
+
 def test_machine_userdata_uses_only_allowed_cloud_init_keys() -> None:
     # Juju rejects `runcmd`; it requires `preruncmd`/`postruncmd`.
     assert set(machine_userdata("http://host", "ctrl", "model")) == {"write_files", "postruncmd"}
@@ -40,6 +51,19 @@ def test_daemon_set_persists_offsets_per_controller() -> None:
     volumes = {volume["name"]: volume for volume in body["spec"]["template"]["spec"]["volumes"]}
     assert volumes["storage"]["hostPath"]["path"].endswith("/ctrl")
     assert volumes["pods"]["hostPath"]["path"] == "/var/log/pods"
+
+
+def test_daemon_set_hardens_the_root_collector() -> None:
+    body = kubernetes_daemon_set("ns", "ctrl")
+
+    security_context = body["spec"]["template"]["spec"]["containers"][0]["securityContext"]
+
+    assert security_context == {
+        "runAsUser": 0,
+        "allowPrivilegeEscalation": False,
+        "readOnlyRootFilesystem": True,
+        "capabilities": {"drop": ["ALL"]},
+    }
 
 
 @dataclass(frozen=True)
