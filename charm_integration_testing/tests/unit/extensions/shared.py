@@ -25,6 +25,7 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def is_k8s_cloud(self, cloud: str) -> bool:
+        raise NotImplementedError
 
     def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
         raise NotImplementedError
