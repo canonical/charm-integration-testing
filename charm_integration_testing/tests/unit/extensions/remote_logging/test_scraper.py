@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import pytest
 import yaml
 from extensions.remote_logging.scraper import (
+    COLLECTOR_IMAGE,
     COLLECTOR_SHA256_BY_ARCH,
     COLLECTOR_STATE_DIRECTORY,
     COLLECTOR_STORAGE_PATH,
@@ -59,6 +60,15 @@ def test_daemon_set_persists_offsets_per_controller() -> None:
     assert {mount["name"]: mount["mountPath"] for mount in container["volumeMounts"]}["storage"] == (
         COLLECTOR_STORAGE_PATH
     )
+
+
+def test_daemon_set_pins_collector_image_by_digest() -> None:
+    body = kubernetes_daemon_set("ns", "ctrl")
+
+    image = body["spec"]["template"]["spec"]["containers"][0]["image"]
+
+    assert image == COLLECTOR_IMAGE
+    assert re.fullmatch(r"otel/opentelemetry-collector-contrib@sha256:[0-9a-f]{64}", image)
 
 
 @pytest.mark.parametrize(

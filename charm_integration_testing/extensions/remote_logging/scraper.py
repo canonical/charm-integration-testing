@@ -10,7 +10,9 @@ from typing import Any
 import yaml
 
 COLLECTOR_VERSION = "0.110.0"
-COLLECTOR_IMAGE = f"otel/opentelemetry-collector-contrib:{COLLECTOR_VERSION}"
+# Multi-platform manifest for COLLECTOR_VERSION; update with the archive checksums when changing versions.
+COLLECTOR_IMAGE_DIGEST = "sha256:0ed3688bbb02dabc0429ef648ebe3e9c53aca5e7c5a6b1a4a61b9f583b823e36"
+COLLECTOR_IMAGE = f"otel/opentelemetry-collector-contrib@{COLLECTOR_IMAGE_DIGEST}"
 COLLECTOR_RELEASE_URL = (
     "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/"
     f"v{COLLECTOR_VERSION}/otelcol-contrib_{COLLECTOR_VERSION}_linux_${{ARCH}}.tar.gz"

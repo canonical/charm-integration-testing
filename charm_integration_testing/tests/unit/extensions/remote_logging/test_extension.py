@@ -266,6 +266,18 @@ class TestKubernetesControllers:
         )
         assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
 
+    def test_bootstrap_preserves_model_namespaces_when_reconciling(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
+        extension = _extension(juju, logger)
+        extension.post_bootstrap_controller(CONTROLLER)
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
+        updated = _extension(juju, logger, endpoints={CONTROLLER: "https://new-observability.example/loki"})
+
+        updated.post_bootstrap_controller(CONTROLLER)
+
+        data = juju.kubernetes.config_maps[(scraper_namespace(CONTROLLER), KUBERNETES_SCRAPER_NAME)]["data"]
+        assert data[KUBERNETES_NAMESPACES_KEY].split("\n") == [controller_namespace(CONTROLLER), "my-model"]
+
     def test_bootstrap_registers_scraper_only_once(self, logger: logging.Logger) -> None:
         registry = _registry_with_controller(logger)
         extension = _extension(JujuStub(k8s_clouds={CONTROLLER}), logger, registry=registry)

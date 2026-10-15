@@ -223,6 +223,11 @@ class RemoteLoggingExtension(JujuExtension):
         namespace = scraper_namespace(controller)
         kubernetes.ensure_namespace(namespace)
         existing_data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
+        if existing_data is not None:
+            existing_namespaces = [
+                name for name in existing_data.get(KUBERNETES_NAMESPACES_KEY, "").split("\n") if name
+            ]
+            scraped = list(dict.fromkeys([*existing_namespaces, *scraped]))
         changed = self._reconcile_config_map(kubernetes, namespace, endpoint, controller, scraped, existing_data)
         kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
         if changed:
