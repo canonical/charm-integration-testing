@@ -71,7 +71,7 @@ def test_machine_collector_groups_logs_by_labels_from_the_file_name() -> None:
 
     config = yaml.safe_load(userdata["write_files"][0]["content"])
 
-    assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs", "resource"]
+    assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs", "resource", "attributes"]
     assert config["receivers"]["filelog"]["resource"] == {"juju_controller": "ctrl", "juju_model": "model"}
     assert [operator["type"] for operator in config["receivers"]["filelog"]["operators"]] == ["regex_parser"] * 2
 
@@ -104,4 +104,14 @@ def test_collector_exports_to_the_loki_push_api_with_juju_labels(endpoint: str) 
         "juju_application",
         "juju_unit_number",
         "juju_machine",
+        "k8s.container.name",
+        "k8s.pod.name",
+    ]
+    assert config["processors"]["resource"]["attributes"][1] == {
+        "key": "loki.format",
+        "value": "raw",
+        "action": "insert",
+    }
+    assert config["processors"]["attributes"]["actions"] == [
+        {"key": "loki.attribute.labels", "value": "log.file.name", "action": "insert"}
     ]

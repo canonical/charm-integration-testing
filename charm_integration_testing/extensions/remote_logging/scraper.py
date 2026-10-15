@@ -32,7 +32,9 @@ KUBERNETES_NAMESPACES_KEY = "namespaces"
 # Labels derived from the log file path and promoted to resource attributes, so Loki can match on them.
 PATH_LABELS = ["juju_model", "juju_application", "juju_unit_number", "juju_machine"]
 # Resource attributes the loki exporter turns into Loki index labels.
-LOKI_LABELS = ["juju_controller", *PATH_LABELS]
+LOKI_LABELS = ["juju_controller", *PATH_LABELS, "k8s.container.name", "k8s.pod.name"]
+# Record attributes promoted to Loki index labels. Pod UIDs and full file paths are left out for cardinality.
+LOKI_ATTRIBUTE_LABELS = ["log.file.name"]
 MACHINE_UNIT_FILE = r"^unit-(?P<juju_application>.+)-(?P<juju_unit_number>\d+)\.log$"
 MACHINE_MACHINE_FILE = r"^machine-(?P<juju_machine>\d+)\.log$"
 # The container parser sets k8s.* resource attributes. Unit pods are named <application>-<number>.
@@ -75,10 +77,16 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
     config["processors"] = {
         "groupbyattrs": {"keys": PATH_LABELS},
         "resource": {
-            "attributes": [{"key": "loki.resource.labels", "value": ",".join(LOKI_LABELS), "action": "insert"}]
+            "attributes": [
+                {"key": "loki.resource.labels", "value": ",".join(LOKI_LABELS), "action": "insert"},
+                {"key": "loki.format", "value": "raw", "action": "insert"},
+            ]
+        },
+        "attributes": {
+            "actions": [{"key": "loki.attribute.labels", "value": ",".join(LOKI_ATTRIBUTE_LABELS), "action": "insert"}]
         },
     }
-    config["service"]["pipelines"]["logs"]["processors"] = ["groupbyattrs", "resource"]
+    config["service"]["pipelines"]["logs"]["processors"] = ["groupbyattrs", "resource", "attributes"]
     if not kubernetes:
         receiver["operators"] = [
             _regex_parser(regex, 'attributes["log.file.name"]') for regex in (MACHINE_UNIT_FILE, MACHINE_MACHINE_FILE)
