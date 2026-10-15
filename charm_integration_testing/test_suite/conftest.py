@@ -27,7 +27,6 @@ from extensions import (
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension
 from juju import (
     JujuApplicationInfo,
     JujuBackend,
@@ -403,7 +402,7 @@ def _build_juju_client(
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
-            GenericUnsealVaultJujuExtension(unseal_vault_k8s_extension.vault_unsealer),
+            unseal_vault_k8s_extension,
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
             RemoteLoggingExtension(juju_backend, remote_logging_endpoints_by_controller, session_resource_registry),

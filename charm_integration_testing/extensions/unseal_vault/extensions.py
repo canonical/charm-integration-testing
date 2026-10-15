@@ -41,11 +41,12 @@ class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
         super().__init__(VaultUnsealer(CharmInfo(name="vault"), VaultClientJujuExec(juju), juju, logger))
 
 
-class UnsealVaultK8sJujuExtension(KubernetesExtension):
-    vault_unsealer: VaultUnsealer
-
+class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension, KubernetesExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
-        self.vault_unsealer = VaultUnsealer(CharmInfo(name="vault-k8s"), VaultClientJujuExecPebble(juju), juju, logger)
+        super().__init__(VaultUnsealer(CharmInfo(name="vault-k8s"), VaultClientJujuExecPebble(juju), juju, logger))
+
+    def post_restart_statefulset(self, model_or_namespace: JujuModelHandle | str, statefulset_name: str) -> None:
+        """Leave Juju restarts unchanged; Kubernetes uses the cloud-aware hook below."""
 
     def post_delete_pod_in_juju_cloud(self, namespace: str, _pod_name: str, juju_cloud: str | None) -> None:
         self._unseal_vaults_in_namespace(juju_cloud, namespace)

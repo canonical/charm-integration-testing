@@ -8,6 +8,7 @@ import pytest
 from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from extensions.unseal_vault.vault_unsealer import VaultUnsealer
 from juju import JujuModelHandle
+from juju.extension import JujuExtension
 from kubernetes_client import KubernetesExtension
 
 from ..shared import NullJujuBackend
@@ -94,17 +95,17 @@ class TestUnsealVaultK8sJujuExtension:
         extension, _ = self._build_extension()
 
         assert isinstance(extension, KubernetesExtension)
+        assert isinstance(extension, JujuExtension)
 
-    def test_generic_juju_lifecycle_adapter_reuses_kubernetes_unsealer(self) -> None:
+    def test_inherited_juju_lifecycle_hooks_reuse_kubernetes_unsealer(self) -> None:
         extension, juju = self._build_extension()
         unsealer = extension.vault_unsealer
         assert isinstance(unsealer, VaultUnsealerStub)
-        juju_extension = GenericUnsealVaultJujuExtension(extension.vault_unsealer)
 
-        juju_extension.post_deploy(TEST_MODEL)
-        juju_extension.post_scale(TEST_MODEL)
-        juju_extension.post_restart_unit(TEST_MODEL, "vault-k8s/0")
-        juju_extension.post_migrate_model("test-model", "source-controller", "target-controller")
+        extension.post_deploy(TEST_MODEL)
+        extension.post_scale(TEST_MODEL)
+        extension.post_restart_unit(TEST_MODEL, "vault-k8s/0")
+        extension.post_migrate_model("test-model", "source-controller", "target-controller")
 
         target_model = JujuModelHandle(controller="target-controller", model="test-model")
         assert unsealer.calls == [
