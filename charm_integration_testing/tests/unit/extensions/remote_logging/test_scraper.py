@@ -33,7 +33,7 @@ def test_merge_userdata_appends_to_lists_and_keeps_other_keys() -> None:
     assert merged == {"postruncmd": ["x", "a"], "packages": ["jq"], "write_files": [{"path": "/f"}]}
 
 
-@pytest.mark.parametrize("existing", ["- item", "plain text"])
+@pytest.mark.parametrize("existing", ["- item", "plain text", "null"])
 def test_merge_userdata_rejects_non_mapping_yaml(existing: str) -> None:
     with pytest.raises(ValueError, match="YAML mapping"):
         merge_userdata(existing, {"postruncmd": ["a"]})
@@ -158,6 +158,9 @@ def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
     receiver = config["receivers"]["filelog"]
     assert receiver["resource"] == {"juju_controller": "ctrl"}
     assert [operator["type"] for operator in receiver["operators"]] == ["container", "add", "regex_parser"]
+    assert receiver["operators"][1]["value"] == (
+        'EXPR(resource["k8s.namespace.name"] == "controller-ctrl" ? "controller" : resource["k8s.namespace.name"])'
+    )
     assert receiver["storage"] == "file_storage"
     assert config["extensions"] == {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}}
     assert config["service"]["extensions"] == ["file_storage"]

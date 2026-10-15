@@ -51,10 +51,6 @@ MACHINE_UNIT_FILE = r"^unit-(?P<juju_application>.+)-(?P<juju_unit_number>\d+)\.
 MACHINE_MACHINE_FILE = r"^machine-(?P<juju_machine>\d+)\.log$"
 # The container parser sets k8s.* resource attributes. Unit pods are named <application>-<number>.
 KUBERNETES_POD_REGEX = r"^(?P<juju_application>.+)-(?P<juju_unit_number>\d+)$"
-# The namespace of a controller model is controller-<name>, whose Juju model name is "controller".
-_MODEL_FROM_NAMESPACE = (
-    'EXPR(resource["k8s.namespace.name"] startsWith "controller-" ? "controller" : resource["k8s.namespace.name"])'
-)
 _KUBERNETES_NAME_INVALID_CHARS = re.compile(r"[^a-z0-9-]+")
 
 
@@ -88,10 +84,16 @@ def _loki_push_endpoint(endpoint: str) -> str:
     return f"{base_url}{LOKI_PUSH_PATH}"
 
 
-KUBERNETES_LABEL_OPERATORS: list[dict[str, Any]] = [
-    {"type": "add", "field": "resource.juju_model", "value": _MODEL_FROM_NAMESPACE},
-    _regex_parser(KUBERNETES_POD_REGEX, 'resource["k8s.pod.name"]'),
-]
+def _kubernetes_label_operators(controller: str) -> list[dict[str, Any]]:
+    controller_model_namespace = f"controller-{controller}"
+    model_expression = (
+        f'EXPR(resource["k8s.namespace.name"] == "{controller_model_namespace}" '
+        '? "controller" : resource["k8s.namespace.name"])'
+    )
+    return [
+        {"type": "add", "field": "resource.juju_model", "value": model_expression},
+        _regex_parser(KUBERNETES_POD_REGEX, 'resource["k8s.pod.name"]'),
+    ]
 
 
 def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kubernetes: bool) -> dict[str, Any]:
@@ -131,7 +133,10 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
         ]
     else:
         # Offsets are persisted so restarting the scraper to pick up new namespaces neither loses nor repeats logs.
-        receiver["operators"] = [{"type": "container", "id": "container-parser"}, *KUBERNETES_LABEL_OPERATORS]
+        receiver["operators"] = [
+            {"type": "container", "id": "container-parser"},
+            *_kubernetes_label_operators(resource["juju_controller"]),
+        ]
     return config
 
 
@@ -181,10 +186,13 @@ def machine_userdata(endpoint: str, controller: str, model: str) -> dict[str, An
 
 def merge_userdata(existing: str | None, addition: dict[str, Any]) -> str:
     """Merge *addition* into an existing ``cloudinit-userdata`` value, keeping the user's entries."""
-    loaded = yaml.safe_load(existing) if existing else {}
-    if loaded is not None and not isinstance(loaded, dict):
+    if not existing or not existing.strip():
+        loaded: Any = {}
+    else:
+        loaded = yaml.safe_load(existing)
+    if not isinstance(loaded, dict):
         raise ValueError("cloudinit-userdata must contain a YAML mapping.")
-    merged: dict[str, Any] = loaded or {}
+    merged: dict[str, Any] = loaded
     for key, value in addition.items():
         if key not in merged:
             merged[key] = value

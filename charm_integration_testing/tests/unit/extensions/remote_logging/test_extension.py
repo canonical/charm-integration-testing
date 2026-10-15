@@ -336,7 +336,7 @@ class TestKubernetesControllers:
 
         # THEN the generated ConfigMap is repaired and the scraper is restarted
         data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
-        assert data[KUBERNETES_NAMESPACES_KEY] == "my-model"
+        assert data[KUBERNETES_NAMESPACES_KEY].split("\n") == [controller_namespace(CONTROLLER), "my-model"]
         assert [(deployed_namespace, body["kind"]) for deployed_namespace, body in juju.kubernetes.daemon_sets] == [
             (namespace, "DaemonSet")
         ]

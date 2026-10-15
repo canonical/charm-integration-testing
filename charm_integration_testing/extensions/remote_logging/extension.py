@@ -163,6 +163,9 @@ class RemoteLoggingExtension(JujuExtension):
         """Reconcile the ConfigMap and report whether a running scraper needs restarting."""
         namespace = scraper_namespace(controller)
         scraped = [name for name in data.get(KUBERNETES_NAMESPACES_KEY, "").split("\n") if name]
+        if not scraped and self.juju.get_kubernetes_client_for_controller(controller) is kubernetes:
+            controller_model_namespace = controller_namespace(controller)
+            scraped.append(controller_model_namespace)
         if model not in scraped:
             scraped.append(model)
         changed = self._reconcile_config_map(kubernetes, namespace, endpoint, controller, scraped, data)
