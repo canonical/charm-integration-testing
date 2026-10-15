@@ -323,7 +323,7 @@ class KubernetesClient:
         unit: str,
         existing_uids: Collection[str],
     ) -> str:
-        """Delete this Pod instance, run replacement hooks, and return its replacement Pod name.
+        """Delete this Pod instance and return the name of its Running replacement.
 
         ``existing_uids`` contains all application Pod UIDs observed before deletion.
         Deletion and replacement polling share one timeout budget.

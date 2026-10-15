@@ -5,8 +5,6 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
-
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
@@ -45,23 +43,10 @@ class JujuClient:
         backend: JujuBackend,
         logger: logging.Logger,
         extensions: list[JujuExtension] | None = None,
-        kubernetes_client_registry: KubernetesClientRegistry | None = None,
     ):
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []
-        self.kubernetes_client_registry = kubernetes_client_registry
-
-    def kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        """Resolve the shared Kubernetes client for a model, or None for machine models."""
-        cloud = self.backend.kubernetes_cloud_for_model(model)
-        if cloud is None:
-            return None
-        if self.kubernetes_client_registry is None:
-            raise RuntimeError(f"No KubernetesClientRegistry configured for Kubernetes model {model.uri}.")
-        if not self.kubernetes_client_registry.has_cloud(cloud):
-            raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}' (model {model.uri}).")
-        return self.kubernetes_client_registry.client_for_cloud(cloud)
 
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
@@ -81,10 +66,9 @@ class JujuClient:
 
     def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
         """Delete a workload pod and dispatch its Juju lifecycle hooks."""
-        kubernetes = self.kubernetes_client_for_model(model)
-        if kubernetes is None:
+        if not self.backend.is_k8s_model(model):
             raise ValueError(f"Cannot delete a Kubernetes pod in non-Kubernetes model {model.uri}.")
-        kubernetes.delete_pod(namespace=model.model, pod_name=pod_name)
+        self.backend.delete_workload_instance(model, pod_name)
         for extension in self.extensions:
             extension.post_delete_pod(model, pod_name)
 

@@ -401,9 +401,13 @@ def _build_juju_client(
             unseal_vault_k8s_extension,
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
-            RemoteLoggingExtension(juju_backend, remote_logging_endpoints_by_controller, session_resource_registry),
+            RemoteLoggingExtension(
+                juju_backend,
+                kubernetes_client_registry,
+                remote_logging_endpoints_by_controller,
+                session_resource_registry,
+            ),
         ],
-        kubernetes_client_registry=kubernetes_client_registry,
     )
 
 

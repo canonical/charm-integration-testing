@@ -13,6 +13,7 @@ import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable, overload
@@ -34,6 +35,7 @@ from juju import (
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
@@ -146,6 +148,69 @@ class JubilantBackend(JujuCmdBackend):
         if not self.kubernetes_client_registry.has_cloud(cloud):
             raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}'.")
         return self.kubernetes_client_registry.client_for_cloud(cloud)
+
+    def _required_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            raise ValueError(f"Model {model.uri} is not Kubernetes-backed.")
+        return self._kubernetes_client_for_cloud(cloud)
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        self._required_kubernetes_client_for_model(model).delete_pod(namespace=model.model, pod_name=instance_name)
+
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        pods = self._required_kubernetes_client_for_model(model).get_ready_charm_pods_by_unit(
+            application, model.model, units, timeout
+        )
+        return {
+            unit: JujuWorkloadInstance(unit=pod.unit, name=pod.name, identifier=pod.uid) for unit, pod in pods.items()
+        }
+
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        return self._required_kubernetes_client_for_model(model).get_charm_pod_uids(application, model.model)
+
+    def wait_for_workload_instances_ready(
+        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_ready(
+            application, model.model, expected_count, timeout
+        )
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        return self._required_kubernetes_client_for_model(model).restart_pod(
+            namespace=model.model,
+            pod_name=instance.name,
+            uid=instance.identifier,
+            timeout=timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_replaced(
+            application, model.model, expected_count, previous_ids, timeout
+        )
 
     def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
         status = self.status(model)

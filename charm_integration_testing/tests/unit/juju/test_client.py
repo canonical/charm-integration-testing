@@ -19,7 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -118,11 +118,14 @@ class WaitIdleBackendStub(NullJujuBackend):
 @dataclass
 class WorkloadPodBackendStub(NullJujuBackend):
     kubernetes_client: KubernetesClient | None = None
-    resolved_models: list[JujuModelHandle] = field(default_factory=list)
 
-    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str:
-        self.resolved_models.append(model)
-        return "k8s"
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return True
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        if self.kubernetes_client is None:
+            raise RuntimeError("No Kubernetes client configured.")
+        self.kubernetes_client.delete_pod(namespace=model.model, pod_name=instance_name)
 
 
 class RestartFollowerBackendStub(NullJujuBackend):
@@ -140,10 +143,6 @@ class RestartLifecycleExtension(JujuExtension):
 
     def post_delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
         self.deleted_pods.append((model, pod_name))
-
-
-def _kubernetes_registry(client: KubernetesClient) -> KubernetesClientRegistry:
-    return KubernetesClientRegistry({"k8s": Path("kubeconfig")}, client_factory=lambda _: client)
 
 
 class ExtensionStub(JujuExtension):
@@ -396,33 +395,17 @@ class TestApplicationHealth:
             backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
 
 
-class TestJujuClientKubernetesClientResolution:
-    def test_resolves_shared_client_for_model_cloud(self) -> None:
-        kubernetes_client = KubernetesClient(MagicMock())
-        backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
-        client = JujuClient(
-            backend,
-            cast(logging.Logger, LoggerStub()),
-            kubernetes_client_registry=_kubernetes_registry(kubernetes_client),
-        )
-        model = JujuModelHandle(controller="controller", model="model")
-
-        resolved_client = client.kubernetes_client_for_model(model)
-        assert backend.resolved_models == [model]
-        assert resolved_client is kubernetes_client
-
+class TestJujuClientWorkloadInstanceOperations:
     def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
         kubernetes_backend = MagicMock()
         kubernetes_client = KubernetesClient(kubernetes_backend)
-        registry = _kubernetes_registry(kubernetes_client)
         extension = RestartLifecycleExtension()
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
         client = JujuClient(
             backend,
             cast(logging.Logger, LoggerStub()),
             extensions=[extension],
-            kubernetes_client_registry=registry,
         )
 
         client.delete_pod(model, "pod-0")
@@ -434,14 +417,12 @@ class TestJujuClientKubernetesClientResolution:
         kubernetes_backend = MagicMock()
         kubernetes_backend.core_v1_api.delete_namespaced_pod.side_effect = RuntimeError("delete failed")
         kubernetes_client = KubernetesClient(kubernetes_backend)
-        registry = _kubernetes_registry(kubernetes_client)
         extension = RestartLifecycleExtension()
         model = JujuModelHandle(controller="controller", model="model")
         client = JujuClient(
             WorkloadPodBackendStub(kubernetes_client=kubernetes_client),
             cast(logging.Logger, LoggerStub()),
             extensions=[extension],
-            kubernetes_client_registry=registry,
         )
 
         with pytest.raises(RuntimeError, match="delete failed"):
