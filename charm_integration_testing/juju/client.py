@@ -72,9 +72,294 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_delete_pod(model, pod_name)
 
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing unit {unit}.")
+        self.backend.remove_unit(model, unit)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_scale(model)
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.logger.info(f"Getting the units for {application}.")
+        return self.backend.application_units(model, application)
+
+    def restart_workload_pod(
+        self,
+        model: JujuModelHandle,
+        pod: CharmPod,
+        timeout: timedelta,
+        *,
+        application: str,
+        existing_uids: Collection[str],
+    ) -> str:
+        """Restart a workload pod through the model's shared Kubernetes client."""
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot restart workload pod for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Restarting workload pod {pod.name} in model {model.uri}.")
+        return kubernetes.restart_pod(
+            namespace=model.model,
+            pod_name=pod.name,
+            uid=pod.uid,
+            timeout=timeout,
+            application=application,
+            unit=pod.unit,
+            existing_uids=existing_uids,
+        )
+
+    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a workload pod through the model's shared Kubernetes client."""
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot delete workload pod for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
+        kubernetes.delete_pod(namespace=model.model, pod_name=pod_name)
+
+    def restart_statefulset(self, model: JujuModelHandle, statefulset_name: str) -> None:
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot restart StatefulSet for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Restarting StatefulSet {statefulset_name} in model {model.uri}.")
+        kubernetes.restart_statefulset(namespace=model.model, statefulset_name=statefulset_name)
+
+    def rotate_application_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        *,
+        related_models: list[JujuModelHandle] | None = None,
+        timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        """Rotate every application unit while preserving capacity across cloud types.
+
+        Kubernetes workloads use one surge replica while all original pods are replaced,
+        because scale-down may select any pod for Deployment-backed workloads.
+        """
+        self.logger.info(f"Rotating all units for {application}.")
+        units = self.application_units(application, model=model)
+        if not units:
+            raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
+        models = list(dict.fromkeys([model, *(related_models or [])]))
+        if self.backend.is_k8s_model(model):
+            kubernetes = self.kubernetes_client_for_model(model)
+            if kubernetes is None:
+                raise RuntimeError(f"Model {model.uri} is Kubernetes-backed but has no Kubernetes client.")
+            self._rotate_kubernetes_units(kubernetes, application, model, units, models, timeout)
+        else:
+            if not self.backend.supports_targeted_unit_removal():
+                raise NotImplementedError(
+                    f"Cannot rotate machine units in model {model.uri}: targeted unit removal is not supported."
+                )
+            self._rotate_machine_units(application, model, units, models, timeout)
+
+        current_units = self.application_units(application, model=model)
+        if len(current_units) != len(units):
+            raise RuntimeError(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
+        self.multi_model_idle_for_period(models, timeout=timeout)
+        for model_ref in models:
+            self.validate_model(model=model_ref, level="deep")
+
+    def _rotate_kubernetes_units(
+        self,
+        kubernetes: KubernetesClient,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        pods_by_unit = kubernetes.get_ready_charm_pods_by_unit(application, model.model, units, timeout)
+        original_ids = {pod.uid for pod in pods_by_unit.values()}
+
+        try:
+            self.scale_application(application, len(units) + 1, model=model)
+            kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
+            self.multi_model_idle_for_period(models, timeout=timeout)
+            for unit in units:
+                pod = pods_by_unit[unit]
+                existing_uids = kubernetes.get_charm_pod_uids(application, model.model)
+                if pod.uid not in existing_uids:
+                    raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
+
+                self.restart_workload_pod(
+                    model,
+                    pod,
+                    timeout=timeout,
+                    application=application,
+                    existing_uids=existing_uids,
+                )
+                kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+        except BaseException as rotation_error:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) > len(units):
+                    self._restore_kubernetes_unit_count(
+                        kubernetes, application, model, len(units), original_ids, models, timeout
+                    )
+                elif len(current_units) < len(units):
+                    raise RuntimeError(
+                        f"Expected at least {len(units)} units while recovering from rotation, found "
+                        f"{len(current_units)}."
+                    )
+            except BaseException as cleanup_error:
+                raise rotation_error from cleanup_error
+            raise
+        else:
+            self._restore_kubernetes_unit_count(
+                kubernetes, application, model, len(units), original_ids, models, timeout
+            )
+
+        kubernetes.wait_for_charm_pods_replaced(application, model.model, len(units), original_ids, timeout=timeout)
+
+    def _restore_kubernetes_unit_count(
+        self,
+        kubernetes: KubernetesClient,
+        application: str,
+        model: JujuModelHandle,
+        unit_count: int,
+        previous_ids: Collection[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        current_units = self.application_units(application, model=model)
+        if len(current_units) > unit_count:
+            kubernetes.wait_for_charm_pods_replaced(
+                application, model.model, len(current_units), previous_ids, timeout=timeout
+            )
+            kubernetes.get_ready_charm_pods_by_unit(application, model.model, current_units, timeout)
+
+        cleanup_errors: list[Exception] = []
+        try:
+            self.scale_application(application, unit_count, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            self.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            kubernetes.wait_for_charm_pods_ready(application, model.model, unit_count, timeout)
+        except Exception as convergence_error:
+            cleanup_errors.append(convergence_error)
+        try:
+            current_units = self.application_units(application, model=model)
+            if len(current_units) != unit_count:
+                raise RuntimeError(
+                    f"Expected {unit_count} units after restoring Kubernetes capacity, found {len(current_units)}."
+                )
+            kubernetes.get_ready_charm_pods_by_unit(application, model.model, current_units, timeout)
+        except Exception as mapping_error:
+            cleanup_errors.append(mapping_error)
+
+        self._raise_cleanup_errors(cleanup_errors)
+
+    def _rotate_machine_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        for unit in units:
+            original_units = set(self.application_units(application, model=model))
+            unit_removal_attempted = False
+            try:
+                self.scale_application(application, len(units) + 1, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                unit_removal_attempted = True
+                self.remove_unit(unit, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) != len(units):
+                    raise RuntimeError(
+                        f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}."
+                    )
+                if unit in current_units:
+                    raise RuntimeError(f"Unit {unit} was not removed after rotation.")
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+            except BaseException as rotation_error:
+                try:
+                    self._cleanup_machine_surge(
+                        application,
+                        model,
+                        original_units,
+                        len(units),
+                        models,
+                        unit,
+                        timeout,
+                        unit_removal_attempted,
+                    )
+                except BaseException as cleanup_error:
+                    raise rotation_error from cleanup_error
+                raise
+
+    def _cleanup_machine_surge(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        original_units: set[str],
+        unit_count: int,
+        models: list[JujuModelHandle],
+        rotated_unit: str,
+        timeout: timedelta,
+        unit_removal_attempted: bool,
+    ) -> None:
+        current_units = self.application_units(application, model=model)
+        cleanup_errors: list[Exception] = []
+        settling_wait_succeeded = True
+        try:
+            self.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+            settling_wait_succeeded = False
+        try:
+            current_units = self.application_units(application, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+            self._raise_cleanup_errors(cleanup_errors)
+
+        if not settling_wait_succeeded and unit_removal_attempted and rotated_unit in current_units:
+            self._raise_cleanup_errors(cleanup_errors)
+
+        surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
+        cleanup_changed_state = False
+        if len(current_units) > unit_count and not surge_units:
+            cleanup_errors.append(
+                RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
+            )
+        elif surge_units:
+            surge_unit_count = max(0, len(current_units) - unit_count)
+            for surge_unit in surge_units[:surge_unit_count]:
+                cleanup_changed_state = True
+                try:
+                    self.remove_unit(surge_unit, model=model)
+                except Exception as error:
+                    cleanup_errors.append(error)
+        if cleanup_changed_state or set(current_units) != original_units:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+            except Exception as error:
+                cleanup_errors.append(error)
+        self._raise_cleanup_errors(cleanup_errors)
+
+    @staticmethod
+    def _raise_cleanup_errors(errors: list[Exception]) -> None:
+        if errors:
+            if len(errors) > 1:
+                raise errors[0] from errors[-1]
+            raise errors[0]
+
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

@@ -116,7 +116,20 @@ class WaitIdleBackendStub(NullJujuBackend):
 
 
 @dataclass
-class WorkloadPodBackendStub(NullJujuBackend):
+class UnitOperationsBackendStub(NullJujuBackend):
+    units: list[str] = field(default_factory=list)
+    removed_units: list[str] = field(default_factory=list)
+
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        return list(self.units)
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.removed_units.append(unit)
+        self.units.remove(unit)
+
+
+@dataclass
+class WorkloadPodBackendStub(UnitOperationsBackendStub):
     kubernetes_client: KubernetesClient | None = None
 
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
@@ -395,6 +408,23 @@ class TestApplicationHealth:
             backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
 
 
+class TestJujuClientUnitOperations:
+    def test_lists_application_units_and_removes_specific_unit(self) -> None:
+        # GIVEN a backend with two units
+        backend = UnitOperationsBackendStub(units=["app/0", "app/1"])
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        # WHEN listing and removing a unit
+        units = client.application_units("app", model)
+        client.remove_unit("app/0", model)
+
+        # THEN unit lookup and removal are delegated through the client
+        assert units == ["app/0", "app/1"]
+        assert backend.removed_units == ["app/0"]
+        assert backend.units == ["app/1"]
+
+
 class TestJujuClientWorkloadInstanceOperations:
     def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
@@ -442,6 +472,17 @@ class TestJujuClientWorkloadInstanceOperations:
         assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
 
         assert extension.restarted_units == [(model, "app/1")]
+
+    def test_rotate_application_units_rejects_applications_without_units(self) -> None:
+        backend = UnitOperationsBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        with pytest.raises(ValueError, match="it has no units"):
+            client.rotate_application_units("app", model, timeout=timedelta(minutes=5))
+
+        assert logger.infos == ["Rotating all units for app.", "Getting the units for app."]
 
 
 class TestJujuValidationError:
