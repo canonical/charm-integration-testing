@@ -13,6 +13,10 @@ COLLECTOR_RELEASE_URL = (
     "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/"
     f"v{COLLECTOR_VERSION}/otelcol-contrib_{COLLECTOR_VERSION}_linux_${{ARCH}}.tar.gz"
 )
+COLLECTOR_SHA256_BY_ARCH = {
+    "amd64": "f4d5de6062b8b0e66a9049cdc0c90de9f79bb1cfcc1a19c74518ddb0a8698e2e",
+    "arm64": "e349432fa08d80113de7575d3698d6b48dda8947d829b893d7299e4389dde99a",
+}
 
 # The Loki charm only exposes the push API, so the loki exporter is used rather than OTLP.
 LOKI_PUSH_PATH = "/loki/api/v1/push"
@@ -22,9 +26,10 @@ MACHINE_LOG_GLOB = "/var/log/juju/*.log"
 MACHINE_CONFIG_PATH = "/etc/otelcol-scraper/config.yaml"
 MACHINE_UNIT_PATH = "/etc/systemd/system/otelcol-scraper.service"
 MACHINE_BINARY_PATH = "/usr/local/bin/otelcol-contrib"
+COLLECTOR_STATE_DIRECTORY = "otelcol-scraper"
+COLLECTOR_STORAGE_PATH = f"/var/lib/{COLLECTOR_STATE_DIRECTORY}"
 
 KUBERNETES_POD_LOG_ROOT = "/var/log/pods"
-KUBERNETES_STORAGE_ROOT = "/var/lib/otelcol-scraper"
 KUBERNETES_SCRAPER_NAME = "log-scraper"
 KUBERNETES_CONFIG_KEY = "config.yaml"
 KUBERNETES_NAMESPACES_KEY = "namespaces"
@@ -68,11 +73,16 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
         "start_at": "beginning",
         "include_file_path": True,
         "resource": resource,
+        "storage": "file_storage",
     }
     config: dict[str, Any] = {
         "receivers": {"filelog": receiver},
         "exporters": {"loki": {"endpoint": f"{endpoint.rstrip('/')}{LOKI_PUSH_PATH}"}},
-        "service": {"pipelines": {"logs": {"receivers": ["filelog"], "exporters": ["loki"]}}},
+        "extensions": {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}},
+        "service": {
+            "extensions": ["file_storage"],
+            "pipelines": {"logs": {"receivers": ["filelog"], "exporters": ["loki"]}},
+        },
     }
     config["processors"] = {
         "groupbyattrs": {"keys": PATH_LABELS},
@@ -93,10 +103,7 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
         ]
     else:
         # Offsets are persisted so restarting the scraper to pick up new namespaces neither loses nor repeats logs.
-        receiver["storage"] = "file_storage"
         receiver["operators"] = [{"type": "container", "id": "container-parser"}, *KUBERNETES_LABEL_OPERATORS]
-        config["extensions"] = {"file_storage": {"directory": "/var/lib/otelcol"}}
-        config["service"]["extensions"] = ["file_storage"]
     return config
 
 
@@ -116,6 +123,7 @@ def machine_userdata(endpoint: str, controller: str, model: str) -> dict[str, An
             "[Service]",
             f"ExecStart={MACHINE_BINARY_PATH} --config {MACHINE_CONFIG_PATH}",
             "Restart=always",
+            f"StateDirectory={COLLECTOR_STATE_DIRECTORY}",
             "[Install]",
             "WantedBy=multi-user.target",
             "",
@@ -128,8 +136,14 @@ def machine_userdata(endpoint: str, controller: str, model: str) -> dict[str, An
         ],
         "postruncmd": [
             'ARCH="$(dpkg --print-architecture)"; '
-            f"curl -fsSL --retry 5 --retry-all-errors -o /tmp/otelcol-scraper.tgz {COLLECTOR_RELEASE_URL}",
-            f"tar -xzf /tmp/otelcol-scraper.tgz -C {MACHINE_BINARY_PATH.rsplit('/', 1)[0]} otelcol-contrib",
+            'case "${ARCH}" in '
+            + " ".join(
+                f"{architecture}) SHA256='{checksum}' ;;" for architecture, checksum in COLLECTOR_SHA256_BY_ARCH.items()
+            )
+            + " *) echo \"Unsupported collector architecture: ${ARCH}\" >&2; exit 1 ;; esac; "
+            f"curl -fsSL --retry 5 --retry-all-errors -o /tmp/otelcol-scraper.tgz {COLLECTOR_RELEASE_URL} && "
+            'printf "%s  %s\\n" "${SHA256}" /tmp/otelcol-scraper.tgz | sha256sum --check --strict - && '
+            f"tar -xzf /tmp/otelcol-scraper.tgz -C {MACHINE_BINARY_PATH.rsplit('/', 1)[0]} otelcol-contrib && "
             "rm -f /tmp/otelcol-scraper.tgz",
             "systemctl daemon-reload",
             "systemctl enable --now otelcol-scraper",
@@ -209,7 +223,7 @@ def kubernetes_daemon_set(namespace: str, controller: str) -> dict[str, Any]:
                             "volumeMounts": [
                                 {"name": "config", "mountPath": "/etc/otelcol"},
                                 {"name": "pods", "mountPath": KUBERNETES_POD_LOG_ROOT, "readOnly": True},
-                                {"name": "storage", "mountPath": "/var/lib/otelcol"},
+                                {"name": "storage", "mountPath": COLLECTOR_STORAGE_PATH},
                             ],
                         }
                     ],
@@ -219,7 +233,7 @@ def kubernetes_daemon_set(namespace: str, controller: str) -> dict[str, Any]:
                         {
                             "name": "storage",
                             "hostPath": {
-                                "path": f"{KUBERNETES_STORAGE_ROOT}/{controller}",
+                                "path": f"{COLLECTOR_STORAGE_PATH}/{controller}",
                                 "type": "DirectoryOrCreate",
                             },
                         },

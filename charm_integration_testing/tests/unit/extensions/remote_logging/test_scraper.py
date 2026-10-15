@@ -7,6 +7,9 @@ from dataclasses import dataclass
 import pytest
 import yaml
 from extensions.remote_logging.scraper import (
+    COLLECTOR_SHA256_BY_ARCH,
+    COLLECTOR_STATE_DIRECTORY,
+    COLLECTOR_STORAGE_PATH,
     KUBERNETES_POD_REGEX,
     MACHINE_MACHINE_FILE,
     MACHINE_UNIT_FILE,
@@ -48,9 +51,13 @@ def test_machine_userdata_uses_only_allowed_cloud_init_keys() -> None:
 def test_daemon_set_persists_offsets_per_controller() -> None:
     body = kubernetes_daemon_set("ns", "ctrl")
 
+    container = body["spec"]["template"]["spec"]["containers"][0]
     volumes = {volume["name"]: volume for volume in body["spec"]["template"]["spec"]["volumes"]}
-    assert volumes["storage"]["hostPath"]["path"].endswith("/ctrl")
+    assert volumes["storage"]["hostPath"]["path"] == f"{COLLECTOR_STORAGE_PATH}/ctrl"
     assert volumes["pods"]["hostPath"]["path"] == "/var/log/pods"
+    assert {mount["name"]: mount["mountPath"] for mount in container["volumeMounts"]}["storage"] == (
+        COLLECTOR_STORAGE_PATH
+    )
 
 
 def test_daemon_set_hardens_the_root_collector() -> None:
@@ -98,6 +105,23 @@ def test_machine_collector_groups_logs_by_labels_from_the_file_name() -> None:
     assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs", "resource", "attributes"]
     assert config["receivers"]["filelog"]["resource"] == {"juju_controller": "ctrl", "juju_model": "model"}
     assert [operator["type"] for operator in config["receivers"]["filelog"]["operators"]] == ["regex_parser"] * 2
+    assert config["receivers"]["filelog"]["storage"] == "file_storage"
+    assert config["extensions"] == {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}}
+    assert config["service"]["extensions"] == ["file_storage"]
+
+
+def test_machine_collector_persists_state_and_verifies_the_archive() -> None:
+    userdata = machine_userdata("http://host", "ctrl", "model")
+
+    unit = userdata["write_files"][1]["content"]
+    install_command = userdata["postruncmd"][0]
+
+    assert f"StateDirectory={COLLECTOR_STATE_DIRECTORY}" in unit
+    assert "Unsupported collector architecture: ${ARCH}" in install_command
+    assert "exit 1" in install_command
+    for architecture, checksum in COLLECTOR_SHA256_BY_ARCH.items():
+        assert f"{architecture}) SHA256='{checksum}' ;;" in install_command
+    assert install_command.index("curl ") < install_command.index("sha256sum ") < install_command.index("tar ")
 
 
 def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
@@ -106,6 +130,9 @@ def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
     receiver = config["receivers"]["filelog"]
     assert receiver["resource"] == {"juju_controller": "ctrl"}
     assert [operator["type"] for operator in receiver["operators"]] == ["container", "add", "regex_parser"]
+    assert receiver["storage"] == "file_storage"
+    assert config["extensions"] == {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}}
+    assert config["service"]["extensions"] == ["file_storage"]
     assert config["processors"]["groupbyattrs"]["keys"] == [
         "juju_model",
         "juju_application",
