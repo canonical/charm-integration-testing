@@ -4,7 +4,6 @@
 import hashlib
 import json
 import logging
-import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -420,7 +419,7 @@ def test_client_initialization_retry_uses_fresh_credentials(client: S3Client) ->
 
 def test_registry_retries_pending_credential_revocation() -> None:
     keystone = KeystoneStub()
-    keystone.fail_delete_attempts["test-access-1"] = 1
+    keystone.fail_delete_attempts["test-access-1"] = 2
 
     def fail(_: S3Credentials) -> S3Client:
         raise RuntimeError("Client initialization failed")
@@ -435,14 +434,15 @@ def test_registry_retries_pending_credential_revocation() -> None:
     with pytest.raises(RuntimeError, match="could not be revoked"):
         bucket.provision()
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", ResourceTeardownWarning)
+    with pytest.warns(ResourceTeardownWarning):
         registry.teardown_all()
 
-    # The bucket destroyer retries the pending key after bucket teardown.
+    # The bucket destroyer retries once, then provider cleanup retries after registry teardown.
     assert keystone.delete_attempts == ["test-access-1"] * 2
+    assert keystone.deleted == []
+    storage.cleanup_pending_resources()
+    assert keystone.delete_attempts == ["test-access-1"] * 3
     assert keystone.deleted == ["test-access-1"]
-    assert not caught
 
 
 def test_cleanup_removes_versions_markers_and_multipart(client: S3Client) -> None:

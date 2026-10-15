@@ -1,9 +1,24 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from unittest.mock import Mock
+
 import pytest
-from test_suite.fixtures.s3 import can_cleanup_session_storage
+from s3_storage import S3Provider
+from test_suite.fixtures.s3 import can_cleanup_session_storage, cleanup_pending_s3_resources
 from test_suite.scheduler.states import State
+
+
+def test_pending_s3_cleanup_attempts_all_providers_and_surfaces_failure() -> None:
+    failed = Mock(spec=S3Provider)
+    failed.cleanup_pending_resources.side_effect = RuntimeError("cleanup failed")
+    succeeding = Mock(spec=S3Provider)
+
+    with pytest.raises(RuntimeError, match="Pending S3 cleanup failed for 1 provider"):
+        cleanup_pending_s3_resources({"failed": failed, "succeeding": succeeding})
+
+    failed.cleanup_pending_resources.assert_called_once_with()
+    succeeding.cleanup_pending_resources.assert_called_once_with()
 
 
 @pytest.mark.parametrize(

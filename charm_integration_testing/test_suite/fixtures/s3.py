@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 import os
-from typing import Iterator
+from collections.abc import Iterator, Mapping
 
 import pytest
 import requests
@@ -11,6 +11,17 @@ from s3_storage import S3Provider
 from s3_storage.environment import provider_from_environment
 
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, State
+
+
+def cleanup_pending_s3_resources(providers: Mapping[str, S3Provider]) -> None:
+    failures: list[Exception] = []
+    for provider in providers.values():
+        try:
+            provider.cleanup_pending_resources()
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise RuntimeError(f"Pending S3 cleanup failed for {len(failures)} provider(s)") from failures[0]
 
 
 def can_cleanup_session_storage(current_state: State) -> bool:
@@ -43,4 +54,7 @@ def s3_providers(
                 continue
             provider = providers_by_resource.setdefault(provider.handle.resource_id, provider)
             providers_by_model[model.resource_id] = provider
-        yield providers_by_model
+        try:
+            yield providers_by_model
+        finally:
+            cleanup_pending_s3_resources(providers_by_resource)
