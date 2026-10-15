@@ -8,8 +8,8 @@ from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
 
 from bundle_builder_x import Charm
 
+from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
-from .test_scale_ha import _require_principal_charm
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
@@ -20,7 +20,7 @@ def test_scale_remove_follower(
     target_application: str,
     target_deployed_charm: Charm | None,
 ) -> None:
-    charm = _require_principal_charm(target_deployed_charm)
+    charm = require_principal_charm(target_deployed_charm)
     timeout = timedelta(minutes=15)
     models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
     juju_client.multi_model_idle_for_period(models=models, timeout=timeout, strict_timeout=True)

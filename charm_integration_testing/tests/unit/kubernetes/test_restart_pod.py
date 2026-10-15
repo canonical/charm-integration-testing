@@ -89,8 +89,8 @@ class Hook(KubernetesExtension):
         self.calls.append((namespace, pod_name))
 
 
-def restart(api: PodAPI, hook: Hook) -> None:
-    KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
+def restart(api: PodAPI, hook: Hook) -> str:
+    return KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
         "model",
         "target-1",
         "old",
@@ -102,7 +102,7 @@ def restart(api: PodAPI, hook: Hook) -> None:
 
 
 @pytest.mark.parametrize("new_name", ["target-1", "target-replicaset-new"])
-def test_waits_for_replacement_before_hook(clock: Clock, new_name: str) -> None:
+def test_waits_for_running_replacement_and_returns_name(clock: Clock, new_name: str) -> None:
     api = PodAPI(
         [
             [pod("old")],
@@ -114,9 +114,10 @@ def test_waits_for_replacement_before_hook(clock: Clock, new_name: str) -> None:
         clock,
     )
     hook = Hook()
-    restart(api, hook)
+    replacement_name = restart(api, hook)
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 5
+    assert replacement_name == new_name
     assert hook.calls == [("model", new_name)]
 
 

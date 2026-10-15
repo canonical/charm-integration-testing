@@ -2,13 +2,14 @@
 # See LICENSE file for licensing details.
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from juju import JujuControllerHandle, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from resource_tracking import (
     CollectedResources,
     DiscrepancyEntry,
@@ -120,12 +121,19 @@ class _FakeJujuBackend(NullJujuBackend):
         self._clients_by_controller = clients_by_controller or {}
         self._error = error
 
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         if self._error is not None:
             raise self._error
-        # The fake clients stored here only duck-type the methods KubernetesResourceCollector
-        # uses; cast rather than widen the override's return type to keep this a real JujuBackend.
-        return cast(KubernetesClient | None, self._clients_by_controller.get(controller))
+        return f"cloud-{model.controller}" if self._clients_by_controller.get(model.controller) is not None else None
+
+
+def _kubernetes_client_registry(backend: _FakeJujuBackend) -> KubernetesClientRegistry:
+    clients = backend._clients_by_controller
+    kubeconfigs = {f"cloud-{controller}": Path(controller) for controller, client in clients.items() if client}
+    return KubernetesClientRegistry(
+        kubeconfigs,
+        client_factory=lambda kubeconfig: cast(KubernetesClient, clients[kubeconfig.name]),
+    )
 
 
 class _FakeCollector:
@@ -356,6 +364,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -371,6 +380,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -391,6 +401,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -423,6 +434,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources, resolving a client per controller dynamically
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -455,6 +467,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources with only the target controller resolvable
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -473,6 +486,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
