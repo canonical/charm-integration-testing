@@ -2,11 +2,10 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base import ValidationResult
 
@@ -83,45 +82,6 @@ class JujuClient:
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
-
-    def restart_workload_pod(
-        self,
-        model: JujuModelHandle,
-        pod: CharmPod,
-        timeout: timedelta,
-        *,
-        application: str,
-        existing_uids: Collection[str],
-    ) -> str:
-        """Restart a workload pod through the model's shared Kubernetes client."""
-        kubernetes = self.kubernetes_client_for_model(model)
-        if kubernetes is None:
-            raise RuntimeError(f"Cannot restart workload pod for model {model.uri}: it is not Kubernetes-backed.")
-        self.logger.info(f"Restarting workload pod {pod.name} in model {model.uri}.")
-        return kubernetes.restart_pod(
-            namespace=model.model,
-            pod_name=pod.name,
-            uid=pod.uid,
-            timeout=timeout,
-            application=application,
-            unit=pod.unit,
-            existing_uids=existing_uids,
-        )
-
-    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
-        """Delete a workload pod through the model's shared Kubernetes client."""
-        kubernetes = self.kubernetes_client_for_model(model)
-        if kubernetes is None:
-            raise RuntimeError(f"Cannot delete workload pod for model {model.uri}: it is not Kubernetes-backed.")
-        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
-        kubernetes.delete_pod(namespace=model.model, pod_name=pod_name)
-
-    def restart_statefulset(self, model: JujuModelHandle, statefulset_name: str) -> None:
-        kubernetes = self.kubernetes_client_for_model(model)
-        if kubernetes is None:
-            raise RuntimeError(f"Cannot restart StatefulSet for model {model.uri}: it is not Kubernetes-backed.")
-        self.logger.info(f"Restarting StatefulSet {statefulset_name} in model {model.uri}.")
-        kubernetes.restart_statefulset(namespace=model.model, statefulset_name=statefulset_name)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

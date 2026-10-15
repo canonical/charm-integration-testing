@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
@@ -19,7 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
-from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry, KubernetesExtension
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -170,11 +170,6 @@ class PersistenceExtensionStub(JujuExtension):
         for key in self.keys_to_drop:
             self.persistence_state.pop(key, None)
         return self.results.get(application, {})
-
-
-class KubernetesExtensionStub(KubernetesExtension):
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
-        pass
 
 
 class PreRemoveIntegrationExtensionStub(JujuExtension):
@@ -384,11 +379,9 @@ class TestApplicationHealth:
             backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
 
 
-class TestJujuClientWorkloadOperations:
-    def test_restart_workload_pod_uses_shared_registry(self) -> None:
-        kubernetes_extension = KubernetesExtensionStub()
-        kubernetes_backend = MagicMock()
-        kubernetes_client = KubernetesClient(kubernetes_backend, extensions=[kubernetes_extension])
+class TestJujuClientKubernetesClientResolution:
+    def test_resolves_shared_client_for_model_cloud(self) -> None:
+        kubernetes_client = KubernetesClient(MagicMock())
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
         client = JujuClient(
             backend,
@@ -396,69 +389,10 @@ class TestJujuClientWorkloadOperations:
             kubernetes_client_registry=_kubernetes_registry(kubernetes_client),
         )
         model = JujuModelHandle(controller="controller", model="model")
-        timeout = timedelta(minutes=5)
-        existing_uids = {"old", "sibling"}
 
-        with patch.object(kubernetes_client, "restart_pod", return_value="replacement") as restart_pod:
-            client.restart_workload_pod(
-                model=model,
-                pod=CharmPod(unit="app/1", name="pod", uid="old"),
-                timeout=timeout,
-                application="app",
-                existing_uids=existing_uids,
-            )
-            client.restart_workload_pod(
-                model=model,
-                pod=CharmPod(unit="app/1", name="pod", uid="old"),
-                timeout=timeout,
-                application="app",
-                existing_uids=existing_uids,
-            )
-
-        assert backend.resolved_models == [model, model]
-        assert restart_pod.call_count == 2
-        assert kubernetes_client.extensions == [kubernetes_extension]
-        restart_pod.assert_called_with(
-            namespace="model",
-            pod_name="pod",
-            uid="old",
-            timeout=timeout,
-            application="app",
-            unit="app/1",
-            existing_uids=existing_uids,
-        )
-
-    def test_restart_workload_pod_reports_missing_kubeconfig(self) -> None:
-        backend = WorkloadPodBackendStub()
-        client = JujuClient(backend, LoggerStub(), [], kubernetes_client_registry=KubernetesClientRegistry({}))  # type: ignore[arg-type]
-        model = JujuModelHandle(controller="controller", model="model")
-
-        with pytest.raises(RuntimeError, match="No kubeconfig configured"):
-            client.restart_workload_pod(
-                model=model,
-                pod=CharmPod(unit="app/1", name="pod", uid="old"),
-                timeout=timedelta(minutes=5),
-                application="app",
-                existing_uids={"old"},
-            )
-
+        resolved_client = client.kubernetes_client_for_model(model)
         assert backend.resolved_models == [model]
-
-    def test_restart_statefulset_uses_shared_kubernetes_client(self) -> None:
-        kubernetes_client = KubernetesClient(MagicMock(), extensions=[KubernetesExtensionStub()])
-        backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
-        model = JujuModelHandle(controller="controller", model="model")
-        client = JujuClient(
-            backend,
-            cast(logging.Logger, LoggerStub()),
-            kubernetes_client_registry=_kubernetes_registry(kubernetes_client),
-        )
-
-        with patch.object(kubernetes_client, "restart_statefulset") as restart:
-            client.restart_statefulset(model, "vault-k8s")
-
-        restart.assert_called_once_with(namespace="model", statefulset_name="vault-k8s")
-        assert client.kubernetes_client_for_model(model) is kubernetes_client
+        assert resolved_client is kubernetes_client
 
 
 class TestJujuValidationError:
