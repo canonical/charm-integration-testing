@@ -143,10 +143,8 @@ def resource_tracking_skips_by_application(
 @pytest.fixture(autouse=True)
 def track_state_resources(
     request: pytest.FixtureRequest,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
-    resource_tracking_skips_by_application: dict[tuple[str, str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> Iterator[None]:
     """Snapshot resources per scheduler state after each passing state-marked test.
@@ -168,6 +166,11 @@ def track_state_resources(
     marker = read_state_marker(request.node)
     if marker is None:
         return
+    if not any(isinstance(handle, JujuModelHandle) for handle in session_resource_registry.registered_handles()):
+        return
+
+    juju_client: JujuClient = request.getfixturevalue("juju_client")
+    request.getfixturevalue("resource_tracking_skips_by_application")
 
     # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
     # skip models whose controllers are not Kubernetes-based.
