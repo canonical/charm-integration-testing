@@ -9,7 +9,7 @@ from juju import JujuBackend, JujuModelHandle
 
 from bundle_builder_x import CharmChannel
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 from .resource_constraints import CharmResourceConstraints, ResourceConstraintsClient
 
 
@@ -43,7 +43,8 @@ class _CleanupAction:
     scope: tuple[str, str]
     path: str
     run: Callable[[], None]
-    stress_tool: ChaosClient | None = None
+    check_tool: ChaosClient | None = None
+    operation: str = ""
 
 
 class MetaChaosClient(ChaosClient):
@@ -120,9 +121,11 @@ class MetaChaosClient(ChaosClient):
     def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
         """Check only successful stress owners, retaining them until cleanup succeeds."""
         tools = {
-            id(action.stress_tool): action.stress_tool
+            id(action.check_tool): action.check_tool
             for action in self._cleanups
-            if action.scope == (model.uri, unit) and action.stress_tool is not None
+            if action.scope == (model.uri, unit)
+            and action.operation in {"stress_cpu", "stress_memory"}
+            and action.check_tool is not None
         }
         if not tools:
             raise RuntimeError(f"No successfully started stress for {model.uri}/{unit}.")
@@ -206,12 +209,29 @@ class MetaChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> IoLatencyInjection:
+        """Inject I/O latency and report the resolved (possibly per-charm-constrained) duration.
+
+        Unlike the other experiments, callers need the resolved duration back so they can keep
+        observing the fault for exactly as long as it will actually run before cleaning it up.
+        The returned start time is the tool's own, taken when the experiment resource was
+        actually created, not when this method returns: resolving per-charm constraints (below)
+        and awaiting controller-confirmed injection can both delay that return by a non-trivial
+        amount, during which the experiment's duration is already counting down.
+        """
+        injections: list[IoLatencyInjection] = []
+
         def build_invoke(constraints: CharmResourceConstraints) -> Callable[[ChaosClient], object]:
             merged_delay = self._merged_duration(constraints.disk_io_latency_delay_ms, delay, unit="milliseconds")
             merged_percent = self._merged_int(constraints.disk_io_latency_percent, percent)
             merged_duration = self._merged_duration(constraints.disk_io_latency_duration_seconds, duration)
-            return lambda tool: tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+
+            def invoke(tool: ChaosClient) -> None:
+                injections.append(
+                    tool.io_latency(model, unit, volume_path, merged_delay, merged_percent, merged_duration)
+                )
+
+            return invoke
 
         self._dispatch_constrained(
             "io_latency",
@@ -221,6 +241,24 @@ class MetaChaosClient(ChaosClient):
             lambda tool: self._experiment_cleanup(tool, model, unit, volume_path),
             self._cleanups,
         )
+        return injections[0]
+
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        """Check only successful I/O latency owners, retaining them until cleanup succeeds."""
+        tools = {
+            id(action.check_tool): action.check_tool
+            for action in self._cleanups
+            if action.scope == (model.uri, unit)
+            and action.path == volume_path
+            and action.operation == "io_latency"
+            and action.check_tool is not None
+        }
+        if not tools:
+            raise RuntimeError(f"No successfully started I/O latency experiment for {model.uri}/{unit}:{volume_path}.")
+        for tool in tools.values():
+            tool.check_io_latency(model, unit, volume_path, allow_completed=allow_completed)
 
     def isolate_network(self, model: str, unit: str) -> None:
         self._dispatch(
@@ -328,8 +366,8 @@ class MetaChaosClient(ChaosClient):
                 # Failed calls may have created resources.
                 pending.append(action)
                 raise
-            if operation in {"stress_cpu", "stress_memory"}:
-                action = replace(action, stress_tool=tool)
+            if operation in {"stress_cpu", "stress_memory", "io_latency"}:
+                action = replace(action, check_tool=tool, operation=operation)
             pending.append(action)
             return
         self._on_unsupported(operation)

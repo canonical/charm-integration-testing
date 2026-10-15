@@ -1,18 +1,18 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
 
-def workload_target(
+def _resolve_unit_pod(
     backend: KubernetesBackend,
     namespace: str,
     unit: str,
     *,
     request_timeout: float | tuple[float, float],
-    target_container: str | None = None,
-) -> tuple[str, str]:
-    """Resolve one live unit Pod and its workload container for targeted stress."""
+) -> k8s.V1Pod:
+    """Resolve the single live Pod for a unit, without imposing any container requirement."""
     application = unit.split("/")[0]
     pods = backend.core_v1_api.list_namespaced_pod(
         namespace=namespace,
@@ -28,7 +28,30 @@ def workload_target(
     ]
     if len(matches) != 1:
         raise RuntimeError(f"Expected one live Pod for {namespace}/{unit}, found {len(matches)}.")
-    pod = matches[0]
+    return matches[0]
+
+
+def unit_pod_name(
+    backend: KubernetesBackend,
+    namespace: str,
+    unit: str,
+    *,
+    request_timeout: float | tuple[float, float],
+) -> str:
+    """Resolve one live unit Pod's name, for experiments that target the whole Pod."""
+    return str(_resolve_unit_pod(backend, namespace, unit, request_timeout=request_timeout).metadata.name)
+
+
+def workload_target(
+    backend: KubernetesBackend,
+    namespace: str,
+    unit: str,
+    *,
+    request_timeout: float | tuple[float, float],
+    target_container: str | None = None,
+) -> tuple[str, str]:
+    """Resolve one live unit Pod and its workload container for targeted stress."""
+    pod = _resolve_unit_pod(backend, namespace, unit, request_timeout=request_timeout)
     containers = [
         container.name
         for container in pod.spec.containers

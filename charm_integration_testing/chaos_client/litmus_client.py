@@ -12,7 +12,7 @@ from kubernetes import client  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient, StressEndedEarlyError
+from .backend import ChaosClient, IoLatencyInjection, StressEndedEarlyError
 from .litmus_detection import LITMUS_CRDS
 from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
@@ -134,7 +134,7 @@ class LitmusChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> IoLatencyInjection:
         raise NotImplementedError
 
     def isolate_network(self, model: str, unit: str) -> None:

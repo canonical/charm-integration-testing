@@ -12,6 +12,7 @@ from chaos_client import (
     ChaosNotSupportedError,
     ChaosResourceConstraintsError,
     CharmResourceConstraints,
+    IoLatencyInjection,
     MetaChaosClient,
     ResourceConstraintsClient,
 )
@@ -75,10 +76,11 @@ DEFAULT_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
 
 
 class ClientStub(ChaosClient):
-    def __init__(self, supported: set[str]) -> None:
+    def __init__(self, supported: set[str], *, injected_at: float = 123.0) -> None:
         self.supported = supported
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.errors: dict[str, BaseException] = {}
+        self.injected_at = injected_at
 
     def supports(self, operation: str) -> bool:
         return operation in self.supported
@@ -110,8 +112,9 @@ class ClientStub(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> IoLatencyInjection:
         self._call("io_latency", model, unit, volume_path, delay, percent, duration)
+        return IoLatencyInjection(duration=duration, injected_at=self.injected_at)
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         self._call("cleanup", model, unit, path)
@@ -692,12 +695,26 @@ def test_io_latency_uses_constraint_overrides() -> None:
     )
 
     # WHEN injecting I/O latency
-    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    injection = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
-    # THEN the merged values are dispatched
+    # THEN the merged values are dispatched, and the merged duration is returned to the caller
     assert tool.calls == [
-        ("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=250), 70, timedelta(seconds=75)))
+        (
+            "io_latency",
+            (
+                TEST_MODEL,
+                UNIT,
+                "/data",
+                timedelta(milliseconds=250),
+                70,
+                timedelta(seconds=75),
+            ),
+        )
     ]
+    assert injection.duration == timedelta(seconds=75)
+    # THEN the tool's own injected_at is forwarded, not a timestamp taken in MetaChaosClient
+    # itself (which would wrongly include constraint-resolution time in the caller's window).
+    assert injection.injected_at == tool.injected_at
 
 
 def test_io_latency_without_matching_constraints_preserves_caller_values() -> None:
@@ -706,10 +723,11 @@ def test_io_latency_without_matching_constraints_preserves_caller_values() -> No
     client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
 
     # WHEN injecting I/O latency
-    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
+    injection = client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION)
 
-    # THEN the original values are preserved
+    # THEN the original values are preserved, and the caller's duration is returned unchanged
     assert tool.calls == [("io_latency", (TEST_MODEL, UNIT, "/data", timedelta(milliseconds=50), 80, DURATION))]
+    assert injection.duration == DURATION
 
 
 class TestCpuObservationDuration:
@@ -939,6 +957,30 @@ def test_stress_checks_only_selected_tool_and_retains_failed_cleanup(failure: bo
         client.check_stress(TEST_MODEL, UNIT)
 
 
+@pytest.mark.parametrize("failure", [False, True])
+def test_io_latency_checks_only_selected_tool_and_retains_failed_cleanup(failure: bool) -> None:
+    from unittest.mock import Mock
+
+    unsupported, selected, unused = [Mock(spec=ChaosClient) for _ in range(3)]
+    unsupported.io_latency.side_effect = NotImplementedError
+    selected.io_latency.return_value = IoLatencyInjection(duration=DURATION, injected_at=0.0)
+    client = MetaChaosClient([unsupported, selected, unused], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+    client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    selected.check_io_latency.assert_called_once_with(TEST_MODEL, UNIT, "/data", allow_completed=False)
+    unsupported.check_io_latency.assert_not_called()
+    unused.check_io_latency.assert_not_called()
+    selected.cleanup.side_effect = RuntimeError("cleanup failed") if failure else None
+    if failure:
+        with pytest.raises(ChaosCleanupError):
+            client.cleanup_all()
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+        selected.cleanup.side_effect = None
+    client.cleanup_all()
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+
+
 @pytest.mark.parametrize("injection_failed", [False, True])
 def test_no_successful_stress_cannot_pass_status_check(injection_failed: bool) -> None:
     from unittest.mock import Mock
@@ -961,3 +1003,58 @@ def test_selected_tool_without_status_support_fails() -> None:
     client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
     with pytest.raises(NotImplementedError):
         client.check_stress(TEST_MODEL, UNIT)
+
+
+@pytest.mark.parametrize("injection_failed", [False, True])
+def test_no_successful_io_latency_cannot_pass_status_check(injection_failed: bool) -> None:
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+    if injection_failed:
+        tool.io_latency.side_effect = RuntimeError("injection failed")
+        with pytest.raises(RuntimeError, match="injection failed"):
+            client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_not_called()
+    client.cleanup_all()
+    assert tool.cleanup.call_count == int(injection_failed)
+
+
+def test_status_checks_do_not_cross_operations() -> None:
+    """A successful I/O latency injection must not make check_stress report success, and vice versa."""
+    from unittest.mock import Mock
+
+    tool = Mock(spec=ChaosClient)
+    tool.io_latency.return_value = IoLatencyInjection(duration=DURATION, injected_at=0.0)
+    client = MetaChaosClient([tool], DEFAULT_BACKEND, DEFAULT_CONSTRAINTS_CLIENT)
+
+    # GIVEN only an I/O latency experiment was successfully injected for the unit
+    client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, DURATION)
+
+    # THEN checking stress must not be satisfied by the unrelated I/O latency action
+    with pytest.raises(RuntimeError, match="No successfully started stress"):
+        client.check_stress(TEST_MODEL, UNIT)
+    tool.check_stress.assert_not_called()
+
+    # AND checking I/O latency still succeeds against its own action
+    client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_called_once_with(TEST_MODEL, UNIT, "/data", allow_completed=False)
+
+    client.cleanup_all()
+
+    # GIVEN only a stress experiment was successfully injected for the unit
+    tool.reset_mock()
+    client.stress_memory(TEST_MODEL, UNIT, 1, 128, DURATION)
+
+    # THEN checking I/O latency must not be satisfied by the unrelated stress action
+    with pytest.raises(RuntimeError, match="No successfully started I/O latency"):
+        client.check_io_latency(TEST_MODEL, UNIT, "/data")
+    tool.check_io_latency.assert_not_called()
+
+    # AND checking stress still succeeds against its own action
+    client.check_stress(TEST_MODEL, UNIT)
+    tool.check_stress.assert_called_once_with(TEST_MODEL, UNIT, allow_completed=False)
+
+    client.cleanup_all()
