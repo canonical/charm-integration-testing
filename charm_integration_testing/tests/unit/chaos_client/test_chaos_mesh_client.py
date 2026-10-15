@@ -1061,7 +1061,7 @@ def test_memory_requests_use_configured_timeout_and_remaining_startup_budget(req
 
 
 @pytest.mark.parametrize("operation", ["memory", "io"])
-def test_memory_cleanup_waits_but_io_cleanup_returns_after_delete(operation: str) -> None:
+def test_cleanup_waits_for_deletion_to_complete(operation: str) -> None:
     backend = BackendStub()
     api = backend.custom_objects_api
     api.retain_on_delete = True
@@ -1080,19 +1080,15 @@ def test_memory_cleanup_waits_but_io_cleanup_returns_after_delete(operation: str
         assert spec["containerNames"] == ["postgresql"]
     else:
         assert "containerNames" not in spec
-    if operation == "memory":
-        with pytest.raises(TimeoutError, match="deletion timed out"):
-            client.cleanup(TEST_MODEL, UNIT, path)
-        assert client._created
-        assert clock.now == 3
-        api.retain_on_delete = False
+    # THEN cleanup waits for the resource to actually disappear, regardless of resource type,
+    # instead of returning as soon as the delete request is accepted.
+    with pytest.raises(TimeoutError, match="deletion timed out"):
         client.cleanup(TEST_MODEL, UNIT, path)
-        assert not api.objects
-    else:
-        client.cleanup(TEST_MODEL, UNIT, path)
-        assert clock.now == 0
-        assert api.objects  # IO cleanup returns after accepted deletion.
-        assert [operation for operation, _ in api.request_timeouts] == ["create", "read", "read", "delete"]
+    assert client._created
+    assert clock.now == 3
+    api.retain_on_delete = False
+    client.cleanup(TEST_MODEL, UNIT, path)
+    assert not api.objects
     assert client._created == []
     assert all(timeout is not None and timeout > 0 for _, timeout in api.request_timeouts)
 

@@ -134,13 +134,16 @@ class ChaosMeshChaosClient(ChaosClient):
             except ApiException as error:
                 if error.status != 404:
                     raise
-            if name in self._cpu_stress or name in self._memory_stress:
-                self._wait(
-                    lambda timeout: self._read_resource(plural, namespace, name, timeout) is None,
-                    deadline,
-                    name,
-                    "deletion",
-                )
+            # Wait for deletion to complete regardless of resource type: StressChaos and
+            # IOChaos resources are both tracked here and both must finish being torn down
+            # before cleanup returns, so callers don't observe recovery while a fault is still
+            # being removed.
+            self._wait(
+                lambda timeout: self._read_resource(plural, namespace, name, timeout) is None,
+                deadline,
+                name,
+                "deletion",
+            )
             self._memory_stress.discard(name)
             self._created.remove(resource)
             del self._scopes[name]
