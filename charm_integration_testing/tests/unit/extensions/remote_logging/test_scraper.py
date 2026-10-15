@@ -31,7 +31,7 @@ def test_merge_userdata_appends_to_lists_and_keeps_other_keys() -> None:
 
 def test_machine_userdata_uses_only_allowed_cloud_init_keys() -> None:
     # Juju rejects `runcmd`; it requires `preruncmd`/`postruncmd`.
-    assert set(machine_userdata("host:4317", "ctrl", "model")) == {"write_files", "postruncmd"}
+    assert set(machine_userdata("http://host", "ctrl", "model")) == {"write_files", "postruncmd"}
 
 
 def test_daemon_set_persists_offsets_per_controller() -> None:
@@ -67,22 +67,39 @@ def test_label_regexes_extract_application_unit_and_machine(params: LabelParams)
 
 
 def test_machine_collector_groups_logs_by_labels_from_the_file_name() -> None:
-    userdata = machine_userdata("host:4317", "ctrl", "model")
+    userdata = machine_userdata("http://host", "ctrl", "model")
 
     config = yaml.safe_load(userdata["write_files"][0]["content"])
 
-    assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs"]
+    assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs", "resource"]
     assert config["receivers"]["filelog"]["resource"] == {"juju_controller": "ctrl", "juju_model": "model"}
     assert [operator["type"] for operator in config["receivers"]["filelog"]["operators"]] == ["regex_parser"] * 2
 
 
 def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
-    config = yaml.safe_load(kubernetes_scraper_config("host:4317", "ctrl", ["ctrl-ns"]))
+    config = yaml.safe_load(kubernetes_scraper_config("http://host", "ctrl", ["ctrl-ns"]))
 
     receiver = config["receivers"]["filelog"]
     assert receiver["resource"] == {"juju_controller": "ctrl"}
     assert [operator["type"] for operator in receiver["operators"]] == ["container", "add", "regex_parser"]
     assert config["processors"]["groupbyattrs"]["keys"] == [
+        "juju_model",
+        "juju_application",
+        "juju_unit_number",
+        "juju_machine",
+    ]
+
+
+@pytest.mark.parametrize("endpoint", ["http://host/loki", "http://host/loki/"])
+def test_collector_exports_to_the_loki_push_api_with_juju_labels(endpoint: str) -> None:
+    config = yaml.safe_load(kubernetes_scraper_config(endpoint, "ctrl", ["ctrl-ns"]))
+
+    assert config["exporters"] == {"loki": {"endpoint": "http://host/loki/loki/api/v1/push"}}
+    assert config["service"]["pipelines"]["logs"]["exporters"] == ["loki"]
+    labels = config["processors"]["resource"]["attributes"][0]
+    assert labels["key"] == "loki.resource.labels"
+    assert labels["value"].split(",") == [
+        "juju_controller",
         "juju_model",
         "juju_application",
         "juju_unit_number",

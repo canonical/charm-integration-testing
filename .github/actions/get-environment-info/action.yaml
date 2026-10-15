@@ -36,7 +36,7 @@ outputs:
     description: Path to a temporary file containing the Juju model config as JSON.
     value: ${{ steps.lookup.outputs.model-config }}
   remote-logging:
-    description: Optional OTLP endpoint for controller-model remote logging.
+    description: Optional Loki base URL for controller-model remote logging.
     value: ${{ steps.lookup.outputs.remote-logging }}
   metadata-source:
     description: >

@@ -16,7 +16,8 @@ from resource_registry import ResourceRegistry
 from ..shared import NullJujuBackend
 
 CONTROLLER = "test-controller"
-OTLP_ENDPOINT = "observability.example:4317"
+LOKI_URL = "http://observability.example/loki-model-loki"
+EXPORTER_ENDPOINT = f"{LOKI_URL}/loki/api/v1/push"
 
 
 @dataclass
@@ -79,7 +80,7 @@ def _extension(
     return RemoteLoggingExtension(
         juju,
         logger,
-        {CONTROLLER: OTLP_ENDPOINT} if endpoints is None else endpoints,
+        {CONTROLLER: LOKI_URL} if endpoints is None else endpoints,
         registry or _registry_with_controller(logger),
     )
 
@@ -96,7 +97,7 @@ class TestMachineControllers:
         assert config["foo"] == "bar"
         userdata = yaml.safe_load(config[USERDATA_KEY])
         collector_config = yaml.safe_load(userdata["write_files"][0]["content"])
-        assert collector_config["exporters"]["otlp"]["endpoint"] == OTLP_ENDPOINT
+        assert collector_config["exporters"]["loki"]["endpoint"] == EXPORTER_ENDPOINT
         assert collector_config["receivers"]["filelog"]["include"] == ["/var/log/juju/*.log"]
         assert collector_config["receivers"]["filelog"]["resource"] == {
             "juju_controller": CONTROLLER,
@@ -158,7 +159,7 @@ class TestKubernetesControllers:
         data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
         assert data[KUBERNETES_NAMESPACES_KEY] == controller_namespace(CONTROLLER)
         collector_config = yaml.safe_load(data["config.yaml"])
-        assert collector_config["exporters"]["otlp"]["endpoint"] == OTLP_ENDPOINT
+        assert collector_config["exporters"]["loki"]["endpoint"] == EXPORTER_ENDPOINT
         assert collector_config["receivers"]["filelog"]["include"] == [
             f"/var/log/pods/{controller_namespace(CONTROLLER)}_*/*/*.log"
         ]

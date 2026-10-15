@@ -51,7 +51,7 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: k8s
-    remote-logging: "10.156.55.120:4317"
+    remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
     arch: amd64
     bootstrap-config:
@@ -86,7 +86,7 @@ environments:
     github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: o7k
-    remote-logging: "10.156.55.120:4317"
+    remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
     arch: amd64
     bootstrap-config:

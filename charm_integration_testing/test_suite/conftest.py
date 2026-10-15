@@ -588,13 +588,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--target-remote-logging-endpoint",
         type=str,
         default=None,
-        help="Optional OTLP endpoint used to configure remote logging on the target controller model.",
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the target controller model.",
     )
     parser.addoption(
         "--neighbor-remote-logging-endpoint",
         type=str,
         default=None,
-        help="Optional OTLP endpoint used to configure remote logging on the neighbor controller model.",
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the neighbor controller model.",
     )
     parser.addoption(
         "--charm-overrides",

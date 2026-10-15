@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Build the configuration of the log scrapers that ship Juju logs to a remote OTLP receiver."""
+"""Build the configuration of the log scrapers that ship Juju logs to a Loki."""
 
 from typing import Any
 
@@ -13,6 +13,9 @@ COLLECTOR_RELEASE_URL = (
     "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/"
     f"v{COLLECTOR_VERSION}/otelcol-contrib_{COLLECTOR_VERSION}_linux_${{ARCH}}.tar.gz"
 )
+
+# The Loki charm only exposes the push API, so the loki exporter is used rather than OTLP.
+LOKI_PUSH_PATH = "/loki/api/v1/push"
 
 USERDATA_KEY = "cloudinit-userdata"
 MACHINE_LOG_GLOB = "/var/log/juju/*.log"
@@ -28,6 +31,8 @@ KUBERNETES_NAMESPACES_KEY = "namespaces"
 
 # Labels derived from the log file path and promoted to resource attributes, so Loki can match on them.
 PATH_LABELS = ["juju_model", "juju_application", "juju_unit_number", "juju_machine"]
+# Resource attributes the loki exporter turns into Loki index labels.
+LOKI_LABELS = ["juju_controller", *PATH_LABELS]
 MACHINE_UNIT_FILE = r"^unit-(?P<juju_application>.+)-(?P<juju_unit_number>\d+)\.log$"
 MACHINE_MACHINE_FILE = r"^machine-(?P<juju_machine>\d+)\.log$"
 # The container parser sets k8s.* resource attributes. Unit pods are named <application>-<number>.
@@ -64,11 +69,16 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
     }
     config: dict[str, Any] = {
         "receivers": {"filelog": receiver},
-        "exporters": {"otlp": {"endpoint": endpoint, "tls": {"insecure": True}}},
-        "service": {"pipelines": {"logs": {"receivers": ["filelog"], "exporters": ["otlp"]}}},
+        "exporters": {"loki": {"endpoint": f"{endpoint.rstrip('/')}{LOKI_PUSH_PATH}"}},
+        "service": {"pipelines": {"logs": {"receivers": ["filelog"], "exporters": ["loki"]}}},
     }
-    config["processors"] = {"groupbyattrs": {"keys": PATH_LABELS}}
-    config["service"]["pipelines"]["logs"]["processors"] = ["groupbyattrs"]
+    config["processors"] = {
+        "groupbyattrs": {"keys": PATH_LABELS},
+        "resource": {
+            "attributes": [{"key": "loki.resource.labels", "value": ",".join(LOKI_LABELS), "action": "insert"}]
+        },
+    }
+    config["service"]["pipelines"]["logs"]["processors"] = ["groupbyattrs", "resource"]
     if not kubernetes:
         receiver["operators"] = [
             _regex_parser(regex, 'attributes["log.file.name"]') for regex in (MACHINE_UNIT_FILE, MACHINE_MACHINE_FILE)
