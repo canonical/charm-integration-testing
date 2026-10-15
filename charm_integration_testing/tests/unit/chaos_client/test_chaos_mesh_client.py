@@ -63,7 +63,7 @@ class BackendStub(KubernetesBackend):
         self._crds = set(crds)
         self.crd_errors: dict[str, ApiException] = {}
         self.crd_reads: list[str] = []
-        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete, inject_stress=True)
+        self.custom_objects_api = FakeCustomObjectsApi(raise_on_delete=raise_on_delete, inject_status=True)
 
     def crd_exists(self, name: str) -> bool:
         self.crd_reads.append(name)
@@ -1038,7 +1038,7 @@ def test_memory_requests_use_configured_timeout_and_remaining_startup_budget(req
     # GIVEN pending memory injection and a non-default request timeout
     backend = BackendStub()
     api = backend.custom_objects_api
-    api.inject_stress = False
+    api.inject_status = False
     clock = Clock()
     client = ChaosMeshChaosClient(
         backend,
@@ -1136,7 +1136,7 @@ def test_stress_waits_for_injection_before_returning(operation: str, recovered_s
     # GIVEN a controller that reports unselected/pending before it injects the fault
     backend = BackendStub()
     api = backend.custom_objects_api
-    api.inject_stress = False
+    api.inject_status = False
     now = 0.0
     sleeps: list[float] = []
 
@@ -1207,7 +1207,7 @@ def test_io_latency_injected_at_follows_slow_resource_creation() -> None:
                 _request_timeout=_request_timeout,
             )
 
-    backend.custom_objects_api = SlowCreateApi(inject_stress=True)
+    backend.custom_objects_api = SlowCreateApi(inject_status=True)
     mesh = ChaosMeshChaosClient(backend, clock=lambda: now)
 
     injection = mesh.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(minutes=12))
@@ -1227,7 +1227,7 @@ def test_injection_failure_retains_cleanup_tracking(state: str, operation: str) 
     # GIVEN a created resource whose injection cannot be confirmed
     backend = BackendStub()
     api = backend.custom_objects_api
-    api.inject_stress = False
+    api.inject_status = False
     now = 0.0
 
     def pause(seconds: float) -> None:
