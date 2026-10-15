@@ -34,7 +34,7 @@ class KubernetesClientRegistry:
     def client_for_cloud(self, cloud: str) -> KubernetesClient:
         if cloud not in self._clients:
             client = self._client_factory(self.kubeconfig_for_cloud(cloud))
-            client.juju_cloud = cloud
+            client.cloud = cloud
             for extension in self._extensions:
                 client.register_extension(extension)
             self._clients[cloud] = client

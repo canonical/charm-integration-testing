@@ -37,7 +37,7 @@ class CharmPod:
 class KubernetesClient:
     backend: KubernetesBackend
     extensions: list[KubernetesExtension]
-    juju_cloud: str | None
+    cloud: str | None
 
     # `timeout_seconds` on a watch is only a server-side hint: the server is expected to close
     # the connection once it elapses, but nothing guarantees it will (e.g. a proxy or an
@@ -55,7 +55,7 @@ class KubernetesClient:
         default_delay: timedelta = timedelta(seconds=1),
         extensions: list[KubernetesExtension] | None = None,
         watch_factory: Callable[[], watch.Watch] = watch.Watch,
-        juju_cloud: str | None = None,
+        cloud: str | None = None,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class KubernetesClient:
         self.default_delay = default_delay
         self.extensions = extensions or []
         self.watch_factory = watch_factory
-        self.juju_cloud = juju_cloud
+        self.cloud = cloud
 
     def register_extension(self, extension: KubernetesExtension) -> None:
         """Register an extension once on this Kubernetes client."""
@@ -388,9 +388,7 @@ class KubernetesClient:
                     and replacements[0].status.phase == PodStatus.RUNNING.value
                 ):
                     for extension in self.extensions:
-                        extension.post_delete_pod_in_juju_cloud(
-                            namespace, replacements[0].metadata.name, self.juju_cloud
-                        )
+                        extension.post_delete_pod_in_cloud(namespace, replacements[0].metadata.name, self.cloud)
                     return replacements[0].metadata.name
             sleep(min(self.default_delay.total_seconds(), remaining()))
 
@@ -533,7 +531,7 @@ class KubernetesClient:
 
         # Call extensions
         for extension in self.extensions:
-            extension.post_delete_pod_in_juju_cloud(namespace, pod_name, self.juju_cloud)
+            extension.post_delete_pod_in_cloud(namespace, pod_name, self.cloud)
 
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         """
@@ -565,7 +563,7 @@ class KubernetesClient:
             raise
 
         for extension in self.extensions:
-            extension.post_restart_statefulset_in_juju_cloud(namespace, statefulset_name, self.juju_cloud)
+            extension.post_restart_statefulset_in_cloud(namespace, statefulset_name, self.cloud)
 
     def patch_statefulset_template(
         self, namespace: str, statefulset_name: str, body: dict[str, Any] | list[dict[str, Any]]

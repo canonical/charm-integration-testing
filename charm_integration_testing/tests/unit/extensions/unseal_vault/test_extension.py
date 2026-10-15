@@ -124,7 +124,7 @@ class TestUnsealVaultK8sJujuExtension:
         model = JujuModelHandle(controller="litmus-controller", model=TEST_MODEL.model)
 
         # WHEN a pod is deleted in a namespace on the litmus cloud
-        extension.post_delete_pod_in_juju_cloud(TEST_MODEL.model, "vault-k8s-0", "litmus")
+        extension.post_delete_pod_in_cloud(TEST_MODEL.model, "vault-k8s-0", "litmus")
 
         # THEN the unsealer re-unseals vault without re-authorizing the charm
         assert juju.namespace_lookups == [("litmus", TEST_MODEL.model)]
@@ -136,7 +136,7 @@ class TestUnsealVaultK8sJujuExtension:
         assert isinstance(unsealer, VaultUnsealerStub)
         model = JujuModelHandle(controller="litmus-controller", model=TEST_MODEL.model)
 
-        extension.post_restart_statefulset_in_juju_cloud(TEST_MODEL.model, "vault-k8s", "litmus")
+        extension.post_restart_statefulset_in_cloud(TEST_MODEL.model, "vault-k8s", "litmus")
 
         assert juju.namespace_lookups == [("litmus", TEST_MODEL.model)]
         assert unsealer.calls == [(model, False)]
@@ -144,8 +144,8 @@ class TestUnsealVaultK8sJujuExtension:
     def test_requires_cloud_context_from_registry(self) -> None:
         extension, juju = self._build_extension()
 
-        with pytest.raises(RuntimeError, match="requires a Juju cloud"):
-            extension.post_delete_pod_in_juju_cloud(TEST_MODEL.model, "vault-k8s-0", None)
+        with pytest.raises(RuntimeError, match="requires a cloud"):
+            extension.post_delete_pod_in_cloud(TEST_MODEL.model, "vault-k8s-0", None)
 
         assert juju.namespace_lookups == []
 
@@ -155,7 +155,7 @@ class TestUnsealVaultK8sJujuExtension:
         unsealer = extension.vault_unsealer
         assert isinstance(unsealer, VaultUnsealerStub)
 
-        extension.post_restart_statefulset_in_juju_cloud("controller-test-controller", "controller", "litmus")
+        extension.post_restart_statefulset_in_cloud("controller-test-controller", "controller", "litmus")
 
         assert juju.namespace_lookups == [("litmus", "controller-test-controller")]
         assert unsealer.calls == []

@@ -45,12 +45,10 @@ class KubernetesExtension(ABC):
     def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         pass
 
-    def post_delete_pod_in_juju_cloud(self, namespace: str, pod_name: str, juju_cloud: str | None) -> None:
+    def post_delete_pod_in_cloud(self, namespace: str, pod_name: str, cloud: str | None) -> None:
         self.post_delete_pod(namespace, pod_name)
 
-    def post_restart_statefulset_in_juju_cloud(
-        self, namespace: str, statefulset_name: str, juju_cloud: str | None
-    ) -> None:
+    def post_restart_statefulset_in_cloud(self, namespace: str, statefulset_name: str, cloud: str | None) -> None:
         self.post_restart_statefulset(namespace, statefulset_name)
 
 

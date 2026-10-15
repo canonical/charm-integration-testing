@@ -137,7 +137,7 @@ class RestartFollowerBackendStub(NullJujuBackend):
         if self.cloud is not None and self.registry is not None:
             client = self.registry.client_for_cloud(self.cloud)
             for extension in client.extensions:
-                extension.post_delete_pod_in_juju_cloud(model.model, "replacement-pod", self.cloud)
+                extension.post_delete_pod_in_cloud(model.model, "replacement-pod", self.cloud)
         return f"{application}/1"
 
 
@@ -149,8 +149,8 @@ class RestartLifecycleExtension(JujuExtension, KubernetesExtension):
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         self.restarted_units.append((model, unit))
 
-    def post_delete_pod_in_juju_cloud(self, namespace: str, pod_name: str, juju_cloud: str | None) -> None:
-        self.deleted_pods.append((namespace, pod_name, juju_cloud))
+    def post_delete_pod_in_cloud(self, namespace: str, pod_name: str, cloud: str | None) -> None:
+        self.deleted_pods.append((namespace, pod_name, cloud))
 
 
 def _kubernetes_registry(client: KubernetesClient) -> KubernetesClientRegistry:

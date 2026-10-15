@@ -34,8 +34,8 @@ def test_clients_are_created_once_per_cloud() -> None:
     assert first is second is clients["target"]
     assert neighbor is clients["neighbor"]
     assert calls == [Path("target.yaml"), Path("neighbor.yaml")]
-    assert first.juju_cloud == "target"
-    assert neighbor.juju_cloud == "neighbor"
+    assert first.cloud == "target"
+    assert neighbor.cloud == "neighbor"
 
 
 def test_extensions_are_registered_on_existing_and_future_clients() -> None:
@@ -75,7 +75,7 @@ def test_constructor_extensions_are_registered_on_created_clients() -> None:
 
     # THEN it receives the registered extension and cloud context
     cast(MagicMock, client.register_extension).assert_called_once_with(extension)
-    assert client.juju_cloud == "target"
+    assert client.cloud == "target"
 
 
 def test_missing_cloud_configuration_is_reported() -> None:

@@ -30,16 +30,14 @@ class KubernetesExtensionSpy(KubernetesExtension):
     def post_delete_pod(self, namespace: str, pod_name: str) -> None:
         self.post_delete_pod_calls.append((namespace, pod_name, None))
 
-    def post_delete_pod_in_juju_cloud(self, namespace: str, pod_name: str, juju_cloud: str | None) -> None:
-        self.post_delete_pod_calls.append((namespace, pod_name, juju_cloud))
+    def post_delete_pod_in_cloud(self, namespace: str, pod_name: str, cloud: str | None) -> None:
+        self.post_delete_pod_calls.append((namespace, pod_name, cloud))
 
     def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         self.post_restart_statefulset_calls.append((namespace, statefulset_name, None))
 
-    def post_restart_statefulset_in_juju_cloud(
-        self, namespace: str, statefulset_name: str, juju_cloud: str | None
-    ) -> None:
-        self.post_restart_statefulset_calls.append((namespace, statefulset_name, juju_cloud))
+    def post_restart_statefulset_in_cloud(self, namespace: str, statefulset_name: str, cloud: str | None) -> None:
+        self.post_restart_statefulset_calls.append((namespace, statefulset_name, cloud))
 
 
 def create_sample_pod(
@@ -1193,7 +1191,7 @@ class TestKubernetesClientInit:
             # GIVEN a client with a registered extension
             backend_stub = KubernetesBackendStub()
             extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension], juju_cloud="test-cloud")
+            client = KubernetesClient(backend=backend_stub, extensions=[extension], cloud="test-cloud")
 
             # WHEN deleting a pod
             client.delete_pod(namespace="test-ns", pod_name="test-pod")
@@ -1237,7 +1235,7 @@ class TestKubernetesClientInit:
             # GIVEN a client with a registered extension
             backend_stub = KubernetesBackendStub()
             extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension], juju_cloud="test-cloud")
+            client = KubernetesClient(backend=backend_stub, extensions=[extension], cloud="test-cloud")
 
             # WHEN restarting a statefulset
             client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
