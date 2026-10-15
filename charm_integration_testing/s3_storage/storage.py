@@ -122,6 +122,18 @@ class S3Storage(S3Provider):
     def handle(self) -> S3StorageHandle:
         return self._handle
 
+    def bucket_destroyer(self, bucket: S3Bucket) -> Callable[[], None]:
+        def cleanup_bucket() -> None:
+            try:
+                bucket.cleanup()
+            except Exception as cleanup_error:
+                try:
+                    self.cleanup_pending_resources()
+                except Exception as retry_error:
+                    raise retry_error from cleanup_error
+
+        return cleanup_bucket
+
     def _make_client(self, credentials: S3Credentials) -> S3Client:
         client: S3Client = boto3.client(
             "s3",
