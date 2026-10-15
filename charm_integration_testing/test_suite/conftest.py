@@ -1019,7 +1019,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = str(report.longrepr)
         exc = call.excinfo.value if call.excinfo else None
         _add_failure_execution_metadata(item.user_properties, item.stash[failure_message], exc)
-        _add_failure_execution_metadata(report.user_properties, item.stash[failure_message], exc)
+        if report.user_properties is not item.user_properties:
+            _add_failure_execution_metadata(report.user_properties, item.stash[failure_message], exc)
 
     # Save skip message
     if report.skipped:
@@ -1035,9 +1036,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
         _append_execution_metadata(
             item.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
         )
-        _append_execution_metadata(
-            report.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
-        )
+        if report.user_properties is not item.user_properties:
+            _append_execution_metadata(
+                report.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
+            )
 
 
 @pytest.fixture(autouse=True)

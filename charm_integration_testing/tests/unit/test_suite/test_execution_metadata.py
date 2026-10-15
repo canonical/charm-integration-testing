@@ -91,13 +91,37 @@ def test_setup_failure_is_included_in_junit_metadata(pytester: Pytester) -> None
     assert result.ret == pytest.ExitCode.TESTS_FAILED
     testcase = ET.parse(pytester.path / "results.xml").find(".//testcase")
     assert testcase is not None
-    metadata = {
-        prop.attrib["name"]: json.loads(prop.attrib["value"]) for prop in testcase.findall("./properties/property")
-    }
+    properties = testcase.findall("./properties/property")
+    assert len(properties) == len({prop.attrib["name"] for prop in properties})
+    metadata = {prop.attrib["name"]: json.loads(prop.attrib["value"]) for prop in properties}
     assert "CLIError" in metadata["failure:message"][0]
     assert metadata["failure:cli:cmd"] == ["juju add-k8s neighbor-cloud --client"]
     assert metadata["failure:cli:return_code"] == ["1"]
     assert metadata["failure:cli:stderr"] == ["ERROR etcdserver: mvcc: database space exceeded"]
+
+
+def test_skip_message_is_included_once_in_junit_metadata(pytester: Pytester) -> None:
+    pytester.makeconftest("from test_suite.conftest import pytest_runtest_makereport")
+    pytester.makepyfile(
+        test_skip=textwrap.dedent(
+            """
+            import pytest
+
+            def test_skip():
+                pytest.skip("not applicable")
+            """
+        )
+    )
+
+    result = pytester.runpytest("--junitxml=results.xml", "-q")
+
+    assert result.ret == pytest.ExitCode.OK
+    testcase = ET.parse(pytester.path / "results.xml").find(".//testcase")
+    assert testcase is not None
+    properties = testcase.findall("./properties/property")
+    assert len(properties) == len({prop.attrib["name"] for prop in properties})
+    metadata = {prop.attrib["name"]: json.loads(prop.attrib["value"]) for prop in properties}
+    assert metadata["skipped:message"] == ["not applicable"]
 
 
 def test_platform_mismatch_metadata_uses_atomic_stable_values() -> None:
