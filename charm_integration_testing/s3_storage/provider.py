@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -39,6 +40,10 @@ class S3Provider(ABC):
     @abstractmethod
     def new_bucket(self) -> S3Bucket:
         """Create a bucket resource before provisioning any external state."""
+
+    def bucket_destroyer(self, bucket: S3Bucket) -> Callable[[], None]:
+        """Return a callback to tear down a bucket resource."""
+        return bucket.cleanup
 
     @abstractmethod
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
