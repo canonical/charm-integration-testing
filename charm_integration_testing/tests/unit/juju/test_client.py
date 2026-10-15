@@ -19,7 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry, KubernetesExtension
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -123,6 +123,34 @@ class WorkloadPodBackendStub(NullJujuBackend):
     def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str:
         self.resolved_models.append(model)
         return "k8s"
+
+
+class RestartFollowerBackendStub(NullJujuBackend):
+    def __init__(self, cloud: str | None, registry: KubernetesClientRegistry | None = None) -> None:
+        self.cloud = cloud
+        self.registry = registry
+
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return self.cloud
+
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        if self.cloud is not None and self.registry is not None:
+            client = self.registry.client_for_cloud(self.cloud)
+            for extension in client.extensions:
+                extension.post_delete_pod_in_juju_cloud(model.model, "replacement-pod", self.cloud)
+        return f"{application}/1"
+
+
+class RestartLifecycleExtension(JujuExtension, KubernetesExtension):
+    def __init__(self) -> None:
+        self.restarted_units: list[tuple[JujuModelHandle, str]] = []
+        self.deleted_pods: list[tuple[str, str, str | None]] = []
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.restarted_units.append((model, unit))
+
+    def post_delete_pod_in_juju_cloud(self, namespace: str, pod_name: str, juju_cloud: str | None) -> None:
+        self.deleted_pods.append((namespace, pod_name, juju_cloud))
 
 
 def _kubernetes_registry(client: KubernetesClient) -> KubernetesClientRegistry:
@@ -393,6 +421,38 @@ class TestJujuClientKubernetesClientResolution:
         resolved_client = client.kubernetes_client_for_model(model)
         assert backend.resolved_models == [model]
         assert resolved_client is kubernetes_client
+
+    def test_kubernetes_follower_restart_runs_only_kubernetes_lifecycle_hook(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        kubernetes_client = KubernetesClient(MagicMock())
+        registry = _kubernetes_registry(kubernetes_client)
+        extension = RestartLifecycleExtension()
+        backend = RestartFollowerBackendStub("k8s", registry)
+        client = JujuClient(
+            backend,
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+            kubernetes_client_registry=registry,
+        )
+
+        assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
+
+        assert extension.deleted_pods == [("model", "replacement-pod", "k8s")]
+        assert extension.restarted_units == []
+
+    def test_machine_follower_restart_runs_juju_lifecycle_hook(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(
+            RestartFollowerBackendStub(None),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
+
+        assert extension.restarted_units == [(model, "app/1")]
+        assert extension.deleted_pods == []
 
 
 class TestJujuValidationError:

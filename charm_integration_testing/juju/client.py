@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry, KubernetesExtension
 
 from validators.base import ValidationResult
 
@@ -51,6 +51,10 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
         self.kubernetes_client_registry = kubernetes_client_registry
+        if kubernetes_client_registry is not None:
+            for extension in self.extensions:
+                if isinstance(extension, KubernetesExtension):
+                    kubernetes_client_registry.register_extension(extension)
 
     def kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
         """Resolve the shared Kubernetes client for a model, or None for machine models."""
@@ -73,8 +77,11 @@ class JujuClient:
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
+        is_kubernetes_model = self.backend.kubernetes_cloud_for_model(model) is not None
         unit = self.backend.restart_follower(model, application, timeout)
         for extension in self.extensions:
+            if is_kubernetes_model and isinstance(extension, KubernetesExtension):
+                continue
             extension.post_restart_unit(model, unit)
         self.logger.info(f"Restarted follower {unit}.")
         return unit
