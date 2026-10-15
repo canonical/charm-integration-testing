@@ -46,7 +46,12 @@ class S3IntegratorExtension(JujuExtension):
             self.juju.wait_application_settled(model, application, timedelta(minutes=10))
             if self.juju.num_units(model, application) == 0:
                 continue
-            bucket, credentials = provider.make_bucket(self.resource_registry, destroy_on_teardown=self.cleanup_buckets)
+            bucket_resource = provider.new_bucket()
+            self.resource_registry.register(
+                handle=bucket_resource.handle,
+                destroyer=provider.bucket_destroyer(bucket_resource) if self.cleanup_buckets else None,
+            )
+            bucket_name, credentials = bucket_resource.provision()
             # Set the endpoint last: a failed action must not look fully configured on redeploy.
             task = self.juju.run_action(
                 model,
@@ -61,7 +66,7 @@ class S3IntegratorExtension(JujuExtension):
                 application,
                 {
                     "endpoint": provider.endpoint,
-                    "bucket": bucket,
+                    "bucket": bucket_name,
                     "path": S3_PATH,
                     "region": provider.region,
                     "s3-uri-style": "path",

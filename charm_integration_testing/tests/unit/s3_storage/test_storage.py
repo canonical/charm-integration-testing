@@ -509,7 +509,7 @@ def test_registry_tears_down_each_bucket_and_continues_after_failure(client: S3C
     registry = ResourceRegistry([], logging.getLogger(__name__))
     buckets = [storage.new_bucket(), storage.new_bucket()]
     for bucket in buckets:
-        registry.register(bucket.handle, destroyer=storage._bucket_destroyer(bucket, True))
+        registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with Stubber(client) as stubber:
         for bucket in buckets:
@@ -950,7 +950,7 @@ def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> Non
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
     bucket = storage.new_bucket()
-    registry.register(bucket.handle, destroyer=storage._bucket_destroyer(bucket, True))
+    registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with Stubber(client) as stubber:
         name = bucket.handle.name
