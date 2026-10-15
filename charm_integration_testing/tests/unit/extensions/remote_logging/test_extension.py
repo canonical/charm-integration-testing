@@ -42,6 +42,7 @@ class KubernetesStub:
     namespaces: list[str] = field(default_factory=list)
     deleted_namespaces: list[str] = field(default_factory=list)
     restarts: list[tuple[str, str]] = field(default_factory=list)
+    fail_on: str | None = None
 
     def ensure_namespace(self, name: str) -> None:
         self.namespaces.append(name)
@@ -50,6 +51,8 @@ class KubernetesStub:
         self.deleted_namespaces.append(name)
 
     def apply_config_map(self, namespace: str, body: dict[str, Any]) -> None:
+        if self.fail_on == "apply_config_map":
+            raise RuntimeError("ConfigMap apply failed")
         self.config_maps[(namespace, body["metadata"]["name"])] = body
 
     def read_config_map_data(self, namespace: str, name: str) -> dict[str, str] | None:
@@ -107,7 +110,6 @@ def _extension(
 ) -> RemoteLoggingExtension:
     return RemoteLoggingExtension(
         juju,
-        logger,
         {CONTROLLER: LOKI_URL} if endpoints is None else endpoints,
         registry or _registry_with_controller(logger),
     )
@@ -260,6 +262,46 @@ class TestKubernetesControllers:
             "https://new-observability.example/loki/api/v1/push"
         )
         assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
+
+    def test_bootstrap_registers_scraper_only_once(self, logger: logging.Logger) -> None:
+        registry = _registry_with_controller(logger)
+        extension = _extension(JujuStub(k8s_clouds={CONTROLLER}), logger, registry=registry)
+
+        extension.post_bootstrap_controller(CONTROLLER)
+        extension.post_bootstrap_controller(CONTROLLER)
+
+        assert registry.children_of(JujuControllerHandle(CONTROLLER)) == [LogScraperHandle(CONTROLLER)]
+
+    def test_bootstrap_failure_leaves_scraper_registered_for_teardown(self, logger: logging.Logger) -> None:
+        registry = _registry_with_controller(logger)
+        kubernetes = KubernetesStub(fail_on="apply_config_map")
+        extension = _extension(
+            JujuStub(k8s_clouds={CONTROLLER}, kubernetes=kubernetes),
+            logger,
+            registry=registry,
+        )
+
+        with pytest.raises(RuntimeError, match="ConfigMap apply failed"):
+            extension.post_bootstrap_controller(CONTROLLER)
+
+        assert registry.children_of(JujuControllerHandle(CONTROLLER)) == [LogScraperHandle(CONTROLLER)]
+
+        registry.teardown(JujuControllerHandle(CONTROLLER))
+
+        assert kubernetes.deleted_namespaces == [scraper_namespace(CONTROLLER)]
+
+    def test_existing_scraper_is_registered_for_teardown(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
+        namespace = scraper_namespace(CONTROLLER)
+        juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)] = {
+            "metadata": {"name": KUBERNETES_SCRAPER_NAME},
+            "data": {KUBERNETES_NAMESPACES_KEY: "my-model", "config.yaml": ""},
+        }
+        extension = _extension(juju, logger)
+
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
+
+        assert LogScraperHandle(CONTROLLER, CONTROLLER) in extension.resource_registry.registered_handles()
 
     def test_kubernetes_model_on_machine_controller_deploys_scraper(self, logger: logging.Logger) -> None:
         # GIVEN a machine controller managing a model on a Kubernetes cloud

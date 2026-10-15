@@ -1,7 +1,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -82,12 +81,10 @@ class RemoteLoggingExtension(JujuExtension):
     def __init__(
         self,
         juju: JujuBackend,
-        logger: logging.Logger,
         endpoints_by_controller: dict[str, str],
         resource_registry: ResourceRegistry,
     ) -> None:
         self.juju = juju
-        self.logger = logger
         self.endpoints_by_controller = endpoints_by_controller
         self.resource_registry = resource_registry
 
@@ -97,20 +94,16 @@ class RemoteLoggingExtension(JujuExtension):
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None or self.juju.is_k8s_cloud(cloud):
             return bootstrap_configuration
-        self.logger.debug(f"Shipping logs of controller '{controller}' to '{endpoint}' from its machines.")
         return self._with_userdata(bootstrap_configuration, endpoint, controller, CONTROLLER_MODEL)
 
     def post_bootstrap_controller(self, controller: str) -> None:
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None:
-            self.logger.debug(f"Skipping remote logging setup for controller '{controller}': no endpoint configured.")
             return
 
         kubernetes = self.juju.get_kubernetes_client_for_controller(controller)
         if kubernetes is None:
             return
-        namespace = scraper_namespace(controller)
-        self.logger.debug(f"Deploying log scraper to namespace '{namespace}' for controller '{controller}'.")
         self._deploy_scraper(
             kubernetes,
             endpoint,
@@ -134,7 +127,6 @@ class RemoteLoggingExtension(JujuExtension):
         if is_kubernetes:
             return model_config
 
-        self.logger.debug(f"Shipping logs of model '{model}' to '{endpoint}' from its machines.")
         return self._with_userdata(model_config, endpoint, controller, model)
 
     def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
@@ -169,8 +161,6 @@ class RemoteLoggingExtension(JujuExtension):
         if model not in scraped:
             scraped.append(model)
         changed = self._reconcile_config_map(kubernetes, namespace, endpoint, controller, scraped, data)
-        if changed:
-            self.logger.debug(f"Updating log scraper configuration for controller '{controller}'.")
         return changed
 
     @staticmethod
@@ -199,6 +189,8 @@ class RemoteLoggingExtension(JujuExtension):
         model: str,
         cloud: str | None,
     ) -> None:
+        handle = LogScraperHandle(controller, cloud)
+        self._register_scraper(kubernetes, controller, handle)
         namespace = scraper_namespace(controller)
         data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
         if data is not None:
@@ -207,15 +199,12 @@ class RemoteLoggingExtension(JujuExtension):
                 kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)
             return
 
-        self.logger.debug(
-            f"Deploying log scraper to namespace '{namespace}' for model '{model}' on controller '{controller}'."
-        )
         self._deploy_scraper(
             kubernetes,
             endpoint,
             controller,
             [model],
-            LogScraperHandle(controller, cloud),
+            handle,
         )
 
     def _deploy_scraper(
@@ -226,6 +215,7 @@ class RemoteLoggingExtension(JujuExtension):
         scraped: list[str],
         handle: LogScraperHandle,
     ) -> None:
+        self._register_scraper(kubernetes, controller, handle)
         namespace = scraper_namespace(controller)
         kubernetes.ensure_namespace(namespace)
         existing_data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
@@ -233,7 +223,11 @@ class RemoteLoggingExtension(JujuExtension):
         kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
         if changed:
             kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)
-        # Torn down with the controller, before it is killed: the controller's own teardown bypasses extension hooks.
+
+    def _register_scraper(self, kubernetes: KubernetesScraperClient, controller: str, handle: LogScraperHandle) -> None:
+        if self.resource_registry.is_registered(handle):
+            return
+        namespace = scraper_namespace(controller)
         self.resource_registry.register(
             handle=handle,
             destroyer=lambda: kubernetes.delete_namespace(namespace),

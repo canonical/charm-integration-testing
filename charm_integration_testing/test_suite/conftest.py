@@ -381,9 +381,7 @@ def _build_juju_client(
             UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
-            RemoteLoggingExtension(
-                juju_backend, logger, remote_logging_endpoints_by_controller, session_resource_registry
-            ),
+            RemoteLoggingExtension(juju_backend, remote_logging_endpoints_by_controller, session_resource_registry),
         ],
     )
 
