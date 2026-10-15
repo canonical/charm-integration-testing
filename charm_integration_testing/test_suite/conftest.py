@@ -437,6 +437,7 @@ def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
     persistence_extension: ValidatorInjectorExtension,
     juju_backend: JujuBackend,
+    target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
