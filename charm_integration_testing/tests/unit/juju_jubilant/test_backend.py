@@ -157,10 +157,35 @@ class JubilantClientStub(JubilantClient):
 class JubilantCliStub:
     results: dict[tuple[str, ...], str] = field(default_factory=dict)
     executions: list[tuple[str, ...]] = field(default_factory=list)
+    execution_options: list[dict[str, Any]] = field(default_factory=list)
 
     def cli(self, *args: str, **kwargs: Any) -> str:
         self.executions.append(tuple(args))
+        self.execution_options.append(kwargs)
         return self.results.get(tuple(args), "")
+
+
+class TestIsK8sCloud:
+    @pytest.mark.parametrize(
+        ("cloud_type", "expected"),
+        [
+            pytest.param("k8s", True, id="kubernetes"),
+            pytest.param("lxd", False, id="machine"),
+        ],
+    )
+    def test_reads_local_cloud_type_through_jubilant(self, cloud_type: str, expected: bool) -> None:
+        # GIVEN a cloud registered with the local Juju client
+        command = ("clouds", "--client", "--format", "json")
+        cli = JubilantCliStub(results={command: f'{{"test-cloud": {{"type": "{cloud_type}"}}}}'})
+        backend = JubilantBackend(client=JubilantClientStub(cli))
+
+        # WHEN its substrate is queried
+        result = backend.is_k8s_cloud("test-cloud")
+
+        # THEN Jubilant runs the model-less client-cloud query and returns the cloud type
+        assert result is expected
+        assert cli.executions == [command]
+        assert cli.execution_options == [{"include_model": False}]
 
 
 @dataclass

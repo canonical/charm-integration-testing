@@ -519,7 +519,7 @@ class JujuClient:
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         for extension in self.extensions:
-            model_config = extension.pre_add_model(controller, model, model_config)
+            model_config = extension.pre_add_model(controller, model, model_config, cloud)
         cloud_suffix = f" on cloud '{cloud}'" if cloud else ""
         self.logger.info(
             f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'{cloud_suffix}."
@@ -528,7 +528,7 @@ class JujuClient:
 
         # Call extensions
         for extension in self.extensions:
-            extension.post_add_model(controller, model)
+            extension.post_add_model_on_cloud(controller, model, cloud)
 
     def add_cloud(self, cloud: str, controller: str) -> None:
         self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")

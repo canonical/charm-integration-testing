@@ -531,26 +531,26 @@ class KubernetesClient:
         return dict(config_map.data or {})
 
     def apply_config_map(self, namespace: str, body: dict[str, Any]) -> None:
-        """Create the ConfigMap, replacing it if it already exists."""
+        """Create the ConfigMap, patching it if it already exists."""
         name = body["metadata"]["name"]
         try:
             self.backend.core_v1_api.create_namespaced_config_map(namespace=namespace, body=body, _request_timeout=30)
         except ApiException as e:
             if e.status != 409:
                 raise
-            self.backend.core_v1_api.replace_namespaced_config_map(
+            self.backend.core_v1_api.patch_namespaced_config_map(
                 name=name, namespace=namespace, body=body, _request_timeout=30
             )
 
     def apply_daemon_set(self, namespace: str, body: dict[str, Any]) -> None:
-        """Create the DaemonSet, replacing it if it already exists."""
+        """Create the DaemonSet, patching it if it already exists."""
         name = body["metadata"]["name"]
         try:
             self.backend.apps_v1_api.create_namespaced_daemon_set(namespace=namespace, body=body, _request_timeout=30)
         except ApiException as e:
             if e.status != 409:
                 raise
-            self.backend.apps_v1_api.replace_namespaced_daemon_set(
+            self.backend.apps_v1_api.patch_namespaced_daemon_set(
                 name=name, namespace=namespace, body=body, _request_timeout=30
             )
 

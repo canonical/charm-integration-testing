@@ -1589,17 +1589,27 @@ class TestJujuClientAddModelCloud:
     def test_add_model_applies_extension_model_config(self) -> None:
         # GIVEN an extension adding a model config key
         class ConfigExtension(JujuExtension):
-            def pre_add_model(self, controller: str, model: str, model_config: dict[str, str]) -> dict[str, str]:
-                return {**model_config, "extra": "value"}
+            def __init__(self) -> None:
+                self.post_add_model_on_cloud_calls: list[tuple[str, str, str | None]] = []
+
+            def pre_add_model(
+                self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None
+            ) -> dict[str, str]:
+                return {**model_config, "extra": cloud or "default"}
+
+            def post_add_model_on_cloud(self, controller: str, model: str, cloud: str | None = None) -> None:
+                self.post_add_model_on_cloud_calls.append((controller, model, cloud))
 
         backend = AddModelCloudBackendStub()
-        client = _client(backend, [ConfigExtension()])
+        extension = ConfigExtension()
+        client = _client(backend, [extension])
 
         # WHEN a model is added
-        client.add_model(controller="ctrl-a", model="model-a", model_config={"foo": "bar"})
+        client.add_model(controller="ctrl-a", model="model-a", model_config={"foo": "bar"}, cloud="k8s-cloud")
 
-        # THEN the backend receives the extended configuration
-        assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar", "extra": "value"}, None)]
+        # THEN both hooks and the backend receive the model cloud
+        assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar", "extra": "k8s-cloud"}, "k8s-cloud")]
+        assert extension.post_add_model_on_cloud_calls == [("ctrl-a", "model-a", "k8s-cloud")]
 
     def test_add_cloud_delegates_to_backend(self) -> None:
         backend = AddModelCloudBackendStub()

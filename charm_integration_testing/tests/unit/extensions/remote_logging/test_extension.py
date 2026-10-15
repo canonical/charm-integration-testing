@@ -7,9 +7,14 @@ from typing import Any
 
 import pytest
 import yaml
-from extensions.remote_logging.extension import RemoteLoggingExtension, controller_namespace, scraper_namespace
+from extensions.remote_logging.extension import (
+    LogScraperHandle,
+    RemoteLoggingExtension,
+    controller_namespace,
+    scraper_namespace,
+)
 from extensions.remote_logging.scraper import KUBERNETES_NAMESPACES_KEY, KUBERNETES_SCRAPER_NAME, USERDATA_KEY
-from juju.handles import JujuControllerHandle
+from juju.handles import JujuControllerHandle, JujuModelHandle
 from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry
 
@@ -51,13 +56,21 @@ class KubernetesStub:
 @dataclass
 class JujuStub(NullJujuBackend):
     k8s_clouds: set[str] = field(default_factory=set)
+    model_clouds: dict[str, str] = field(default_factory=dict)
     kubernetes: KubernetesStub = field(default_factory=KubernetesStub)
+    kubernetes_by_cloud: dict[str, KubernetesStub] = field(default_factory=dict)
 
     def is_k8s_cloud(self, cloud: str) -> bool:
         return cloud in self.k8s_clouds
 
     def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
         return self.kubernetes if controller in self.k8s_clouds else None  # type: ignore[return-value]
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        cloud = self.model_clouds.get(model.model)
+        if cloud not in self.k8s_clouds:
+            return None
+        return self.kubernetes_by_cloud.get(cloud, self.kubernetes)  # type: ignore[return-value]
 
 
 @pytest.fixture
@@ -118,7 +131,7 @@ class TestMachineControllers:
     def test_add_model_adds_userdata_labelled_with_the_model(self, logger: logging.Logger) -> None:
         extension = _extension(JujuStub(), logger)
 
-        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"})
+        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, "lxd")
 
         collector_config = yaml.safe_load(yaml.safe_load(config[USERDATA_KEY])["write_files"][0]["content"])
         assert config["foo"] == "bar"
@@ -130,7 +143,7 @@ class TestMachineControllers:
         extension = _extension(JujuStub(), logger)
 
         # WHEN the model config is extended
-        config = extension.pre_add_model(CONTROLLER, "my-model", {USERDATA_KEY: existing})
+        config = extension.pre_add_model(CONTROLLER, "my-model", {USERDATA_KEY: existing}, "lxd")
 
         # THEN the user's entries are preserved ahead of ours
         userdata = yaml.safe_load(config[USERDATA_KEY])
@@ -141,7 +154,7 @@ class TestMachineControllers:
     def test_add_model_leaves_unconfigured_controllers_unchanged(self, logger: logging.Logger) -> None:
         extension = _extension(JujuStub(), logger, endpoints={})
 
-        assert extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}) == {"foo": "bar"}
+        assert extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, "lxd") == {"foo": "bar"}
 
 
 class TestKubernetesControllers:
@@ -174,12 +187,13 @@ class TestKubernetesControllers:
 
     def test_add_model_extends_the_scraper_and_restarts_it(self, logger: logging.Logger) -> None:
         # GIVEN a deployed scraper
-        juju = JujuStub(k8s_clouds={CONTROLLER})
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
         extension = _extension(juju, logger)
         extension.post_bootstrap_controller(CONTROLLER)
 
         # WHEN a model is added
-        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"})
+        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, CONTROLLER)
+        extension.post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         # THEN the model config is untouched and its namespace is scraped
         namespace = scraper_namespace(CONTROLLER)
@@ -193,22 +207,67 @@ class TestKubernetesControllers:
         assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
 
     def test_add_model_already_scraped_does_not_restart(self, logger: logging.Logger) -> None:
-        juju = JujuStub(k8s_clouds={CONTROLLER})
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
         extension = _extension(juju, logger)
         extension.post_bootstrap_controller(CONTROLLER)
-        extension.pre_add_model(CONTROLLER, "my-model", {})
+        extension.post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         # AND a fresh extension instance, as created for every test
-        _extension(juju, logger).pre_add_model(CONTROLLER, "my-model", {})
+        _extension(juju, logger).post_add_model_on_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         assert len(juju.kubernetes.restarts) == 1
 
-    def test_add_model_without_scraper_does_nothing(self, logger: logging.Logger) -> None:
+    def test_kubernetes_model_on_machine_controller_deploys_scraper(self, logger: logging.Logger) -> None:
+        # GIVEN a machine controller managing a model on a Kubernetes cloud
+        juju = JujuStub(k8s_clouds={"workload-k8s"}, model_clouds={"my-model": "workload-k8s"})
+        extension = _extension(juju, logger)
+
+        # WHEN the model is configured and added
+        config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, "workload-k8s")
+        extension.post_add_model_on_cloud(CONTROLLER, "my-model", "workload-k8s")
+
+        # THEN machine userdata is not added and a scraper is deployed in the model's cluster
+        assert config == {"foo": "bar"}
+        namespace = scraper_namespace(CONTROLLER)
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert data[KUBERNETES_NAMESPACES_KEY] == "my-model"
+        assert LogScraperHandle(CONTROLLER, "workload-k8s") in extension.resource_registry.registered_handles()
+
+    def test_machine_model_on_kubernetes_controller_gets_userdata(self, logger: logging.Logger) -> None:
+        # GIVEN a Kubernetes controller managing a model on a machine cloud
         juju = JujuStub(k8s_clouds={CONTROLLER})
+        extension = _extension(juju, logger)
 
-        _extension(juju, logger).pre_add_model(CONTROLLER, "my-model", {})
+        # WHEN the model configuration is prepared
+        config = extension.pre_add_model(CONTROLLER, "my-model", {}, "lxd")
+        extension.post_add_model_on_cloud(CONTROLLER, "my-model", "lxd")
 
-        assert juju.kubernetes.restarts == []
+        # THEN the model gets machine logging and no Kubernetes scraper is deployed for it
+        assert USERDATA_KEY in config
+        assert juju.kubernetes.config_maps == {}
+
+    def test_models_on_different_kubernetes_clouds_get_independent_scrapers(self, logger: logging.Logger) -> None:
+        # GIVEN one controller managing models on two Kubernetes clouds
+        first = KubernetesStub()
+        second = KubernetesStub()
+        juju = JujuStub(
+            k8s_clouds={"first-k8s", "second-k8s"},
+            model_clouds={"model-a": "first-k8s", "model-b": "second-k8s"},
+            kubernetes_by_cloud={"first-k8s": first, "second-k8s": second},
+        )
+        extension = _extension(juju, logger)
+
+        # WHEN both models are added
+        extension.post_add_model_on_cloud(CONTROLLER, "model-a", "first-k8s")
+        extension.post_add_model_on_cloud(CONTROLLER, "model-b", "second-k8s")
+
+        # THEN each workload cluster has its own scraper and teardown handle
+        namespace = scraper_namespace(CONTROLLER)
+        assert first.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"][KUBERNETES_NAMESPACES_KEY] == "model-a"
+        assert second.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"][KUBERNETES_NAMESPACES_KEY] == "model-b"
+        handles = extension.resource_registry.registered_handles()
+        assert LogScraperHandle(CONTROLLER, "first-k8s") in handles
+        assert LogScraperHandle(CONTROLLER, "second-k8s") in handles
 
     def test_registry_teardown_removes_the_scraper_namespace(self, logger: logging.Logger) -> None:
         # GIVEN a deployed scraper and a registered controller

@@ -228,6 +228,92 @@ class TestPodStatus:
         assert PodStatus.UNKNOWN.value == "Unknown"
 
 
+@pytest.mark.parametrize(
+    ("apply_method", "api_name", "create_method", "patch_method", "body"),
+    [
+        pytest.param(
+            "apply_config_map",
+            "core_v1_api",
+            "create_namespaced_config_map",
+            "patch_namespaced_config_map",
+            {"metadata": {"name": "logs"}, "data": {"config.yaml": "value"}},
+            id="config-map",
+        ),
+        pytest.param(
+            "apply_daemon_set",
+            "apps_v1_api",
+            "create_namespaced_daemon_set",
+            "patch_namespaced_daemon_set",
+            {"metadata": {"name": "logs"}, "spec": {"selector": {}}},
+            id="daemon-set",
+        ),
+    ],
+)
+class TestApplyKubernetesResource:
+    def test_creates_missing_resource(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN a Kubernetes API that accepts resource creation
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied
+        getattr(client, apply_method)("logging", body)
+
+        # THEN it is created without an update request
+        getattr(api, create_method).assert_called_once_with(namespace="logging", body=body, _request_timeout=30)
+        getattr(api, patch_method).assert_not_called()
+
+    def test_patches_existing_resource(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN resource creation reports that it already exists
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        getattr(api, create_method).side_effect = ApiException(status=409)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied
+        getattr(client, apply_method)("logging", body)
+
+        # THEN the existing resource is patched without requiring metadata.resourceVersion
+        getattr(api, patch_method).assert_called_once_with(
+            name="logs", namespace="logging", body=body, _request_timeout=30
+        )
+
+    def test_propagates_non_conflict_create_error(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN resource creation fails for a reason other than an existing object
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        getattr(api, create_method).side_effect = ApiException(status=403)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied, THEN the original error propagates
+        with pytest.raises(ApiException) as exc_info:
+            getattr(client, apply_method)("logging", body)
+
+        assert exc_info.value.status == 403
+        getattr(api, patch_method).assert_not_called()
+
+
 class TestKubernetesClientInit:
     """Test suite for KubernetesClient initialization."""
 
