@@ -172,18 +172,6 @@ class PersistenceExtensionStub(JujuExtension):
         return self.results.get(application, {})
 
 
-class PodDeleteExtensionStub(JujuExtension):
-    def __init__(self) -> None:
-        self.deleted_pods: list[tuple[str, str]] = []
-        self.restarted_statefulsets: list[tuple[JujuModelHandle, str]] = []
-
-    def post_delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
-        self.deleted_pods.append((model.model, pod_name))
-
-    def post_restart_statefulset(self, model: JujuModelHandle, statefulset_name: str) -> None:
-        self.restarted_statefulsets.append((model, statefulset_name))
-
-
 class KubernetesExtensionStub(KubernetesExtension):
     def post_delete_pod(self, namespace: str, pod_name: str) -> None:
         pass
@@ -397,16 +385,14 @@ class TestApplicationHealth:
 
 
 class TestJujuClientWorkloadOperations:
-    def test_restart_workload_pod_uses_shared_registry_and_model_hooks(self) -> None:
+    def test_restart_workload_pod_uses_shared_registry(self) -> None:
         kubernetes_extension = KubernetesExtensionStub()
-        juju_extension = PodDeleteExtensionStub()
         kubernetes_backend = MagicMock()
         kubernetes_client = KubernetesClient(kubernetes_backend, extensions=[kubernetes_extension])
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
         client = JujuClient(
             backend,
             cast(logging.Logger, LoggerStub()),
-            [juju_extension],
             kubernetes_client_registry=_kubernetes_registry(kubernetes_client),
         )
         model = JujuModelHandle(controller="controller", model="model")
@@ -441,7 +427,6 @@ class TestJujuClientWorkloadOperations:
             unit="app/1",
             existing_uids=existing_uids,
         )
-        assert juju_extension.deleted_pods == [("model", "replacement")] * 2
 
     def test_restart_workload_pod_reports_missing_kubeconfig(self) -> None:
         backend = WorkloadPodBackendStub()
@@ -459,15 +444,13 @@ class TestJujuClientWorkloadOperations:
 
         assert backend.resolved_models == [model]
 
-    def test_restart_statefulset_runs_model_scoped_juju_hooks(self) -> None:
-        extension = PodDeleteExtensionStub()
-        kubernetes_client = KubernetesClient(MagicMock())
+    def test_restart_statefulset_uses_shared_kubernetes_client(self) -> None:
+        kubernetes_client = KubernetesClient(MagicMock(), extensions=[KubernetesExtensionStub()])
         backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
         model = JujuModelHandle(controller="controller", model="model")
         client = JujuClient(
             backend,
             cast(logging.Logger, LoggerStub()),
-            [extension],
             kubernetes_client_registry=_kubernetes_registry(kubernetes_client),
         )
 
@@ -475,7 +458,7 @@ class TestJujuClientWorkloadOperations:
             client.restart_statefulset(model, "vault-k8s")
 
         restart.assert_called_once_with(namespace="model", statefulset_name="vault-k8s")
-        assert extension.restarted_statefulsets == [(model, "vault-k8s")]
+        assert client.kubernetes_client_for_model(model) is kubernetes_client
 
 
 class TestJujuValidationError:
