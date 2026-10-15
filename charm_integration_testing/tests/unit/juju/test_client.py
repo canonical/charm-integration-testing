@@ -425,6 +425,7 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
+
 class TestJujuClientKubernetesClientResolution:
     def test_resolves_shared_client_for_model_cloud(self) -> None:
         kubernetes_client = KubernetesClient(MagicMock())
