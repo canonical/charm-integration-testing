@@ -441,6 +441,7 @@ def seed_persistence_state_for_resumed_run(
         )
         return
 
+    request.getfixturevalue("register_test_clouds")
     client = _build_juju_client(
         juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
     )
@@ -1018,6 +1019,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[failure_message] = str(report.longrepr)
         exc = call.excinfo.value if call.excinfo else None
         _add_failure_execution_metadata(item.user_properties, item.stash[failure_message], exc)
+        _add_failure_execution_metadata(report.user_properties, item.stash[failure_message], exc)
 
     # Save skip message
     if report.skipped:
@@ -1032,6 +1034,9 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
             item.stash[skipped_message] = skipreason.removeprefix("Skipped: ")
         _append_execution_metadata(
             item.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
+        )
+        _append_execution_metadata(
+            report.user_properties, [("skipped:message", normalize_string(item.stash[skipped_message]))]
         )
 
 

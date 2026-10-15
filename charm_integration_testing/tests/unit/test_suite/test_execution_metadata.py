@@ -3,11 +3,14 @@
 
 import json
 import logging
+import textwrap
+import xml.etree.ElementTree as ET
 
 import pytest
 from jubilant import CLIError
 from juju import JujuClient, JujuModelHandle
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from pytest import Pytester
 from test_suite.conftest import (
     _add_failure_execution_metadata,
     _bundle_diagnostic_metadata,
@@ -36,6 +39,8 @@ from bundle_builder_x import (
 
 from ..extensions.shared import NullJujuBackend
 
+pytest_plugins = ["pytester"]
+
 
 def test_cli_error_is_written_to_failure_report_metadata() -> None:
     user_properties: list[tuple[str, object]] = []
@@ -56,6 +61,43 @@ def test_cli_error_is_written_to_failure_report_metadata() -> None:
     assert json.loads(metadata["failure:cli:cmd"]) == ["juju add-k8s neighbor-cloud --client"]
     assert json.loads(metadata["failure:cli:return_code"]) == ["1"]
     assert json.loads(metadata["failure:cli:stderr"]) == ["ERROR etcdserver: mvcc: database space exceeded"]
+
+
+def test_setup_failure_is_included_in_junit_metadata(pytester: Pytester) -> None:
+    pytester.makeconftest("from test_suite.conftest import pytest_runtest_makereport")
+    pytester.makepyfile(
+        test_setup_failure=textwrap.dedent(
+            """
+            import pytest
+            from jubilant import CLIError
+
+            @pytest.fixture
+            def fail_during_setup():
+                raise CLIError(
+                    1,
+                    ["juju", "add-k8s", "neighbor-cloud", "--client"],
+                    "",
+                    "ERROR etcdserver: mvcc: database space exceeded",
+                )
+
+            def test_setup_failure(fail_during_setup):
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("--junitxml=results.xml", "-q")
+
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    testcase = ET.parse(pytester.path / "results.xml").find(".//testcase")
+    assert testcase is not None
+    metadata = {
+        prop.attrib["name"]: json.loads(prop.attrib["value"]) for prop in testcase.findall("./properties/property")
+    }
+    assert "CLIError" in metadata["failure:message"][0]
+    assert metadata["failure:cli:cmd"] == ["juju add-k8s neighbor-cloud --client"]
+    assert metadata["failure:cli:return_code"] == ["1"]
+    assert metadata["failure:cli:stderr"] == ["ERROR etcdserver: mvcc: database space exceeded"]
 
 
 def test_platform_mismatch_metadata_uses_atomic_stable_values() -> None:
