@@ -4,7 +4,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 

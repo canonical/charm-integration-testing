@@ -100,10 +100,7 @@ def test_unit_rotation_replaces_each_machine_unit_before_validation() -> None:
         ("validate_model", MODEL, "simple"),
         ("validate_model", MODEL, "deep"),
     ]
-    assert client.calls[-2:] == [
-        ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
-        ("validate_model", MODEL, "deep"),
-    ]
+    assert client.calls[-1] == ("validate_model", MODEL, "deep")
     assert client.units == ["target/3", "target/4", "target/5"]
 
 
@@ -285,16 +282,13 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     ]
     assert [call for call in client.calls if call[0] == "multi_model_idle_for_period"] == [
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
-    ] * 5
+    ] * 4
     assert [call for call in client.calls if call[0] == "validate_model"] == [
         ("validate_model", MODEL, "simple"),
         ("validate_model", MODEL, "simple"),
         ("validate_model", MODEL, "deep"),
     ]
-    assert client.calls[-2:] == [
-        ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
-        ("validate_model", MODEL, "deep"),
-    ]
+    assert client.calls[-1] == ("validate_model", MODEL, "deep")
     assert client.units == ["target/0", "target/1"]
     assert len(kubernetes_client.pods) == 2
     assert [call for call in kubernetes_client.calls if call[0] == "wait_for_charm_pods_ready"] == [
