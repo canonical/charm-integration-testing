@@ -3,12 +3,12 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import cast
 
 import pytest
 from juju import JujuClient, JujuModelHandle
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from juju.extension import JujuExtension
+from kubernetes_client import KubernetesClient
 
 from validators.base import ValidationResult
 
@@ -21,16 +21,9 @@ class RecordingRotationJujuClient(JujuClient):
         recorder: RecordingJujuClient,
         backend: RecordingJujuBackend,
         *,
-        configure_kubeconfig: bool = True,
+        extensions: list[JujuExtension] | None = None,
     ) -> None:
-        registry = None
-        if backend.is_k8s:
-            kubeconfigs = {"k8s": Path("kubeconfig")} if configure_kubeconfig else {}
-            registry = KubernetesClientRegistry(
-                kubeconfigs,
-                client_factory=lambda _: cast(KubernetesClient, backend.kubernetes_client),
-            )
-        super().__init__(backend, logging.getLogger(__name__), kubernetes_client_registry=registry)
+        super().__init__(backend, logging.getLogger(__name__), extensions)
         self.recorder = recorder
 
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
@@ -73,13 +66,12 @@ def _rotate_units(
     *,
     k8s_model: bool,
     kubernetes_client: RecordingKubernetesClient | None = None,
-    configure_kubeconfig: bool = True,
 ) -> None:
     backend = RecordingJujuBackend(
         k8s_model=k8s_model,
         kubernetes_client=cast(KubernetesClient | None, kubernetes_client),
     )
-    juju_client = RecordingRotationJujuClient(client, backend, configure_kubeconfig=configure_kubeconfig)
+    juju_client = RecordingRotationJujuClient(client, backend)
     juju_client.rotate_application_units("target", MODEL)
 
 
@@ -108,7 +100,7 @@ def test_rotation_requires_a_kubeconfig_for_kubernetes_models() -> None:
     client = RecordingJujuClient(current_units=2)
 
     with pytest.raises(RuntimeError, match="No kubeconfig configured"):
-        _rotate_units(client, k8s_model=True, configure_kubeconfig=False)
+        _rotate_units(client, k8s_model=True)
 
     assert not [call for call in client.calls if call[0] == "scale_application"]
     assert client.units == ["target/0", "target/1"]
@@ -321,6 +313,29 @@ def test_unit_rotation_replaces_kubernetes_pods_with_surge_capacity(statefulset:
     assert not {f"uid-{index}" for index in range(2)} & {
         pod.metadata.uid for pod in kubernetes_client.pods if pod.metadata is not None
     }
+
+
+def test_kubernetes_rotation_dispatches_restart_hook_once_per_unit() -> None:
+    class RestartRecorder(JujuExtension):
+        def __init__(self) -> None:
+            self.restarted_units: list[tuple[JujuModelHandle, str]] = []
+
+        def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+            self.restarted_units.append((model, unit))
+
+    client = RecordingJujuClient(current_units=2)
+    kubernetes_client = RecordingKubernetesClient("target", 2)
+    client.scale_callback = kubernetes_client.scale_to
+    backend = RecordingJujuBackend(
+        k8s_model=True,
+        kubernetes_client=cast(KubernetesClient, kubernetes_client),
+    )
+    extension = RestartRecorder()
+    juju_client = RecordingRotationJujuClient(client, backend, extensions=[extension])
+
+    juju_client.rotate_application_units("target", MODEL)
+
+    assert extension.restarted_units == [(MODEL, "target/0"), (MODEL, "target/1")]
 
 
 def test_unit_rotation_snapshots_ready_pods_after_terminating_pod_converges() -> None:

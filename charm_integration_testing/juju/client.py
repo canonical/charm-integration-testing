@@ -34,6 +34,13 @@ class JujuValidationError(Exception):
         super().__init__(f"Model validation failed with {num_failed_validations} failed validations (units: {units}).")
 
 
+class _JujuCleanupError(RuntimeError):
+    def __init__(self, errors: Collection[Exception]) -> None:
+        self.errors = tuple(errors)
+        details = "; ".join(f"{type(error).__name__}: {error}" for error in self.errors)
+        super().__init__(f"Multiple cleanup operations failed: {details}")
+
+
 class JujuClient:
     backend: JujuBackend
     logger: logging.Logger
@@ -107,9 +114,8 @@ class JujuClient:
         if not units:
             raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
         models = list(dict.fromkeys([model, *(related_models or [])]))
-        kubernetes = self.kubernetes_client_for_model(model)
-        if kubernetes is not None:
-            self._rotate_kubernetes_units(kubernetes, application, model, units, models, timeout)
+        if self.backend.is_k8s_model(model):
+            self._rotate_kubernetes_units(application, model, units, models, timeout)
         else:
             if not self.backend.supports_targeted_unit_removal():
                 raise NotImplementedError(
@@ -125,67 +131,53 @@ class JujuClient:
 
     def _rotate_kubernetes_units(
         self,
-        kubernetes: KubernetesClient,
         application: str,
         model: JujuModelHandle,
         units: list[str],
         models: list[JujuModelHandle],
         timeout: timedelta,
     ) -> None:
-        pods_by_unit = kubernetes.get_ready_charm_pods_by_unit(application, model.model, units, timeout)
-        original_ids = {pod.uid for pod in pods_by_unit.values()}
+        instances_by_unit = self.backend.ready_workload_instances_by_unit(model, application, units, timeout)
+        original_ids = {instance.identifier for instance in instances_by_unit.values()}
 
         try:
             self.scale_application(application, len(units) + 1, model=model)
-            kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
+            self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
             self.multi_model_idle_for_period(models, timeout=timeout)
             for unit in units:
-                pod = pods_by_unit[unit]
-                existing_uids = kubernetes.get_charm_pod_uids(application, model.model)
-                if pod.uid not in existing_uids:
+                instance = instances_by_unit[unit]
+                existing_ids = self.backend.workload_instance_ids(model, application)
+                if instance.identifier not in existing_ids:
                     raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                kubernetes.restart_pod(
-                    namespace=model.model,
-                    pod_name=pod.name,
-                    uid=pod.uid,
-                    application=application,
-                    unit=pod.unit,
-                    existing_uids=existing_uids,
-                    timeout=timeout,
-                )
+                self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
                 for extension in self.extensions:
                     extension.post_restart_unit(model, unit)
-                kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
+                self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:
                     self.validate_model(model=model_ref, level="simple")
-        except BaseException as rotation_error:
+        except Exception as rotation_error:
             try:
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 current_units = self.application_units(application, model=model)
                 if len(current_units) > len(units):
-                    self._restore_kubernetes_unit_count(
-                        kubernetes, application, model, len(units), original_ids, models, timeout
-                    )
+                    self._restore_kubernetes_unit_count(application, model, len(units), original_ids, models, timeout)
                 elif len(current_units) < len(units):
                     raise RuntimeError(
                         f"Expected at least {len(units)} units while recovering from rotation, found "
                         f"{len(current_units)}."
                     )
-            except BaseException as cleanup_error:
+            except Exception as cleanup_error:
                 raise rotation_error from cleanup_error
             raise
         else:
-            self._restore_kubernetes_unit_count(
-                kubernetes, application, model, len(units), original_ids, models, timeout
-            )
+            self._restore_kubernetes_unit_count(application, model, len(units), original_ids, models, timeout)
 
-        kubernetes.wait_for_charm_pods_replaced(application, model.model, len(units), original_ids, timeout=timeout)
+        self.backend.wait_for_workload_instances_replaced(model, application, len(units), original_ids, timeout)
 
     def _restore_kubernetes_unit_count(
         self,
-        kubernetes: KubernetesClient,
         application: str,
         model: JujuModelHandle,
         unit_count: int,
@@ -195,10 +187,10 @@ class JujuClient:
     ) -> None:
         current_units = self.application_units(application, model=model)
         if len(current_units) > unit_count:
-            kubernetes.wait_for_charm_pods_replaced(
-                application, model.model, len(current_units), previous_ids, timeout=timeout
+            self.backend.wait_for_workload_instances_replaced(
+                model, application, len(current_units), previous_ids, timeout
             )
-            kubernetes.get_ready_charm_pods_by_unit(application, model.model, current_units, timeout)
+            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
 
         cleanup_errors: list[Exception] = []
         try:
@@ -210,7 +202,7 @@ class JujuClient:
         except Exception as error:
             cleanup_errors.append(error)
         try:
-            kubernetes.wait_for_charm_pods_ready(application, model.model, unit_count, timeout)
+            self.backend.wait_for_workload_instances_ready(model, application, unit_count, timeout)
         except Exception as convergence_error:
             cleanup_errors.append(convergence_error)
         try:
@@ -219,7 +211,7 @@ class JujuClient:
                 raise RuntimeError(
                     f"Expected {unit_count} units after restoring Kubernetes capacity, found {len(current_units)}."
                 )
-            kubernetes.get_ready_charm_pods_by_unit(application, model.model, current_units, timeout)
+            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
         except Exception as mapping_error:
             cleanup_errors.append(mapping_error)
 
@@ -251,7 +243,7 @@ class JujuClient:
                     raise RuntimeError(f"Unit {unit} was not removed after rotation.")
                 for model_ref in models:
                     self.validate_model(model=model_ref, level="simple")
-            except BaseException as rotation_error:
+            except Exception as rotation_error:
                 try:
                     self._cleanup_machine_surge(
                         application,
@@ -263,7 +255,7 @@ class JujuClient:
                         timeout,
                         unit_removal_attempted,
                     )
-                except BaseException as cleanup_error:
+                except Exception as cleanup_error:
                     raise rotation_error from cleanup_error
                 raise
 
@@ -278,7 +270,6 @@ class JujuClient:
         timeout: timedelta,
         unit_removal_attempted: bool,
     ) -> None:
-        current_units = self.application_units(application, model=model)
         cleanup_errors: list[Exception] = []
         settling_wait_succeeded = True
         try:
@@ -320,7 +311,7 @@ class JujuClient:
     def _raise_cleanup_errors(errors: list[Exception]) -> None:
         if errors:
             if len(errors) > 1:
-                raise errors[0] from errors[-1]
+                raise _JujuCleanupError(errors) from errors[0]
             raise errors[0]
 
     @staticmethod

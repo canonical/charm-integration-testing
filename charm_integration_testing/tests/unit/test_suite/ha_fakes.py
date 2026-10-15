@@ -4,7 +4,7 @@
 from collections.abc import Callable, Collection
 from datetime import timedelta
 
-from juju import JujuModelHandle
+from juju import JujuModelHandle, JujuWorkloadInstance
 from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from kubernetes_client import CharmPod, KubernetesClient
 
@@ -120,9 +120,6 @@ class RecordingJujuBackend(NullJujuBackend):
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.is_k8s
 
-    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
-        return "k8s" if self.is_k8s else None
-
     def supports_targeted_unit_removal(self) -> bool:
         return not self.is_k8s
 
@@ -130,6 +127,60 @@ class RecordingJujuBackend(NullJujuBackend):
         if self.kubernetes_client is None:
             raise RuntimeError("No kubeconfig configured for Kubernetes cloud 'k8s'.")
         return self.kubernetes_client
+
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        pods = self._kubernetes_client().get_ready_charm_pods_by_unit(application, model.model, units, timeout)
+        return {
+            unit: JujuWorkloadInstance(unit=pod.unit, name=pod.name, identifier=pod.uid) for unit, pod in pods.items()
+        }
+
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        return self._kubernetes_client().get_charm_pod_uids(application, model.model)
+
+    def wait_for_workload_instances_ready(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        timeout: timedelta,
+    ) -> None:
+        self._kubernetes_client().wait_for_charm_pods_ready(application, model.model, expected_count, timeout)
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        return self._kubernetes_client().restart_pod(
+            namespace=model.model,
+            pod_name=instance.name,
+            uid=instance.identifier,
+            timeout=timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self._kubernetes_client().wait_for_charm_pods_replaced(
+            application, model.model, expected_count, previous_ids, timeout=timeout
+        )
 
 
 class RecordingKubernetesClient:

@@ -4,12 +4,13 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
-from juju.client import JujuClient
+from juju.client import JujuClient, _JujuCleanupError
 from juju.extension import JujuExtension
 from juju.models import (
     JujuApplicationHealth,
@@ -423,7 +424,17 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
+
 class TestJujuClientWorkloadInstanceOperations:
+    def test_multiple_cleanup_errors_are_preserved(self) -> None:
+        errors = [RuntimeError("first cleanup failed"), TimeoutError("second cleanup failed")]
+
+        with pytest.raises(_JujuCleanupError) as error:
+            JujuClient._raise_cleanup_errors(errors)
+
+        assert error.value.errors == tuple(errors)
+        assert error.value.__cause__ is errors[0]
+
     def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
         kubernetes_backend = MagicMock()
