@@ -5,7 +5,7 @@ import logging
 from datetime import timedelta
 from pathlib import Path
 
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry, KubernetesExtension
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base import ValidationResult
 
@@ -51,10 +51,6 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
         self.kubernetes_client_registry = kubernetes_client_registry
-        if kubernetes_client_registry is not None:
-            for extension in self.extensions:
-                if isinstance(extension, KubernetesExtension):
-                    kubernetes_client_registry.register_extension(extension)
 
     def kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
         """Resolve the shared Kubernetes client for a model, or None for machine models."""
@@ -77,14 +73,20 @@ class JujuClient:
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
-        is_kubernetes_model = self.backend.kubernetes_cloud_for_model(model) is not None
         unit = self.backend.restart_follower(model, application, timeout)
         for extension in self.extensions:
-            if is_kubernetes_model and isinstance(extension, KubernetesExtension):
-                continue
             extension.post_restart_unit(model, unit)
         self.logger.info(f"Restarted follower {unit}.")
         return unit
+
+    def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a workload pod and dispatch its Juju lifecycle hooks."""
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise ValueError(f"Cannot delete a Kubernetes pod in non-Kubernetes model {model.uri}.")
+        kubernetes.delete_pod(namespace=model.model, pod_name=pod_name)
+        for extension in self.extensions:
+            extension.post_delete_pod(model, pod_name)
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")

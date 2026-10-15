@@ -205,12 +205,8 @@ def juju_backend(
 
 
 @pytest.fixture(scope="session")
-def unseal_vault_k8s_extension(
-    juju_backend: JujuBackend, kubernetes_client_registry: KubernetesClientRegistry, logger: logging.Logger
-) -> UnsealVaultK8sJujuExtension:
-    extension = UnsealVaultK8sJujuExtension(juju_backend, logger)
-    kubernetes_client_registry.register_extension(extension)
-    return extension
+def unseal_vault_k8s_extension(juju_backend: JujuBackend, logger: logging.Logger) -> UnsealVaultK8sJujuExtension:
+    return UnsealVaultK8sJujuExtension(juju_backend, logger)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -13,7 +13,7 @@ from kubernetes.client import (  # type: ignore[import-untyped]
     V1PodList,
     V1PodStatus,
 )
-from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension
+from kubernetes_client import KubernetesBackend, KubernetesClient
 
 
 def pod(uid: str, phase: str = "Running", *, name: str = "target-1", unit: str = "target/1") -> V1Pod:
@@ -81,16 +81,8 @@ class Backend(KubernetesBackend):
         self.core_v1_api = api
 
 
-class Hook(KubernetesExtension):
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
-        self.calls.append((namespace, pod_name))
-
-
-def restart(api: PodAPI, hook: Hook) -> str:
-    return KubernetesClient(Backend(api), extensions=[hook]).restart_pod(
+def restart(api: PodAPI) -> str:
+    return KubernetesClient(Backend(api)).restart_pod(
         "model",
         "target-1",
         "old",
@@ -113,12 +105,10 @@ def test_waits_for_running_replacement_and_returns_name(clock: Clock, new_name: 
         ],
         clock,
     )
-    hook = Hook()
-    replacement_name = restart(api, hook)
+    replacement_name = restart(api)
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 5
     assert replacement_name == new_name
-    assert hook.calls == [("model", new_name)]
 
 
 @pytest.mark.parametrize("candidate", ["sibling", "wrong-unit", "unannotated", "deleting", "no-uid"])
@@ -135,10 +125,8 @@ def test_ignores_pods_that_are_not_a_live_replacement(clock: Clock, candidate: s
     else:
         wrong.metadata.uid = None
     api = PodAPI([[wrong], [pod("replacement", name="replacement")]], clock)
-    hook = Hook()
-    restart(api, hook)
+    restart(api)
     assert api.reads == 2
-    assert hook.calls == [("model", "replacement")]
 
 
 @pytest.mark.parametrize("becomes_running", [True, False])
@@ -147,76 +135,61 @@ def test_replacement_without_status_waits_for_running(clock: Clock, becomes_runn
     replacement = pod("new")
     replacement.status = None
     api = PodAPI([[replacement]] * 10, clock)
-    hook = Hook()
     if becomes_running:
         api.responses = [[replacement], [pod("new")]]
 
     # WHEN waiting for replacement, THEN missing status does not complete the restart
     if becomes_running:
-        restart(api, hook)
+        restart(api)
         assert api.reads == 2
         assert clock.now > 0
-        assert hook.calls == [("model", "target-1")]
     else:
         with pytest.raises(TimeoutError, match="was not replaced"):
-            restart(api, hook)
+            restart(api)
         assert clock.now == 10
-        assert hook.calls == []
 
 
 def test_ambiguous_replacements_are_not_accepted(clock: Clock) -> None:
     api = PodAPI([[pod("new-1"), pod("new-2")]], clock)
-    hook = Hook()
     with pytest.raises(TimeoutError):
-        restart(api, hook)
-    assert hook.calls == []
+        restart(api)
 
 
 def test_api_failure_is_not_treated_as_replacement(clock: Clock) -> None:
     api = PodAPI([ApiException(status=403)], clock)
-    hook = Hook()
     with pytest.raises(ApiException):
-        restart(api, hook)
-    assert hook.calls == []
+        restart(api)
 
 
 def test_uid_conflict_does_not_wait_or_run_hook(clock: Clock) -> None:
     api = PodAPI([], clock)
     api.delete_error = ApiException(status=409)
-    hook = Hook()
     with pytest.raises(ApiException) as error:
-        restart(api, hook)
+        restart(api)
     assert error.value.status == 409
     assert cast(V1DeleteOptions, api.body).preconditions.uid == "old"
     assert api.reads == 0
-    assert hook.calls == []
 
 
 def test_delete_and_polling_share_timeout_budget(clock: Clock) -> None:
     api = PodAPI([], clock)
     api.delete_duration = 7
-    hook = Hook()
     with pytest.raises(TimeoutError, match="was not replaced"):
-        restart(api, hook)
+        restart(api)
     assert clock.now == 10
     assert api.timeouts == [(5, 5), (1.5, 1.5), (1, 1), (0.5, 0.5)]
-    assert hook.calls == []
 
 
 def test_delete_exhausting_budget_does_not_poll(clock: Clock) -> None:
     api = PodAPI([], clock)
     api.delete_duration = 10
-    hook = Hook()
     with pytest.raises(TimeoutError):
-        restart(api, hook)
+        restart(api)
     assert api.reads == 0
-    assert hook.calls == []
 
 
 def test_replacement_returned_after_deadline_does_not_run_hook(clock: Clock) -> None:
     api = PodAPI([[pod("new")]], clock)
     api.list_duration = 11
-    hook = Hook()
     with pytest.raises(TimeoutError):
-        restart(api, hook)
-    assert hook.calls == []
+        restart(api)

@@ -6,7 +6,6 @@ from abc import ABC
 from datetime import timedelta
 
 from juju import JujuBackend, JujuExtension, JujuModelHandle
-from kubernetes_client import KubernetesExtension
 
 from .vault_client import VaultClientJujuExec, VaultClientJujuExecPebble
 from .vault_unsealer import CharmInfo, VaultUnsealer
@@ -41,19 +40,9 @@ class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
         super().__init__(VaultUnsealer(CharmInfo(name="vault"), VaultClientJujuExec(juju), juju, logger))
 
 
-class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension, KubernetesExtension):
+class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
         super().__init__(VaultUnsealer(CharmInfo(name="vault-k8s"), VaultClientJujuExecPebble(juju), juju, logger))
 
-    def post_delete_pod_in_cloud(self, namespace: str, _pod_name: str, cloud: str | None) -> None:
-        self._unseal_vaults_in_namespace(cloud, namespace)
-
-    def post_restart_statefulset_in_cloud(self, namespace: str, _statefulset_name: str, cloud: str | None) -> None:
-        self._unseal_vaults_in_namespace(cloud, namespace)
-
-    def _unseal_vaults_in_namespace(self, cloud: str | None, namespace: str) -> None:
-        if cloud is None:
-            raise RuntimeError("Kubernetes Vault extension requires a cloud from KubernetesClientRegistry.")
-        model = self.vault_unsealer.juju.model_for_namespace(cloud, namespace)
-        if model is not None:
-            self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)
+    def post_delete_pod(self, model: JujuModelHandle, _pod_name: str) -> None:
+        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)

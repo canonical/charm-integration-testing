@@ -330,61 +330,6 @@ class TestModelKubernetesCloud:
         assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
 
 
-class TestModelForNamespace:
-    class Client(JubilantClient):
-        def __init__(self, models_by_controller: dict[str, str]) -> None:
-            self.cli_client = JubilantCliStub(
-                results={
-                    ("controllers", "--format=json"): '{"controllers":{"ctrl-a":{},"ctrl-b":{}}}',
-                    **{
-                        ("models", "-c", controller, "--all", "--format=json"): output
-                        for controller, output in models_by_controller.items()
-                    },
-                }
-            )
-
-        def model(self, model: JujuModelHandle | None) -> Any:
-            assert model is None
-            return self.cli_client
-
-    def test_resolves_namespace_on_matching_cloud_and_controller(self) -> None:
-        # GIVEN a same-named namespace on two clouds/controllers
-        client = self.Client(
-            models_by_controller={
-                "ctrl-a": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"other-cloud"}]}',
-                "ctrl-b": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
-            }
-        )
-        backend = JubilantBackend(client=client)
-
-        # WHEN resolving by Kubernetes cloud and namespace
-        model = backend.model_for_namespace("litmus", "workload")
-
-        # THEN it returns the model on the matching cloud
-        assert model == JujuModelHandle(controller="ctrl-b", model="workload", owner="admin")
-        assert model.uri == "ctrl-b:admin/workload"
-
-    def test_missing_namespace_returns_none(self) -> None:
-        client = self.Client(
-            models_by_controller={"ctrl-a": '{"models":[]}', "ctrl-b": '{"models":[]}'},
-        )
-        backend = JubilantBackend(client=client)
-
-        assert backend.model_for_namespace("litmus", "missing") is None
-
-    def test_ambiguous_namespace_raises(self) -> None:
-        client = self.Client(
-            models_by_controller={
-                "ctrl-a": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
-                "ctrl-b": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
-            },
-        )
-        backend = JubilantBackend(client=client)
-
-        with pytest.raises(LookupError, match="Multiple Juju models found"):
-            backend.model_for_namespace("litmus", "workload")
-
-
 class TestJubilantClient:
     def test_model(self) -> None:
         # GIVEN a jubilant client

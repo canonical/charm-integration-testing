@@ -14,7 +14,7 @@ from kubernetes import watch
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
-from kubernetes_client.backend import KubernetesBackend, KubernetesExtension
+from kubernetes_client.backend import KubernetesBackend
 
 T = TypeVar("T")
 
@@ -36,8 +36,6 @@ class CharmPod:
 
 class KubernetesClient:
     backend: KubernetesBackend
-    extensions: list[KubernetesExtension]
-    cloud: str | None
 
     # `timeout_seconds` on a watch is only a server-side hint: the server is expected to close
     # the connection once it elapses, but nothing guarantees it will (e.g. a proxy or an
@@ -53,23 +51,14 @@ class KubernetesClient:
         logger: logging.Logger | None = None,
         default_timeout: timedelta = timedelta(minutes=5),
         default_delay: timedelta = timedelta(seconds=1),
-        extensions: list[KubernetesExtension] | None = None,
         watch_factory: Callable[[], watch.Watch] = watch.Watch,
-        cloud: str | None = None,
     ):
         self.backend = backend
         self.logger = logger or logging.getLogger(__name__)
 
         self.default_timeout = default_timeout
         self.default_delay = default_delay
-        self.extensions = extensions or []
         self.watch_factory = watch_factory
-        self.cloud = cloud
-
-    def register_extension(self, extension: KubernetesExtension) -> None:
-        """Register an extension once on this Kubernetes client."""
-        if extension not in self.extensions:
-            self.extensions.append(extension)
 
     def get_charm_pods(
         self, application_name: str, model: str
@@ -387,8 +376,6 @@ class KubernetesClient:
                     and replacements[0].status is not None
                     and replacements[0].status.phase == PodStatus.RUNNING.value
                 ):
-                    for extension in self.extensions:
-                        extension.post_delete_pod_in_cloud(namespace, replacements[0].metadata.name, self.cloud)
                     return replacements[0].metadata.name
             sleep(min(self.default_delay.total_seconds(), remaining()))
 
@@ -529,10 +516,6 @@ class KubernetesClient:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")
             raise
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_delete_pod_in_cloud(namespace, pod_name, self.cloud)
-
     def restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
         """
         Triggers a rollout restart of a StatefulSet by patching its pod template annotation.
@@ -561,9 +544,6 @@ class KubernetesClient:
                 f"Failed to start rollout restart for Statefulset: '{statefulset_name}' in namespace '{namespace}': {e}"
             )
             raise
-
-        for extension in self.extensions:
-            extension.post_restart_statefulset_in_cloud(namespace, statefulset_name, self.cloud)
 
     def patch_statefulset_template(
         self, namespace: str, statefulset_name: str, body: dict[str, Any] | list[dict[str, Any]]

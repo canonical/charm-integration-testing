@@ -16,28 +16,8 @@ from kubernetes.client import (  # type: ignore[import-untyped]
     V1PodCondition,
     V1PodStatus,
 )
-from kubernetes_client import CharmPod, KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
+from kubernetes_client import CharmPod, KubernetesBackend, KubernetesClient, PodStatus
 from urllib3.exceptions import ProtocolError, ReadTimeoutError
-
-
-class KubernetesExtensionSpy(KubernetesExtension):
-    """Spy extension that records hook invocations."""
-
-    def __init__(self) -> None:
-        self.post_delete_pod_calls: list[tuple[str, str, str | None]] = []
-        self.post_restart_statefulset_calls: list[tuple[str, str, str | None]] = []
-
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
-        self.post_delete_pod_calls.append((namespace, pod_name, None))
-
-    def post_delete_pod_in_cloud(self, namespace: str, pod_name: str, cloud: str | None) -> None:
-        self.post_delete_pod_calls.append((namespace, pod_name, cloud))
-
-    def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-        self.post_restart_statefulset_calls.append((namespace, statefulset_name, None))
-
-    def post_restart_statefulset_in_cloud(self, namespace: str, statefulset_name: str, cloud: str | None) -> None:
-        self.post_restart_statefulset_calls.append((namespace, statefulset_name, cloud))
 
 
 def create_sample_pod(
@@ -1187,32 +1167,6 @@ class TestKubernetesClientInit:
 
             assert exc_info.value.status == 500
 
-        def test_calls_post_delete_pod_extensions(self) -> None:
-            # GIVEN a client with a registered extension
-            backend_stub = KubernetesBackendStub()
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension], cloud="test-cloud")
-
-            # WHEN deleting a pod
-            client.delete_pod(namespace="test-ns", pod_name="test-pod")
-
-            # THEN the extension's post_delete_pod hook is invoked with the namespace and pod name
-            assert extension.post_delete_pod_calls == [("test-ns", "test-pod", "test-cloud")]
-
-        def test_does_not_call_extensions_when_delete_fails(self) -> None:
-            # GIVEN a client with a registered extension and a backend that fails to delete
-            api_error = ApiException(status=500, reason="Internal Server Error")
-            backend_stub = KubernetesBackendStub(delete_pod_raises=api_error)
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN deleting a pod fails
-            with pytest.raises(ApiException):
-                client.delete_pod(namespace="test-ns", pod_name="test-pod")
-
-            # THEN the extension's post_delete_pod hook is not invoked
-            assert extension.post_delete_pod_calls == []
-
     class TestRestartStatefulset:
         """Test suite for restart_statefulset method."""
 
@@ -1230,32 +1184,6 @@ class TestKubernetesClientInit:
             assert backend_stub.patch_stateful_set_last_body is not None
             annotations = backend_stub.patch_stateful_set_last_body["spec"]["template"]["metadata"]["annotations"]
             assert "kubectl.kubernetes.io/restartedAt" in annotations
-
-        def test_calls_post_restart_statefulset_extensions(self) -> None:
-            # GIVEN a client with a registered extension
-            backend_stub = KubernetesBackendStub()
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension], cloud="test-cloud")
-
-            # WHEN restarting a statefulset
-            client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
-
-            # THEN the extension's post_restart_statefulset hook is invoked with the namespace and name
-            assert extension.post_restart_statefulset_calls == [("test-ns", "my-sts", "test-cloud")]
-
-        def test_does_not_call_extensions_when_patch_fails(self) -> None:
-            # GIVEN a client with a registered extension and a backend that fails to patch
-            api_error = ApiException(status=500, reason="Internal Server Error")
-            backend_stub = KubernetesBackendStub(patch_stateful_set_raises=api_error)
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN restarting a statefulset fails
-            with pytest.raises(ApiException):
-                client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
-
-            # THEN the extension's post_restart_statefulset hook is not invoked
-            assert extension.post_restart_statefulset_calls == []
 
         def test_api_exception_propagates(self) -> None:
             # GIVEN a backend stub configured to raise ApiException on patch

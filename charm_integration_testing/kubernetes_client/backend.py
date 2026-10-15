@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 
-from abc import ABC
 from pathlib import Path
 from types import MappingProxyType
 from typing import Callable
@@ -36,20 +35,6 @@ def build_default_retries() -> Retry:
     ever share the same mutable `Retry` object.
     """
     return Retry(**DEFAULT_RETRY_KWARGS)  # type: ignore[arg-type]
-
-
-class KubernetesExtension(ABC):
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
-        pass
-
-    def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-        pass
-
-    def post_delete_pod_in_cloud(self, namespace: str, pod_name: str, cloud: str | None) -> None:
-        self.post_delete_pod(namespace, pod_name)
-
-    def post_restart_statefulset_in_cloud(self, namespace: str, statefulset_name: str, cloud: str | None) -> None:
-        self.post_restart_statefulset(namespace, statefulset_name)
 
 
 class KubernetesBackend:

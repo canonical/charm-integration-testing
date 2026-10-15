@@ -487,7 +487,3 @@ class JujuBackend(ABC):
     def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         """Return the model's Kubernetes cloud, or None when it is not Kubernetes-backed."""
         raise NotImplementedError
-
-    def model_for_namespace(self, cloud: str, namespace: str) -> JujuModelHandle | None:
-        """Resolve a Kubernetes namespace to its Juju model, or return None if it is not a Juju model."""
-        return None
