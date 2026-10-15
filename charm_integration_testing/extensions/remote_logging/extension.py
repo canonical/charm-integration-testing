@@ -189,7 +189,11 @@ class RemoteLoggingExtension(JujuExtension):
         model: str,
         cloud: str | None,
     ) -> None:
-        handle = LogScraperHandle(controller, cloud)
+        handle = (
+            LogScraperHandle(controller)
+            if self.juju.get_kubernetes_client_for_controller(controller) is kubernetes
+            else LogScraperHandle(controller, cloud)
+        )
         self._register_scraper(kubernetes, controller, handle)
         namespace = scraper_namespace(controller)
         data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)

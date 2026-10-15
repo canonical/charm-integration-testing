@@ -222,6 +222,9 @@ class TestKubernetesControllers:
             "/var/log/pods/my-model_*/*/*.log",
         ]
         assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
+        assert extension.resource_registry.children_of(JujuControllerHandle(CONTROLLER)) == [
+            LogScraperHandle(CONTROLLER)
+        ]
 
     def test_add_model_already_scraped_does_not_restart(self, logger: logging.Logger) -> None:
         juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
@@ -301,7 +304,7 @@ class TestKubernetesControllers:
 
         extension.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
-        assert LogScraperHandle(CONTROLLER, CONTROLLER) in extension.resource_registry.registered_handles()
+        assert LogScraperHandle(CONTROLLER) in extension.resource_registry.registered_handles()
 
     def test_kubernetes_model_on_machine_controller_deploys_scraper(self, logger: logging.Logger) -> None:
         # GIVEN a machine controller managing a model on a Kubernetes cloud
