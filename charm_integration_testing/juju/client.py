@@ -528,7 +528,7 @@ class JujuClient:
 
         # Call extensions
         for extension in self.extensions:
-            extension.post_add_model(controller, model, cloud)
+            extension.post_add_model_with_cloud(controller, model, cloud)
 
     def add_cloud(self, cloud: str, controller: str) -> None:
         self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")

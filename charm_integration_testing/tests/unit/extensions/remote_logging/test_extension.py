@@ -69,8 +69,13 @@ class JujuStub(NullJujuBackend):
     model_clouds: dict[str, str] = field(default_factory=dict)
     kubernetes: KubernetesStub = field(default_factory=KubernetesStub)
     kubernetes_by_cloud: dict[str, KubernetesStub] = field(default_factory=dict)
+    controller_cloud_queries: list[tuple[str, str]] = field(default_factory=list)
 
     def is_k8s_cloud(self, cloud: str) -> bool:
+        return cloud in self.k8s_clouds
+
+    def is_k8s_cloud_on_controller(self, cloud: str, controller: str) -> bool:
+        self.controller_cloud_queries.append((cloud, controller))
         return cloud in self.k8s_clouds
 
     def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
@@ -203,7 +208,7 @@ class TestKubernetesControllers:
 
         # WHEN a model is added
         config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, CONTROLLER)
-        extension.post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         # THEN the model config is untouched and its namespace is scraped
         namespace = scraper_namespace(CONTROLLER)
@@ -220,20 +225,20 @@ class TestKubernetesControllers:
         juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
         extension = _extension(juju, logger)
         extension.post_bootstrap_controller(CONTROLLER)
-        extension.post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         # AND a fresh extension instance, as created for every test
-        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        _extension(juju, logger).post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         assert len(juju.kubernetes.restarts) == 1
 
     def test_existing_scraper_reconciles_changed_endpoint(self, logger: logging.Logger) -> None:
         juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
         _extension(juju, logger).post_bootstrap_controller(CONTROLLER)
-        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        _extension(juju, logger).post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
         updated = _extension(juju, logger, endpoints={CONTROLLER: "https://new-observability.example/loki"})
 
-        updated.post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        updated.post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         namespace = scraper_namespace(CONTROLLER)
         data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
@@ -263,10 +268,11 @@ class TestKubernetesControllers:
 
         # WHEN the model is configured and added
         config = extension.pre_add_model(CONTROLLER, "my-model", {"foo": "bar"}, "workload-k8s")
-        extension.post_add_model(CONTROLLER, "my-model", "workload-k8s")
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", "workload-k8s")
 
         # THEN machine userdata is not added and a scraper is deployed in the model's cluster
         assert config == {"foo": "bar"}
+        assert juju.controller_cloud_queries == [("workload-k8s", CONTROLLER)]
         namespace = scraper_namespace(CONTROLLER)
         data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
         assert data[KUBERNETES_NAMESPACES_KEY] == "my-model"
@@ -279,7 +285,7 @@ class TestKubernetesControllers:
 
         # WHEN the model configuration is prepared
         config = extension.pre_add_model(CONTROLLER, "my-model", {}, "lxd")
-        extension.post_add_model(CONTROLLER, "my-model", "lxd")
+        extension.post_add_model_with_cloud(CONTROLLER, "my-model", "lxd")
 
         # THEN the model gets machine logging and no Kubernetes scraper is deployed for it
         assert USERDATA_KEY in config
@@ -297,8 +303,8 @@ class TestKubernetesControllers:
         extension = _extension(juju, logger)
 
         # WHEN both models are added
-        extension.post_add_model(CONTROLLER, "model-a", "first-k8s")
-        extension.post_add_model(CONTROLLER, "model-b", "second-k8s")
+        extension.post_add_model_with_cloud(CONTROLLER, "model-a", "first-k8s")
+        extension.post_add_model_with_cloud(CONTROLLER, "model-b", "second-k8s")
 
         # THEN each workload cluster has its own scraper and teardown handle
         namespace = scraper_namespace(CONTROLLER)
@@ -332,7 +338,7 @@ class TestKubernetesControllers:
         }
 
         # WHEN the model is added
-        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        _extension(juju, logger).post_add_model_with_cloud(CONTROLLER, "my-model", CONTROLLER)
 
         # THEN the generated ConfigMap is repaired and the scraper is restarted
         data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]

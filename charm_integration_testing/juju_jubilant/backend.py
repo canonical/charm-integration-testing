@@ -967,10 +967,20 @@ class JubilantBackend(JujuCmdBackend):
 
     def is_k8s_cloud(self, cloud: str) -> bool:
         clouds = json.loads(self.client.model(None).cli("clouds", "--client", "--format", "json", include_model=False))
+        return self._cloud_is_k8s(cloud, clouds, "the Juju client")
+
+    def is_k8s_cloud_on_controller(self, cloud: str, controller: str) -> bool:
+        clouds = json.loads(
+            self.client.model(None).cli("clouds", "--controller", controller, "--format", "json", include_model=False)
+        )
+        return self._cloud_is_k8s(cloud, clouds, f"controller '{controller}'")
+
+    @staticmethod
+    def _cloud_is_k8s(cloud: str, clouds: dict[str, Any], registry: str) -> bool:
         try:
             cloud_type: object = clouds[cloud]["type"]
         except KeyError as exc:
-            raise ValueError(f"Cloud '{cloud}' is not registered with the Juju client.") from exc
+            raise ValueError(f"Cloud '{cloud}' is not registered with {registry}.") from exc
         return cloud_type == "k8s"
 
     def get_controller_kubeconfig(self, controller: str) -> pathlib.Path | None:

@@ -127,7 +127,7 @@ class RemoteLoggingExtension(JujuExtension):
             return model_config
 
         is_kubernetes = (
-            self.juju.is_k8s_cloud(cloud)
+            self.juju.is_k8s_cloud_on_controller(cloud, controller)
             if cloud is not None
             else self.juju.get_kubernetes_client_for_controller(controller) is not None
         )
@@ -137,7 +137,7 @@ class RemoteLoggingExtension(JujuExtension):
         self.logger.debug(f"Shipping logs of model '{model}' to '{endpoint}' from its machines.")
         return self._with_userdata(model_config, endpoint, controller, model)
 
-    def post_add_model(self, controller: str, model: str, cloud: str | None) -> None:
+    def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
         endpoint = self.endpoints_by_controller.get(controller)
         if endpoint is None:
             return

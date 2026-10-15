@@ -187,12 +187,37 @@ class TestIsK8sCloud:
         assert cli.executions == [command]
         assert cli.execution_options == [{"include_model": False}]
 
+    def test_reads_controller_cloud_type_through_jubilant(self) -> None:
+        # GIVEN a cloud registered on the target controller
+        command = ("clouds", "--controller", "target-controller", "--format", "json")
+        cli = JubilantCliStub(results={command: '{"neighbor-cloud": {"type": "k8s"}}'})
+        backend = JubilantBackend(client=JubilantClientStub(cli))
+
+        # WHEN its substrate is queried
+        result = backend.is_k8s_cloud_on_controller("neighbor-cloud", "target-controller")
+
+        # THEN Jubilant queries the target controller's cloud registry
+        assert result
+        assert cli.executions == [command]
+        assert cli.execution_options == [{"include_model": False}]
+
     def test_missing_cloud_raises_targeted_error(self) -> None:
         command = ("clouds", "--client", "--format", "json")
         backend = JubilantBackend(client=JubilantClientStub(JubilantCliStub(results={command: "{}"})))
 
         with pytest.raises(ValueError, match="Cloud 'missing' is not registered"):
             backend.is_k8s_cloud("missing")
+
+    def test_missing_controller_cloud_raises_targeted_error(self) -> None:
+        command = ("clouds", "--controller", "target-controller", "--format", "json")
+        backend = JubilantBackend(client=JubilantClientStub(JubilantCliStub(results={command: "{}"})))
+
+        with pytest.raises(ValueError, match="Cloud 'missing' is not registered with controller"):
+            backend.is_k8s_cloud_on_controller("missing", "target-controller")
+
+
+def test_juju_cmd_backend_does_not_require_cloud_detection() -> None:
+    assert "is_k8s_cloud" not in JujuCmdBackend.__abstractmethods__
 
 
 @dataclass

@@ -1597,7 +1597,7 @@ class TestJujuClientAddModelCloud:
             ) -> dict[str, str]:
                 return {**model_config, "extra": cloud or "default"}
 
-            def post_add_model(self, controller: str, model: str, cloud: str | None) -> None:
+            def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
                 self.post_add_model_calls.append((controller, model, cloud))
 
         backend = AddModelCloudBackendStub()
@@ -1610,6 +1610,23 @@ class TestJujuClientAddModelCloud:
         # THEN both hooks and the backend receive the model cloud
         assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar", "extra": "k8s-cloud"}, "k8s-cloud")]
         assert extension.post_add_model_calls == [("ctrl-a", "model-a", "k8s-cloud")]
+
+    def test_add_model_preserves_legacy_post_add_model_hook(self) -> None:
+        class LegacyExtension(JujuExtension):
+            def __init__(self) -> None:
+                self.post_add_model_calls: list[tuple[str, str]] = []
+
+            def post_add_model(self, controller: str, model: str) -> None:
+                self.post_add_model_calls.append((controller, model))
+
+        backend = AddModelCloudBackendStub()
+        extension = LegacyExtension()
+
+        _client(backend, [extension]).add_model(
+            controller="ctrl-a", model="model-a", model_config={}, cloud="k8s-cloud"
+        )
+
+        assert extension.post_add_model_calls == [("ctrl-a", "model-a")]
 
     def test_add_cloud_delegates_to_backend(self) -> None:
         backend = AddModelCloudBackendStub()
