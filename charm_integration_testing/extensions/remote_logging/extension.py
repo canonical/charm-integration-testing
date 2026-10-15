@@ -10,6 +10,7 @@ from juju.handles import JujuControllerHandle
 from resource_registry import ResourceRegistry, sanitize_path_segment
 
 from .scraper import (
+    KUBERNETES_NAMESPACE_PREFIX,
     KUBERNETES_NAMESPACES_KEY,
     KUBERNETES_SCRAPER_NAME,
     USERDATA_KEY,
@@ -17,6 +18,7 @@ from .scraper import (
     kubernetes_daemon_set,
     machine_userdata,
     merge_userdata,
+    safe_controller_name,
 )
 
 CONTROLLER_MODEL = "controller"
@@ -39,7 +41,7 @@ class KubernetesScraperClient(Protocol):
 
 
 def scraper_namespace(controller: str) -> str:
-    return f"log-scraper-{controller}"
+    return f"{KUBERNETES_NAMESPACE_PREFIX}{safe_controller_name(controller)}"
 
 
 def controller_namespace(controller: str) -> str:

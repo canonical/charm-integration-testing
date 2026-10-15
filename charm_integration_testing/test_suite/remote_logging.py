@@ -10,9 +10,10 @@ def build_remote_logging_endpoints_by_controller(
 ) -> dict[str, str]:
     """Build controller-to-Loki mappings, preferring the target endpoint for a shared controller."""
     endpoints: dict[str, str] = {}
-    shared_endpoint = target_endpoint or neighbor_endpoint
-    if shared_endpoint:
-        endpoints[target_controller] = shared_endpoint
+    if target_endpoint:
+        endpoints[target_controller] = target_endpoint
+    elif neighbor_controller == target_controller and neighbor_endpoint:
+        endpoints[target_controller] = neighbor_endpoint
     if neighbor_controller is not None and neighbor_controller != target_controller and neighbor_endpoint:
         endpoints[neighbor_controller] = neighbor_endpoint
     return endpoints

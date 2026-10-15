@@ -25,6 +25,16 @@ LOKI_URL = "http://observability.example/loki-model-loki"
 EXPORTER_ENDPOINT = f"{LOKI_URL}/loki/api/v1/push"
 
 
+@pytest.mark.parametrize("controller", ["CTRL_1", "a" * 100])
+def test_scraper_namespace_is_dns_compatible_and_bounded(controller: str) -> None:
+    namespace = scraper_namespace(controller)
+
+    assert len(namespace) <= 63
+    assert namespace == namespace.lower()
+    assert namespace[0] != "-" and namespace[-1] != "-"
+    assert all(character.isalnum() or character == "-" for character in namespace)
+
+
 @dataclass
 class KubernetesStub:
     config_maps: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)

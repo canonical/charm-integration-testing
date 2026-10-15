@@ -17,6 +17,7 @@ from extensions.remote_logging.scraper import (
     kubernetes_scraper_config,
     machine_userdata,
     merge_userdata,
+    safe_controller_name,
 )
 
 
@@ -58,6 +59,29 @@ def test_daemon_set_persists_offsets_per_controller() -> None:
     assert {mount["name"]: mount["mountPath"] for mount in container["volumeMounts"]}["storage"] == (
         COLLECTOR_STORAGE_PATH
     )
+
+
+@pytest.mark.parametrize(
+    ("controller", "expected"),
+    [
+        ("ctrl-1", "ctrl-1"),
+        ("CTRL_1", "ctrl-1-"),
+        ("a" * 100, "a" * 38 + "-"),
+    ],
+)
+def test_safe_controller_name_is_bounded_and_dns_compatible(controller: str, expected: str) -> None:
+    safe = safe_controller_name(controller)
+
+    assert safe.startswith(expected)
+    assert len(safe) <= 51
+    assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", safe)
+
+
+def test_daemon_set_sanitizes_controller_for_host_path() -> None:
+    body = kubernetes_daemon_set("ns", "../Ctrl_1")
+    volumes = {volume["name"]: volume for volume in body["spec"]["template"]["spec"]["volumes"]}
+
+    assert volumes["storage"]["hostPath"]["path"] == (f"{COLLECTOR_STORAGE_PATH}/{safe_controller_name('../Ctrl_1')}")
 
 
 def test_daemon_set_hardens_the_root_collector() -> None:
@@ -141,11 +165,19 @@ def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
     ]
 
 
-@pytest.mark.parametrize("endpoint", ["http://host/loki", "http://host/loki/"])
-def test_collector_exports_to_the_loki_push_api_with_juju_labels(endpoint: str) -> None:
+@pytest.mark.parametrize(
+    ("endpoint", "expected"),
+    [
+        ("http://host/loki", "http://host/loki/loki/api/v1/push"),
+        ("http://host/loki/", "http://host/loki/loki/api/v1/push"),
+        ("https://host/loki", "https://host/loki/loki/api/v1/push"),
+        ("https://host/loki/", "https://host/loki/loki/api/v1/push"),
+    ],
+)
+def test_collector_exports_to_the_loki_push_api_with_juju_labels(endpoint: str, expected: str) -> None:
     config = yaml.safe_load(kubernetes_scraper_config(endpoint, "ctrl", ["ctrl-ns"]))
 
-    assert config["exporters"] == {"loki": {"endpoint": "http://host/loki/loki/api/v1/push"}}
+    assert config["exporters"] == {"loki": {"endpoint": expected}}
     assert config["service"]["pipelines"]["logs"]["exporters"] == ["loki"]
     labels = config["processors"]["resource"]["attributes"][0]
     assert labels["key"] == "loki.resource.labels"

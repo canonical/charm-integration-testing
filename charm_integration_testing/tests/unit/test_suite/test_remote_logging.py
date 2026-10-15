@@ -49,6 +49,15 @@ def test_omits_unconfigured_controllers() -> None:
     )
 
 
+def test_does_not_use_neighbor_endpoint_for_an_unconfigured_target_controller() -> None:
+    assert build_remote_logging_endpoints_by_controller(
+        "target-controller",
+        None,
+        "neighbor-controller",
+        "http://neighbor.example/loki",
+    ) == {"neighbor-controller": "http://neighbor.example/loki"}
+
+
 def test_warns_when_remote_logging_reuses_an_existing_controller() -> None:
     assert remote_logging_existing_state_warning(
         True,

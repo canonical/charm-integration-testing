@@ -3,6 +3,8 @@
 
 """Build the configuration of the log scrapers that ship Juju logs to a Loki."""
 
+import hashlib
+import re
 from typing import Any
 
 import yaml
@@ -33,6 +35,11 @@ KUBERNETES_POD_LOG_ROOT = "/var/log/pods"
 KUBERNETES_SCRAPER_NAME = "log-scraper"
 KUBERNETES_CONFIG_KEY = "config.yaml"
 KUBERNETES_NAMESPACES_KEY = "namespaces"
+KUBERNETES_NAMESPACE_PREFIX = "log-scraper-"
+_KUBERNETES_NAME_MAX_LENGTH = 63
+_CONTROLLER_NAME_MAX_LENGTH = _KUBERNETES_NAME_MAX_LENGTH - len(KUBERNETES_NAMESPACE_PREFIX)
+_CONTROLLER_NAME_HASH_LENGTH = 12
+_CONTROLLER_NAME_PREFIX_LENGTH = _CONTROLLER_NAME_MAX_LENGTH - _CONTROLLER_NAME_HASH_LENGTH - 1
 
 # Labels derived from the log file path and promoted to resource attributes, so Loki can match on them.
 PATH_LABELS = ["juju_model", "juju_application", "juju_unit_number", "juju_machine"]
@@ -48,6 +55,17 @@ KUBERNETES_POD_REGEX = r"^(?P<juju_application>.+)-(?P<juju_unit_number>\d+)$"
 _MODEL_FROM_NAMESPACE = (
     'EXPR(resource["k8s.namespace.name"] startsWith "controller-" ? "controller" : resource["k8s.namespace.name"])'
 )
+_KUBERNETES_NAME_INVALID_CHARS = re.compile(r"[^a-z0-9-]+")
+
+
+def safe_controller_name(controller: str) -> str:
+    """Return a bounded, DNS-compatible controller identifier that stays distinct after normalization."""
+    normalized = _KUBERNETES_NAME_INVALID_CHARS.sub("-", controller.lower()).strip("-")
+    if controller and normalized == controller and len(normalized) <= _CONTROLLER_NAME_MAX_LENGTH:
+        return normalized
+    suffix = hashlib.sha256(controller.encode()).hexdigest()[:_CONTROLLER_NAME_HASH_LENGTH]
+    prefix = normalized[:_CONTROLLER_NAME_PREFIX_LENGTH].rstrip("-") or "controller"
+    return f"{prefix}-{suffix}"
 
 
 def _regex_parser(regex: str, parse_from: str) -> dict[str, Any]:
@@ -233,7 +251,7 @@ def kubernetes_daemon_set(namespace: str, controller: str) -> dict[str, Any]:
                         {
                             "name": "storage",
                             "hostPath": {
-                                "path": f"{COLLECTOR_STORAGE_PATH}/{controller}",
+                                "path": f"{COLLECTOR_STORAGE_PATH}/{safe_controller_name(controller)}",
                                 "type": "DirectoryOrCreate",
                             },
                         },
