@@ -186,12 +186,14 @@ class JujuClient:
                 if pod.uid not in existing_uids:
                     raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                self.restart_workload_pod(
-                    model,
-                    pod,
-                    timeout=timeout,
+                kubernetes.restart_pod(
+                    namespace=model.model,
+                    pod_name=pod.name,
+                    uid=pod.uid,
                     application=application,
+                    unit=pod.unit,
                     existing_uids=existing_uids,
+                    timeout=timeout,
                 )
                 kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
