@@ -424,7 +424,6 @@ class TestJujuClientUnitOperations:
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
 
-
 class TestJujuClientWorkloadInstanceOperations:
     def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
