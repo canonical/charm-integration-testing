@@ -2,8 +2,11 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
+
+from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry
 
 from validators.base import ValidationResult
 
@@ -43,10 +46,23 @@ class JujuClient:
         backend: JujuBackend,
         logger: logging.Logger,
         extensions: list[JujuExtension] | None = None,
+        kubernetes_client_registry: KubernetesClientRegistry | None = None,
     ):
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []
+        self.kubernetes_client_registry = kubernetes_client_registry
+
+    def kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Resolve the shared Kubernetes client for a model, or None for machine models."""
+        cloud = self.backend.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            return None
+        if self.kubernetes_client_registry is None:
+            raise RuntimeError(f"No KubernetesClientRegistry configured for Kubernetes model {model.uri}.")
+        if not self.kubernetes_client_registry.has_cloud(cloud):
+            raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}' (model {model.uri}).")
+        return self.kubernetes_client_registry.client_for_cloud(cloud)
 
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
@@ -67,6 +83,52 @@ class JujuClient:
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
+
+    def restart_workload_pod(
+        self,
+        model: JujuModelHandle,
+        pod: CharmPod,
+        timeout: timedelta,
+        *,
+        application: str,
+        existing_uids: Collection[str],
+    ) -> str:
+        """Restart a workload pod and run model-scoped Juju extension hooks."""
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot restart workload pod for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Restarting workload pod {pod.name} in model {model.uri}.")
+        replacement_name = kubernetes.restart_pod(
+            namespace=model.model,
+            pod_name=pod.name,
+            uid=pod.uid,
+            timeout=timeout,
+            application=application,
+            unit=pod.unit,
+            existing_uids=existing_uids,
+        )
+        for extension in self.extensions:
+            extension.post_delete_workload_pod(model, replacement_name)
+        return replacement_name
+
+    def delete_workload_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a workload pod and run model-scoped Juju extension hooks."""
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot delete workload pod for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Deleting workload pod {pod_name} in model {model.uri}.")
+        kubernetes.delete_pod(namespace=model.model, pod_name=pod_name)
+        for extension in self.extensions:
+            extension.post_delete_workload_pod(model, pod_name)
+
+    def restart_statefulset(self, model: JujuModelHandle, statefulset_name: str) -> None:
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is None:
+            raise RuntimeError(f"Cannot restart StatefulSet for model {model.uri}: it is not Kubernetes-backed.")
+        self.logger.info(f"Restarting StatefulSet {statefulset_name} in model {model.uri}.")
+        kubernetes.restart_statefulset(namespace=model.model, statefulset_name=statefulset_name)
+        for extension in self.extensions:
+            extension.post_restart_statefulset(model, statefulset_name)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

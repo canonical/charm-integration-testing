@@ -2,11 +2,14 @@
 # See LICENSE file for licensing details.
 
 from .backend import KubernetesBackend, KubernetesExtension
-from .client import KubernetesClient, PodStatus
+from .client import CharmPod, KubernetesClient, PodStatus
+from .registry import KubernetesClientRegistry
 
 __all__ = [
+    "CharmPod",
     "KubernetesBackend",
     "KubernetesClient",
+    "KubernetesClientRegistry",
     "KubernetesExtension",
     "PodStatus",
 ]

@@ -20,6 +20,7 @@ from typing import Iterator
 
 import pytest
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 from resource_registry import ResourceRegistry
 from resource_tracking import (
     DEFAULT_KUBERNETES_SOURCES,
@@ -144,6 +145,7 @@ def resource_tracking_skips_by_application(
 def track_state_resources(
     request: pytest.FixtureRequest,
     juju_client: JujuClient,
+    kubernetes_client_registry: KubernetesClientRegistry,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
     resource_tracking_skips_by_application: dict[tuple[str, str, str], frozenset[str]],
@@ -175,6 +177,7 @@ def track_state_resources(
     collectors: list[ResourceCollector] = [
         KubernetesResourceCollector(
             juju_client.backend,
+            kubernetes_client_registry,
             session_resource_registry,
             sources=DEFAULT_KUBERNETES_SOURCES,
         )

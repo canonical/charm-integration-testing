@@ -13,7 +13,7 @@ from chaos_client.chaos_mesh_detection import chaos_mesh_is_available
 from chaos_client.litmus_client import LitmusChaosClient
 from chaos_client.litmus_detection import litmus_is_available
 from juju import JujuBackend, JujuModelHandle
-from kubernetes_client import KubernetesBackend
+from kubernetes_client import KubernetesBackend, KubernetesClientRegistry
 
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
@@ -65,7 +65,7 @@ def detect_initial_tools(
 def detect_chaos_tools(
     request: pytest.FixtureRequest,
     juju_backend: JujuBackend,
-    cloud_kubeconfigs: dict[str, Path],
+    kubernetes_client_registry: KubernetesClientRegistry,
     target_cloud: str,
     target_model_ref: JujuModelHandle,
     neighbor_cloud: str | None,
@@ -80,30 +80,41 @@ def detect_chaos_tools(
             models.append(neighbor_model_ref)
         checked_clients: set[int] = set()
         for model in {model.uri: model for model in models}.values():
-            kubernetes = juju_backend.get_kubernetes_client_for_model(model)
-            if kubernetes is None:
+            cloud = juju_backend.kubernetes_cloud_for_model(model)
+            if cloud is None:
                 logger.info("Chaos detection not performed for model %s: non-Kubernetes model.", model.uri)
                 continue
+            kubernetes = kubernetes_client_registry.client_for_cloud(cloud)
             if id(kubernetes) in checked_clients:
                 continue
             checked_clients.add(id(kubernetes))
-            # The backend owns this client and may reuse it after the snapshot.
+            # The registry owns this client and reuses it after the snapshot.
             tools = available_chaos_tools(kubernetes.backend)
             logger.info("Initial chaos tools for %s: %s.", model.uri, _format_tools(tools))
         return
     scopes = [(target_cloud, target_model_ref.model)]
     if neighbor_cloud is not None and neighbor_model_ref is not None:
         scopes.append((neighbor_cloud, neighbor_model_ref.model))
-    detect_initial_tools(scopes, cloud_kubeconfigs, logger)
+    for cloud, namespace in scopes:
+        if not kubernetes_client_registry.has_cloud(cloud):
+            logger.info("Chaos detection not performed for cloud %s: no kubeconfig supplied.", cloud)
+            continue
+        kubernetes = kubernetes_client_registry.client_for_cloud(cloud)
+        tools = available_chaos_tools(kubernetes.backend)
+        logger.info("Initial chaos tools for %s/%s: %s.", cloud, namespace, _format_tools(tools))
 
 
 def chaos_client_for_model(
-    backend: JujuBackend, model: JujuModelHandle, resource_constraints_client: ResourceConstraintsClient
+    backend: JujuBackend,
+    model: JujuModelHandle,
+    resource_constraints_client: ResourceConstraintsClient,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> MetaChaosClient:
     """Build experiment clients for the model's substrate."""
     tools: list[ChaosClient] = []
-    kubernetes = backend.get_kubernetes_client_for_model(model)
-    if kubernetes is not None:
+    cloud = backend.kubernetes_cloud_for_model(model)
+    if cloud is not None:
+        kubernetes = kubernetes_client_registry.client_for_cloud(cloud)
         if litmus_is_available(kubernetes.backend):
             tools.append(LitmusChaosClient(kubernetes.backend))
         if chaos_mesh_is_available(kubernetes.backend):
@@ -121,13 +132,14 @@ def chaos_client_for_model(
 def chaos_tool_for_model(
     request: pytest.FixtureRequest,
     juju_backend: JujuBackend,
+    kubernetes_client_registry: KubernetesClientRegistry,
     resource_constraints_client: ResourceConstraintsClient,
     detect_chaos_tools: None,
 ) -> Callable[[JujuModelHandle], MetaChaosClient]:
     """Provide experiment clients with cleanup at test teardown."""
 
     def resolve(model: JujuModelHandle) -> MetaChaosClient:
-        client = chaos_client_for_model(juju_backend, model, resource_constraints_client)
+        client = chaos_client_for_model(juju_backend, model, resource_constraints_client, kubernetes_client_registry)
         request.addfinalizer(client.cleanup_all)
         return client
 

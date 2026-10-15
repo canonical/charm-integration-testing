@@ -34,7 +34,7 @@ from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityE
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -191,12 +191,7 @@ class ModelLookupClientStub(JubilantClient):
         return self.models[model.uri]
 
 
-class UnusedKubernetesBackend(KubernetesBackend):
-    def __init__(self) -> None:
-        pass
-
-
-class TestModelKubernetesClient:
+class TestModelKubernetesCloud:
     @dataclass(frozen=True)
     class Params:
         label: str
@@ -210,25 +205,19 @@ class TestModelKubernetesClient:
 
     @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
     def test_uses_workload_cloud(self, params: Params) -> None:
-        # GIVEN a Kubernetes model on a different cloud from its controller
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
+        # GIVEN a Kubernetes model
         client = ModelLookupClientStub(
             {
                 TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workload-cloud")),
-                controller.uri: ShowModelStub(
-                    ModelInfoStub(type=params.controller_type, cloud=params.controller_cloud)
-                ),
             }
         )
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["workload-cloud"] = kubernetes
 
-        # WHEN resolving the workload model
-        result = backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving its cloud
+        result = backend.kubernetes_cloud_for_model(TEST_MODEL)
 
-        # THEN only the workload model's cloud is used
-        assert result is kubernetes
+        # THEN the workload model's cloud is returned without constructing a Kubernetes client
+        assert result == "workload-cloud"
         assert client.lookups == [TEST_MODEL.uri]
 
     def test_preserves_model_owner(self) -> None:
@@ -236,11 +225,8 @@ class TestModelKubernetesClient:
         model = JujuModelHandle(controller="shared", model="litmus", owner="other-user")
         client = ModelLookupClientStub({model.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="litmus"))})
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["litmus"] = kubernetes
-
-        # WHEN resolving its client, THEN the owner-qualified model is queried
-        assert backend.get_kubernetes_client_for_model(model) is kubernetes
+        # WHEN resolving its cloud, THEN the owner-qualified model is queried
+        assert backend.kubernetes_cloud_for_model(model) == "litmus"
         assert client.lookups == ["shared:other-user/litmus"]
 
     def test_machine_model_returns_none(self) -> None:
@@ -248,9 +234,8 @@ class TestModelKubernetesClient:
         client = ModelLookupClientStub({TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines"))})
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN no Kubernetes client is needed
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is None
-        assert backend._kubernetes_clients == {}
+        # WHEN resolving the model, THEN there is no Kubernetes cloud
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) is None
 
     def test_missing_kubeconfig_raises(self) -> None:
         # GIVEN a Kubernetes model whose cloud has no kubeconfig
@@ -259,9 +244,8 @@ class TestModelKubernetesClient:
         )
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN configuration failure is not treated as a machine model
-        with pytest.raises(RuntimeError, match="No kubeconfig configured for cloud 'missing'"):
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving the model, THEN the cloud is returned without checking local configuration
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "missing"
 
     def test_model_lookup_error_propagates(self) -> None:
         # GIVEN an inaccessible model
@@ -273,38 +257,75 @@ class TestModelKubernetesClient:
 
         # WHEN resolving the model, THEN the original error propagates
         with pytest.raises(RuntimeError) as exc_info:
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+            backend.kubernetes_cloud_for_model(TEST_MODEL)
         assert exc_info.value is error
 
     def test_rechecks_model_cloud(self) -> None:
-        # GIVEN a model with a previously resolved cloud
+        # GIVEN a model whose cloud changes
         model = ShowModelStub(ModelInfoStub(type="kubernetes", cloud="first"))
         client = ModelLookupClientStub({TEST_MODEL.uri: model})
         backend = JubilantBackend(client=client)
-        first = KubernetesClient(UnusedKubernetesBackend())
-        second = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients.update(first=first, second=second)
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is first
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "first"
 
-        # WHEN its cloud changes, THEN the next resolution uses the current model data
+        # WHEN its cloud changes, THEN the next lookup uses current model data
         model.info = ModelInfoStub(type="kubernetes", cloud="second")
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is second
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "second"
         assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
 
-    def test_controller_resolver_still_uses_controller_model(self) -> None:
-        # GIVEN a machine controller hosting a Kubernetes workload model
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
-        client = ModelLookupClientStub(
-            {
-                controller.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines")),
-                TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workloads")),
+
+class TestModelForNamespace:
+    class Client(JubilantClient):
+        def __init__(self, models_by_controller: dict[str, str]) -> None:
+            self.cli_client = JubilantCliStub(
+                results={
+                    ("controllers", "--format=json"): '{"controllers":{"ctrl-a":{},"ctrl-b":{}}}',
+                    **{
+                        ("models", "-c", controller, "--all", "--format=json"): output
+                        for controller, output in models_by_controller.items()
+                    },
+                }
+            )
+
+        def model(self, model: JujuModelHandle | None) -> Any:
+            assert model is None
+            return self.cli_client
+
+    def test_resolves_namespace_on_matching_cloud_and_controller(self) -> None:
+        # GIVEN a same-named namespace on two clouds/controllers
+        client = self.Client(
+            models_by_controller={
+                "ctrl-a": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"other-cloud"}]}',
+                "ctrl-b": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
             }
         )
         backend = JubilantBackend(client=client)
 
-        # WHEN using the existing controller API, THEN its meaning is unchanged
-        assert backend.get_kubernetes_client_for_controller(TEST_MODEL.controller) is None
-        assert client.lookups == [controller.uri]
+        # WHEN resolving by Kubernetes cloud and namespace
+        model = backend.model_for_namespace("litmus", "workload")
+
+        # THEN it returns the model on the matching cloud
+        assert model == JujuModelHandle(controller="ctrl-b", model="workload", owner="admin")
+        assert model.uri == "ctrl-b:admin/workload"
+
+    def test_missing_namespace_returns_none(self) -> None:
+        client = self.Client(
+            models_by_controller={"ctrl-a": '{"models":[]}', "ctrl-b": '{"models":[]}'},
+        )
+        backend = JubilantBackend(client=client)
+
+        assert backend.model_for_namespace("litmus", "missing") is None
+
+    def test_ambiguous_namespace_raises(self) -> None:
+        client = self.Client(
+            models_by_controller={
+                "ctrl-a": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
+                "ctrl-b": '{"models":[{"name":"admin/workload","short-name":"workload","owner":"admin","cloud":"litmus"}]}',
+            },
+        )
+        backend = JubilantBackend(client=client)
+
+        with pytest.raises(LookupError, match="Multiple Juju models found"):
+            backend.model_for_namespace("litmus", "workload")
 
 
 class TestJubilantClient:
@@ -1691,6 +1712,7 @@ class TestJubilantBackend:
         @dataclass
         class ModelStub:
             type: str = "kubernetes"
+            cloud: str = "test-cloud"
 
         @dataclass
         class ScpStub:
@@ -2749,7 +2771,8 @@ class TestJubilantBackend:
         def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2765,7 +2788,8 @@ class TestJubilantBackend:
         def test_register_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2790,7 +2814,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2809,7 +2834,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -3313,9 +3339,13 @@ class FollowerRestartSshStub:
 class FollowerRestartBackendStub(JubilantBackend):
     def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
         self.stub = FollowerRestartSshStub()
-        super().__init__()
-        self.snapshots = [follower_status(), follower_status()]
         self.kube = kube
+        registry = KubernetesClientRegistry(
+            {"fake-cloud": Path("fake-kubeconfig")} if kube is not None else {},
+            client_factory=lambda _: cast(KubernetesClient, kube),
+        )
+        super().__init__(kubernetes_client_registry=registry)
+        self.snapshots = [follower_status(), follower_status()]
 
     @overload
     def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
@@ -3332,8 +3362,8 @@ class FollowerRestartBackendStub(JubilantBackend):
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         return self.snapshots.pop(0)
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        return cast(KubernetesClient | None, self.kube)
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "fake-cloud" if self.kube is not None else None
 
 
 def test_restarts_only_follower_pod() -> None:
