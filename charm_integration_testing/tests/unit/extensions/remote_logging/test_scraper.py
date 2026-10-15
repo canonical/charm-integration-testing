@@ -127,9 +127,13 @@ def test_machine_collector_groups_logs_by_labels_from_the_file_name() -> None:
     config = yaml.safe_load(userdata["write_files"][0]["content"])
 
     assert config["service"]["pipelines"]["logs"]["processors"] == ["groupbyattrs", "resource", "attributes"]
-    assert config["receivers"]["filelog"]["resource"] == {"juju_controller": "ctrl", "juju_model": "model"}
-    assert [operator["type"] for operator in config["receivers"]["filelog"]["operators"]] == ["regex_parser"] * 2
-    assert config["receivers"]["filelog"]["storage"] == "file_storage"
+    receiver = config["receivers"]["filelog"]
+    assert receiver["resource"] == {"juju_controller": "ctrl", "juju_model": "model"}
+    assert receiver["include_file_name"] is True
+    assert receiver["include_file_path"] is True
+    assert [operator["type"] for operator in receiver["operators"]] == ["regex_parser"] * 2
+    assert receiver["operators"][0]["parse_from"] == 'attributes["log.file.name"]'
+    assert receiver["storage"] == "file_storage"
     assert config["extensions"] == {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}}
     assert config["service"]["extensions"] == ["file_storage"]
 

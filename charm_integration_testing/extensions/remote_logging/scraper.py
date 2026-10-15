@@ -98,6 +98,7 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
     receiver: dict[str, Any] = {
         "include": include,
         "start_at": "beginning",
+        "include_file_name": True,
         "include_file_path": True,
         "resource": resource,
         "storage": "file_storage",
