@@ -79,6 +79,15 @@ def _regex_parser(regex: str, parse_from: str) -> dict[str, Any]:
     }
 
 
+def _loki_push_endpoint(endpoint: str) -> str:
+    base_url = endpoint.rstrip("/")
+    if base_url.endswith(LOKI_PUSH_PATH):
+        return base_url
+    if base_url.endswith("/loki"):
+        return f"{base_url}/api/v1/push"
+    return f"{base_url}{LOKI_PUSH_PATH}"
+
+
 KUBERNETES_LABEL_OPERATORS: list[dict[str, Any]] = [
     {"type": "add", "field": "resource.juju_model", "value": _MODEL_FROM_NAMESPACE},
     _regex_parser(KUBERNETES_POD_REGEX, 'resource["k8s.pod.name"]'),
@@ -95,7 +104,7 @@ def _config(endpoint: str, include: list[str], resource: dict[str, str], *, kube
     }
     config: dict[str, Any] = {
         "receivers": {"filelog": receiver},
-        "exporters": {"loki": {"endpoint": f"{endpoint.rstrip('/')}{LOKI_PUSH_PATH}"}},
+        "exporters": {"loki": {"endpoint": _loki_push_endpoint(endpoint)}},
         "extensions": {"file_storage": {"directory": COLLECTOR_STORAGE_PATH}},
         "service": {
             "extensions": ["file_storage"],

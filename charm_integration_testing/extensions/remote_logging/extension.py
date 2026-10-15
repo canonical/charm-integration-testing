@@ -159,17 +159,34 @@ class RemoteLoggingExtension(JujuExtension):
         controller: str,
         model: str,
         data: dict[str, str],
-    ) -> None:
-        """Add the namespace of *model* to the scraper, restarting it so the new path is picked up."""
+    ) -> bool:
+        """Reconcile the ConfigMap and report whether a running scraper needs restarting."""
         namespace = scraper_namespace(controller)
         scraped = [name for name in data.get(KUBERNETES_NAMESPACES_KEY, "").split("\n") if name]
-        if model in scraped:
-            return
-        self.logger.debug(f"Adding namespace '{model}' to the log scraper of controller '{controller}'.")
-        kubernetes.apply_config_map(
-            namespace, kubernetes_config_map(namespace, endpoint, controller, [*scraped, model])
+        if model not in scraped:
+            scraped.append(model)
+        changed = self._reconcile_config_map(kubernetes, namespace, endpoint, controller, scraped, data)
+        if changed:
+            self.logger.debug(f"Updating log scraper configuration for controller '{controller}'.")
+        return changed
+
+    @staticmethod
+    def _reconcile_config_map(
+        kubernetes: KubernetesScraperClient,
+        namespace: str,
+        endpoint: str,
+        controller: str,
+        scraped: list[str],
+        existing_data: dict[str, str] | None,
+    ) -> bool:
+        desired_config_map = kubernetes_config_map(namespace, endpoint, controller, scraped)
+        desired_data = desired_config_map["data"]
+        changed = existing_data is not None and any(
+            existing_data.get(key) != value for key, value in desired_data.items()
         )
-        kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)
+        if existing_data is None or changed:
+            kubernetes.apply_config_map(namespace, desired_config_map)
+        return changed
 
     def _ensure_scraper(
         self,
@@ -183,7 +200,8 @@ class RemoteLoggingExtension(JujuExtension):
         data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
         if data is not None:
             kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
-            self._scrape_namespace(kubernetes, endpoint, controller, model, data)
+            if self._scrape_namespace(kubernetes, endpoint, controller, model, data):
+                kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)
             return
 
         self.logger.debug(
@@ -207,8 +225,11 @@ class RemoteLoggingExtension(JujuExtension):
     ) -> None:
         namespace = scraper_namespace(controller)
         kubernetes.ensure_namespace(namespace)
-        kubernetes.apply_config_map(namespace, kubernetes_config_map(namespace, endpoint, controller, scraped))
+        existing_data = kubernetes.read_config_map_data(namespace, KUBERNETES_SCRAPER_NAME)
+        changed = self._reconcile_config_map(kubernetes, namespace, endpoint, controller, scraped, existing_data)
         kubernetes.apply_daemon_set(namespace, kubernetes_daemon_set(namespace, controller))
+        if changed:
+            kubernetes.restart_daemon_set(namespace, KUBERNETES_SCRAPER_NAME)
         # Torn down with the controller, before it is killed: the controller's own teardown bypasses extension hooks.
         self.resource_registry.register(
             handle=handle,

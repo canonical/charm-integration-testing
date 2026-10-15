@@ -168,10 +168,16 @@ def test_kubernetes_collector_derives_the_model_from_the_namespace() -> None:
 @pytest.mark.parametrize(
     ("endpoint", "expected"),
     [
-        ("http://host/loki", "http://host/loki/loki/api/v1/push"),
-        ("http://host/loki/", "http://host/loki/loki/api/v1/push"),
-        ("https://host/loki", "https://host/loki/loki/api/v1/push"),
-        ("https://host/loki/", "https://host/loki/loki/api/v1/push"),
+        ("http://host", "http://host/loki/api/v1/push"),
+        ("http://host/", "http://host/loki/api/v1/push"),
+        ("https://host", "https://host/loki/api/v1/push"),
+        ("https://host/", "https://host/loki/api/v1/push"),
+        ("http://host/loki", "http://host/loki/api/v1/push"),
+        ("http://host/loki/", "http://host/loki/api/v1/push"),
+        ("https://host/loki", "https://host/loki/api/v1/push"),
+        ("https://host/loki/", "https://host/loki/api/v1/push"),
+        ("http://host/gateway-loki", "http://host/gateway-loki/loki/api/v1/push"),
+        ("https://host/loki/api/v1/push/", "https://host/loki/api/v1/push"),
     ],
 )
 def test_collector_exports_to_the_loki_push_api_with_juju_labels(endpoint: str, expected: str) -> None:

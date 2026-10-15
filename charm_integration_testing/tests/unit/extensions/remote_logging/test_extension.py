@@ -227,6 +227,35 @@ class TestKubernetesControllers:
 
         assert len(juju.kubernetes.restarts) == 1
 
+    def test_existing_scraper_reconciles_changed_endpoint(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER}, model_clouds={"my-model": CONTROLLER})
+        _extension(juju, logger).post_bootstrap_controller(CONTROLLER)
+        _extension(juju, logger).post_add_model(CONTROLLER, "my-model", CONTROLLER)
+        updated = _extension(juju, logger, endpoints={CONTROLLER: "https://new-observability.example/loki"})
+
+        updated.post_add_model(CONTROLLER, "my-model", CONTROLLER)
+
+        namespace = scraper_namespace(CONTROLLER)
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert yaml.safe_load(data["config.yaml"])["exporters"]["loki"]["endpoint"] == (
+            "https://new-observability.example/loki/api/v1/push"
+        )
+        assert juju.kubernetes.restarts[-1] == (namespace, KUBERNETES_SCRAPER_NAME)
+
+    def test_bootstrap_reconciles_existing_scraper_configuration(self, logger: logging.Logger) -> None:
+        juju = JujuStub(k8s_clouds={CONTROLLER})
+        _extension(juju, logger).post_bootstrap_controller(CONTROLLER)
+        updated = _extension(juju, logger, endpoints={CONTROLLER: "https://new-observability.example/loki"})
+
+        updated.post_bootstrap_controller(CONTROLLER)
+
+        namespace = scraper_namespace(CONTROLLER)
+        data = juju.kubernetes.config_maps[(namespace, KUBERNETES_SCRAPER_NAME)]["data"]
+        assert yaml.safe_load(data["config.yaml"])["exporters"]["loki"]["endpoint"] == (
+            "https://new-observability.example/loki/api/v1/push"
+        )
+        assert juju.kubernetes.restarts == [(namespace, KUBERNETES_SCRAPER_NAME)]
+
     def test_kubernetes_model_on_machine_controller_deploys_scraper(self, logger: logging.Logger) -> None:
         # GIVEN a machine controller managing a model on a Kubernetes cloud
         juju = JujuStub(k8s_clouds={"workload-k8s"}, model_clouds={"my-model": "workload-k8s"})
