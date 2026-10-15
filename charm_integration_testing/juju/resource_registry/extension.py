@@ -34,7 +34,7 @@ class JujuResourceRegistryExtension(JujuExtension):
             destroyer=lambda: self._backend.kill_controller(controller=controller),
         )
 
-    def post_add_model(self, controller: str, model: str) -> None:
+    def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
         controller_handle = JujuControllerHandle(controller=controller)
         if not self._registry.is_registered(controller_handle):
             # Controller pre-existed this session: register it with no destroyer so logs
