@@ -19,7 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry, KubernetesExtension
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 

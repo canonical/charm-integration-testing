@@ -123,10 +123,8 @@ class JujuClient:
         if not units:
             raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
         models = list(dict.fromkeys([model, *(related_models or [])]))
-        if self.backend.is_k8s_model(model):
-            kubernetes = self.kubernetes_client_for_model(model)
-            if kubernetes is None:
-                raise RuntimeError(f"Model {model.uri} is Kubernetes-backed but has no Kubernetes client.")
+        kubernetes = self.kubernetes_client_for_model(model)
+        if kubernetes is not None:
             self._rotate_kubernetes_units(kubernetes, application, model, units, models, timeout)
         else:
             if not self.backend.supports_targeted_unit_removal():
@@ -138,7 +136,6 @@ class JujuClient:
         current_units = self.application_units(application, model=model)
         if len(current_units) != len(units):
             raise RuntimeError(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
-        self.multi_model_idle_for_period(models, timeout=timeout)
         for model_ref in models:
             self.validate_model(model=model_ref, level="deep")
 
@@ -173,6 +170,8 @@ class JujuClient:
                     existing_uids=existing_uids,
                     timeout=timeout,
                 )
+                for extension in self.extensions:
+                    extension.post_restart_unit(model, unit)
                 kubernetes.wait_for_charm_pods_ready(application, model.model, len(units) + 1, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:
