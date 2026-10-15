@@ -249,6 +249,14 @@ class JubilantBackend(JujuCmdBackend):
             raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
         return value
 
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        if self.is_k8s_model(model):
+            raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
+        self.client.model(model).remove_unit(unit)
+
+    def supports_targeted_unit_removal(self) -> bool:
+        return True
+
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         try:
