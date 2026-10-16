@@ -18,9 +18,14 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 @dataclass
 class UnitOperationsClient:
     units: dict[str, Any] = field(default_factory=dict)
+    cli_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = field(default_factory=list)
 
     def model(self, model: JujuModelHandle) -> "UnitOperationsClient":
         return self
+
+    def cli(self, *args: Any, **kwargs: Any) -> str:
+        self.cli_calls.append((args, kwargs))
+        return ""
 
     def status(self) -> Any:
         return SimpleNamespace(apps={"target": SimpleNamespace(units=self.units)})
@@ -37,18 +42,21 @@ class RebootKubernetesClient:
                         annotations={"unit.juju.is/id": "target/1"},
                         deletion_timestamp=None,
                         name="target-1",
-                    )
+                        uid="target-uid",
+                        namespace=MODEL.model,
+                    ),
+                    status=None,
                 )
             ]
         )
-        self.deleted_pods: list[tuple[str, str]] = []
+        self.deleted_pods: list[tuple[str, str, str | None]] = []
 
     def get_charm_pods(self, application: str, namespace: str) -> list[Any]:
         assert (application, namespace) == ("target", MODEL.model)
         return self.pods
 
-    def delete_pod(self, namespace: str, pod_name: str) -> None:
-        self.deleted_pods.append((namespace, pod_name))
+    def delete_pod(self, namespace: str, pod_name: str, *, uid: str | None = None) -> None:
+        self.deleted_pods.append((namespace, pod_name, uid))
 
 
 class UnitRebootBackend(JubilantBackend):
@@ -69,6 +77,11 @@ class UnitRebootBackend(JubilantBackend):
     ) -> str | None:
         self.ssh_calls.append((model, application, command))
         return None
+
+
+class UnitRemovalBackend(JubilantBackend):
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return False
 
 
 def test_application_leader_returns_unit_marked_as_leader() -> None:
@@ -117,8 +130,45 @@ def test_reboot_unit_deletes_the_target_kubernetes_unit_pod() -> None:
 
     backend.reboot_unit(MODEL, "target/1")
 
-    assert kubernetes.deleted_pods == [(MODEL.model, "target-1")]
+    assert kubernetes.deleted_pods == [(MODEL.model, "target-1", "target-uid")]
     assert backend.ssh_calls == []
+
+
+@pytest.mark.parametrize("phase", ["Succeeded", "Failed"])
+def test_reboot_unit_ignores_completed_kubernetes_pods(phase: str) -> None:
+    completed = SimpleNamespace(
+        metadata=SimpleNamespace(
+            annotations={"unit.juju.is/id": "target/1"},
+            deletion_timestamp=None,
+            name="target-1-old",
+            uid="old-uid",
+        ),
+        status=SimpleNamespace(phase=phase),
+    )
+    live = SimpleNamespace(
+        metadata=SimpleNamespace(
+            annotations={"unit.juju.is/id": "target/1"},
+            deletion_timestamp=None,
+            name="target-1",
+            uid="target-uid",
+        ),
+        status=SimpleNamespace(phase="Running"),
+    )
+    kubernetes = RebootKubernetesClient([completed, live])
+    backend = UnitRebootBackend(kubernetes)
+
+    backend.reboot_unit(MODEL, "target/1")
+
+    assert kubernetes.deleted_pods == [(MODEL.model, "target-1", "target-uid")]
+
+
+def test_remove_unit_uses_noninteractive_jubilant_command() -> None:
+    client = UnitOperationsClient()
+    backend = UnitRemovalBackend(client=cast(JubilantClient, client))
+
+    backend.remove_unit(MODEL, "target/1")
+
+    assert client.cli_calls == [(("remove-unit", "target/1", "--no-prompt"), {})]
 
 
 def test_reboot_unit_rejects_ambiguous_kubernetes_pod() -> None:
@@ -128,14 +178,18 @@ def test_reboot_unit_rejects_ambiguous_kubernetes_pod() -> None:
                 annotations={"unit.juju.is/id": "target/1"},
                 deletion_timestamp=None,
                 name="target-1",
-            )
+                uid="target-uid",
+            ),
+            status=None,
         ),
         SimpleNamespace(
             metadata=SimpleNamespace(
                 annotations={"unit.juju.is/id": "target/1"},
                 deletion_timestamp=None,
                 name="target-1-duplicate",
-            )
+                uid="duplicate-uid",
+            ),
+            status=None,
         ),
     ]
     kubernetes = RebootKubernetesClient(pods)

@@ -234,7 +234,25 @@ class TestValidatorInjectorExtension:
             assert set(results.keys()) == {"myapp/0", "myapp/1"}
             assert all(len(v) == 1 for v in results.values())
 
+        def test_skips_excluded_units(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            juju.exec_responses.extend(_preinstalled_responses(_runner_json(_pass_result("db"))))
+
+            results = extension.post_validate_excluding_units(TEST_MODEL, "myapp", "simple", {"myapp/1"})
+
+            assert set(results) == {"myapp/0"}
+            assert {call[1] for call in juju.exec_calls} == {"myapp/0"}
+
     class TestPostPersistence:
+        def test_skips_excluded_units(self, extension: ValidatorInjectorExtension, juju: JujuStub) -> None:
+            juju.units_by_app["myapp"] = ["myapp/0", "myapp/1"]
+            juju.exec_responses.extend(_preinstalled_responses(_persistence_runner_json()))
+
+            results = extension.post_persistence_excluding_units(TEST_MODEL, "myapp", None, {"myapp/1"})
+
+            assert set(results) == {"myapp/0"}
+            assert {call[1] for call in juju.exec_calls} == {"myapp/0"}
+
         def test_injects_venv_then_runs_op_when_venv_absent(
             self, extension: ValidatorInjectorExtension, juju: JujuStub
         ) -> None:

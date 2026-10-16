@@ -44,6 +44,10 @@ class RecordingJujuClient:
         self.calls.append(("application_leader", application, model))
         return f"{application}/1"
 
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.calls.append(("application_units", application, model))
+        return [f"{application}/0", f"{application}/1", f"{application}/2"]
+
     def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("reboot_unit", unit, model))
         if self.reboot_error is not None:
@@ -55,10 +59,20 @@ class RecordingJujuClient:
     def wait_for_unit_available(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_available", unit, model, timeout))
 
-    def validate_model(
-        self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
+    def wait_for_unit_restart_completion(
+        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
-        self.calls.append(("validate_model", model, level, applications))
+        self.calls.append(("wait_for_unit_restart_completion", unit, model, timeout))
+
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str = "simple",
+        *,
+        applications: list[str] | None = None,
+        excluded_units: set[str] | None = None,
+    ) -> None:
+        self.calls.append(("validate_model", model, level, applications, excluded_units))
 
     def multi_model_idle_for_period(self, models: list[JujuModelHandle], timeout: timedelta | None = None) -> None:
         self.calls.append(("multi_model_idle_for_period", models, timeout))
@@ -79,11 +93,13 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
     assert client.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
+        ("application_units", "target", MODEL),
         ("reboot_unit", "target/1", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
-        ("validate_model", MODEL, "deep", ["target"]),
-        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
+        ("validate_model", MODEL, "deep", ["target"], {"target/1"}),
+        ("wait_for_unit_restart_completion", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
+        ("validate_model", MODEL, "deep", ["target"], {"target/0", "target/2"}),
     ]
 
 
@@ -92,9 +108,14 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
 
     class FailingValidationClient(RecordingJujuClient):
         def validate_model(
-            self, model: JujuModelHandle, level: str = "simple", *, applications: list[str] | None = None
+            self,
+            model: JujuModelHandle,
+            level: str = "simple",
+            *,
+            applications: list[str] | None = None,
+            excluded_units: set[str] | None = None,
         ) -> None:
-            super().validate_model(model, level, applications=applications)
+            super().validate_model(model, level, applications=applications, excluded_units=excluded_units)
             raise validation_error
 
     client = FailingValidationClient()
@@ -127,9 +148,9 @@ def test_reboot_leader_waits_for_unavailability_before_recovery_after_reboot_err
         )
 
     assert error.value is reboot_error
-    assert client.calls[3:] == [
+    assert client.calls[4:] == [
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
-        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
+        ("wait_for_unit_restart_completion", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15)),
     ]
 
@@ -146,8 +167,8 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
         "neighbor",
     )
 
-    assert ("validate_model", MODEL, "deep", ["target"]) in client.calls
-    assert ("validate_model", MODEL, "deep", ["neighbor"]) in client.calls
+    assert ("validate_model", MODEL, "deep", ["target"], {"target/1"}) in client.calls
+    assert ("validate_model", MODEL, "deep", ["neighbor"], None) in client.calls
 
 
 def test_reboot_leader_validates_neighbor_model_and_recovers() -> None:
@@ -165,16 +186,18 @@ def test_reboot_leader_validates_neighbor_model_and_recovers() -> None:
     assert juju.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
+        ("application_units", "target", MODEL),
         ("reboot_unit", "target/1", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
-        ("validate_model", MODEL, "deep", ["target"]),
-        ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
-        ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
+        ("validate_model", MODEL, "deep", ["target"], {"target/1"}),
+        ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"], None),
+        ("wait_for_unit_restart_completion", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL, NEIGHBOR_MODEL], timedelta(minutes=15)),
+        ("validate_model", MODEL, "deep", ["target"], {"target/0", "target/2"}),
     ]
 
 
-def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> None:
+def test_reboot_leader_waits_for_disruption_after_reboot_error() -> None:
     reboot_error = RuntimeError("pod deletion accepted then failed")
     client = RecordingJujuClient(reboot_error=reboot_error)
 

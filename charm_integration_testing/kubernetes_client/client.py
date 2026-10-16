@@ -498,6 +498,8 @@ class KubernetesClient:
         self,
         namespace: str,
         pod_name: str,
+        *,
+        uid: str | None = None,
     ) -> None:
         """
         Deletes the specified pod.
@@ -505,12 +507,20 @@ class KubernetesClient:
         Args:
             namespace: Namespace where the pod is located
             pod_name: Name of the pod to delete
+            uid: If provided, delete only the Pod instance with this UID.
 
         Raises:
             ApiException: If there is an error communicating with the Kubernetes API
         """
         try:
-            self.backend.core_v1_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            if uid is None:
+                self.backend.core_v1_api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            else:
+                self.backend.core_v1_api.delete_namespaced_pod(
+                    name=pod_name,
+                    namespace=namespace,
+                    body=K8sClient.V1DeleteOptions(preconditions=K8sClient.V1Preconditions(uid=uid)),
+                )
             self.logger.info(f"Pod {pod_name} in namespace {namespace} has been deleted.")
         except ApiException as e:
             self.logger.error(f"Failed to delete pod {pod_name} in namespace {namespace}: {e}")

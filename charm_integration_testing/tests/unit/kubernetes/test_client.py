@@ -68,6 +68,7 @@ class KubernetesBackendStub(KubernetesBackend):
     list_namespaced_pvcs_raises: Exception | None = None
     delete_pod_raises: Exception | None = None
     delete_pod_call_count: int = 0
+    delete_pod_body: Any = None
 
     def __post_init__(self) -> None:
         self.core_v1_api = self
@@ -92,8 +93,9 @@ class KubernetesBackendStub(KubernetesBackend):
         assert self.list_namespaced_pvcs_result is not None
         return self.list_namespaced_pvcs_result
 
-    def delete_namespaced_pod(self, name: str, namespace: str) -> None:
+    def delete_namespaced_pod(self, name: str, namespace: str, body: Any = None) -> None:
         self.delete_pod_call_count += 1
+        self.delete_pod_body = body
         if self.delete_pod_raises:
             raise self.delete_pod_raises
 
@@ -1153,6 +1155,14 @@ class TestKubernetesClientInit:
 
             # THEN delete_namespaced_pod is called once
             assert backend_stub.delete_pod_call_count == 1
+
+        def test_uid_precondition(self) -> None:
+            backend_stub = KubernetesBackendStub()
+            client = KubernetesClient(backend=backend_stub)
+
+            client.delete_pod(namespace="test-ns", pod_name="test-pod", uid="expected-uid")
+
+            assert backend_stub.delete_pod_body.preconditions.uid == "expected-uid"
 
         def test_api_exception_propagates(self) -> None:
             # GIVEN a backend stub configured to raise ApiException on delete

@@ -79,8 +79,7 @@ class JujuClient:
     def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.logger.info(f"Rebooting unit {unit}.")
         self.backend.reboot_unit(model, unit)
-        self._post_restart_unit(model, unit)
-        self.logger.info(f"Rebooted unit {unit}.")
+        self.logger.info(f"Reboot request for unit {unit} accepted.")
 
     def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
         """Delete a workload pod and dispatch its Juju lifecycle hooks."""
@@ -361,8 +360,17 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become available.")
         self.backend.wait_for_unit_available(model, unit, timeout)
 
+    def wait_for_unit_restart_completion(
+        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
+    ) -> None:
+        """Wait for a requested restart to recover, then dispatch its completion hook."""
+        self.wait_for_unit_available(unit, model, timeout)
+        self._post_restart_unit(model, unit)
+
     def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
         self.logger.info(f"Running command on unit {unit}: {command}")
+        if timeout is None:
+            return self.backend.ssh(model, unit, command)
         return self.backend.ssh(model, unit, command, timeout=timeout)
 
     @staticmethod
@@ -689,6 +697,7 @@ class JujuClient:
         *,
         applications: list[str] | None = None,
         endpoints: set[tuple[str, str]] | None = None,
+        excluded_units: set[str] | None = None,
     ) -> dict[str, list[ValidationResult]]:
         """Validate selected or all applications, and run the persistence lifecycle.
 
@@ -701,7 +710,8 @@ class JujuClient:
                 entirely (e.g. when only running a persistence op).
             applications: Application names to validate; None selects all applications.
             endpoints: (application, endpoint) pairs whose functional results count toward validation.
-                None includes all endpoints. Persistence results are always checked.
+                None includes all endpoints.
+            excluded_units: Units to skip during functional and persistence validation.
 
         Returns:
             Functional validation results by unit, excluding persistence results.
@@ -725,11 +735,18 @@ class JujuClient:
                 # Phase 2: This will trigger Ops framework validation
                 # Phase 1: This is a no-op, just a placeholder
                 for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                    results.setdefault(unit, []).extend(unit_results)
+                    if excluded_units is None or unit not in excluded_units:
+                        results.setdefault(unit, []).extend(unit_results)
 
                 # Call extensions (Phase 1 validation happens here)
                 for extension in self.extensions:
-                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                    if excluded_units is None:
+                        extension_results = extension.post_validate(model, application, level)
+                    else:
+                        extension_results = extension.post_validate_excluding_units(
+                            model, application, level, excluded_units
+                        )
+                    for unit, unit_results in extension_results.items():
                         results.setdefault(unit, []).extend(unit_results)
 
             if endpoints is not None:
@@ -742,7 +759,13 @@ class JujuClient:
                 functional_results.setdefault(unit, []).extend(unit_results)
 
             for extension, persistence_operation in persistence_operations:
-                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
+                if excluded_units is None:
+                    persistence_results = extension.post_persistence(model, application, persistence_operation)
+                else:
+                    persistence_results = extension.post_persistence_excluding_units(
+                        model, application, persistence_operation, excluded_units
+                    )
+                for unit, unit_results in persistence_results.items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:

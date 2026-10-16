@@ -296,10 +296,16 @@ class JubilantBackend(JujuCmdBackend):
             if pod.metadata is not None
             and (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
             and pod.metadata.deletion_timestamp is None
+            and pod.metadata.uid is not None
+            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
         ]
         if len(matching_pods) != 1 or matching_pods[0].metadata.name is None:
             raise RuntimeError(f"Unable to identify a single live Pod for {unit}.")
-        kubernetes.delete_pod(namespace=model.model, pod_name=matching_pods[0].metadata.name)
+        kubernetes.delete_pod(
+            namespace=model.model,
+            pod_name=matching_pods[0].metadata.name,
+            uid=matching_pods[0].metadata.uid,
+        )
 
     @staticmethod
     def _check_follower(current: jubilant.Status, application: str, expected_units: set[str], unit_name: str) -> None:
@@ -346,7 +352,7 @@ class JubilantBackend(JujuCmdBackend):
     def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
         if self.is_k8s_model(model):
             raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
-        self.client.model(model).remove_unit(unit)
+        self.client.model(model).cli("remove-unit", unit, "--no-prompt")
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:

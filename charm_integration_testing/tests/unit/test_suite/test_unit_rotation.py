@@ -51,6 +51,7 @@ class RecordingRotationJujuClient(JujuClient):
         *,
         applications: list[str] | None = None,
         endpoints: set[tuple[str, str]] | None = None,
+        excluded_units: set[str] | None = None,
     ) -> dict[str, list[ValidationResult]]:
         self.recorder.validate_model(model, level or "simple")
         return {}
