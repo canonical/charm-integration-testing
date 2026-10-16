@@ -67,7 +67,7 @@ class MigrationFailureAfterMoveStub(JujuStub):
         self.current_controller = target_controller
         raise RuntimeError("Migration command failed after moving the model")
 
-    def model_exists(self, model: JujuModelHandle) -> bool:
+    def model_exists(self, model: JujuModelHandle) -> bool | None:
         return model.controller == self.current_controller
 
     def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
