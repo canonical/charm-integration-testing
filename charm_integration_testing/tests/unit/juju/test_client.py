@@ -195,6 +195,15 @@ class ExtensionStub(JujuExtension):
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
 
+    def post_validate_excluding_units(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        return {
+            unit: results
+            for unit, results in self.post_validate(model, application, level).items()
+            if unit not in excluded_units
+        }
+
 
 class PersistenceExtensionStub(JujuExtension):
     """Extension that returns configurable persistence results and records how it was called."""
@@ -651,6 +660,32 @@ class TestJujuClientValidateModel:
 
         assert set(results) == {"myapp/0"}
         assert results["myapp/0"] == [_pass(), _pass()]
+
+    def test_excluded_units_require_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class ExtensionWithoutExclusion(JujuExtension):
+            def post_validate(
+                self, model: JujuModelHandle, application: str, level: str
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [ExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_validate_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], excluded_units={"myapp/1"})
+
+    def test_excluded_units_require_persistence_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class PersistenceExtensionWithoutExclusion(JujuExtension):
+            def post_persistence(
+                self, model: JujuModelHandle, application: str, persistence: str | None = None
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [PersistenceExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_persistence_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], level=None, excluded_units={"myapp/1"})
 
     def test_raises_when_backend_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN the backend returns a FAIL result
