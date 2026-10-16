@@ -12,6 +12,29 @@ from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
 
 
+def _restore_application_scale(
+    juju_client: JujuClient,
+    application: str,
+    leader: str,
+    model: JujuModelHandle,
+    models: list[JujuModelHandle],
+    original_units: int,
+    removal_attempted: bool,
+    removal_request_returned: bool,
+    removal_settled: bool,
+) -> None:
+    restore_scale = True
+    if removal_attempted and not removal_settled:
+        if removal_request_returned:
+            juju_client.wait_for_unit_removal(leader, model=model, timeout=timedelta(minutes=15))
+        else:
+            juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+            restore_scale = juju_client.num_units(application, model=model) != original_units
+    if restore_scale:
+        juju_client.scale_application(application, original_units, model=model)
+    juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+
+
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
 def test_scale_remove_leader(
     juju_client: JujuClient,
@@ -38,20 +61,6 @@ def test_scale_remove_leader(
     removal_attempted = False
     removal_request_returned = False
     removal_settled = False
-    restore_scale = True
-
-    def restore_application() -> None:
-        nonlocal removal_settled, restore_scale
-        if removal_attempted and not removal_settled:
-            if removal_request_returned:
-                juju_client.wait_for_unit_removal(leader, model=target_model_ref, timeout=timedelta(minutes=15))
-            else:
-                juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
-                restore_scale = juju_client.num_units(target_application, model=target_model_ref) != original_units
-            removal_settled = True
-        if restore_scale:
-            juju_client.scale_application(target_application, original_units, model=target_model_ref)
-        juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
 
     try:
         removal_attempted = True
@@ -67,9 +76,29 @@ def test_scale_remove_leader(
             )
     except Exception as operation_error:
         try:
-            restore_application()
+            _restore_application_scale(
+                juju_client,
+                target_application,
+                leader,
+                target_model_ref,
+                models,
+                original_units,
+                removal_attempted,
+                removal_request_returned,
+                removal_settled,
+            )
         except Exception as restoration_error:
             raise operation_error from restoration_error
         raise
     else:
-        restore_application()
+        _restore_application_scale(
+            juju_client,
+            target_application,
+            leader,
+            target_model_ref,
+            models,
+            original_units,
+            removal_attempted,
+            removal_request_returned,
+            removal_settled,
+        )

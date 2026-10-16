@@ -2,12 +2,10 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
-from typing import Any, Callable, cast
+from typing import cast
 
 import pytest
-from juju import JujuClient, JujuModelHandle
-from kubernetes import client as K8sClient  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient, PodStatus
+from juju import JujuClient, JujuModelHandle, JujuWorkloadInstance
 from test_suite import test_reboot_leader as reboot_leader
 
 from bundle_builder_x import Charm, CharmChannel
@@ -31,9 +29,15 @@ def _charm(*, ha_units: int = 3, subordinate: bool = False) -> Charm:
 
 
 class RecordingJujuClient:
-    def __init__(self, ssh_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        ssh_error: Exception | None = None,
+        delete_pod_error: Exception | None = None,
+    ) -> None:
         self.calls: list[tuple[object, ...]] = []
         self.ssh_error = ssh_error
+        self.delete_pod_error = delete_pod_error
+        self.replacement_seen = False
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -42,6 +46,35 @@ class RecordingJujuClient:
     def application_leader(self, application: str, model: JujuModelHandle) -> str:
         self.calls.append(("application_leader", application, model))
         return f"{application}/1"
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.calls.append(("application_units", application, model))
+        return [f"{application}/{unit}" for unit in range(3)]
+
+    def ready_workload_instances_by_unit(
+        self, application: str, units: list[str], model: JujuModelHandle, timeout: timedelta
+    ) -> dict[str, JujuWorkloadInstance]:
+        self.calls.append(("ready_workload_instances_by_unit", application, units, model, timeout))
+        uid = "uid-replacement" if self.replacement_seen else None
+        return {
+            unit: JujuWorkloadInstance(
+                unit=unit,
+                name=f"{application}-{unit.rsplit('/', maxsplit=1)[1]}",
+                identifier=uid if unit == f"{application}/1" and uid else f"uid-{unit.rsplit('/', maxsplit=1)[1]}",
+            )
+            for unit in units
+        }
+
+    def wait_for_workload_instances_ready(
+        self, application: str, expected_count: int, model: JujuModelHandle, timeout: timedelta
+    ) -> None:
+        self.calls.append(("wait_for_workload_instances_ready", application, expected_count, model, timeout))
+        self.replacement_seen = True
+
+    def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        self.calls.append(("delete_pod", model, pod_name))
+        if self.delete_pod_error is not None:
+            raise self.delete_pod_error
 
     def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
         self.calls.append(("ssh", unit, command, model))
@@ -63,45 +96,6 @@ class RecordingJujuClient:
         self.calls.append(("multi_model_idle_for_period", models, timeout))
 
 
-def _pod(name: str, uid: str, unit: str) -> K8sClient.V1Pod:
-    return K8sClient.V1Pod(
-        metadata=K8sClient.V1ObjectMeta(name=name, uid=uid, annotations={"unit.juju.is/id": unit}),
-        status=K8sClient.V1PodStatus(phase="Running"),
-    )
-
-
-class RecordingKubernetesClient:
-    def __init__(self) -> None:
-        self.pods = [_pod("target-0", "uid-0", "target/0"), _pod("target-1", "uid-1", "target/1")]
-        self.calls: list[tuple[object, ...]] = []
-
-    def get_charm_pods(self, application_name: str, model: str) -> list[K8sClient.V1Pod]:
-        assert application_name == "target"
-        assert model == MODEL.model
-        return self.pods
-
-    def delete_pod(self, namespace: str, pod_name: str) -> None:
-        self.calls.append(("delete_pod", namespace, pod_name))
-        self.pods = [pod for pod in self.pods if pod.metadata.name != pod_name]
-        self.pods.append(_pod("target-2", "uid-unrelated", "target/0"))
-
-    def wait(self, check: Callable[[], Any], timeout_message: str, timeout: timedelta | None = None) -> Any:
-        self.calls.append(("wait", timeout_message, timeout))
-        if "was not removed" in timeout_message:
-            return check()
-
-        assert check() is None
-        replacement = _pod("target-1", "uid-replacement", "target/1")
-        self.pods.append(replacement)
-        assert check() is replacement
-        return replacement
-
-    def wait_for_pod_status(
-        self, pod_name: str, namespace: str, target_status: PodStatus, timeout: timedelta | None = None
-    ) -> None:
-        self.calls.append(("wait_for_pod_status", pod_name, namespace, target_status, timeout))
-
-
 def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
     client = RecordingJujuClient()
 
@@ -111,7 +105,6 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
         "target",
         "machine",
         _charm(),
-        None,
         None,
         None,
     )
@@ -148,7 +141,6 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
             _charm(),
             None,
             None,
-            None,
         )
 
     assert client.calls[-1] == ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
@@ -165,7 +157,6 @@ def test_reboot_leader_waits_for_unavailability_before_recovery_after_ssh_error(
             "target",
             "machine",
             _charm(),
-            None,
             None,
             None,
         )
@@ -189,7 +180,6 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
         _charm(),
         None,
         "neighbor",
-        None,
     )
 
     assert ("validate_model", MODEL, "deep", ["target"]) in client.calls
@@ -198,7 +188,6 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
 
 def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_recovery() -> None:
     juju = RecordingJujuClient()
-    kubernetes = RecordingKubernetesClient()
 
     reboot_leader.test_reboot_leader(
         cast(JujuClient, juju),
@@ -208,21 +197,50 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
         _charm(),
         NEIGHBOR_MODEL,
         "neighbor",
-        cast(KubernetesClient, kubernetes),
     )
 
-    assert kubernetes.calls == [
-        ("delete_pod", MODEL.model, "target-1"),
-        ("wait", "Leader Pod target-1 was not removed.", timedelta(minutes=15)),
-        ("wait", "Replacement Pod for leader target/1 did not appear.", timedelta(minutes=15)),
-        ("wait_for_pod_status", "target-1", MODEL.model, PodStatus.RUNNING, timedelta(minutes=15)),
-    ]
     assert juju.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
+        ("application_units", "target", MODEL),
+        (
+            "ready_workload_instances_by_unit",
+            "target",
+            ["target/0", "target/1", "target/2"],
+            MODEL,
+            timedelta(minutes=15),
+        ),
+        ("delete_pod", MODEL, "target-1"),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
+        ("wait_for_workload_instances_ready", "target", 3, MODEL, timedelta(minutes=15)),
+        (
+            "ready_workload_instances_by_unit",
+            "target",
+            ["target/0", "target/1", "target/2"],
+            MODEL,
+            timedelta(minutes=15),
+        ),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL, NEIGHBOR_MODEL], timedelta(minutes=15)),
     ]
+
+
+def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> None:
+    delete_error = RuntimeError("delete accepted then failed")
+    client = RecordingJujuClient(delete_pod_error=delete_error)
+
+    with pytest.raises(RuntimeError, match="delete accepted then failed") as error:
+        reboot_leader.test_reboot_leader(
+            cast(JujuClient, client),
+            MODEL,
+            "target",
+            "kubernetes",
+            _charm(),
+            None,
+            None,
+        )
+
+    assert error.value is delete_error
+    assert ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)) in client.calls

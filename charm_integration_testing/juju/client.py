@@ -17,6 +17,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuWorkloadInstance,
 )
 from .version import JujuVersion
 
@@ -96,6 +97,47 @@ class JujuClient:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
 
+    def ready_workload_instances_by_unit(
+        self, application: str, units: Collection[str], model: JujuModelHandle, timeout: timedelta
+    ) -> dict[str, JujuWorkloadInstance]:
+        self.logger.info(f"Getting ready workload instances for {application}.")
+        return self.backend.ready_workload_instances_by_unit(model, application, units, timeout)
+
+    def workload_instance_ids(self, application: str, model: JujuModelHandle) -> set[str]:
+        self.logger.info(f"Getting workload instance IDs for {application}.")
+        return self.backend.workload_instance_ids(model, application)
+
+    def wait_for_workload_instances_ready(
+        self, application: str, expected_count: int, model: JujuModelHandle, timeout: timedelta
+    ) -> None:
+        self.logger.info(f"Waiting {timeout} for {expected_count} ready workload instances of {application}.")
+        self.backend.wait_for_workload_instances_ready(model, application, expected_count, timeout)
+
+    def restart_workload_instance(
+        self,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        model: JujuModelHandle,
+        timeout: timedelta,
+    ) -> str:
+        self.logger.info(f"Restarting workload instance {instance.name} for unit {instance.unit}.")
+        replacement = self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
+        for extension in self.extensions:
+            extension.post_restart_unit(model, instance.unit)
+        return replacement
+
+    def wait_for_workload_instances_replaced(
+        self,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        model: JujuModelHandle,
+        timeout: timedelta,
+    ) -> None:
+        self.logger.info(f"Waiting {timeout} for replacement workload instances of {application}.")
+        self.backend.wait_for_workload_instances_replaced(model, application, expected_count, previous_ids, timeout)
+
     def rotate_application_units(
         self,
         application: str,
@@ -133,23 +175,21 @@ class JujuClient:
         models: list[JujuModelHandle],
         timeout: timedelta,
     ) -> None:
-        instances_by_unit = self.backend.ready_workload_instances_by_unit(model, application, units, timeout)
+        instances_by_unit = self.ready_workload_instances_by_unit(application, units, model, timeout)
         original_ids = {instance.identifier for instance in instances_by_unit.values()}
 
         try:
             self.scale_application(application, len(units) + 1, model=model)
-            self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
+            self.wait_for_workload_instances_ready(application, len(units) + 1, model, timeout)
             self.multi_model_idle_for_period(models, timeout=timeout)
             for unit in units:
                 instance = instances_by_unit[unit]
-                existing_ids = self.backend.workload_instance_ids(model, application)
+                existing_ids = self.workload_instance_ids(application, model)
                 if instance.identifier not in existing_ids:
                     raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
-                for extension in self.extensions:
-                    extension.post_restart_unit(model, unit)
-                self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
+                self.restart_workload_instance(application, instance, existing_ids, model, timeout)
+                self.wait_for_workload_instances_ready(application, len(units) + 1, model, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:
                     self.validate_model(model=model_ref, level="simple")
@@ -170,7 +210,7 @@ class JujuClient:
         else:
             self._restore_kubernetes_unit_count(application, model, len(units), original_ids, models, timeout)
 
-        self.backend.wait_for_workload_instances_replaced(model, application, len(units), original_ids, timeout)
+        self.wait_for_workload_instances_replaced(application, len(units), original_ids, model, timeout)
 
     def _restore_kubernetes_unit_count(
         self,
@@ -183,10 +223,8 @@ class JujuClient:
     ) -> None:
         current_units = self.application_units(application, model=model)
         if len(current_units) > unit_count:
-            self.backend.wait_for_workload_instances_replaced(
-                model, application, len(current_units), previous_ids, timeout
-            )
-            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
+            self.wait_for_workload_instances_replaced(application, len(current_units), previous_ids, model, timeout)
+            self.ready_workload_instances_by_unit(application, current_units, model, timeout)
 
         cleanup_errors: list[Exception] = []
         try:
@@ -198,7 +236,7 @@ class JujuClient:
         except Exception as error:
             cleanup_errors.append(error)
         try:
-            self.backend.wait_for_workload_instances_ready(model, application, unit_count, timeout)
+            self.wait_for_workload_instances_ready(application, unit_count, model, timeout)
         except Exception as convergence_error:
             cleanup_errors.append(convergence_error)
         try:
@@ -207,7 +245,7 @@ class JujuClient:
                 raise RuntimeError(
                     f"Expected {unit_count} units after restoring Kubernetes capacity, found {len(current_units)}."
                 )
-            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
+            self.ready_workload_instances_by_unit(application, current_units, model, timeout)
         except Exception as mapping_error:
             cleanup_errors.append(mapping_error)
 

@@ -5,12 +5,35 @@ from datetime import timedelta
 
 import pytest
 from juju import JujuClient, JujuModelHandle
-from kubernetes_client import KubernetesClient, PodStatus
 
 from bundle_builder_x import Charm
 
 from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
+
+_TIMEOUT = timedelta(minutes=15)
+
+
+def _wait_for_leader_recovery(
+    juju_client: JujuClient,
+    leader: str,
+    application: str,
+    model: JujuModelHandle,
+    models: list[JujuModelHandle],
+    workload_units: list[str] | None,
+    previous_workload_ids: set[str] | None,
+) -> None:
+    if workload_units is not None and previous_workload_ids is not None:
+        juju_client.wait_for_workload_instances_ready(application, len(workload_units), model, _TIMEOUT)
+        instances = juju_client.ready_workload_instances_by_unit(application, workload_units, model, _TIMEOUT)
+        replacement = instances.get(leader)
+        if replacement is None:
+            raise RuntimeError(f"No ready workload instance was found for leader {leader}.")
+        if replacement.identifier in previous_workload_ids:
+            raise RuntimeError(f"Workload instance for leader {leader} was not replaced.")
+
+    juju_client.wait_for_unit_available(leader, model=model, timeout=_TIMEOUT)
+    juju_client.multi_model_idle_for_period(models, timeout=_TIMEOUT)
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
@@ -22,7 +45,6 @@ def test_reboot_leader(
     target_deployed_charm: Charm | None,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str | None,
-    kubernetes_client: KubernetesClient | None,
 ) -> None:
     charm = require_principal_charm(target_deployed_charm)
     current_units = juju_client.num_units(target_application, model=target_model_ref)
@@ -30,99 +52,36 @@ def test_reboot_leader(
         pytest.fail(f"{target_application} has {current_units} units, fewer than its HA minimum of {charm.ha_units}.")
 
     leader = juju_client.application_leader(target_application, model=target_model_ref)
-    old_pod_uids: set[str] = set()
-    leader_pod_name: str | None = None
-    leader_pod_uid: str | None = None
+    workload_units: list[str] | None = None
+    previous_workload_ids: set[str] | None = None
+    leader_workload_name: str | None = None
     if target_platform == "kubernetes":
-        if kubernetes_client is None:
-            pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
-        pods = kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
-        leader_pods = [
-            pod
-            for pod in pods
-            if (pod.metadata.annotations or {}).get("unit.juju.is/id") == leader
-            and pod.metadata.deletion_timestamp is None
-        ]
-        if len(leader_pods) != 1:
-            pytest.fail(f"Expected one live Pod for leader {leader}, found {len(leader_pods)}.")
-        if any(pod.metadata.uid is None for pod in pods):
-            pytest.fail("Expected every target Pod to have a UID before restarting the leader.")
-        old_pod_uids = {pod.metadata.uid for pod in pods if pod.metadata.uid is not None}
-        leader_pod_name = leader_pods[0].metadata.name
-        leader_pod_uid = leader_pods[0].metadata.uid
-        if leader_pod_name is None:
-            pytest.fail(f"Leader Pod for {leader} has no name.")
-        if leader_pod_uid is None:
-            pytest.fail(f"Leader Pod for {leader} has no UID.")
+        workload_units = juju_client.application_units(target_application, model=target_model_ref)
+        instances = juju_client.ready_workload_instances_by_unit(
+            target_application, workload_units, target_model_ref, _TIMEOUT
+        )
+        if leader not in instances:
+            pytest.fail(f"Expected a ready workload instance for leader {leader}.")
+        leader_workload_name = instances[leader].name
+        previous_workload_ids = {instance.identifier for instance in instances.values()}
 
     models = [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
-    reboot_attempted = False
+    restart_attempted = False
     unit_unavailability_observed = False
 
-    def wait_for_unit_unavailability() -> None:
-        nonlocal unit_unavailability_observed
-        juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=timedelta(minutes=15))
-        unit_unavailability_observed = True
-
-    def restart_leader() -> None:
-        nonlocal reboot_attempted
+    try:
+        restart_attempted = True
         if target_platform == "kubernetes":
-            assert kubernetes_client is not None
-            assert leader_pod_name is not None
-            assert leader_pod_uid is not None
-            kubernetes_client.delete_pod(target_model_ref.model, leader_pod_name)
-            kubernetes_client.wait(
-                check=lambda: (
-                    True
-                    if all(
-                        pod.metadata.uid != leader_pod_uid
-                        for pod in kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
-                    )
-                    else None
-                ),
-                timeout_message=f"Leader Pod {leader_pod_name} was not removed.",
-                timeout=timedelta(minutes=15),
-            )
+            assert leader_workload_name is not None
+            juju_client.delete_pod(target_model_ref, leader_workload_name)
         else:
-            reboot_attempted = True
             juju_client.ssh(
                 leader,
                 "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
                 model=target_model_ref,
             )
-
-    def wait_for_recovery() -> None:
-        if target_platform == "kubernetes":
-            assert kubernetes_client is not None
-            replacement = kubernetes_client.wait(
-                check=lambda: next(
-                    (
-                        pod
-                        for pod in kubernetes_client.get_charm_pods(target_application, model=target_model_ref.model)
-                        if (pod.metadata.annotations or {}).get("unit.juju.is/id") == leader
-                        and pod.metadata.uid is not None
-                        and pod.metadata.uid not in old_pod_uids
-                        and pod.metadata.deletion_timestamp is None
-                    ),
-                    None,
-                ),
-                timeout_message=f"Replacement Pod for leader {leader} did not appear.",
-                timeout=timedelta(minutes=15),
-            )
-            if replacement.metadata.name is None:
-                pytest.fail(f"Replacement Pod for leader {leader} has no name.")
-            kubernetes_client.wait_for_pod_status(
-                pod_name=replacement.metadata.name,
-                namespace=target_model_ref.model,
-                target_status=PodStatus.RUNNING,
-                timeout=timedelta(minutes=15),
-            )
-        juju_client.wait_for_unit_available(leader, model=target_model_ref, timeout=timedelta(minutes=15))
-        juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
-
-    try:
-        restart_leader()
-        wait_for_unit_unavailability()
+        juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=_TIMEOUT)
+        unit_unavailability_observed = True
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
         if neighbor_application is not None:
             juju_client.validate_model(
@@ -130,11 +89,27 @@ def test_reboot_leader(
             )
     except Exception as operation_error:
         try:
-            if reboot_attempted and not unit_unavailability_observed:
-                wait_for_unit_unavailability()
-            wait_for_recovery()
+            if restart_attempted and not unit_unavailability_observed:
+                juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=_TIMEOUT)
+            _wait_for_leader_recovery(
+                juju_client,
+                leader,
+                target_application,
+                target_model_ref,
+                models,
+                workload_units,
+                previous_workload_ids,
+            )
         except Exception as recovery_error:
             raise operation_error from recovery_error
         raise
     else:
-        wait_for_recovery()
+        _wait_for_leader_recovery(
+            juju_client,
+            leader,
+            target_application,
+            target_model_ref,
+            models,
+            workload_units,
+            previous_workload_ids,
+        )
