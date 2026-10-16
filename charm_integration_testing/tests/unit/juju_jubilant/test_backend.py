@@ -276,13 +276,13 @@ class TestModelExists:
         ],
         ids=["already-migrated", "migration-in-progress"],
     )
-    def test_returns_false_when_model_is_temporarily_unavailable_during_migration(self, error_stderr: str) -> None:
+    def test_returns_none_when_model_is_temporarily_unavailable_during_migration(self, error_stderr: str) -> None:
         error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr=error_stderr)
         client = ModelLookupClientStub(
             {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"), error=error)}
         )
 
-        assert not JubilantBackend(client=client).model_exists(TEST_MODEL)
+        assert JubilantBackend(client=client).model_exists(TEST_MODEL) is None
 
     def test_raises_unrelated_cli_errors(self) -> None:
         error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr="ERROR connection refused")

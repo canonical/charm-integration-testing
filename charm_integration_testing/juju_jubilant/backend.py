@@ -115,13 +115,17 @@ def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: Ju
     # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
     controller_matches = model.controller.lower() in err_msg
     is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
-    is_migrating = (
+    return is_missing or _is_model_migration_error(error)
+
+
+def _is_model_migration_error(error: jubilant.CLIError) -> bool:
+    err_msg = error.stderr.lower()
+    return (
         "has been migrated to controller" in err_msg
         or "migration in progress" in err_msg
         # e.stderr: 'ERROR model cache: model "<uuid>" did not appear in cache timeout\n'
         or "did not appear in cache timeout" in err_msg
     )
-    return is_missing or is_migrating
 
 
 class JubilantBackend(JujuCmdBackend):
@@ -1111,10 +1115,12 @@ class JubilantBackend(JujuCmdBackend):
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
 
-    def model_exists(self, model: JujuModelHandle) -> bool:
+    def model_exists(self, model: JujuModelHandle) -> bool | None:
         try:
             self.client.model(model).show_model()
         except jubilant.CLIError as exc:
+            if _is_model_migration_error(exc):
+                return None
             if _is_transient_model_unavailability_error(exc, model):
                 return False
             message = f"{exc.stderr or ''}\n{exc.stdout or ''}".casefold()

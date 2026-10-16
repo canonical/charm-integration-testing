@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import time
 from datetime import timedelta
 from typing import MutableMapping
 
@@ -8,6 +9,9 @@ from juju import JujuBackend, JujuExtension, JujuModelHandle
 from resource_registry import ResourceRegistry
 from s3_storage import S3Provider
 from s3_storage.storage import S3_PATH
+
+_INTEGRATOR_WAIT_TIMEOUT = timedelta(minutes=10)
+_UNIT_POLL_INTERVAL = 1
 
 
 class S3IntegratorExtension(JujuExtension):
@@ -40,10 +44,12 @@ class S3IntegratorExtension(JujuExtension):
             if provider is None:
                 raise RuntimeError(
                     f"S3 integrator '{application}' in model '{model.resource_id}' has no S3 provider; "
-                    "configure this model's environment with s3-swift-secret or S3_ENDPOINT credentials"
+                    "configure this model with either s3-swift-secret variables (S3_OS_* and "
+                    "S3_CLEANUP_ACCESS_KEY/S3_CLEANUP_SECRET_KEY) or S3_ENDPOINT, S3_ACCESS_KEY, and "
+                    "S3_SECRET_KEY"
                 )
-            self.juju.wait_application_scaled(model, application, timedelta(minutes=10))
-            self.juju.wait_application_settled(model, application, timedelta(minutes=10))
+            self.juju.wait_application_scaled(model, application, _INTEGRATOR_WAIT_TIMEOUT)
+            self.juju.wait_application_settled(model, application, _INTEGRATOR_WAIT_TIMEOUT)
             if self.juju.num_units(model, application) == 0:
                 continue
             bucket_resource = provider.new_bucket()
@@ -74,3 +80,25 @@ class S3IntegratorExtension(JujuExtension):
                     "s3-api-version": "s3v4",
                 },
             )
+
+    def post_scale(self, model: JujuModelHandle) -> None:
+        self.post_deploy(model)
+
+    def post_scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        app_info = self.juju.list_applications(model).get(application)
+        if (
+            num > 0
+            and app_info is not None
+            and app_info.charm == "s3-integrator"
+            and not self.juju.get_application_config(model, application).get("endpoint")
+            and model.resource_id in self.providers
+        ):
+            self._wait_for_first_unit(model, application)
+        self.post_deploy(model)
+
+    def _wait_for_first_unit(self, model: JujuModelHandle, application: str) -> None:
+        deadline = time.monotonic() + _INTEGRATOR_WAIT_TIMEOUT.total_seconds()
+        while self.juju.num_units(model, application) == 0:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for an s3-integrator unit in '{model.resource_id}'")
+            time.sleep(_UNIT_POLL_INTERVAL)
