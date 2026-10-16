@@ -528,10 +528,16 @@ class TestJujuClientWorkloadInstanceOperations:
 
         assert extension.restarted_units == [(model, "app/1")]
 
-    def test_reboot_unit_dispatches_lifecycle_hook_after_restart_completion(self) -> None:
+    def test_restart_completion_dispatches_hook_before_waiting_for_availability(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
         backend = RebootUnitBackendStub()
-        extension = RestartLifecycleExtension()
+
+        class OrderingExtension(RestartLifecycleExtension):
+            def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+                assert backend.available_units == []
+                super().post_restart_unit(model, unit)
+
+        extension = OrderingExtension()
         client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
 
         client.reboot_unit("app/1", model)

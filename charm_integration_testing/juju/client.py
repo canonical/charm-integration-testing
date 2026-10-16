@@ -363,9 +363,9 @@ class JujuClient:
     def wait_for_unit_restart_completion(
         self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
-        """Wait for a requested restart to recover, then dispatch its completion hook."""
-        self.wait_for_unit_available(unit, model, timeout)
+        """Dispatch the restart hook, then wait for the unit to become available."""
         self._post_restart_unit(model, unit)
+        self.wait_for_unit_available(unit, model, timeout)
 
     def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
         self.logger.info(f"Running command on unit {unit}: {command}")
