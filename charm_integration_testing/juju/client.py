@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from datetime import timedelta
 from pathlib import Path
 
@@ -57,27 +57,26 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
 
+    def _run_extension_hooks(self, hook: Callable[[JujuExtension], None]) -> None:
+        for extension in self.extensions:
+            hook(extension)
+
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
-
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_scale(model)
+        self._run_extension_hooks(lambda extension: extension.post_scale(model))
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
         unit = self.backend.restart_follower(model, application, timeout)
-        for extension in self.extensions:
-            extension.post_restart_unit(model, unit)
+        self._run_extension_hooks(lambda extension: extension.post_restart_unit(model, unit))
         self.logger.info(f"Restarted follower {unit}.")
         return unit
 
     def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.logger.info(f"Rebooting unit {unit}.")
         self.backend.reboot_unit(model, unit)
-        for extension in self.extensions:
-            extension.post_restart_unit(model, unit)
+        self._run_extension_hooks(lambda extension: extension.post_restart_unit(model, unit))
         self.logger.info(f"Rebooted unit {unit}.")
 
     def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
@@ -85,16 +84,12 @@ class JujuClient:
         if not self.backend.is_k8s_model(model):
             raise ValueError(f"Cannot delete a Kubernetes pod in non-Kubernetes model {model.uri}.")
         self.backend.delete_workload_instance(model, pod_name)
-        for extension in self.extensions:
-            extension.post_delete_pod(model, pod_name)
+        self._run_extension_hooks(lambda extension: extension.post_delete_pod(model, pod_name))
 
     def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.logger.info(f"Removing unit {unit}.")
         self.backend.remove_unit(model, unit)
-
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_scale(model)
+        self._run_extension_hooks(lambda extension: extension.post_scale(model))
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
@@ -130,8 +125,7 @@ class JujuClient:
     ) -> str:
         self.logger.info(f"Restarting workload instance {instance.name} for unit {instance.unit}.")
         replacement = self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
-        for extension in self.extensions:
-            extension.post_restart_unit(model, instance.unit)
+        self._run_extension_hooks(lambda extension: extension.post_restart_unit(model, instance.unit))
         return replacement
 
     def wait_for_workload_instances_replaced(
@@ -457,9 +451,7 @@ class JujuClient:
         endpoint_2: JujuIntegrationApplication,
         model: JujuModelHandle,
     ) -> None:
-        # Call extensions
-        for extension in self.extensions:
-            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
+        self._run_extension_hooks(lambda extension: extension.pre_remove_integration(model, endpoint_1, endpoint_2))
 
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
@@ -471,9 +463,7 @@ class JujuClient:
     ) -> None:
         self._deploy_bundle_phase(model, Path(bundle))
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_deploy(model)
+        self._run_extension_hooks(lambda extension: extension.post_deploy(model))
 
     def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
         """Deploy a bundle file directly via the backend, without invoking extensions.
@@ -562,8 +552,7 @@ class JujuClient:
         # Call extensions once per model, now that every model reflects its final, fully-related
         # topology (dict.fromkeys preserves first-seen order while de-duplicating models).
         for model in dict.fromkeys(model for _, model in bundles):
-            for extension in self.extensions:
-                extension.post_deploy(model)
+            self._run_extension_hooks(lambda extension: extension.post_deploy(model))
 
     def refresh_application(
         self,
@@ -582,9 +571,7 @@ class JujuClient:
         self.backend.refresh_application(model, application, revision=revision, channel=channel)
 
     def remove_applications(self, *applications: str, model: JujuModelHandle) -> None:
-        # Call extensions
-        for extension in self.extensions:
-            extension.pre_remove(model, *applications)
+        self._run_extension_hooks(lambda extension: extension.pre_remove(model, *applications))
 
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
@@ -835,9 +822,7 @@ class JujuClient:
             metadata_source=metadata_source,
         )
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_bootstrap_controller(controller)
+        self._run_extension_hooks(lambda extension: extension.post_bootstrap_controller(controller))
 
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         for extension in self.extensions:
@@ -848,9 +833,7 @@ class JujuClient:
         )
         self.backend.add_model(controller=controller, model=model, model_config=model_config, cloud=cloud)
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_add_model_with_cloud(controller, model, cloud)
+        self._run_extension_hooks(lambda extension: extension.post_add_model_with_cloud(controller, model, cloud))
 
     def add_cloud(self, cloud: str, controller: str) -> None:
         self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")
@@ -863,15 +846,11 @@ class JujuClient:
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.pre_kill_controller(controller)
+        self._run_extension_hooks(lambda extension: extension.pre_kill_controller(controller))
 
         self.backend.kill_controller(controller=controller)
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_kill_controller(controller)
+        self._run_extension_hooks(lambda extension: extension.post_kill_controller(controller))
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.logger.info(
@@ -881,9 +860,9 @@ class JujuClient:
             model_name=model_name, source_controller=source_controller, target_controller=target_controller
         )
 
-        # Call extensions
-        for extension in self.extensions:
-            extension.post_migrate_model(model_name, source_controller, target_controller)
+        self._run_extension_hooks(
+            lambda extension: extension.post_migrate_model(model_name, source_controller, target_controller)
+        )
 
     def upgrade_controller(self, controller: str, agent_version: str | None = None) -> None:
         version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
