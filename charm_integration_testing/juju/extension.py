@@ -17,6 +17,10 @@ class JujuExtension(ABC):
         """Run after an explicit scale request or targeted unit removal."""
         pass
 
+    def post_scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        """Run after scaling one application; defaults to the model-wide scale hook."""
+        self.post_scale(model)
+
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         pass
 

@@ -250,6 +250,50 @@ class ModelLookupClientStub(JubilantClient):
         return self.models[model.uri]
 
 
+class TestModelExists:
+    def test_returns_true_when_model_is_found(self) -> None:
+        client = ModelLookupClientStub({TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"))})
+
+        assert JubilantBackend(client=client).model_exists(TEST_MODEL)
+
+    def test_returns_false_when_model_is_not_found(self) -> None:
+        missing_model = jubilant.CLIError(
+            returncode=1,
+            cmd="juju show-model",
+            stderr=f"ERROR model '{TEST_MODEL.model}' not found",
+        )
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"), error=missing_model)}
+        )
+
+        assert not JubilantBackend(client=client).model_exists(TEST_MODEL)
+
+    @pytest.mark.parametrize(
+        "error_stderr",
+        [
+            'ERROR Model "test-model" has been migrated to controller "target-controller".',
+            "ERROR model migration in progress",
+        ],
+        ids=["already-migrated", "migration-in-progress"],
+    )
+    def test_returns_none_when_model_is_temporarily_unavailable_during_migration(self, error_stderr: str) -> None:
+        error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr=error_stderr)
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"), error=error)}
+        )
+
+        assert JubilantBackend(client=client).model_exists(TEST_MODEL) is None
+
+    def test_raises_unrelated_cli_errors(self) -> None:
+        error = jubilant.CLIError(returncode=1, cmd="juju show-model", stderr="ERROR connection refused")
+        client = ModelLookupClientStub(
+            {TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="test-cloud"), error=error)}
+        )
+
+        with pytest.raises(jubilant.CLIError, match="connection refused"):
+            JubilantBackend(client=client).model_exists(TEST_MODEL)
+
+
 class TestModelKubernetesCloud:
     @dataclass(frozen=True)
     class Params:

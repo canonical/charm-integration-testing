@@ -124,13 +124,17 @@ class S3Storage(S3Provider):
 
     def bucket_destroyer(self, bucket: S3Bucket) -> Callable[[], None]:
         def cleanup_bucket() -> None:
+            cleanup_error: Exception | None = None
             try:
                 bucket.cleanup()
-            except Exception as cleanup_error:
-                try:
-                    self.cleanup_pending_resources()
-                except Exception as retry_error:
+            except Exception as exc:
+                cleanup_error = exc
+            try:
+                self.cleanup_pending_resources()
+            except Exception as retry_error:
+                if cleanup_error is not None:
                     raise retry_error from cleanup_error
+                raise
 
         return cleanup_bucket
 
@@ -166,7 +170,7 @@ class S3Storage(S3Provider):
         )
 
     def cleanup_pending_resources(self) -> None:
-        """Retry bucket deletion and credential revocation left pending by child teardown."""
+        """Retry bucket deletion and credential revocation left pending by bucket cleanup."""
         failures: list[Exception] = []
         for bucket in list(self._pending_bucket_deletions):
             try:

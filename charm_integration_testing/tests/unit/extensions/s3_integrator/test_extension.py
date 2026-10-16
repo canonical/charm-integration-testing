@@ -1,0 +1,494 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pytest
+from extensions import S3IntegratorExtension
+from juju import JujuClient, JujuControllerHandle, JujuModelHandle
+from juju.backend import JujuTask
+from resource_registry import ResourceRegistry
+from s3_storage import S3Bucket, S3BucketHandle, S3Credentials, S3Provider, S3StorageHandle
+
+from ..shared import JujuStub as JujuStubBase
+
+MODEL = JujuModelHandle(controller="controller", model="model")
+
+
+@dataclass
+class JujuStub(JujuStubBase):
+    applications: dict[str, str] = field(default_factory=lambda: {"storage": "s3-integrator"})
+    application_charm_calls: list[str] = field(default_factory=list)
+    action_status: str = "completed"
+    action_return_code: int = 0
+    unit_count: int = 1
+    scale_target: int | None = None
+    num_units_calls: int = 0
+
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        self.scale_target = num
+
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
+        if self.scale_target is not None:
+            self.num_units_calls += 1
+            if self.num_units_calls >= 2:
+                self.unit_count = self.scale_target
+                self.scale_target = None
+        return self.unit_count
+
+    def application_charm(self, model: JujuModelHandle, application: str) -> str:
+        self.application_charm_calls.append(application)
+        return self.applications[application]
+
+    def deploy_bundle_file(
+        self,
+        model: JujuModelHandle,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
+    ) -> None:
+        pass
+
+    def run_action(self, model: JujuModelHandle, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+        super().run_action(model, unit, action, params)
+        return JujuTask("id", self.action_return_code, self.action_status, "", "")
+
+
+@dataclass
+class MigrationFailureAfterMoveStub(JujuStub):
+    current_controller: str | None = MODEL.controller
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.current_controller = target_controller
+        raise RuntimeError("Migration command failed after moving the model")
+
+    def model_exists(self, model: JujuModelHandle) -> bool | None:
+        return model.controller == self.current_controller
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        assert model.controller == self.current_controller
+
+
+@dataclass
+class MigrationFailureDuringVisibilityGapStub(MigrationFailureAfterMoveStub):
+    waited_for: list[JujuModelHandle] = field(default_factory=list)
+    model_exists_calls: int = 0
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.current_controller = None
+        raise RuntimeError("Migration command failed during the visibility gap")
+
+    def model_exists(self, model: JujuModelHandle) -> bool | None:
+        self.model_exists_calls += 1
+        if self.model_exists_calls == 1:
+            return None
+        return model.controller == self.current_controller
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        self.waited_for.append(model)
+        self.current_controller = model.controller
+
+
+@dataclass
+class MigrationFailureBeforeMoveStub(JujuStub):
+    checked_models: list[JujuModelHandle] = field(default_factory=list)
+    waited_for: list[JujuModelHandle] = field(default_factory=list)
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        raise RuntimeError("Source model does not exist")
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        self.checked_models.append(model)
+        return False
+
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
+        self.waited_for.append(model)
+
+
+@dataclass
+class MigrationPreflightErrorStub(JujuStub):
+    model_exists_calls: int = 0
+    migration_attempted: bool = False
+
+    def model_exists(self, model: JujuModelHandle) -> bool:
+        self.model_exists_calls += 1
+        if self.model_exists_calls == 1:
+            raise RuntimeError("show-model access denied")
+        return True
+
+    def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
+        self.migration_attempted = True
+        raise RuntimeError("migration command failed")
+
+
+class StorageStub(S3Provider):
+    def __init__(
+        self,
+        endpoint: str = "https://s3.test",
+        namespace: str = "test",
+        teardown_events: list[str] | None = None,
+    ) -> None:
+        self._endpoint = endpoint
+        self.namespace = namespace
+        self.buckets: list[BucketStub] = []
+        self.fail_next_provision = False
+        self.teardown_events = teardown_events if teardown_events is not None else []
+
+    @property
+    def endpoint(self) -> str:
+        return self._endpoint
+
+    @property
+    def region(self) -> str:
+        return "us-east-1"
+
+    @property
+    def handle(self) -> S3StorageHandle:
+        return S3StorageHandle(self.namespace)
+
+    def new_bucket(self) -> S3Bucket:
+        bucket = BucketStub(
+            S3BucketHandle(self.namespace, f"isolated-bucket-{self.namespace}-{len(self.buckets)}"),
+            self.teardown_events,
+        )
+        bucket.fail_provision = self.fail_next_provision
+        self.fail_next_provision = False
+        self.buckets.append(bucket)
+        return bucket
+
+    def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
+        return []
+
+    def cleanup_pending_resources(self) -> None:
+        pass
+
+
+class BucketStub(S3Bucket):
+    def __init__(self, handle: S3BucketHandle, teardown_events: list[str]) -> None:
+        self._handle = handle
+        self._teardown_events = teardown_events
+        self.cleanup_calls = 0
+        self.fail_provision = False
+
+    @property
+    def handle(self) -> S3BucketHandle:
+        return self._handle
+
+    def provision(self) -> tuple[str, S3Credentials]:
+        if self.fail_provision:
+            raise RuntimeError("Bucket provisioning failed")
+        return self._handle.name, S3Credentials("access", "secret")
+
+    def cleanup(self) -> None:
+        self.cleanup_calls += 1
+        self._teardown_events.append("bucket")
+
+
+def make_registry(*providers: S3Provider, models: tuple[JujuModelHandle, ...] = (MODEL,)) -> ResourceRegistry:
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    for provider in providers:
+        if not registry.is_registered(provider.handle):
+            registry.register(handle=provider.handle)
+    for model in models:
+        registry.register(handle=model)
+    return registry
+
+
+@pytest.mark.parametrize("is_k8s", [True, False], ids=["kubernetes", "machine"])
+def test_deploy_configures_integrator_on_either_substrate(tmp_path: Path, is_k8s: bool) -> None:
+    # GIVEN an integrator and storage injected through the Juju client
+    backend = JujuStub(is_k8s=is_k8s)
+    storage = StorageStub()
+    registry = make_registry(storage)
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), extensions=[extension])
+    # WHEN the deployment lifecycle runs twice
+    client.deploy_bundle_file(str(tmp_path / "bundle.yaml"), MODEL)
+    client.deploy_bundle_file(str(tmp_path / "bundle.yaml"), MODEL)
+    # THEN credentials and configuration are applied only once without deploying another charm
+    assert len(storage.buckets) == 1
+    assert storage.buckets[0].cleanup_calls == 0
+    assert registry.is_registered(storage.buckets[0].handle)
+    assert registry.children_of(storage.handle) == [storage.buckets[0].handle]
+    assert backend.actions == [
+        (MODEL.uri, "storage/leader", "sync-s3-credentials", {"access-key": "access", "secret-key": "secret"})
+    ]
+    assert backend.configured_applications == [
+        (
+            MODEL.uri,
+            "storage",
+            {
+                "endpoint": "https://s3.test",
+                "bucket": storage.buckets[0].handle.name,
+                "path": "charmqa",
+                "region": "us-east-1",
+                "s3-uri-style": "path",
+                "s3-api-version": "s3v4",
+            },
+        )
+    ]
+    assert backend.deployed == []
+    assert backend.application_charm_calls == []
+    assert len(backend.waited_scaled) == len(backend.waited_settled) == 1
+    registry.teardown_all()
+    assert storage.buckets[0].cleanup_calls == 1
+
+
+def test_controller_teardown_precedes_bucket_cleanup() -> None:
+    teardown_events: list[str] = []
+    backend = JujuStub()
+    storage = StorageStub(teardown_events=teardown_events)
+    registry = make_registry(storage, models=())
+    controller = JujuControllerHandle(controller=MODEL.controller)
+    registry.register(handle=controller, destroyer=lambda: teardown_events.append("controller"))
+    registry.register(handle=MODEL, parent=controller)
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+
+    extension.post_deploy(MODEL)
+    registry.teardown_all()
+
+    assert teardown_events == ["controller", "bucket"]
+
+
+def test_zero_unit_machine_integrator_is_not_provisioned(tmp_path: Path) -> None:
+    backend = JujuStub(is_k8s=False, unit_count=0)
+    storage = StorageStub()
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), extensions=[extension])
+
+    client.deploy_bundle_file(str(tmp_path / "bundle.yaml"), MODEL)
+
+    assert storage.buckets == []
+    assert backend.actions == []
+    assert backend.configured_applications == []
+    assert backend.waited_scaled
+    assert backend.waited_settled
+
+
+def test_zero_unit_integrator_is_configured_after_scaling_up(tmp_path: Path) -> None:
+    backend = JujuStub(is_k8s=False, unit_count=0)
+    storage = StorageStub()
+    registry = make_registry(storage)
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), extensions=[extension])
+
+    client.deploy_bundle_file(str(tmp_path / "bundle.yaml"), MODEL)
+
+    assert storage.buckets == []
+    client.scale_application("storage", 1, MODEL)
+
+    assert len(storage.buckets) == 1
+    assert backend.configured_applications[0][2]["bucket"] == storage.buckets[0].handle.name
+
+
+def test_unrelated_or_externally_configured_apps_need_no_credentials() -> None:
+    backend = JujuStub(applications={"other": "ubuntu", "storage": "s3-integrator"})
+    backend.configured_applications.append((MODEL.uri, "storage", {"endpoint": "https://external.test"}))
+    S3IntegratorExtension(
+        backend, {}, ResourceRegistry([], logging.getLogger(__name__)), cleanup_buckets=True
+    ).post_deploy(MODEL)
+    assert backend.actions == []
+
+
+def test_missing_credentials_fail_explicitly() -> None:
+    with pytest.raises(RuntimeError, match="S3_OS_.*S3_ACCESS_KEY"):
+        S3IntegratorExtension(
+            JujuStub(), {}, ResourceRegistry([], logging.getLogger(__name__)), cleanup_buckets=True
+        ).post_deploy(MODEL)
+
+
+@pytest.mark.parametrize(("status", "code"), [("failed", 0), ("completed", 1)])
+def test_failed_action_does_not_mark_integrator_configured(status: str, code: int) -> None:
+    # GIVEN a backend that returns a failed task rather than raising
+    backend = JujuStub(action_status=status, action_return_code=code)
+    storage = StorageStub()
+    registry = make_registry(storage)
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+    # WHEN credential synchronization fails
+    with pytest.raises(RuntimeError, match="synchronization failed"):
+        extension.post_deploy(MODEL)
+    # THEN a later deploy can retry instead of incorrectly skipping configuration
+    assert backend.configured_applications == []
+    backend.action_status = "completed"
+    backend.action_return_code = 0
+    extension.post_deploy(MODEL)
+    assert len(backend.configured_applications) == 1
+    assert len(storage.buckets) == 2
+    assert registry.is_registered(storage.buckets[0].handle)
+    assert registry.is_registered(storage.buckets[1].handle)
+
+
+def test_bucket_is_registered_before_external_provisioning() -> None:
+    backend = JujuStub()
+    storage = StorageStub()
+    registry = make_registry(storage)
+    storage.fail_next_provision = True
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=True)
+
+    with pytest.raises(RuntimeError, match="Bucket provisioning failed"):
+        extension.post_deploy(MODEL)
+
+    bucket = storage.buckets[0]
+    assert registry.is_registered(bucket.handle)
+    registry.teardown_all()
+    assert bucket.cleanup_calls == 1
+
+
+def test_resumed_runs_register_bucket_without_destroyer() -> None:
+    backend = JujuStub()
+    storage = StorageStub()
+    registry = make_registry(storage)
+    extension = S3IntegratorExtension(backend, {MODEL.resource_id: storage}, registry, cleanup_buckets=False)
+
+    extension.post_deploy(MODEL)
+    registry.teardown_all()
+
+    assert storage.buckets[0].cleanup_calls == 0
+
+
+def test_each_model_uses_its_environment_provider() -> None:
+    backend = JujuStub()
+    neighbor = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
+    target_storage = StorageStub("https://target-s3.test", "target")
+    neighbor_storage = StorageStub("https://neighbor-s3.test", "neighbor")
+    registry = make_registry(target_storage, neighbor_storage, models=(MODEL, neighbor))
+    extension = S3IntegratorExtension(
+        backend,
+        {MODEL.resource_id: target_storage, neighbor.resource_id: neighbor_storage},
+        registry,
+        cleanup_buckets=True,
+    )
+
+    extension.post_deploy(MODEL)
+    extension.post_deploy(neighbor)
+
+    configured_endpoints = {model_uri: config["endpoint"] for model_uri, _, config in backend.configured_applications}
+    assert configured_endpoints == {
+        MODEL.uri: target_storage.endpoint,
+        neighbor.uri: neighbor_storage.endpoint,
+    }
+
+
+def test_migrated_model_provider_is_shared_across_extensions() -> None:
+    backend = JujuStub()
+    migrated_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    registry = make_registry(storage, models=(migrated_model,))
+    extension = S3IntegratorExtension(
+        backend,
+        providers,
+        registry,
+        cleanup_buckets=True,
+    )
+
+    extension.post_migrate_model(MODEL.model, MODEL.controller, migrated_model.controller)
+    # JujuClient creates a fresh extension for each test, but the session provider map is shared.
+    new_extension = S3IntegratorExtension(
+        backend,
+        providers,
+        registry,
+        cleanup_buckets=True,
+    )
+    new_extension.post_deploy(migrated_model)
+
+    assert backend.configured_applications[0][2]["endpoint"] == storage.endpoint
+
+
+def test_failed_migration_reconciles_provider_for_retry_with_new_client() -> None:
+    backend = MigrationFailureAfterMoveStub()
+    target_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    registry = make_registry(storage, models=(target_model,))
+    extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="after moving the model"):
+        client.migrate_model(MODEL.model, MODEL.controller, target_model.controller)
+
+    assert providers == {target_model.resource_id: storage}
+
+    retry_extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    retry_client = JujuClient(backend, logging.getLogger(__name__), [retry_extension])
+    retry_client.deploy_bundle_file("bundle.yaml", target_model)
+
+    assert backend.configured_applications[0][2]["endpoint"] == storage.endpoint
+
+
+def test_failed_migration_waits_through_model_visibility_gap() -> None:
+    backend = MigrationFailureDuringVisibilityGapStub()
+    target_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    extension = S3IntegratorExtension(backend, providers, registry, cleanup_buckets=True)
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="visibility gap"):
+        client.migrate_model(MODEL.model, MODEL.controller, target_model.controller)
+
+    assert backend.waited_for == [target_model]
+    assert backend.model_exists_calls == 2
+    assert providers == {target_model.resource_id: storage}
+
+
+def test_failed_migration_does_not_wait_when_source_was_already_missing() -> None:
+    backend = MigrationFailureBeforeMoveStub()
+    storage = StorageStub("https://source-s3.test", "source")
+    providers: dict[str, S3Provider] = {MODEL.resource_id: storage}
+    extension = S3IntegratorExtension(
+        backend,
+        providers,
+        ResourceRegistry([], logging.getLogger(__name__)),
+        cleanup_buckets=True,
+    )
+    client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+    with pytest.raises(RuntimeError, match="Source model does not exist"):
+        client.migrate_model(MODEL.model, MODEL.controller, "neighbor-controller")
+
+    assert backend.checked_models == [MODEL]
+    assert backend.waited_for == []
+    assert providers == {MODEL.resource_id: storage}
+
+
+def test_migration_proceeds_when_source_visibility_preflight_fails(caplog: pytest.LogCaptureFixture) -> None:
+    backend = MigrationPreflightErrorStub()
+    client = JujuClient(backend, logging.getLogger(__name__))
+
+    with pytest.raises(RuntimeError, match="migration command failed"):
+        client.migrate_model(MODEL.model, MODEL.controller, "neighbor-controller")
+
+    assert backend.migration_attempted
+    assert backend.model_exists_calls == 2
+    assert "proceeding without preflight" in caplog.text
+
+
+def test_migration_does_not_replace_target_provider() -> None:
+    backend = JujuStub()
+    migrated_model = JujuModelHandle(controller="neighbor-controller", model=MODEL.model)
+    source_storage = StorageStub("https://source-s3.test", "source")
+    target_storage = StorageStub("https://target-s3.test", "target")
+    providers: dict[str, S3Provider] = {
+        MODEL.resource_id: source_storage,
+        migrated_model.resource_id: target_storage,
+    }
+    registry = make_registry(source_storage, target_storage, models=(migrated_model,))
+    extension = S3IntegratorExtension(
+        backend,
+        providers,
+        registry,
+        cleanup_buckets=True,
+    )
+
+    extension.post_migrate_model(MODEL.model, MODEL.controller, migrated_model.controller)
+    extension.post_deploy(migrated_model)
+
+    assert backend.configured_applications[0][2]["endpoint"] == target_storage.endpoint
