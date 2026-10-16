@@ -518,13 +518,14 @@ class ModelExistsStub:
 class TestJubilantBackend:
     class TestRemoveUnit:
         def test_removes_a_specific_unit_on_machine_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            # GIVEN a machine model and a client that records unit removal
+            # GIVEN a machine model and a client that records CLI calls
             class RemoveUnitStub:
                 def __init__(self) -> None:
-                    self.removed_units: list[str] = []
+                    self.cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
 
-                def remove_unit(self, unit: str) -> None:
-                    self.removed_units.append(unit)
+                def cli(self, *args: str, **kwargs: Any) -> str:
+                    self.cli_calls.append((args, kwargs))
+                    return ""
 
             model_client = RemoveUnitStub()
             backend = JubilantBackend(JubilantClientStub(client=model_client))
@@ -533,8 +534,8 @@ class TestJubilantBackend:
             # WHEN removing a specific unit
             backend.remove_unit(TEST_MODEL, "mysql/2")
 
-            # THEN Jubilant receives the unit identifier
-            assert model_client.removed_units == ["mysql/2"]
+            # THEN the unit removal command is non-interactive
+            assert model_client.cli_calls == [(("remove-unit", "mysql/2", "--no-prompt"), {})]
 
         def test_rejects_targeted_removal_on_kubernetes_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
             # GIVEN a Kubernetes model
