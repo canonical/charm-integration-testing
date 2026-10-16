@@ -6,7 +6,6 @@ from abc import ABC
 from datetime import timedelta
 
 from juju import JujuBackend, JujuExtension, JujuModelHandle
-from kubernetes_client.backend import KubernetesExtension
 
 from .vault_client import VaultClientJujuExec, VaultClientJujuExecPebble
 from .vault_unsealer import CharmInfo, VaultUnsealer
@@ -41,23 +40,9 @@ class UnsealVaultJujuExtension(GenericUnsealVaultJujuExtension):
         super().__init__(VaultUnsealer(CharmInfo(name="vault"), VaultClientJujuExec(juju), juju, logger))
 
 
-class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension, KubernetesExtension):
-    def __init__(self, juju: JujuBackend, controller: str, logger: logging.Logger) -> None:
+class UnsealVaultK8sJujuExtension(GenericUnsealVaultJujuExtension):
+    def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
         super().__init__(VaultUnsealer(CharmInfo(name="vault-k8s"), VaultClientJujuExecPebble(juju), juju, logger))
-        self._controller = controller
 
-    def post_delete_pod(self, namespace: str, _pod_name: str) -> None:
-        # A deleted vault-k8s pod comes back sealed (Vault's in-memory unseal state is lost
-        # on process restart). Re-unseal without re-authorizing, mirroring post_scale.
-        # The k8s pod hook only gives us the namespace, so we pair it with the controller
-        # this extension was constructed for (the target controller its KubernetesClient watches).
-        self.vault_unsealer.try_init_or_unseal_all_vaults(
-            JujuModelHandle(controller=self._controller, model=namespace), authorize_charm=False
-        )
-
-    def post_restart_statefulset(self, namespace: str, _statefulset_name: str) -> None:
-        # Same rationale as post_delete_pod: a StatefulSet rollout restarts every pod,
-        # which seals vault-k8s again.
-        self.vault_unsealer.try_init_or_unseal_all_vaults(
-            JujuModelHandle(controller=self._controller, model=namespace), authorize_charm=False
-        )
+    def post_delete_pod(self, model: JujuModelHandle, _pod_name: str) -> None:
+        self.vault_unsealer.try_init_or_unseal_all_vaults(model, authorize_charm=False)

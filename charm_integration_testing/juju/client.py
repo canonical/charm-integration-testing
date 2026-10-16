@@ -64,6 +64,14 @@ class JujuClient:
         self.logger.info(f"Restarted follower {unit}.")
         return unit
 
+    def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a workload pod and dispatch its Juju lifecycle hooks."""
+        if not self.backend.is_k8s_model(model):
+            raise ValueError(f"Cannot delete a Kubernetes pod in non-Kubernetes model {model.uri}.")
+        self.backend.delete_workload_instance(model, pod_name)
+        for extension in self.extensions:
+            extension.post_delete_pod(model, pod_name)
+
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)

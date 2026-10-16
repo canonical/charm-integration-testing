@@ -19,6 +19,9 @@ class JujuExtension(ABC):
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         pass
 
+    def post_delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        pass
+
     def pre_remove(self, model: JujuModelHandle, *applications: str) -> None:
         pass
 

@@ -5,7 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
@@ -18,6 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -111,6 +113,36 @@ class WaitIdleBackendStub(NullJujuBackend):
         strict_timeout: bool = False,
     ) -> None:
         self.calls.append((models, timeout, count, strict_timeout))
+
+
+@dataclass
+class WorkloadPodBackendStub(NullJujuBackend):
+    kubernetes_client: KubernetesClient | None = None
+
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return True
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        if self.kubernetes_client is None:
+            raise RuntimeError("No Kubernetes client configured.")
+        self.kubernetes_client.delete_pod(namespace=model.model, pod_name=instance_name)
+
+
+class RestartFollowerBackendStub(NullJujuBackend):
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        return f"{application}/1"
+
+
+class RestartLifecycleExtension(JujuExtension):
+    def __init__(self) -> None:
+        self.restarted_units: list[tuple[JujuModelHandle, str]] = []
+        self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.restarted_units.append((model, unit))
+
+    def post_delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        self.deleted_pods.append((model, pod_name))
 
 
 class ExtensionStub(JujuExtension):
@@ -361,6 +393,55 @@ class TestApplicationHealth:
         # WHEN health is requested, THEN it fails explicitly rather than preventing instantiation
         with pytest.raises(NotImplementedError):
             backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
+
+
+class TestJujuClientWorkloadInstanceOperations:
+    def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        kubernetes_backend = MagicMock()
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
+        client = JujuClient(
+            backend,
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        client.delete_pod(model, "pod-0")
+
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.assert_called_once_with(name="pod-0", namespace="model")
+        assert extension.deleted_pods == [(model, "pod-0")]
+
+    def test_delete_pod_does_not_run_hook_when_deletion_fails(self) -> None:
+        kubernetes_backend = MagicMock()
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.side_effect = RuntimeError("delete failed")
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        model = JujuModelHandle(controller="controller", model="model")
+        client = JujuClient(
+            WorkloadPodBackendStub(kubernetes_client=kubernetes_client),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            client.delete_pod(model, "pod-0")
+
+        assert extension.deleted_pods == []
+
+    def test_follower_restart_runs_juju_lifecycle_hook(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(
+            RestartFollowerBackendStub(),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
+
+        assert extension.restarted_units == [(model, "app/1")]
 
 
 class TestJujuValidationError:

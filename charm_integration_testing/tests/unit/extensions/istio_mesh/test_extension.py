@@ -13,7 +13,6 @@ from extensions.istio_mesh.extension import (
     IstioMeshExtension,
 )
 from juju import JujuModelHandle
-from kubernetes_client import KubernetesClient
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -24,11 +23,7 @@ ISTIO_INGRESS_CHARM = "istio-ingress-k8s"
 
 @dataclass
 class JujuStub(JujuStubBase):
-    kubernetes_client: KubernetesClient | None = None
     deployed_with_channel: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
-
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        return self.kubernetes_client
 
     def deploy_application(
         self,
@@ -44,11 +39,6 @@ class JujuStub(JujuStubBase):
         super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
 
 
-# A stand-in Kubernetes client marker: only ever checked for None-ness (machine controller vs.
-# k8s controller) by this extension, never actually called into.
-A_KUBERNETES_CLIENT = object()
-
-
 class TestIstioMeshExtension:
     @pytest.fixture
     def logger(self) -> logging.Logger:
@@ -62,7 +52,7 @@ class TestIstioMeshExtension:
     class TestPostDeploy:
         def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:
             # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s
-            juju = JujuStub(applications={"other-app": "other-charm"}, kubernetes_client=A_KUBERNETES_CLIENT)  # type: ignore[arg-type]
+            juju = JujuStub(applications={"other-app": "other-charm"})
             extension = IstioMeshExtension(juju, logger)
 
             # WHEN post_deploy is called
@@ -78,7 +68,6 @@ class TestIstioMeshExtension:
             # GIVEN a dependent charm is present with no istio-k8s of its own in the model
             juju = JujuStub(
                 applications={"dependent": dependent_charm},
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -99,7 +88,6 @@ class TestIstioMeshExtension:
             # GIVEN the dependent charm and istio-k8s are already both in the model
             juju = JujuStub(
                 applications={"dependent": dependent_charm, ISTIO_CONTROL_PLANE_CHARM: ISTIO_CONTROL_PLANE_CHARM},
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -114,7 +102,6 @@ class TestIstioMeshExtension:
             # GIVEN both istio-beacon-k8s and istio-ingress-k8s are present with no istio-k8s yet
             juju = JujuStub(
                 applications={"beacon": ISTIO_BEACON_CHARM, "ingress": ISTIO_INGRESS_CHARM},
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -134,7 +121,6 @@ class TestIstioMeshExtension:
                     "istio-beacon-k8s": ISTIO_BEACON_CHARM,
                     "my-istio": ISTIO_CONTROL_PLANE_CHARM,
                 },
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = IstioMeshExtension(juju, logger)
 
@@ -147,7 +133,7 @@ class TestIstioMeshExtension:
 
         def test_ignores_models_on_non_k8s_controllers(self, logger: logging.Logger) -> None:
             # GIVEN istio-beacon-k8s is present but the controller isn't backed by Kubernetes
-            juju = JujuStub(applications={"istio-beacon-k8s": ISTIO_BEACON_CHARM}, kubernetes_client=None)
+            juju = JujuStub(applications={"istio-beacon-k8s": ISTIO_BEACON_CHARM}, is_k8s=False)
             extension = IstioMeshExtension(juju, logger)
 
             # WHEN post_deploy is called

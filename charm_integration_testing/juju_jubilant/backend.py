@@ -13,6 +13,7 @@ import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Callable, overload
@@ -34,10 +35,11 @@ from juju import (
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -132,14 +134,83 @@ class JubilantBackend(JujuCmdBackend):
     def __init__(
         self,
         client: JubilantClient | None = None,
-        cloud_kubeconfigs: dict[str, pathlib.Path] | None = None,
+        kubernetes_client_registry: KubernetesClientRegistry | None = None,
         cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] | None = None,
     ):
         super().__init__()
         self.client = client or JubilantClient()
-        self._cloud_kubeconfigs: dict[str, pathlib.Path] = cloud_kubeconfigs or {}
+        self.kubernetes_client_registry = kubernetes_client_registry
         self._cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] = cloud_definitions or {}
-        self._kubernetes_clients: dict[str, KubernetesClient] = {}
+
+    def _kubernetes_client_for_cloud(self, cloud: str) -> KubernetesClient:
+        if self.kubernetes_client_registry is None:
+            raise RuntimeError("No KubernetesClientRegistry configured.")
+        if not self.kubernetes_client_registry.has_cloud(cloud):
+            raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}'.")
+        return self.kubernetes_client_registry.client_for_cloud(cloud)
+
+    def _required_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            raise ValueError(f"Model {model.uri} is not Kubernetes-backed.")
+        return self._kubernetes_client_for_cloud(cloud)
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        self._required_kubernetes_client_for_model(model).delete_pod(namespace=model.model, pod_name=instance_name)
+
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        pods = self._required_kubernetes_client_for_model(model).get_ready_charm_pods_by_unit(
+            application, model.model, units, timeout
+        )
+        return {
+            unit: JujuWorkloadInstance(unit=pod.unit, name=pod.name, identifier=pod.uid) for unit, pod in pods.items()
+        }
+
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        return self._required_kubernetes_client_for_model(model).get_charm_pod_uids(application, model.model)
+
+    def wait_for_workload_instances_ready(
+        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_ready(
+            application, model.model, expected_count, timeout
+        )
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        return self._required_kubernetes_client_for_model(model).restart_pod(
+            namespace=model.model,
+            pod_name=instance.name,
+            uid=instance.identifier,
+            timeout=timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_replaced(
+            application, model.model, expected_count, previous_ids, timeout
+        )
 
     def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
         status = self.status(model)
@@ -151,7 +222,8 @@ class JubilantBackend(JujuCmdBackend):
             raise JujuRestartNotSupportedError(f"{application} has no follower to restart.")
         unit_name = followers[0]
 
-        kubernetes = self.get_kubernetes_client_for_model(model)
+        cloud = self.kubernetes_cloud_for_model(model)
+        kubernetes = self._kubernetes_client_for_cloud(cloud) if cloud is not None else None
         if kubernetes is not None:
             application_pods = kubernetes.get_charm_pods(application, model.model)
             pods = [
@@ -241,15 +313,6 @@ class JubilantBackend(JujuCmdBackend):
         if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
             raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
         return value
-
-    def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
-        """Return a KubernetesClient for the given cloud, constructing and caching it on first use."""
-        if cloud not in self._kubernetes_clients:
-            path = self._cloud_kubeconfigs.get(cloud)
-            if path is None:
-                raise RuntimeError(f"No kubeconfig configured for cloud '{cloud}'")
-            self._kubernetes_clients[cloud] = KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=path))
-        return self._kubernetes_clients[cloud]
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
@@ -882,7 +945,7 @@ class JubilantBackend(JujuCmdBackend):
 
         Idempotent: a no-op if the cloud is already registered locally.
         """
-        if cloud in self._cloud_kubeconfigs:
+        if self.kubernetes_client_registry is not None and self.kubernetes_client_registry.has_cloud(cloud):
             self._register_k8s_cloud(cloud)
         elif cloud in self._cloud_definitions:
             self._register_generic_cloud(cloud)
@@ -896,7 +959,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def add_cloud(self, cloud: str, controller: str) -> None:
         """Register a cloud on an existing Juju controller."""
-        if cloud in self._cloud_kubeconfigs:
+        if self.kubernetes_client_registry is not None and self.kubernetes_client_registry.has_cloud(cloud):
             self._register_k8s_cloud(cloud, controller=controller)
         elif cloud in self._cloud_definitions:
             self._register_generic_cloud(cloud, controller=controller)
@@ -909,7 +972,9 @@ class JubilantBackend(JujuCmdBackend):
             )
 
     def _register_k8s_cloud(self, cloud: str, controller: str | None = None) -> None:
-        kubeconfig = self._cloud_kubeconfigs[cloud]
+        if self.kubernetes_client_registry is None:
+            raise RuntimeError("No KubernetesClientRegistry configured.")
+        kubeconfig = self.kubernetes_client_registry.kubeconfig_for_cloud(cloud)
         # juju add-k8s reads the kubeconfig from stdin when KUBECONFIG is unset,
         # so the content is piped in rather than mutating the environment.
         controller_args = ("--controller", controller) if controller else ("--client",)
@@ -963,7 +1028,11 @@ class JubilantBackend(JujuCmdBackend):
         return {}
 
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
-        return self.client.model(model).show_model().type == "kubernetes"
+        return self.kubernetes_cloud_for_model(model) is not None
+
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        info = self.client.model(model).show_model()
+        return info.cloud if info.type == "kubernetes" else None
 
     def is_k8s_cloud(self, cloud: str) -> bool:
         clouds = json.loads(self.client.model(None).cli("clouds", "--client", "--format", "json", include_model=False))
@@ -991,49 +1060,36 @@ class JubilantBackend(JujuCmdBackend):
         controller is machine-based. Raises if the controller is K8s-based but no
         kubeconfig is configured for its cloud.
         """
-        if not self.is_k8s_controller(controller):
+        cloud = self.kubernetes_cloud_for_model(JujuModelHandle(controller=controller, model="controller"))
+        if cloud is None:
             return None
-        model_info = self.client.model(JujuModelHandle(controller=controller, model="controller")).show_model()
-        cloud = model_info.cloud
-        path = self._cloud_kubeconfigs.get(cloud)
-        if path is None:
+        if self.kubernetes_client_registry is None or not self.kubernetes_client_registry.has_cloud(cloud):
             raise ValueError(
                 f"Controller '{controller}' is on K8s cloud '{cloud}' but no kubeconfig is configured for it. "
                 f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
             )
-        return path
+        return self.kubernetes_client_registry.kubeconfig_for_cloud(cloud)
 
     def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
-
-        Cloud type is determined by querying Juju (show_model().type), never by
-        whether a kubeconfig was supplied. Returning None unambiguously means the
-        controller is machine-based. Client construction is delegated to
-        ``get_kubernetes_client``, which caches per cloud.
-        """
-        model_info = self.client.model(JujuModelHandle(controller=controller, model="controller")).show_model()
-        if model_info.type != "kubernetes":
-            return None
-        return self.get_kubernetes_client(model_info.cloud)
+        """Return the Kubernetes client for a controller's cloud, or None for machine controllers."""
+        return self.get_kubernetes_client_for_model(JujuModelHandle(controller=controller, model="controller"))
 
     def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        """Resolve the model's current cloud independently of its controller's cloud."""
-        model_info = self.client.model(model).show_model()
-        if model_info.type != "kubernetes":
-            return None
-        return self.get_kubernetes_client(model_info.cloud)
+        """Resolve the Kubernetes client for a model's cloud, or None for machine models."""
+        cloud = self.kubernetes_cloud_for_model(model)
+        return self._kubernetes_client_for_cloud(cloud) if cloud is not None else None
 
     def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller
         controller_model = JujuModelHandle(controller=controller_name, model="controller")
 
-        if not self.is_k8s_controller(controller_name):
+        cloud = self.kubernetes_cloud_for_model(controller_model)
+        if cloud is None:
             # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
             # reboot the leader
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
         else:
-            model_info = self.client.model(controller_model).show_model()
-            k8s = self.get_kubernetes_client(model_info.cloud)
+            k8s = self._kubernetes_client_for_cloud(cloud)
             controller_k8s_namespace = f"controller-{controller_name}"
             k8s.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
             k8s.wait_for_statefulset_restart(
