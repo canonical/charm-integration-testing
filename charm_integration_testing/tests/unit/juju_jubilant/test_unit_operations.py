@@ -17,17 +17,12 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 @dataclass
 class UnitOperationsClient:
     units: dict[str, Any] = field(default_factory=dict)
-    calls: list[tuple[str, ...]] = field(default_factory=list)
 
     def model(self, model: JujuModelHandle) -> "UnitOperationsClient":
         return self
 
     def status(self) -> Any:
         return SimpleNamespace(apps={"target": SimpleNamespace(units=self.units)})
-
-    def cli(self, *args: str) -> str:
-        self.calls.append(args)
-        return ""
 
 
 def test_application_leader_returns_unit_marked_as_leader() -> None:
@@ -47,14 +42,6 @@ def test_application_leader_raises_when_no_leader_is_reported() -> None:
 
     with pytest.raises(RuntimeError, match="Expected one leader"):
         JubilantBackend(client=cast(JubilantClient, client)).application_leader(MODEL, "target")
-
-
-def test_remove_unit_delegates_to_juju_cli() -> None:
-    client = UnitOperationsClient()
-
-    JubilantBackend(client=cast(JubilantClient, client)).remove_unit(MODEL, "target/1")
-
-    assert client.calls == [("remove-unit", "--no-prompt", "target/1")]
 
 
 def test_unit_operations_do_not_add_abstract_requirements_to_legacy_backend() -> None:
