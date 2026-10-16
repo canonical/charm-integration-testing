@@ -150,6 +150,10 @@ class RestartLifecycleExtension(JujuExtension):
     def __init__(self) -> None:
         self.restarted_units: list[tuple[JujuModelHandle, str]] = []
         self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
+        self.scaled_models: list[JujuModelHandle] = []
+
+    def post_scale(self, model: JujuModelHandle) -> None:
+        self.scaled_models.append(model)
 
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         self.restarted_units.append((model, unit))
@@ -423,6 +427,15 @@ class TestJujuClientUnitOperations:
         assert units == ["app/0", "app/1"]
         assert backend.removed_units == ["app/0"]
         assert backend.units == ["app/1"]
+
+    def test_removing_a_unit_runs_the_post_scale_hook_once(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(UnitOperationsBackendStub(units=["app/0"]), LoggerStub(), [extension])  # type: ignore[arg-type]
+
+        client.remove_unit("app/0", model)
+
+        assert extension.scaled_models == [model]
 
 
 class TestJujuClientWorkloadInstanceOperations:

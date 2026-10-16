@@ -288,7 +288,13 @@ class JujuClient:
 
         surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
         cleanup_changed_state = False
-        if len(current_units) > unit_count and not surge_units:
+        if len(current_units) < unit_count:
+            cleanup_changed_state = True
+            try:
+                self.scale_application(application, unit_count, model=model)
+            except Exception as error:
+                cleanup_errors.append(error)
+        elif len(current_units) > unit_count and not surge_units:
             cleanup_errors.append(
                 RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
             )
@@ -303,6 +309,15 @@ class JujuClient:
         if cleanup_changed_state or set(current_units) != original_units:
             try:
                 self.multi_model_idle_for_period(models, timeout=timeout)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_changed_state:
+            try:
+                current_units = self.application_units(application, model=model)
+                if len(current_units) != unit_count:
+                    raise RuntimeError(
+                        f"Expected {unit_count} units after machine cleanup, found {len(current_units)}."
+                    )
             except Exception as error:
                 cleanup_errors.append(error)
         self._raise_cleanup_errors(cleanup_errors)

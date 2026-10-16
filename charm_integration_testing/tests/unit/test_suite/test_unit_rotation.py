@@ -192,6 +192,22 @@ def test_unit_rotation_continues_machine_cleanup_after_remove_hook_failure() -> 
     assert client.units == ["target/0", "target/1", "target/2"]
 
 
+def test_unit_rotation_restores_machine_capacity_if_targeted_removal_loses_surge() -> None:
+    client = RecordingJujuClient(current_units=3)
+    client.fail_next_remove_after_callback = True
+    client.lose_surge_after_next_remove = True
+
+    with pytest.raises(RuntimeError, match="unit removal hook failed"):
+        _rotate_units(client, k8s_model=False)
+
+    assert [call for call in client.calls if call[0] == "scale_application"] == [
+        ("scale_application", "target", 4, MODEL),
+        ("scale_application", "target", 3, MODEL),
+    ]
+    assert [call[1] for call in client.calls if call[0] == "remove_unit"] == ["target/0"]
+    assert len(client.units) == 3
+
+
 def test_unit_rotation_waits_for_async_machine_removal_before_cleaning_surge() -> None:
     client = RecordingJujuClient(current_units=3)
     client.defer_next_remove = True

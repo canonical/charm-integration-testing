@@ -44,6 +44,7 @@ class RecordingJujuClient:
         self.fail_multi_model_idle_on_call: int | None = None
         self.fail_multi_model_idle_on_calls: set[int] = set()
         self.fail_next_remove_after_callback = False
+        self.lose_surge_after_next_remove = False
         self.defer_next_remove = False
         self.pending_unit_removals: list[str] = []
         self.extra_units_on_scale_up = 0
@@ -88,6 +89,9 @@ class RecordingJujuClient:
             self.pending_unit_removals.append(unit)
         else:
             self.units.remove(unit)
+            if self.lose_surge_after_next_remove:
+                self.lose_surge_after_next_remove = False
+                self.units.pop()
         if self.fail_next_remove_after_callback:
             self.fail_next_remove_after_callback = False
             raise RuntimeError("unit removal hook failed")
