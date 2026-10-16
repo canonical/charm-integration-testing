@@ -16,7 +16,7 @@ import warnings
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any, Callable, overload
+from typing import Any, Callable
 
 import jubilant
 import yaml
@@ -304,7 +304,10 @@ class JubilantBackend(JujuCmdBackend):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
-        return self.ssh(model, machine, command, timeout=min(30, remaining))
+        output = self.ssh(model, machine, command, timeout=min(30, remaining))
+        if output is None:
+            raise RuntimeError(f"SSH command on machine {machine} did not return output.")
+        return output
 
     def _machine_boot_id(self, model: JujuModelHandle, machine: str, deadline: float, timeout: timedelta) -> str:
         value = self._ssh_before_deadline(
@@ -804,12 +807,6 @@ class JubilantBackend(JujuCmdBackend):
             return
 
         self.client.model(model).cli("scp", *options, source, destination)
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None

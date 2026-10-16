@@ -8,7 +8,7 @@ from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable, cast, overload
+from typing import Any, Callable, cast
 from unittest.mock import patch
 
 import jubilant
@@ -3497,12 +3497,6 @@ class FollowerRestartBackendStub(JubilantBackend):
         )
         super().__init__(kubernetes_client_registry=registry)
         self.snapshots = [follower_status(), follower_status()]
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None

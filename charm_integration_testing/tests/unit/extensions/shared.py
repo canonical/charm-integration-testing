@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Iterable, overload
+from typing import Any, Iterable
 
 from juju import JujuModelHandle
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
@@ -221,12 +221,6 @@ class NullJujuBackend(JujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
-
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
@@ -391,12 +385,6 @@ class JujuStub(NullJujuBackend):
     def scp(self, model: "JujuModelHandle", source: str, destination: str) -> None:
         """Mock SCP file transfer (captures call for verification)"""
         self.scp_calls.append((_model_key(model), source, destination))
-
-    @overload
-    def ssh(self, model: "JujuModelHandle", target: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: "JujuModelHandle", target: str, command: str, *, timeout: float) -> str: ...
 
     def ssh(self, model: "JujuModelHandle", target: str, command: str, *, timeout: float | None = None) -> str | None:
         """Mock SSH command execution (captures call for verification)"""

@@ -4,7 +4,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import overload
 
 from juju import JujuClient, JujuModelHandle
 
@@ -32,12 +31,6 @@ class UnitOperationsBackend(NullJujuBackend):
 
     def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         self.calls.append(("wait_for_unit_available", model, unit, timeout))
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None

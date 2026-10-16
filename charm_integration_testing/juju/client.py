@@ -381,8 +381,6 @@ class JujuClient:
 
     def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
         self.logger.info(f"Running command on unit {unit}: {command}")
-        if timeout is None:
-            return self.backend.ssh(model, unit, command)
         return self.backend.ssh(model, unit, command, timeout=timeout)
 
     @staticmethod
