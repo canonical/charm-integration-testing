@@ -117,10 +117,6 @@ class JujuClient:
         if self.backend.is_k8s_model(model):
             self._rotate_kubernetes_units(application, model, units, models, timeout)
         else:
-            if not self.backend.supports_targeted_unit_removal():
-                raise NotImplementedError(
-                    f"Cannot rotate machine units in model {model.uri}: targeted unit removal is not supported."
-                )
             self._rotate_machine_units(application, model, units, models, timeout)
 
         current_units = self.application_units(application, model=model)

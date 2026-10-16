@@ -56,11 +56,6 @@ class RecordingRotationJujuClient(JujuClient):
         return {}
 
 
-class UnsupportedTargetedRemovalBackend(RecordingJujuBackend):
-    def supports_targeted_unit_removal(self) -> bool:
-        return False
-
-
 def _rotate_units(
     client: RecordingJujuClient,
     *,
@@ -101,18 +96,6 @@ def test_rotation_requires_a_kubeconfig_for_kubernetes_models() -> None:
 
     with pytest.raises(RuntimeError, match="No kubeconfig configured"):
         _rotate_units(client, k8s_model=True)
-
-    assert not [call for call in client.calls if call[0] == "scale_application"]
-    assert client.units == ["target/0", "target/1"]
-
-
-def test_rotation_rejects_machine_backend_without_targeted_unit_removal() -> None:
-    client = RecordingJujuClient(current_units=2)
-    backend = UnsupportedTargetedRemovalBackend(k8s_model=False)
-    juju_client = RecordingRotationJujuClient(client, backend)
-
-    with pytest.raises(NotImplementedError, match="targeted unit removal is not supported"):
-        juju_client.rotate_application_units("target", MODEL)
 
     assert not [call for call in client.calls if call[0] == "scale_application"]
     assert client.units == ["target/0", "target/1"]

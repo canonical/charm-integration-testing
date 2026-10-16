@@ -124,9 +124,6 @@ class RecordingJujuBackend(NullJujuBackend):
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.is_k8s
 
-    def supports_targeted_unit_removal(self) -> bool:
-        return not self.is_k8s
-
     def _kubernetes_client(self) -> KubernetesClient:
         if self.kubernetes_client is None:
             raise RuntimeError("No kubeconfig configured for Kubernetes cloud 'k8s'.")

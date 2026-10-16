@@ -319,9 +319,6 @@ class JubilantBackend(JujuCmdBackend):
             raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
         self.client.model(model).remove_unit(unit)
 
-    def supports_targeted_unit_removal(self) -> bool:
-        return True
-
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         try:

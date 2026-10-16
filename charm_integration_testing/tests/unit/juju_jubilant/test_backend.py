@@ -535,7 +535,6 @@ class TestJubilantBackend:
 
             # THEN Jubilant receives the unit identifier
             assert model_client.removed_units == ["mysql/2"]
-            assert backend.supports_targeted_unit_removal()
 
         def test_rejects_targeted_removal_on_kubernetes_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
             # GIVEN a Kubernetes model
