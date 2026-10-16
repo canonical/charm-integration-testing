@@ -228,7 +228,7 @@ def register_test_clouds(
         juju_backend.register_cloud(cloud=cloud)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def kubernetes_client(
     kubernetes_client_registry: KubernetesClientRegistry,
     target_model_ref: JujuModelHandle,
