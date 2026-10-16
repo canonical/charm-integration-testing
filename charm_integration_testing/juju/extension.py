@@ -37,9 +37,31 @@ class JujuExtension(ABC):
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return {}
 
+    def post_validate_excluding_units(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        if excluded_units and type(self).post_validate is not JujuExtension.post_validate:
+            raise NotImplementedError(
+                f"{type(self).__name__} must implement post_validate_excluding_units when excluding units."
+            )
+        return self.post_validate(model, application, level)
+
     def persistence_operation(self, model: JujuModelHandle) -> str | None:
         """Return the persistence lifecycle operation for one model validation, if any."""
         return None
+
+    def post_persistence_excluding_units(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        persistence: str | None,
+        excluded_units: set[str],
+    ) -> dict[str, list[ValidationResult]]:
+        if excluded_units and type(self).post_persistence is not JujuExtension.post_persistence:
+            raise NotImplementedError(
+                f"{type(self).__name__} must implement post_persistence_excluding_units when excluding units."
+            )
+        return self.post_persistence(model, application, persistence)
 
     def post_persistence(
         self, model: JujuModelHandle, application: str, persistence: str | None = None

@@ -53,6 +53,12 @@ def test_scale_to_ha_skips_subordinate_before_accessing_juju() -> None:
     assert client.calls == []
 
 
+def test_require_principal_charm_returns_principal_metadata() -> None:
+    deployed_charm = charm()
+
+    assert integration_spec.require_principal_charm(deployed_charm) is deployed_charm
+
+
 def test_scale_from_ha_restores_original_units_waits_and_simple_validates(tmp_path: Path) -> None:
     client = RecordingJujuClient(current_units=3)
 

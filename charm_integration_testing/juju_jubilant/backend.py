@@ -16,7 +16,8 @@ import warnings
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any, Callable, overload
+from functools import partial
+from typing import Any, Callable
 
 import jubilant
 import yaml
@@ -55,8 +56,13 @@ from .wait import (
     bundle_applications_integrations_exist,
     integrations_are_removed,
     saas_is_removed,
+    unit_is_available,
+    unit_is_removed,
+    unit_is_unavailable,
     units_have_message,
 )
+
+_UNIT_REBOOT_COMMAND = "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot"
 
 
 def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
@@ -275,6 +281,32 @@ class JubilantBackend(JujuCmdBackend):
                 raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
         return unit_name
 
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            self.ssh(model, unit, _UNIT_REBOOT_COMMAND)
+            return
+
+        application = unit.split("/", maxsplit=1)[0]
+        kubernetes = self._kubernetes_client_for_cloud(cloud)
+        pods = kubernetes.get_charm_pods(application, model.model)
+        matching_pods = [
+            pod
+            for pod in pods
+            if pod.metadata is not None
+            and (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+            and pod.metadata.deletion_timestamp is None
+            and pod.metadata.uid is not None
+            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
+        ]
+        if len(matching_pods) != 1 or matching_pods[0].metadata.name is None:
+            raise RuntimeError(f"Unable to identify a single live Pod for {unit}.")
+        kubernetes.delete_pod(
+            namespace=model.model,
+            pod_name=matching_pods[0].metadata.name,
+            uid=matching_pods[0].metadata.uid,
+        )
+
     @staticmethod
     def _check_follower(current: jubilant.Status, application: str, expected_units: set[str], unit_name: str) -> None:
         current_units = current.apps[application].units
@@ -304,7 +336,10 @@ class JubilantBackend(JujuCmdBackend):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
-        return self.ssh(model, machine, command, timeout=min(30, remaining))
+        output = self.ssh(model, machine, command, timeout=min(30, remaining))
+        if output is None:
+            raise RuntimeError(f"SSH command on machine {machine} did not return output.")
+        return output
 
     def _machine_boot_id(self, model: JujuModelHandle, machine: str, deadline: float, timeout: timedelta) -> str:
         value = self._ssh_before_deadline(
@@ -317,7 +352,7 @@ class JubilantBackend(JujuCmdBackend):
     def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
         if self.is_k8s_model(model):
             raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
-        self.client.model(model).remove_unit(unit)
+        self.client.model(model).cli("remove-unit", unit, "--no-prompt")
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
     def status(self, model: JujuModelHandle) -> jubilant.Status:
@@ -690,6 +725,28 @@ class JubilantBackend(JujuCmdBackend):
             exec_output = e.stdout
         return {unit_name: JujuExecTask(**result) for unit_name, result in yaml.safe_load(exec_output).items()}
 
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        status = self.status(model)
+        try:
+            units = status.apps[application].units
+        except KeyError:
+            raise KeyError(f"Application '{application}' not found in model '{model.uri}'") from None
+        leaders = [unit for unit, info in units.items() if info.leader]
+        if len(leaders) != 1:
+            raise RuntimeError(
+                f"Expected one leader for application '{application}' in model '{model.uri}', found {leaders}."
+            )
+        return leaders[0]
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_removed, unit=unit, model_uri=model.uri), timeout=timeout)
+
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_unavailable, unit=unit, model_uri=model.uri), timeout=timeout)
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_available, unit=unit, model_uri=model.uri), timeout=timeout)
+
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
         if operator:
@@ -752,12 +809,6 @@ class JubilantBackend(JujuCmdBackend):
             return
 
         self.client.model(model).cli("scp", *options, source, destination)
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None

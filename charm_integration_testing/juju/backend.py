@@ -152,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Reboot a unit without waiting for it to recover."""
+        raise NotImplementedError("This backend does not support rebooting units.")
+
     def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
         """Restart one Juju non-leader without changing the application unit count."""
         raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")
@@ -362,6 +366,18 @@ class JujuBackend(ABC):
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        raise NotImplementedError
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     @abstractmethod
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
@@ -438,7 +454,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     @abstractmethod

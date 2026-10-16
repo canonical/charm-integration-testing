@@ -17,6 +17,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuWorkloadInstance,
 )
 from .version import JujuVersion
 
@@ -56,6 +57,10 @@ class JujuClient:
         self.logger = logger
         self.extensions = extensions or []
 
+    def _post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+
     def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
@@ -67,10 +72,14 @@ class JujuClient:
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")
         unit = self.backend.restart_follower(model, application, timeout)
-        for extension in self.extensions:
-            extension.post_restart_unit(model, unit)
+        self._post_restart_unit(model, unit)
         self.logger.info(f"Restarted follower {unit}.")
         return unit
+
+    def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Rebooting unit {unit}.")
+        self.backend.reboot_unit(model, unit)
+        self.logger.info(f"Reboot request for unit {unit} accepted.")
 
     def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
         """Delete a workload pod and dispatch its Juju lifecycle hooks."""
@@ -95,6 +104,18 @@ class JujuClient:
     def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
         self.logger.info(f"Getting the units for {application}.")
         return self.backend.application_units(model, application)
+
+    def _restart_workload_instance(
+        self,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        model: JujuModelHandle,
+        timeout: timedelta,
+    ) -> str:
+        replacement = self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
+        self._post_restart_unit(model, instance.unit)
+        return replacement
 
     def rotate_application_units(
         self,
@@ -146,9 +167,7 @@ class JujuClient:
                 if instance.identifier not in existing_ids:
                     raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
-                for extension in self.extensions:
-                    extension.post_restart_unit(model, unit)
+                self._restart_workload_instance(application, instance, existing_ids, model, timeout)
                 self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:
@@ -324,6 +343,35 @@ class JujuClient:
             if len(errors) > 1:
                 raise _JujuCleanupError(errors) from errors[0]
             raise errors[0]
+
+    def application_leader(self, application: str, model: JujuModelHandle) -> str:
+        self.logger.info(f"Getting the leader unit for {application}.")
+        return self.backend.application_leader(model, application)
+
+    def wait_for_unit_removal(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of unit {unit}.")
+        self.backend.wait_for_unit_removal(model, unit, timeout)
+
+    def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become unavailable.")
+        self.backend.wait_for_unit_unavailable(model, unit, timeout)
+
+    def wait_for_unit_available(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become available.")
+        self.backend.wait_for_unit_available(model, unit, timeout)
+
+    def wait_for_unit_restart_completion(
+        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
+    ) -> None:
+        """Dispatch the restart hook, then wait for the unit to become available."""
+        self._post_restart_unit(model, unit)
+        self.wait_for_unit_available(unit, model, timeout)
+
+    def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
+        self.logger.info(f"Running command on unit {unit}: {command}")
+        if timeout is None:
+            return self.backend.ssh(model, unit, command)
+        return self.backend.ssh(model, unit, command, timeout=timeout)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:
@@ -649,6 +697,7 @@ class JujuClient:
         *,
         applications: list[str] | None = None,
         endpoints: set[tuple[str, str]] | None = None,
+        excluded_units: set[str] | None = None,
     ) -> dict[str, list[ValidationResult]]:
         """Validate selected or all applications, and run the persistence lifecycle.
 
@@ -661,7 +710,8 @@ class JujuClient:
                 entirely (e.g. when only running a persistence op).
             applications: Application names to validate; None selects all applications.
             endpoints: (application, endpoint) pairs whose functional results count toward validation.
-                None includes all endpoints. Persistence results are always checked.
+                None includes all endpoints.
+            excluded_units: Units to skip during functional and persistence validation.
 
         Returns:
             Functional validation results by unit, excluding persistence results.
@@ -685,11 +735,18 @@ class JujuClient:
                 # Phase 2: This will trigger Ops framework validation
                 # Phase 1: This is a no-op, just a placeholder
                 for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                    results.setdefault(unit, []).extend(unit_results)
+                    if excluded_units is None or unit not in excluded_units:
+                        results.setdefault(unit, []).extend(unit_results)
 
                 # Call extensions (Phase 1 validation happens here)
                 for extension in self.extensions:
-                    for unit, unit_results in extension.post_validate(model, application, level).items():
+                    if excluded_units is None:
+                        extension_results = extension.post_validate(model, application, level)
+                    else:
+                        extension_results = extension.post_validate_excluding_units(
+                            model, application, level, excluded_units
+                        )
+                    for unit, unit_results in extension_results.items():
                         results.setdefault(unit, []).extend(unit_results)
 
             if endpoints is not None:
@@ -702,7 +759,13 @@ class JujuClient:
                 functional_results.setdefault(unit, []).extend(unit_results)
 
             for extension, persistence_operation in persistence_operations:
-                for unit, unit_results in extension.post_persistence(model, application, persistence_operation).items():
+                if excluded_units is None:
+                    persistence_results = extension.post_persistence(model, application, persistence_operation)
+                else:
+                    persistence_results = extension.post_persistence_excluding_units(
+                        model, application, persistence_operation, excluded_units
+                    )
+                for unit, unit_results in persistence_results.items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:

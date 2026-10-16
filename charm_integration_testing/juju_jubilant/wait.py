@@ -242,6 +242,36 @@ def application_is_on_revision(status: jubilant.Status, application: str, revisi
     )
 
 
+def unit_is_removed(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    removed = unit not in status.apps[application].units
+    return removed, JujuWaitState(message=f"waiting for removal of unit '{unit}'")
+
+
+def unit_is_unavailable(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    unit_info = status.apps[application].units.get(unit)
+    unavailable = unit_info is None or unit_info.juju_status.current in {"down", "lost"}
+    return unavailable, JujuWaitState(message=f"waiting for unit '{unit}' to become unavailable")
+
+
+def unit_is_available(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    unit_info = status.apps[application].units.get(unit)
+    available = (
+        unit_info is not None
+        and unit_info.workload_status.current == "active"
+        and unit_info.juju_status.current == "idle"
+    )
+    return available, JujuWaitState(message=f"waiting for unit '{unit}' to become available")
+
+
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
     if unit_args:
         units = set(unit_args)
