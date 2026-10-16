@@ -356,18 +356,66 @@ def test_client_and_revocation_failure_remains_recoverable() -> None:
     with pytest.raises(RuntimeError, match="could not be revoked"):
         bucket_resource.provision()
 
-    with pytest.raises(RuntimeError, match="Credential revocation failed"):
-        bucket_resource.cleanup()
+    with pytest.raises(RuntimeError, match="Failed to clean 1 pending S3 resource"):
+        storage.cleanup_pending_resources()
 
     # WHEN session teardown retries revocation after the initial cleanup failure
     keystone.fail_delete.clear()
-    bucket_resource.cleanup()
+    storage.cleanup_pending_resources()
 
     # THEN the issued key was retained until Keystone confirmed revocation
     assert keystone.created == 1
     assert keystone.delete_attempts == ["test-access-1", "test-access-1", "test-access-1"]
     assert keystone.deleted == ["test-access-1"]
     assert client_credentials == [S3Credentials("test-access-1", "test-secret-1")]
+
+
+def test_client_initialization_retry_uses_fresh_credentials(client: S3Client) -> None:
+    keystone = KeystoneStub()
+    keystone.fail_delete_attempts["test-access-1"] = 1
+    client_credentials: list[S3Credentials] = []
+    stubber = Stubber(client)
+
+    def create_client(credentials: S3Credentials) -> S3Client:
+        client_credentials.append(credentials)
+        if credentials.access_key == "test-access-1":
+            raise RuntimeError("Client initialization failed")
+        return client
+
+    storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS),
+        client_factory=create_client,
+    )
+    bucket_resource = storage.new_bucket()
+    with pytest.raises(RuntimeError, match="could not be revoked"):
+        bucket_resource.provision()
+
+    stubber.add_response("create_bucket", {}, {"Bucket": ANY})
+    stubber.add_response(
+        "put_bucket_tagging",
+        {},
+        {"Bucket": ANY, "Tagging": expected_tagging("test-access-2")},
+    )
+    stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
+    stubber.add_response("head_bucket", {}, {"Bucket": ANY})
+    empty_bucket(stubber)
+    with stubber:
+        _, credentials = bucket_resource.provision()
+        storage.cleanup_pending_resources()
+        bucket_resource.cleanup()
+
+    assert credentials == S3Credentials("test-access-2", "test-secret-2")
+    assert keystone.created == 2
+    assert keystone.delete_attempts == ["test-access-1", "test-access-1", "test-access-2"]
+    assert keystone.deleted == ["test-access-1", "test-access-2"]
+    assert client_credentials == [
+        S3Credentials("test-access-1", "test-secret-1"),
+        S3Credentials("test-access-2", "test-secret-2"),
+        CLEANUP_CREDS,
+    ]
+    stubber.assert_no_pending_responses()
 
 
 def test_registry_retries_pending_credential_revocation() -> None:
@@ -390,10 +438,14 @@ def test_registry_retries_pending_credential_revocation() -> None:
     with pytest.warns(ResourceTeardownWarning):
         registry.teardown_all()
 
-    # The bucket teardown fails, then the parent provider retries the pending key.
+    # The provider retries the pending key after bucket teardown.
+    assert keystone.delete_attempts == ["test-access-1"] * 2
+    assert keystone.deleted == []
+
+    # A later session cleanup retries the still-pending key.
+    storage.cleanup_pending_resources()
     assert keystone.delete_attempts == ["test-access-1"] * 3
     assert keystone.deleted == ["test-access-1"]
-    storage.cleanup_pending_resources()
 
 
 def test_cleanup_removes_versions_markers_and_multipart(client: S3Client) -> None:

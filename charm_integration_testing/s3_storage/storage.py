@@ -306,6 +306,7 @@ class _S3Bucket(S3Bucket):
                     access_key = self._credentials.access_key
                     self._credential_provider.revoke(access_key)
                 except Exception as revoke_error:
+                    self._credentials = None
                     raise RuntimeError(
                         "S3 client initialization failed and the issued credentials could not be revoked "
                         f"({type(revoke_error).__name__}; client error: {type(client_error).__name__})"
