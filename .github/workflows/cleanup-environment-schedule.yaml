@@ -7,22 +7,287 @@ on:
   schedule:
     - cron: '*/30 * * * *'
 jobs:
-  cleanup-schedule:
-    strategy:
-      fail-fast: false
-      matrix:
-        environment:
-          - ps6-sqa-stg_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_openstack-1
-          - ps7-sqa-prod_charm_qa_kubernetes-1
-          - ps7-sqa-prod_charm_qa_openstack-1
+  cleanup-ps6-stg-kubernetes-1:
     uses: ./.github/workflows/cleanup-environment.yaml
     with:
-      environment: ${{ matrix.environment }}
+      environment: ps6-sqa-stg_charm_qa_kubernetes-1
     secrets:
       PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
       STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
       PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
       PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
       PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1 }}
+  cleanup-ps6-stg-kubernetes-2:
+    needs: cleanup-ps6-stg-kubernetes-1
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-stg_charm_qa_kubernetes-2
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2 }}
+  cleanup-ps6-prod-kubernetes-1:
+    needs: cleanup-ps6-stg-kubernetes-2
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-1
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+  cleanup-ps6-prod-kubernetes-2:
+    needs: cleanup-ps6-prod-kubernetes-1
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-2
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2 }}
+  cleanup-ps6-prod-kubernetes-3:
+    needs: cleanup-ps6-prod-kubernetes-2
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-3
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3 }}
+  cleanup-ps6-prod-kubernetes-4:
+    needs: cleanup-ps6-prod-kubernetes-3
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-4
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4 }}
+  cleanup-ps6-prod-kubernetes-5:
+    needs: cleanup-ps6-prod-kubernetes-4
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-5
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5 }}
+  cleanup-ps6-prod-kubernetes-6:
+    needs: cleanup-ps6-prod-kubernetes-5
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_kubernetes-6
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6 }}
+  cleanup-ps6-prod-openstack-1:
+    needs: cleanup-ps6-prod-kubernetes-6
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_openstack-1
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+  cleanup-ps6-prod-openstack-2:
+    needs: cleanup-ps6-prod-openstack-1
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps6-sqa-prod_charm_qa_openstack-2
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2 }}
+  cleanup-ps7-prod-kubernetes-1:
+    needs: cleanup-ps6-prod-openstack-2
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-1
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+  cleanup-ps7-prod-kubernetes-2:
+    needs: cleanup-ps7-prod-kubernetes-1
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-2
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2 }}
+  cleanup-ps7-prod-kubernetes-3:
+    needs: cleanup-ps7-prod-kubernetes-2
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-3
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3 }}
+  cleanup-ps7-prod-kubernetes-4:
+    needs: cleanup-ps7-prod-kubernetes-3
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-4
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4 }}
+  cleanup-ps7-prod-kubernetes-5:
+    needs: cleanup-ps7-prod-kubernetes-4
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-5
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5 }}
+  cleanup-ps7-prod-kubernetes-6:
+    needs: cleanup-ps7-prod-kubernetes-5
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-6
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6 }}
+  cleanup-ps7-prod-kubernetes-7:
+    needs: cleanup-ps7-prod-kubernetes-6
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-7
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7 }}
+  cleanup-ps7-prod-kubernetes-8:
+    needs: cleanup-ps7-prod-kubernetes-7
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-8
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8 }}
+  cleanup-ps7-prod-kubernetes-9:
+    needs: cleanup-ps7-prod-kubernetes-8
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-9
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9 }}
+  cleanup-ps7-prod-kubernetes-10:
+    needs: cleanup-ps7-prod-kubernetes-9
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_kubernetes-10
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10 }}
+  cleanup-ps7-prod-openstack-1:
+    needs: cleanup-ps7-prod-kubernetes-10
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_openstack-1
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+  cleanup-ps7-prod-openstack-2:
+    needs: cleanup-ps7-prod-openstack-1
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/cleanup-environment.yaml
+    with:
+      environment: ps7-sqa-prod_charm_qa_openstack-2
+    secrets:
+      PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
+      STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
+      PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
+      PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
+      PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+      S3_SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2 }}

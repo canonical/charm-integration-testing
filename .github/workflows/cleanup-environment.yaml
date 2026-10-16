@@ -2,8 +2,8 @@
 name: Clean up environment
 run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}
-  cancel-in-progress: true
+  group: charm-qa-environment-cleanup
+  cancel-in-progress: false
 permissions:
   contents: read  # only needed for private repos
 on:
@@ -15,10 +15,27 @@ on:
         default: ps6-sqa-stg_charm_qa_kubernetes-1
         options:
           - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-stg_charm_qa_kubernetes-2
           - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-2
+          - ps6-sqa-prod_charm_qa_kubernetes-3
+          - ps6-sqa-prod_charm_qa_kubernetes-4
+          - ps6-sqa-prod_charm_qa_kubernetes-5
+          - ps6-sqa-prod_charm_qa_kubernetes-6
           - ps6-sqa-prod_charm_qa_openstack-1
+          - ps6-sqa-prod_charm_qa_openstack-2
           - ps7-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_kubernetes-2
+          - ps7-sqa-prod_charm_qa_kubernetes-3
+          - ps7-sqa-prod_charm_qa_kubernetes-4
+          - ps7-sqa-prod_charm_qa_kubernetes-5
+          - ps7-sqa-prod_charm_qa_kubernetes-6
+          - ps7-sqa-prod_charm_qa_kubernetes-7
+          - ps7-sqa-prod_charm_qa_kubernetes-8
+          - ps7-sqa-prod_charm_qa_kubernetes-9
+          - ps7-sqa-prod_charm_qa_kubernetes-10
           - ps7-sqa-prod_charm_qa_openstack-1
+          - ps7-sqa-prod_charm_qa_openstack-2
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
@@ -44,6 +61,8 @@ on:
         required: true
       PROD_PS7_NOVARC:
         required: true
+      S3_SWIFT_CONFIG:
+        required: false
 jobs:
   cleanup-environment:
     name: Clean up any leftover artifacts from old Charm QA environments
@@ -103,6 +122,29 @@ jobs:
                 fi
             done <<< "${!NOVARC_SECRET_NAME}"
           fi
+      - name: Check S3 cleanup credentials
+        id: s3_credentials
+        if: ${{ success() && steps.env_info.outputs.swift-storage == 'true' }}
+        shell: bash
+        env:
+          SWIFT_SECRET_NAME: ${{ steps.env_info.outputs.s3-swift-secret }}
+          SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG || secrets[steps.env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Dynamic fallback key comes from the repo-owned environment map.
+        run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --optional
+      - name: Install S3 cleanup dependencies
+        if: ${{ success() && steps.s3_credentials.outputs.available == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
+            install 'boto3>=1.40,<2' 'requests>=2.32.3,<2.35' 'pydantic>=2.11.3,<3'
+      - name: Remove stale harness S3 buckets
+        if: ${{ success() && steps.s3_credentials.outputs.available == 'true' }}
+        shell: bash
+        env:
+          # Cleanup imports only the storage module, not the full suite and its dependencies.
+          PYTHONPATH: ${{ github.workspace }}/charm_integration_testing
+          S3_BUCKET_NAMESPACE: ${{ steps.env_info.outputs.s3-swift-secret }}
+        run: |
+          "${RUNNER_TEMP}/s3-cleanup/bin/python" scripts/cleanup-s3.py --age-minutes "${AGE_THRESHOLD}"
 
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 

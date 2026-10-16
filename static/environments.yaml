@@ -6,6 +6,8 @@ environments:
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_SQA_KUBECONFIG
+    swift-storage: true
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config: {}
     bootstrap-constraints:
@@ -16,17 +18,29 @@ environments:
       juju-http-proxy: "http://squid.internal:3128"
       juju-https-proxy: "http://squid.internal:3128"
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
-  ps6-sqa-prod_charm_qa_kubernetes-2: *ps6-sqa-prod_charm_qa_kubernetes
-  ps6-sqa-prod_charm_qa_kubernetes-3: *ps6-sqa-prod_charm_qa_kubernetes
-  ps6-sqa-prod_charm_qa_kubernetes-4: *ps6-sqa-prod_charm_qa_kubernetes
-  ps6-sqa-prod_charm_qa_kubernetes-5: *ps6-sqa-prod_charm_qa_kubernetes
-  ps6-sqa-prod_charm_qa_kubernetes-6: *ps6-sqa-prod_charm_qa_kubernetes
+  ps6-sqa-prod_charm_qa_kubernetes-2:
+    <<: *ps6-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2
+  ps6-sqa-prod_charm_qa_kubernetes-3:
+    <<: *ps6-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3
+  ps6-sqa-prod_charm_qa_kubernetes-4:
+    <<: *ps6-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4
+  ps6-sqa-prod_charm_qa_kubernetes-5:
+    <<: *ps6-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5
+  ps6-sqa-prod_charm_qa_kubernetes-6:
+    <<: *ps6-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6
   # PS6 STG KUBERNETES
   ps6-sqa-stg_charm_qa_kubernetes-1: &ps6-sqa-stg_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: STG_SQA_KUBECONFIG
+    swift-storage: true
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config: {}
     bootstrap-constraints:
@@ -37,15 +51,21 @@ environments:
       juju-http-proxy: "http://squid.internal:3128"
       juju-https-proxy: "http://squid.internal:3128"
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
-  ps6-sqa-stg_charm_qa_kubernetes-2: *ps6-sqa-stg_charm_qa_kubernetes
+  ps6-sqa-stg_charm_qa_kubernetes-2:
+    <<: *ps6-sqa-stg_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2
   # PS6 PROD OPENSTACK
   ps6-sqa-prod_charm_qa_openstack-1: &ps6-sqa-prod_charm_qa_openstack
     github-runner: ps7-private-endpoint-runners
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_SQA_NOVARC
+    swift-storage: true
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1
     arch: amd64
-  ps6-sqa-prod_charm_qa_openstack-2: *ps6-sqa-prod_charm_qa_openstack
+  ps6-sqa-prod_charm_qa_openstack-2:
+    <<: *ps6-sqa-prod_charm_qa_openstack
+    s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2
   # PS7 PROD KUBERNETES
   ps7-sqa-prod_charm_qa_kubernetes-1: &ps7-sqa-prod_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
@@ -54,6 +74,8 @@ environments:
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
+    swift-storage: true
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config:
       apt-http-proxy: "http://egress.ps7.internal:3128"
@@ -73,15 +95,33 @@ environments:
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
-  ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-3: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-4: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-5: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-6: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-7: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-8: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-9: *ps7-sqa-prod_charm_qa_kubernetes
-  ps7-sqa-prod_charm_qa_kubernetes-10: *ps7-sqa-prod_charm_qa_kubernetes
+  ps7-sqa-prod_charm_qa_kubernetes-2:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2
+  ps7-sqa-prod_charm_qa_kubernetes-3:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3
+  ps7-sqa-prod_charm_qa_kubernetes-4:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4
+  ps7-sqa-prod_charm_qa_kubernetes-5:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5
+  ps7-sqa-prod_charm_qa_kubernetes-6:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6
+  ps7-sqa-prod_charm_qa_kubernetes-7:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7
+  ps7-sqa-prod_charm_qa_kubernetes-8:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8
+  ps7-sqa-prod_charm_qa_kubernetes-9:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9
+  ps7-sqa-prod_charm_qa_kubernetes-10:
+    <<: *ps7-sqa-prod_charm_qa_kubernetes
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10
   # PS7 PROD OPENSTACK
   ps7-sqa-prod_charm_qa_openstack-1: &ps7-sqa-prod_charm_qa_openstack
     github-runner: ps7-private-endpoint-runners
@@ -90,6 +130,8 @@ environments:
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
+    swift-storage: true
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1
     arch: amd64
     bootstrap-config:
       apt-http-proxy: "http://egress.ps7.internal:3128"
@@ -101,4 +143,6 @@ environments:
       snap-https-proxy: "http://egress.ps7.internal:3128"
     bootstrap-constraints: *ps7-model-constraints
     model-config: *ps7-model-config
-  ps7-sqa-prod_charm_qa_openstack-2: *ps7-sqa-prod_charm_qa_openstack
+  ps7-sqa-prod_charm_qa_openstack-2:
+    <<: *ps7-sqa-prod_charm_qa_openstack
+    s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2
