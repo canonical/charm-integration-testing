@@ -73,6 +73,13 @@ class JujuClient:
         self.logger.info(f"Restarted follower {unit}.")
         return unit
 
+    def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Rebooting unit {unit}.")
+        self.backend.reboot_unit(model, unit)
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+        self.logger.info(f"Rebooted unit {unit}.")
+
     def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
         """Delete a workload pod and dispatch its Juju lifecycle hooks."""
         if not self.backend.is_k8s_model(model):

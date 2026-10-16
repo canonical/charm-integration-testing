@@ -31,12 +31,10 @@ def _charm(*, ha_units: int = 3, platform: str = "machine", subordinate: bool = 
 class RecordingJujuClient:
     def __init__(
         self,
-        ssh_error: Exception | None = None,
-        delete_pod_error: Exception | None = None,
+        reboot_error: Exception | None = None,
     ) -> None:
         self.calls: list[tuple[object, ...]] = []
-        self.ssh_error = ssh_error
-        self.delete_pod_error = delete_pod_error
+        self.reboot_error = reboot_error
         self.replacement_seen = False
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -71,15 +69,10 @@ class RecordingJujuClient:
         self.calls.append(("wait_for_workload_instances_ready", application, expected_count, model, timeout))
         self.replacement_seen = True
 
-    def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
-        self.calls.append(("delete_pod", model, pod_name))
-        if self.delete_pod_error is not None:
-            raise self.delete_pod_error
-
-    def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
-        self.calls.append(("ssh", unit, command, model))
-        if self.ssh_error is not None:
-            raise self.ssh_error
+    def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.calls.append(("reboot_unit", unit, model))
+        if self.reboot_error is not None:
+            raise self.reboot_error
 
     def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.calls.append(("wait_for_unit_unavailable", unit, model, timeout))
@@ -112,7 +105,7 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
     assert client.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
-        ("ssh", "target/1", "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot", MODEL),
+        ("reboot_unit", "target/1", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
@@ -146,11 +139,11 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
     assert client.calls[-1] == ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
 
 
-def test_reboot_leader_waits_for_unavailability_before_recovery_after_ssh_error() -> None:
-    ssh_error = RuntimeError("SSH disconnected after reboot request")
-    client = RecordingJujuClient(ssh_error=ssh_error)
+def test_reboot_leader_waits_for_unavailability_before_recovery_after_reboot_error() -> None:
+    reboot_error = RuntimeError("reboot request failed after acceptance")
+    client = RecordingJujuClient(reboot_error=reboot_error)
 
-    with pytest.raises(RuntimeError, match="SSH disconnected after reboot request") as error:
+    with pytest.raises(RuntimeError, match="reboot request failed after acceptance") as error:
         reboot_leader.test_reboot_leader(
             cast(JujuClient, client),
             MODEL,
@@ -161,7 +154,7 @@ def test_reboot_leader_waits_for_unavailability_before_recovery_after_ssh_error(
             None,
         )
 
-    assert error.value is ssh_error
+    assert error.value is reboot_error
     assert client.calls[3:] == [
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
@@ -210,7 +203,7 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
             MODEL,
             timedelta(minutes=15),
         ),
-        ("delete_pod", MODEL, "target-1"),
+        ("reboot_unit", "target/1", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
@@ -228,10 +221,10 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
 
 
 def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> None:
-    delete_error = RuntimeError("delete accepted then failed")
-    client = RecordingJujuClient(delete_pod_error=delete_error)
+    reboot_error = RuntimeError("pod deletion accepted then failed")
+    client = RecordingJujuClient(reboot_error=reboot_error)
 
-    with pytest.raises(RuntimeError, match="delete accepted then failed") as error:
+    with pytest.raises(RuntimeError, match="pod deletion accepted then failed") as error:
         reboot_leader.test_reboot_leader(
             cast(JujuClient, client),
             MODEL,
@@ -242,5 +235,5 @@ def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> N
             None,
         )
 
-    assert error.value is delete_error
+    assert error.value is reboot_error
     assert ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)) in client.calls

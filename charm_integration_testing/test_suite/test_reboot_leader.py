@@ -54,7 +54,6 @@ def test_reboot_leader(
     leader = juju_client.application_leader(target_application, model=target_model_ref)
     workload_units: list[str] | None = None
     previous_workload_ids: set[str] | None = None
-    leader_workload_name: str | None = None
     if target_platform == "kubernetes":
         workload_units = juju_client.application_units(target_application, model=target_model_ref)
         instances = juju_client.ready_workload_instances_by_unit(
@@ -62,7 +61,6 @@ def test_reboot_leader(
         )
         if leader not in instances:
             pytest.fail(f"Expected a ready workload instance for leader {leader}.")
-        leader_workload_name = instances[leader].name
         previous_workload_ids = {instance.identifier for instance in instances.values()}
 
     models = [model for model in (target_model_ref, neighbor_model_ref) if model is not None]
@@ -71,16 +69,7 @@ def test_reboot_leader(
 
     try:
         restart_attempted = True
-        if target_platform == "kubernetes":
-            if leader_workload_name is None:
-                pytest.fail(f"Expected a ready workload instance for leader {leader}.")
-            juju_client.delete_pod(target_model_ref, leader_workload_name)
-        else:
-            juju_client.ssh(
-                leader,
-                "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
-                model=target_model_ref,
-            )
+        juju_client.reboot_unit(leader, model=target_model_ref)
         juju_client.wait_for_unit_unavailable(leader, model=target_model_ref, timeout=_TIMEOUT)
         unit_unavailability_observed = True
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])

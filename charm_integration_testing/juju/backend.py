@@ -152,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Reboot a unit without waiting for it to recover."""
+        raise NotImplementedError("This backend does not support rebooting units.")
+
     def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
         """Restart one Juju non-leader without changing the application unit count."""
         raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")

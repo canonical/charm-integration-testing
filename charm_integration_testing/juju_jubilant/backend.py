@@ -62,6 +62,8 @@ from .wait import (
     units_have_message,
 )
 
+_UNIT_REBOOT_COMMAND = "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot"
+
 
 def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
     """Ignore function for shutil.copytree that skips unreadable or non-regular entries.
@@ -278,6 +280,26 @@ class JubilantBackend(JujuCmdBackend):
             else:
                 raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
         return unit_name
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            self.ssh(model, unit, _UNIT_REBOOT_COMMAND)
+            return
+
+        application = unit.split("/", maxsplit=1)[0]
+        kubernetes = self._kubernetes_client_for_cloud(cloud)
+        pods = kubernetes.get_charm_pods(application, model.model)
+        matching_pods = [
+            pod
+            for pod in pods
+            if pod.metadata is not None
+            and (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+            and pod.metadata.deletion_timestamp is None
+        ]
+        if len(matching_pods) != 1 or matching_pods[0].metadata.name is None:
+            raise RuntimeError(f"Unable to identify a single live Pod for {unit}.")
+        kubernetes.delete_pod(namespace=model.model, pod_name=matching_pods[0].metadata.name)
 
     @staticmethod
     def _check_follower(current: jubilant.Status, application: str, expected_units: set[str], unit_name: str) -> None:

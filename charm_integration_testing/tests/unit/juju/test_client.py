@@ -196,6 +196,17 @@ class RestartFollowerBackendStub(NullJujuBackend):
         return f"{application}/1"
 
 
+class RebootUnitBackendStub(NullJujuBackend):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.units: list[tuple[JujuModelHandle, str]] = []
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.units.append((model, unit))
+        if self.error is not None:
+            raise self.error
+
+
 class RestartLifecycleExtension(JujuExtension):
     def __init__(self) -> None:
         self.restarted_units: list[tuple[JujuModelHandle, str]] = []
@@ -544,6 +555,30 @@ class TestJujuClientWorkloadInstanceOperations:
         assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
 
         assert extension.restarted_units == [(model, "app/1")]
+
+    def test_reboot_unit_runs_juju_lifecycle_hook_after_backend_reboot(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = RebootUnitBackendStub()
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == [(model, "app/1")]
+
+    def test_reboot_unit_does_not_run_hook_when_backend_reboot_fails(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend_error = RuntimeError("reboot failed")
+        backend = RebootUnitBackendStub(error=backend_error)
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        with pytest.raises(RuntimeError, match="reboot failed"):
+            client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == []
 
     def test_workload_operations_use_backend_and_restart_dispatches_lifecycle_once(self) -> None:
         model = JujuModelHandle(controller="controller", model="model")
