@@ -47,6 +47,101 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+S3 storage
+~~~~~~~~~~
+
+Bundles containing an ``unconfigured`` ``s3-integrator`` require external object
+storage. The post-deploy extension configures it; no MinIO charm is deployed.
+An integrator with an explicit endpoint is left untouched.
+The extension depends on the ``S3Provider`` interface; ``SwiftS3Provider`` and
+``StaticS3Provider`` share the bucket lifecycle while supplying different
+credential strategies.
+
+For Swift, supply ``S3_OS_AUTH_URL``, ``S3_OS_PASSWORD``,
+``S3_OS_PROJECT_DOMAIN_NAME``, ``S3_OS_PROJECT_NAME``, ``S3_OS_STORAGE_URL``,
+``S3_OS_USERNAME`` and ``S3_OS_USER_DOMAIN_NAME`` in the environment. Also supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for a persistent cleanup
+identity. The test-storage account must be able to create and revoke its own
+Keystone EC2 credentials and create/delete buckets and objects.
+The RADOS Gateway must enable ``rgw_s3_auth_use_keystone``. Its S3 endpoint is
+the origin of the ``/swift/v1/AUTH_*`` storage URL. For deployments that do not
+use the RADOS Gateway or have a nonstandard endpoint, set the optional
+``S3_ENDPOINT`` explicitly rather than treating a native Swift URL as an S3 URL.
+
+For a local S3-compatible server, supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY`` and
+``S3_SECRET_KEY`` instead, and unset ``S3_OS_STORAGE_URL``. Optionally supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
+identity; the provider uses it for bucket creation and cleanup but sends only the
+``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development
+sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions the service with
+that separate identity and a test identity restricted to harness buckets. Load
+``$HOME/.local/share/charmqa-s3/s3.env`` in the test shell.
+``S3_REGION`` defaults to ``us-east-1``.
+
+Each integrator gets an isolated bucket and an initial ``charmqa/`` directory
+marker for consumers such as Spark History Server. ``S3_BUCKET_NAMESPACE`` defaults to
+``local``; CI uses each environment's ``s3-swift-secret`` value, so numbered
+environments have separate cleanup scopes even when they share a substrate.
+Session teardown tracks storage in the resource registry. Runs that create their
+controller attempt to delete their owned buckets after controller teardown,
+even if controller teardown fails. Runs reusing an existing controller preserve storage
+because that controller may still be using it. Swift-generated bucket keys are
+revoked before their buckets are deleted; local/static keys are never revoked.
+
+Interrupted runs are swept by the scheduled environment cleanup using the
+existing age threshold (240 minutes by default). Only strictly named harness
+buckets in the matching namespace and with the matching provider ownership tag
+are eligible; log containers, other providers' buckets, and externally
+configured buckets are not touched. Buckets without ownership tags are retained
+and reported for manual inspection. The four-hour threshold is longer than any
+supported test run. Swift-backed cleanup uses the
+pre-provisioned ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for S3
+operations, so it does not create temporary cleanup keys. If a process is
+terminated between creating a bucket EC2 key and tagging the bucket, the sweep
+cannot identify that key, so manual revocation may be required. A failure to
+create the bucket client triggers immediate revocation; if that fails, session
+teardown retains the key identifier and retries revocation. Run the same cleanup
+manually with:
+
+.. code:: bash
+
+   poetry run python scripts/cleanup-s3.py --age-minutes 240
+
+Supported test environments opt into Swift storage with ``swift-storage:
+true`` and select their own repository secret using ``s3-swift-secret`` in
+``static/environments.yaml``. Create one repository secret per enabled
+environment (22 with the current environment table) and store that
+environment's credentials there, using a dedicated test-storage account
+separate from the log-upload account. Each secret contains the seven required
+Swift values and two cleanup values, plus optional ``S3_ENDPOINT`` when a
+non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
+``KEY=value`` format:
+
+.. code:: text
+
+   S3_OS_AUTH_URL=https://identity.example/v3
+   S3_OS_USERNAME=test-storage
+   S3_OS_PASSWORD=...
+   S3_OS_USER_DOMAIN_NAME=users
+   S3_OS_PROJECT_NAME=charm-qa
+   S3_OS_PROJECT_DOMAIN_NAME=projects
+   S3_OS_STORAGE_URL=https://storage.example/swift/v1/AUTH_project
+   S3_CLEANUP_ACCESS_KEY=...
+   S3_CLEANUP_SECRET_KEY=...
+   S3_ENDPOINT=https://s3.example
+
+The parser accepts comments and values containing ``=``; do not quote values or
+put them on multiple lines. Optional ``S3_ENDPOINT`` and ``S3_REGION`` values
+select a nonstandard endpoint or region. In cross-model runs, each integrator uses the
+provider selected by its own environment, so both environment secrets must be
+configured. The cleanup identity must be able to list buckets, read harness
+bucket tags, and remove buckets, object versions, and incomplete uploads. The
+test-storage account must also allow its generated bucket key to create buckets,
+write bucket tags, and upload the marker object. Scheduled cleanup uses the
+same environment secret and namespace as test provisioning. CI validates each
+Swift-enabled environment's configuration before its test step starts and
+reports missing variable names; non-Swift environments skip this check.
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
