@@ -122,7 +122,7 @@ class JujuClient:
         self.logger.info(f"Waiting {timeout} for {expected_count} ready workload instances of {application}.")
         self.backend.wait_for_workload_instances_ready(model, application, expected_count, timeout)
 
-    def restart_workload_instance(
+    def _restart_workload_instance(
         self,
         application: str,
         instance: JujuWorkloadInstance,
@@ -196,7 +196,7 @@ class JujuClient:
                 if instance.identifier not in existing_ids:
                     raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
 
-                self.restart_workload_instance(application, instance, existing_ids, model, timeout)
+                self._restart_workload_instance(application, instance, existing_ids, model, timeout)
                 self.wait_for_workload_instances_ready(application, len(units) + 1, model, timeout)
                 self.multi_model_idle_for_period(models, timeout=timeout)
                 for model_ref in models:

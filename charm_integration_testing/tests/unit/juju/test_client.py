@@ -591,7 +591,7 @@ class TestJujuClientWorkloadInstanceOperations:
         assert client.ready_workload_instances_by_unit("app", ["app/0"], model, timeout) == {"app/0": instance}
         assert client.workload_instance_ids("app", model) == {"old-uid"}
         client.wait_for_workload_instances_ready("app", 1, model, timeout)
-        assert client.restart_workload_instance("app", instance, {"old-uid"}, model, timeout) == "replacement"
+        assert client._restart_workload_instance("app", instance, {"old-uid"}, model, timeout) == "replacement"
         client.wait_for_workload_instances_replaced("app", 1, {"old-uid"}, model, timeout)
 
         assert extension.restarted_units == [(model, "app/0")]
