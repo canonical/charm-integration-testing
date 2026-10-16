@@ -280,6 +280,10 @@ def session_resource_registry(
         ],
         logger=logger,
     )
+    # Provider roots must precede controller roots so buckets outlive their consumers.
+    for provider in s3_providers.values():
+        if not registry.is_registered(provider.handle):
+            registry.register(handle=provider.handle)
     try:
         yield registry
     finally:

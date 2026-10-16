@@ -50,6 +50,7 @@ class S3IntegratorExtension(JujuExtension):
             self.resource_registry.register(
                 handle=bucket_resource.handle,
                 destroyer=provider.bucket_destroyer(bucket_resource) if self.cleanup_buckets else None,
+                parent=provider.handle,
             )
             bucket_name, credentials = bucket_resource.provision()
             # Set the endpoint last: a failed action must not look fully configured on redeploy.
