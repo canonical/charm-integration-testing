@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -17,7 +16,6 @@ from juju.models import (
     JujuApplicationHealth,
     JujuApplicationInfo,
     JujuIntegrationApplication,
-    JujuWorkloadInstance,
     PersistenceKey,
 )
 from juju.version import JujuVersion
@@ -141,54 +139,6 @@ class WorkloadPodBackendStub(UnitOperationsBackendStub):
         if self.kubernetes_client is None:
             raise RuntimeError("No Kubernetes client configured.")
         self.kubernetes_client.delete_pod(namespace=model.model, pod_name=instance_name)
-
-
-@dataclass
-class WorkloadOperationsBackendStub(NullJujuBackend):
-    instance: JujuWorkloadInstance
-    calls: list[tuple[object, ...]] = field(default_factory=list)
-
-    def ready_workload_instances_by_unit(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        units: Collection[str],
-        timeout: timedelta,
-    ) -> dict[str, JujuWorkloadInstance]:
-        self.calls.append(("ready_workload_instances_by_unit", model, application, list(units), timeout))
-        return {self.instance.unit: self.instance}
-
-    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
-        self.calls.append(("workload_instance_ids", model, application))
-        return {self.instance.identifier}
-
-    def wait_for_workload_instances_ready(
-        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
-    ) -> None:
-        self.calls.append(("wait_for_workload_instances_ready", model, application, expected_count, timeout))
-
-    def restart_workload_instance(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        instance: JujuWorkloadInstance,
-        existing_ids: Collection[str],
-        timeout: timedelta,
-    ) -> str:
-        self.calls.append(("restart_workload_instance", model, application, instance, set(existing_ids), timeout))
-        return "replacement"
-
-    def wait_for_workload_instances_replaced(
-        self,
-        model: JujuModelHandle,
-        application: str,
-        expected_count: int,
-        previous_ids: Collection[str],
-        timeout: timedelta,
-    ) -> None:
-        self.calls.append(
-            ("wait_for_workload_instances_replaced", model, application, expected_count, set(previous_ids), timeout)
-        )
 
 
 class RestartFollowerBackendStub(NullJujuBackend):
@@ -579,29 +529,6 @@ class TestJujuClientWorkloadInstanceOperations:
 
         assert backend.units == [(model, "app/1")]
         assert extension.restarted_units == []
-
-    def test_workload_operations_use_backend_and_restart_dispatches_lifecycle_once(self) -> None:
-        model = JujuModelHandle(controller="controller", model="model")
-        timeout = timedelta(minutes=5)
-        instance = JujuWorkloadInstance(unit="app/0", name="app-0", identifier="old-uid")
-        backend = WorkloadOperationsBackendStub(instance=instance)
-        extension = RestartLifecycleExtension()
-        client = JujuClient(backend, LoggerStub(), [extension])  # type: ignore[arg-type]
-
-        assert client.ready_workload_instances_by_unit("app", ["app/0"], model, timeout) == {"app/0": instance}
-        assert client.workload_instance_ids("app", model) == {"old-uid"}
-        client.wait_for_workload_instances_ready("app", 1, model, timeout)
-        assert client._restart_workload_instance("app", instance, {"old-uid"}, model, timeout) == "replacement"
-        client.wait_for_workload_instances_replaced("app", 1, {"old-uid"}, model, timeout)
-
-        assert extension.restarted_units == [(model, "app/0")]
-        assert backend.calls == [
-            ("ready_workload_instances_by_unit", model, "app", ["app/0"], timeout),
-            ("workload_instance_ids", model, "app"),
-            ("wait_for_workload_instances_ready", model, "app", 1, timeout),
-            ("restart_workload_instance", model, "app", instance, {"old-uid"}, timeout),
-            ("wait_for_workload_instances_replaced", model, "app", 1, {"old-uid"}, timeout),
-        ]
 
     def test_rotate_application_units_rejects_applications_without_units(self) -> None:
         backend = UnitOperationsBackendStub()

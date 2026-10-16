@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import cast
 
 import pytest
-from juju import JujuClient, JujuModelHandle, JujuWorkloadInstance
+from juju import JujuClient, JujuModelHandle
 from test_suite import test_reboot_leader as reboot_leader
 
 from bundle_builder_x import Charm, CharmChannel
@@ -14,7 +14,7 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 NEIGHBOR_MODEL = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
 
 
-def _charm(*, ha_units: int = 3, platform: str = "machine", subordinate: bool = False) -> Charm:
+def _charm(*, ha_units: int = 3, subordinate: bool = False) -> Charm:
     return Charm(
         name="mysql-k8s",
         channel=CharmChannel.model_validate("8.0/stable"),
@@ -22,7 +22,7 @@ def _charm(*, ha_units: int = 3, platform: str = "machine", subordinate: bool = 
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints={},
-        platforms=[platform],
+        platforms=["machine"],
         subordinate=subordinate,
         ha_units=ha_units,
     )
@@ -35,7 +35,6 @@ class RecordingJujuClient:
     ) -> None:
         self.calls: list[tuple[object, ...]] = []
         self.reboot_error = reboot_error
-        self.replacement_seen = False
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.calls.append(("num_units", application, model))
@@ -44,30 +43,6 @@ class RecordingJujuClient:
     def application_leader(self, application: str, model: JujuModelHandle) -> str:
         self.calls.append(("application_leader", application, model))
         return f"{application}/1"
-
-    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
-        self.calls.append(("application_units", application, model))
-        return [f"{application}/{unit}" for unit in range(3)]
-
-    def ready_workload_instances_by_unit(
-        self, application: str, units: list[str], model: JujuModelHandle, timeout: timedelta
-    ) -> dict[str, JujuWorkloadInstance]:
-        self.calls.append(("ready_workload_instances_by_unit", application, units, model, timeout))
-        uid = "uid-replacement" if self.replacement_seen else None
-        return {
-            unit: JujuWorkloadInstance(
-                unit=unit,
-                name=f"{application}-{unit.rsplit('/', maxsplit=1)[1]}",
-                identifier=uid if unit == f"{application}/1" and uid else f"uid-{unit.rsplit('/', maxsplit=1)[1]}",
-            )
-            for unit in units
-        }
-
-    def wait_for_workload_instances_ready(
-        self, application: str, expected_count: int, model: JujuModelHandle, timeout: timedelta
-    ) -> None:
-        self.calls.append(("wait_for_workload_instances_ready", application, expected_count, model, timeout))
-        self.replacement_seen = True
 
     def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
         self.calls.append(("reboot_unit", unit, model))
@@ -96,7 +71,6 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
         cast(JujuClient, client),
         MODEL,
         "target",
-        "machine",
         _charm(),
         None,
         None,
@@ -130,7 +104,6 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
             cast(JujuClient, client),
             MODEL,
             "target",
-            "machine",
             _charm(),
             None,
             None,
@@ -148,7 +121,6 @@ def test_reboot_leader_waits_for_unavailability_before_recovery_after_reboot_err
             cast(JujuClient, client),
             MODEL,
             "target",
-            "machine",
             _charm(),
             None,
             None,
@@ -169,7 +141,6 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
         cast(JujuClient, client),
         MODEL,
         "target",
-        "machine",
         _charm(),
         None,
         "neighbor",
@@ -179,15 +150,14 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
     assert ("validate_model", MODEL, "deep", ["neighbor"]) in client.calls
 
 
-def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_recovery() -> None:
+def test_reboot_leader_validates_neighbor_model_and_recovers() -> None:
     juju = RecordingJujuClient()
 
     reboot_leader.test_reboot_leader(
         cast(JujuClient, juju),
         MODEL,
         "target",
-        "kubernetes",
-        _charm(platform="kubernetes"),
+        _charm(),
         NEIGHBOR_MODEL,
         "neighbor",
     )
@@ -195,26 +165,10 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
     assert juju.calls == [
         ("num_units", "target", MODEL),
         ("application_leader", "target", MODEL),
-        ("application_units", "target", MODEL),
-        (
-            "ready_workload_instances_by_unit",
-            "target",
-            ["target/0", "target/1", "target/2"],
-            MODEL,
-            timedelta(minutes=15),
-        ),
         ("reboot_unit", "target/1", MODEL),
         ("wait_for_unit_unavailable", "target/1", MODEL, timedelta(minutes=15)),
         ("validate_model", MODEL, "deep", ["target"]),
         ("validate_model", NEIGHBOR_MODEL, "deep", ["neighbor"]),
-        ("wait_for_workload_instances_ready", "target", 3, MODEL, timedelta(minutes=15)),
-        (
-            "ready_workload_instances_by_unit",
-            "target",
-            ["target/0", "target/1", "target/2"],
-            MODEL,
-            timedelta(minutes=15),
-        ),
         ("wait_for_unit_available", "target/1", MODEL, timedelta(minutes=15)),
         ("multi_model_idle_for_period", [MODEL, NEIGHBOR_MODEL], timedelta(minutes=15)),
     ]
@@ -229,8 +183,7 @@ def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> N
             cast(JujuClient, client),
             MODEL,
             "target",
-            "kubernetes",
-            _charm(platform="kubernetes"),
+            _charm(),
             None,
             None,
         )
