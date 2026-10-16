@@ -16,6 +16,7 @@ import warnings
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, Callable
 
 import jubilant
@@ -55,6 +56,9 @@ from .wait import (
     bundle_applications_integrations_exist,
     integrations_are_removed,
     saas_is_removed,
+    unit_is_available,
+    unit_is_removed,
+    unit_is_unavailable,
     units_have_message,
 )
 
@@ -707,43 +711,13 @@ class JubilantBackend(JujuCmdBackend):
         return leaders[0]
 
     def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
-        application = unit.split("/", maxsplit=1)[0]
-
-        def unit_is_removed(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            if application not in status.apps:
-                raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
-            removed = unit not in status.apps[application].units
-            return removed, JujuWaitState(message=f"waiting for removal of unit '{unit}'")
-
-        self.wait(model, unit_is_removed, timeout=timeout)
+        self.wait(model, partial(unit_is_removed, unit=unit, model_uri=model.uri), timeout=timeout)
 
     def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
-        application = unit.split("/", maxsplit=1)[0]
-
-        def unit_is_unavailable(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            if application not in status.apps:
-                raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
-            unit_info = status.apps[application].units.get(unit)
-            unavailable = unit_info is None or unit_info.juju_status.current in {"down", "lost"}
-            return unavailable, JujuWaitState(message=f"waiting for unit '{unit}' to become unavailable")
-
-        self.wait(model, unit_is_unavailable, timeout=timeout)
+        self.wait(model, partial(unit_is_unavailable, unit=unit, model_uri=model.uri), timeout=timeout)
 
     def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
-        application = unit.split("/", maxsplit=1)[0]
-
-        def unit_is_available(status: jubilant.Status) -> tuple[bool, JujuWaitState]:
-            if application not in status.apps:
-                raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
-            unit_info = status.apps[application].units.get(unit)
-            available = (
-                unit_info is not None
-                and unit_info.workload_status.current == "active"
-                and unit_info.juju_status.current == "idle"
-            )
-            return available, JujuWaitState(message=f"waiting for unit '{unit}' to become available")
-
-        self.wait(model, unit_is_available, timeout=timeout)
+        self.wait(model, partial(unit_is_available, unit=unit, model_uri=model.uri), timeout=timeout)
 
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
