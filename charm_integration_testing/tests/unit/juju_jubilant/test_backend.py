@@ -3,6 +3,7 @@
 
 import logging
 import subprocess
+from collections.abc import Collection
 from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,7 @@ from juju import (
     JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
 )
 from juju.backend import JujuBackend
 from juju.version import JujuVersion
@@ -34,7 +36,7 @@ from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityE
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient, KubernetesClientRegistry
+from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -3295,6 +3297,124 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
+
+
+class WorkloadKubernetesClientStub:
+    def __init__(self) -> None:
+        self.ready_pods = {"app/0": CharmPod(unit="app/0", name="app-0", uid="old-uid")}
+        self.restart_result = "app-0-replacement"
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def get_ready_charm_pods_by_unit(
+        self, application: str, namespace: str, units: Collection[str], timeout: timedelta
+    ) -> dict[str, CharmPod]:
+        self.calls.append(("ready-by-unit", (application, namespace, units, timeout), {}))
+        return self.ready_pods
+
+    def get_charm_pod_uids(self, application: str, namespace: str) -> set[str]:
+        self.calls.append(("instance-ids", (application, namespace), {}))
+        return {"old-uid"}
+
+    def wait_for_charm_pods_ready(
+        self, application: str, namespace: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self.calls.append(("wait-ready", (application, namespace, expected_count, timeout), {}))
+
+    def restart_pod(
+        self,
+        namespace: str,
+        pod_name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> str:
+        self.calls.append(
+            (
+                "restart",
+                (),
+                {
+                    "namespace": namespace,
+                    "pod_name": pod_name,
+                    "uid": uid,
+                    "timeout": timeout,
+                    "application": application,
+                    "unit": unit,
+                    "existing_uids": existing_uids,
+                },
+            )
+        )
+        return self.restart_result
+
+    def wait_for_charm_pods_replaced(
+        self,
+        application: str,
+        namespace: str,
+        expected_count: int,
+        previous_uids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self.calls.append(("wait-replaced", (application, namespace, expected_count, previous_uids, timeout), {}))
+
+    def delete_pod(self, namespace: str, pod_name: str) -> None:
+        self.calls.append(("delete", (namespace, pod_name), {}))
+
+
+class WorkloadOperationsBackend(JubilantBackend):
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "test-cloud"
+
+
+def test_workload_operations_use_registry_client_and_delegate_arguments(tmp_path: Path) -> None:
+    kubeconfig = tmp_path / "kubeconfig"
+    client = WorkloadKubernetesClientStub()
+    factory_calls: list[Path] = []
+
+    def create_client(path: Path) -> KubernetesClient:
+        factory_calls.append(path)
+        return cast(KubernetesClient, client)
+
+    backend = WorkloadOperationsBackend(
+        kubernetes_client_registry=KubernetesClientRegistry(
+            {"test-cloud": kubeconfig},
+            client_factory=create_client,
+        )
+    )
+    timeout = timedelta(seconds=30)
+    units = {"app/0"}
+    instance = JujuWorkloadInstance(unit="app/0", name="app-0", identifier="old-uid")
+    previous_ids = {"old-uid", "other-uid"}
+
+    assert backend.ready_workload_instances_by_unit(TEST_MODEL, "app", units, timeout) == {"app/0": instance}
+    assert backend.workload_instance_ids(TEST_MODEL, "app") == {"old-uid"}
+    backend.wait_for_workload_instances_ready(TEST_MODEL, "app", 1, timeout)
+    assert backend.restart_workload_instance(TEST_MODEL, "app", instance, previous_ids, timeout) == "app-0-replacement"
+    backend.wait_for_workload_instances_replaced(TEST_MODEL, "app", 1, previous_ids, timeout)
+    backend.delete_workload_instance(TEST_MODEL, "app-0")
+
+    assert factory_calls == [kubeconfig]
+    assert client.calls == [
+        ("ready-by-unit", ("app", "test-model", units, timeout), {}),
+        ("instance-ids", ("app", "test-model"), {}),
+        ("wait-ready", ("app", "test-model", 1, timeout), {}),
+        (
+            "restart",
+            (),
+            {
+                "namespace": "test-model",
+                "pod_name": "app-0",
+                "uid": "old-uid",
+                "timeout": timeout,
+                "application": "app",
+                "unit": "app/0",
+                "existing_uids": previous_ids,
+            },
+        ),
+        ("wait-replaced", ("app", "test-model", 1, previous_ids, timeout), {}),
+        ("delete", ("test-model", "app-0"), {}),
+    ]
 
 
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
