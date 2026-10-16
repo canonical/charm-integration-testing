@@ -14,7 +14,7 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 NEIGHBOR_MODEL = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
 
 
-def _charm(*, ha_units: int = 3, subordinate: bool = False) -> Charm:
+def _charm(*, ha_units: int = 3, platform: str = "machine", subordinate: bool = False) -> Charm:
     return Charm(
         name="mysql-k8s",
         channel=CharmChannel.model_validate("8.0/stable"),
@@ -22,7 +22,7 @@ def _charm(*, ha_units: int = 3, subordinate: bool = False) -> Charm:
         ubuntu_version="22.04",
         ubuntu_arch="amd64",
         endpoints={},
-        platforms=["machine"],
+        platforms=[platform],
         subordinate=subordinate,
         ha_units=ha_units,
     )
@@ -194,7 +194,7 @@ def test_reboot_leader_kubernetes_validates_both_models_and_waits_for_leader_rec
         MODEL,
         "target",
         "kubernetes",
-        _charm(),
+        _charm(platform="kubernetes"),
         NEIGHBOR_MODEL,
         "neighbor",
     )
@@ -237,7 +237,7 @@ def test_reboot_leader_waits_for_disruption_after_kubernetes_delete_error() -> N
             MODEL,
             "target",
             "kubernetes",
-            _charm(),
+            _charm(platform="kubernetes"),
             None,
             None,
         )

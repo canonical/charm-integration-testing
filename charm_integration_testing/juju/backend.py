@@ -8,7 +8,7 @@ from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar, overload
 
 from pydantic.dataclasses import dataclass
 
@@ -449,8 +449,16 @@ class JujuBackend(ABC):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
     @abstractmethod
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     @abstractmethod

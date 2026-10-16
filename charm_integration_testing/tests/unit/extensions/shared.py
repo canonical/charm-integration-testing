@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Iterable
+from typing import Any, Iterable, overload
 
 from juju import JujuModelHandle
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
@@ -221,7 +221,15 @@ class NullJujuBackend(JujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
@@ -384,9 +392,16 @@ class JujuStub(NullJujuBackend):
         """Mock SCP file transfer (captures call for verification)"""
         self.scp_calls.append((_model_key(model), source, destination))
 
-    def ssh(self, model: "JujuModelHandle", target: str, command: str) -> None:
+    @overload
+    def ssh(self, model: "JujuModelHandle", target: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: "JujuModelHandle", target: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(self, model: "JujuModelHandle", target: str, command: str, *, timeout: float | None = None) -> str | None:
         """Mock SSH command execution (captures call for verification)"""
         self.ssh_calls.append((_model_key(model), target, command))
+        return None
 
     def run_action(self, model: "JujuModelHandle", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""

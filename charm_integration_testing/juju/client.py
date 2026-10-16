@@ -379,9 +379,11 @@ class JujuClient:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become available.")
         self.backend.wait_for_unit_available(model, unit, timeout)
 
-    def ssh(self, unit: str, command: str, model: JujuModelHandle) -> None:
+    def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
         self.logger.info(f"Running command on unit {unit}: {command}")
-        self.backend.ssh(model, unit, command)
+        if timeout is None:
+            return self.backend.ssh(model, unit, command)
+        return self.backend.ssh(model, unit, command, timeout=timeout)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:

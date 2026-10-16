@@ -72,7 +72,8 @@ def test_reboot_leader(
     try:
         restart_attempted = True
         if target_platform == "kubernetes":
-            assert leader_workload_name is not None
+            if leader_workload_name is None:
+                pytest.fail(f"Expected a ready workload instance for leader {leader}.")
             juju_client.delete_pod(target_model_ref, leader_workload_name)
         else:
             juju_client.ssh(

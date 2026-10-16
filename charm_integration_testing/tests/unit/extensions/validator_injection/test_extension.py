@@ -6,6 +6,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import overload
 
 import pytest
 from extensions.validator_injection.extension import (
@@ -54,8 +55,15 @@ class JujuStub(NullJujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         self.scp_calls.append((model, source, destination))
 
-    def ssh(self, model: JujuModelHandle, unit: str, cmd: str) -> None:
+    @overload
+    def ssh(self, model: JujuModelHandle, unit: str, cmd: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, unit: str, cmd: str, *, timeout: float) -> str: ...
+
+    def ssh(self, model: JujuModelHandle, unit: str, cmd: str, *, timeout: float | None = None) -> str | None:
         self.ssh_calls.append((model, unit, cmd))
+        return None
 
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return model.model in self.k8s_models

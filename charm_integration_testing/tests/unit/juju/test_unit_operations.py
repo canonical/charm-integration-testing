@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import overload
 
 from juju import JujuClient, JujuModelHandle
 
@@ -32,8 +33,17 @@ class UnitOperationsBackend(NullJujuBackend):
     def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         self.calls.append(("wait_for_unit_available", model, unit, timeout))
 
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
-        self.calls.append(("ssh", model, application, command))
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
+
+    @overload
+    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        self.calls.append(("ssh", model, application, command, timeout))
+        return "output" if timeout is not None else None
 
 
 def test_unit_operations_delegate_to_backend() -> None:
@@ -47,6 +57,7 @@ def test_unit_operations_delegate_to_backend() -> None:
     client.wait_for_unit_unavailable("target/1", model=MODEL, timeout=timeout)
     client.wait_for_unit_available("target/1", model=MODEL, timeout=timeout)
     client.ssh("target/1", "sudo reboot", model=MODEL)
+    assert client.ssh("target/1", "cat /etc/os-release", model=MODEL, timeout=5.0) == "output"
 
     assert backend.calls == [
         ("application_leader", MODEL, "target"),
@@ -54,5 +65,6 @@ def test_unit_operations_delegate_to_backend() -> None:
         ("wait_for_unit_removal", MODEL, "target/1", timeout),
         ("wait_for_unit_unavailable", MODEL, "target/1", timeout),
         ("wait_for_unit_available", MODEL, "target/1", timeout),
-        ("ssh", MODEL, "target/1", "sudo reboot"),
+        ("ssh", MODEL, "target/1", "sudo reboot", None),
+        ("ssh", MODEL, "target/1", "cat /etc/os-release", 5.0),
     ]

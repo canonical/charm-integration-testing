@@ -11,6 +11,8 @@ from bundle_builder_x import Charm
 from .fixtures.integration_spec import require_principal_charm
 from .scheduler.states import State
 
+_TIMEOUT = timedelta(minutes=15)
+
 
 def _restore_application_scale(
     juju_client: JujuClient,
@@ -26,13 +28,13 @@ def _restore_application_scale(
     restore_scale = True
     if removal_attempted and not removal_settled:
         if removal_request_returned:
-            juju_client.wait_for_unit_removal(leader, model=model, timeout=timedelta(minutes=15))
+            juju_client.wait_for_unit_removal(leader, model=model, timeout=_TIMEOUT)
         else:
-            juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+            juju_client.idle_for_period(model=model, timeout=_TIMEOUT)
             restore_scale = juju_client.num_units(application, model=model) != original_units
     if restore_scale:
         juju_client.scale_application(application, original_units, model=model)
-    juju_client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+    juju_client.multi_model_idle_for_period(models, timeout=_TIMEOUT)
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
@@ -66,9 +68,9 @@ def test_scale_remove_leader(
         removal_attempted = True
         juju_client.remove_unit(leader, model=target_model_ref)
         removal_request_returned = True
-        juju_client.wait_for_unit_removal(leader, model=target_model_ref, timeout=timedelta(minutes=15))
+        juju_client.wait_for_unit_removal(leader, model=target_model_ref, timeout=_TIMEOUT)
         removal_settled = True
-        juju_client.idle_for_period(model=target_model_ref, timeout=timedelta(minutes=15))
+        juju_client.idle_for_period(model=target_model_ref, timeout=_TIMEOUT)
         juju_client.validate_model(model=target_model_ref, level="deep", applications=[target_application])
         if neighbor_application is not None:
             juju_client.validate_model(
