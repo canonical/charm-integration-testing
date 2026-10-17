@@ -66,6 +66,7 @@ class CharmhubClientStub(CharmhubClient):
         # Prefer exact track + risk match.
         if charm_track is not None:
             for c in candidates:
+                assert c.channel is not None
                 if c.channel.explicit_track == charm_track:
                     if charm_risk is None or c.channel.risk == charm_risk:
                         if ubuntu_version is None or c.ubuntu_version == ubuntu_version:
@@ -74,6 +75,7 @@ class CharmhubClientStub(CharmhubClient):
         # Fall back to risk-only match.
         if charm_risk is not None:
             for c in candidates:
+                assert c.channel is not None
                 if c.channel.risk == charm_risk:
                     if ubuntu_version is None or c.ubuntu_version == ubuntu_version:
                         return c

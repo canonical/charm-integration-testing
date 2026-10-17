@@ -22,7 +22,12 @@ def _offer_name_from_url(url: str) -> str:
 
 
 class AppSpec(BaseModel):
-    """Specification for a single application in a model."""
+    """Specification for a single application in a model.
+
+    When ``local_charm`` is set, ``channel`` and ``revision`` describe the release
+    context the artifact is being tested as. They select policy and constraints;
+    they do not identify or fetch a Charmhub release.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -30,6 +35,7 @@ class AppSpec(BaseModel):
     channel: str | None = None
     revision: int | None = None
     base: str | None = None
+    local_charm: Path | None = None
 
 
 class IntegrationSpec(BaseModel):

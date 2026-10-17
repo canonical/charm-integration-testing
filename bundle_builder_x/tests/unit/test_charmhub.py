@@ -147,6 +147,52 @@ def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> Charmhu
 
 
 class TestCharmhubClient:
+    class TestCharmFromStoreByRevision:
+        def test_uses_current_default_channel_for_pinned_revision(self) -> None:
+            # GIVEN a pinned revision and a different current default channel
+            revision_response = _refresh_response_with_charm(
+                "juju-qa-test",
+                revision=27,
+                metadata=_METADATA_REQUIRES,
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            ).model_copy(update={"effective_channel": "3.0/stable"})
+            default_response = _refresh_response_with_charm(
+                "juju-qa-test",
+                revision=40,
+                metadata=_METADATA_REQUIRES,
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            ).model_copy(update={"effective_channel": "latest/stable"})
+
+            class _RevisionHttpClient(_NullHttpClient):
+                def __init__(self) -> None:
+                    self.actions: list[RefreshAction] = []
+
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    self.actions.append(action)
+                    return revision_response if action.charm_revision is not None else default_response
+
+            http_client = _RevisionHttpClient()
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, http_client),
+                overrides_client=_StubOverridesClient({}),
+            )
+
+            # WHEN resolving the pinned revision without a caller-supplied channel
+            charm = client.charm_from_store(
+                charm_name="juju-qa-test",
+                ubuntu_arch="amd64",
+                platform="machine",
+                charm_revision=27,
+                ubuntu_version="22.04",
+            )
+
+            # THEN the pinned revision retains the existing default-channel behavior
+            assert charm.revision == 27
+            assert charm.channel == CharmChannel.model_validate("latest/stable")
+            assert len(http_client.actions) == 2
+            assert http_client.actions[0].charm_revision == 27
+            assert http_client.actions[1].charm_channel is None
+
     class TestBuildCharmHa:
         def test_build_charm_uses_ha_defaults(self) -> None:
             client = _client({})
@@ -568,6 +614,7 @@ class TestCharmhubClient:
             )
 
             # THEN the resolved charm retains that branch
+            assert charm.channel is not None
             assert charm.channel.branch == "candidate-build"
 
         def test_preserves_branch_on_trackless_channel(self) -> None:
@@ -607,6 +654,7 @@ class TestCharmhubClient:
             )
 
             # THEN the trackless channel remains unqualified by a synthetic latest track
+            assert charm.channel is not None
             assert charm.channel.track == ""
             assert str(charm.channel) == "stable/feature"
 
