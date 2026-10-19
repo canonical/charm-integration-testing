@@ -26,10 +26,9 @@ class MysqlReplicator:
         self.juju = juju
         self.logger = logger
         self.charm_info = charm_info
-        # Models seen across post_deploy calls (one call per model per deploy_bundles() run), so
-        # that a CMR pair split across two models can be discovered even though each call only
-        # ever receives one of the two models. Reset per test since a new JujuClient (and thus a
-        # new extension/replicator instance) is constructed per test.
+        # Models seen across post_deploy calls, so a CMR pair split across two models can be
+        # discovered even though each call only receives one of the two models. Applications are
+        # looked up live on each call, so repeated deployments use the current model state.
         self._known_models: list[JujuModelHandle] = []
 
     def try_replicate_all_database_clusters(self, model: JujuModelHandle) -> None:

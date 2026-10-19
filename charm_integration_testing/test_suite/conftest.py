@@ -209,7 +209,7 @@ def unseal_vault_k8s_extension(juju_backend: JujuBackend, logger: logging.Logger
     return UnsealVaultK8sJujuExtension(juju_backend, logger)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def register_test_clouds(
     juju_backend: JujuBackend,
     unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
@@ -411,9 +411,10 @@ def _build_juju_client(
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def juju_client(
     juju_backend: JujuBackend,
+    register_test_clouds: None,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -439,15 +440,6 @@ def juju_client(
 @pytest.fixture(scope="session", autouse=True)
 def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
-    persistence_extension: ValidatorInjectorExtension,
-    juju_backend: JujuBackend,
-    target_controller: str,
-    logger: logging.Logger,
-    ubuntu_pro_token: str | None,
-    session_resource_registry: ResourceRegistry,
-    remote_logging_endpoints_by_controller: dict[str, str],
-    kubernetes_client_registry: KubernetesClientRegistry,
-    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
@@ -486,17 +478,7 @@ def seed_persistence_state_for_resumed_run(
         )
         return
 
-    client = _build_juju_client(
-        juju_backend,
-        target_controller,
-        logger,
-        ubuntu_pro_token,
-        session_resource_registry,
-        persistence_extension,
-        remote_logging_endpoints_by_controller,
-        kubernetes_client_registry,
-        unseal_vault_k8s_extension,
-    )
+    client: JujuClient = request.getfixturevalue("juju_client")
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:
         models.append(neighbor_model_ref)
@@ -1151,18 +1133,22 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _print_all_model_statuses() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                try:
-                    juju_client.print_status(model=handle)
-                except Exception:
-                    logger.warning(f"Failed to print status for model '{handle.uri}'")
+        model_handles = [
+            handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+        ]
+        if not model_handles:
+            return
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
+            try:
+                juju_client.print_status(model=handle)
+            except Exception:
+                logger.warning(f"Failed to print status for model '{handle.uri}'")
 
     # Print starting state for all registered models
     _print_all_model_statuses()
@@ -1316,15 +1302,20 @@ def record_charm_info_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charm_info_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
+        model_handles = [
+            handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+        ]
+        if not model_handles:
+            return
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
+            record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -1583,7 +1574,7 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
     require_temp_juju_controller_alive: None,
@@ -1591,8 +1582,12 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version for each registered model
-    for handle in session_resource_registry.registered_handles():
-        if isinstance(handle, JujuModelHandle):
+    model_handles = [
+        handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)
+    ]
+    if model_handles:
+        juju_client: JujuClient = request.getfixturevalue("juju_client")
+        for handle in model_handles:
             execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
