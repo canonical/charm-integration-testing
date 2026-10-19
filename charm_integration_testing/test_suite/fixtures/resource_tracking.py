@@ -31,6 +31,7 @@ from resource_tracking import (
 
 from bundle_builder_x import CharmChannel, OverridesClient
 from test_suite.conftest import failure_message, skipped_message
+from test_suite.fixtures.juju import get_juju_client_for_registered_models
 from test_suite.scheduler.markers import read_state_marker
 
 
@@ -168,10 +169,11 @@ def track_state_resources(
     marker = read_state_marker(request.node)
     if marker is None:
         return
-    if not any(isinstance(handle, JujuModelHandle) for handle in session_resource_registry.registered_handles()):
+    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+    if client_and_models is None:
         return
 
-    juju_client: JujuClient = request.getfixturevalue("juju_client")
+    juju_client, _ = client_and_models
     request.getfixturevalue("resource_tracking_skips_by_application")
 
     # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
