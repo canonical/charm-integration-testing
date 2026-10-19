@@ -18,6 +18,9 @@ class GenericMysqlDatabaseReplicationExtension(JujuExtension, ABC):
     def post_deploy(self, model: JujuModelHandle) -> None:
         self.mysql_replicator.try_replicate_all_database_clusters(model)
 
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        self.mysql_replicator.post_migrate_model(model, source, target)
+
 
 class MysqlK8sDatabaseReplicationExtension(GenericMysqlDatabaseReplicationExtension):
     def __init__(self, juju: JujuBackend, logger: logging.Logger):

@@ -35,9 +35,14 @@ class JujuStub(JujuStubBase):
     # succeed immediately, preserving existing tests' assumptions.
     unit_messages: dict[str, str] = field(default_factory=dict)
     consumed_offers_by_model: dict[str, dict[str, JujuConsumedOfferInfo]] = field(default_factory=dict)
+    unavailable_models: set[str] = field(default_factory=set)
+    listed_models: list[JujuModelHandle] = field(default_factory=list)
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         """Return applications for the given model"""
+        self.listed_models.append(model)
+        if _model_key(model) in self.unavailable_models:
+            raise RuntimeError(f"Model '{model.uri}' is unavailable.")
         apps = self.applications_by_model.get(_model_key(model), {})
         return {name: JujuApplicationInfo(charm=charm, revision=0) for name, charm in apps.items()}
 
@@ -320,3 +325,20 @@ class TestMysqlDatabaseReplicationExtension:
 
             # THEN no action is run
             assert juju.actions == []
+
+        def test_redeploy_after_model_migration_does_not_query_source_model(
+            self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN a model that the replicator has already seen
+            migrated_model = JujuModelHandle(controller="migrated-controller", model=TARGET_MODEL.model)
+            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
+            extension.post_deploy(TARGET_MODEL)
+
+            # WHEN the model migrates and is redeployed under its new controller
+            extension.post_migrate_model(TARGET_MODEL.model, TARGET_MODEL.controller, migrated_model.controller)
+            juju.unavailable_models.add(_model_key(TARGET_MODEL))
+            juju.applications_by_model[_model_key(migrated_model)] = {"target": "mysql-k8s"}
+            extension.post_deploy(migrated_model)
+
+            # THEN replication discovery uses the new handle without querying the stale source handle
+            assert juju.listed_models == [TARGET_MODEL, migrated_model]

@@ -44,6 +44,19 @@ class MysqlReplicator:
         self._try_replicate_same_model_pairs(applications_by_model)
         self._try_replicate_cross_model_pairs(applications_by_model)
 
+    def post_migrate_model(self, model: str, source: str, target: str) -> None:
+        source_handle = JujuModelHandle(controller=source, model=model)
+        if source_handle not in self._known_models:
+            return
+
+        target_handle = JujuModelHandle(controller=target, model=model)
+        self._known_models = [
+            known_model
+            for known_model in self._known_models
+            if known_model != source_handle and known_model != target_handle
+        ]
+        self._known_models.append(target_handle)
+
     def _charm_applications_by_model(self) -> dict[JujuModelHandle, set[str]]:
         """Return the matching-charm applications found in each model seen so far."""
         result: dict[JujuModelHandle, set[str]] = {}
