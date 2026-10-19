@@ -35,14 +35,9 @@ class JujuStub(JujuStubBase):
     # succeed immediately, preserving existing tests' assumptions.
     unit_messages: dict[str, str] = field(default_factory=dict)
     consumed_offers_by_model: dict[str, dict[str, JujuConsumedOfferInfo]] = field(default_factory=dict)
-    unavailable_models: set[str] = field(default_factory=set)
-    listed_models: list[JujuModelHandle] = field(default_factory=list)
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         """Return applications for the given model"""
-        self.listed_models.append(model)
-        if _model_key(model) in self.unavailable_models:
-            raise RuntimeError(f"Model '{model.uri}' is unavailable.")
         apps = self.applications_by_model.get(_model_key(model), {})
         return {name: JujuApplicationInfo(charm=charm, revision=0) for name, charm in apps.items()}
 
@@ -232,12 +227,15 @@ class TestMysqlDatabaseReplicationExtension:
                 )
             )
 
-        def test_creates_replication_across_models_once_both_are_known(
+        def _offer_model(self, owner: str = "admin") -> JujuModelHandle:
+            return JujuModelHandle(controller=TARGET_MODEL.controller, model=TARGET_MODEL.model, owner=owner)
+
+        def test_creates_replication_by_resolving_consumed_offer_model(
             self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN an offer application in one model and a consumer application in another,
             # related via a consumed offer
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
+            juju.applications_by_model[_model_key(self._offer_model())] = {"target": "mysql-k8s"}
             juju.applications_by_model[_model_key(NEIGHBOR_MODEL)] = {"neighbor": "mysql-k8s"}
             juju.units.update({"target": 1, "neighbor": 1})
             self._consume_offer(juju, offer_model=TARGET_MODEL, offer_alias="target-offer")
@@ -247,20 +245,19 @@ class TestMysqlDatabaseReplicationExtension:
                 JujuIntegrationApplication("neighbor", "replication"),
             )
 
-            # WHEN post_deploy is called once per model, as deploy_bundles() does
-            extension.post_deploy(TARGET_MODEL)
+            # WHEN post_deploy is called for the consumer model
             extension.post_deploy(NEIGHBOR_MODEL)
 
             # THEN the create-replication action is run on the offer's leader unit, addressed
             # with the owner declared in the consumed offer's URL ("admin", per _consume_offer)
-            admin_qualified_uri = f"{TARGET_MODEL.controller}:admin/{TARGET_MODEL.model}"
+            admin_qualified_uri = self._offer_model().uri
             assert (admin_qualified_uri, "target/leader", "create-replication", {}) in juju.actions
 
         def test_addresses_offer_model_with_its_declared_owner(
             self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a consumed offer whose URL declares an owner other than "admin"
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
+            juju.applications_by_model[_model_key(self._offer_model("produser"))] = {"target": "mysql-k8s"}
             juju.applications_by_model[_model_key(NEIGHBOR_MODEL)] = {"neighbor": "mysql-k8s"}
             juju.units.update({"target": 1, "neighbor": 1})
             self._consume_offer(juju, offer_model=TARGET_MODEL, offer_alias="target-offer", owner="produser")
@@ -270,12 +267,11 @@ class TestMysqlDatabaseReplicationExtension:
                 JujuIntegrationApplication("neighbor", "replication"),
             )
 
-            # WHEN post_deploy is called once per model, as deploy_bundles() does
-            extension.post_deploy(TARGET_MODEL)
+            # WHEN post_deploy is called for the consumer model
             extension.post_deploy(NEIGHBOR_MODEL)
 
             # THEN the offer model is addressed with its owner, not just "controller:model"
-            owner_qualified_uri = f"{TARGET_MODEL.controller}:produser/{TARGET_MODEL.model}"
+            owner_qualified_uri = self._offer_model("produser").uri
             assert (owner_qualified_uri, "target", "0:10:00") in juju.waited_scaled
             assert (owner_qualified_uri, "target/leader", "create-replication", {}) in juju.actions
 
@@ -283,7 +279,7 @@ class TestMysqlDatabaseReplicationExtension:
             self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN two applications of the matching charm in the offer model (ambiguous)
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {
+            juju.applications_by_model[_model_key(self._offer_model())] = {
                 "target": "mysql-k8s",
                 "target-2": "mysql-k8s",
             }
@@ -296,8 +292,7 @@ class TestMysqlDatabaseReplicationExtension:
                 JujuIntegrationApplication("neighbor", "replication"),
             )
 
-            # WHEN post_deploy is called once per model
-            extension.post_deploy(TARGET_MODEL)
+            # WHEN post_deploy is called for the consumer model
             extension.post_deploy(NEIGHBOR_MODEL)
 
             # THEN no action is run, since which application owns the offer is ambiguous
@@ -307,7 +302,7 @@ class TestMysqlDatabaseReplicationExtension:
             self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
         ) -> None:
             # GIVEN a consumed offer that doesn't expose our replication-offer endpoint
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
+            juju.applications_by_model[_model_key(self._offer_model())] = {"target": "mysql-k8s"}
             juju.applications_by_model[_model_key(NEIGHBOR_MODEL)] = {"neighbor": "mysql-k8s"}
             juju.units.update({"target": 1, "neighbor": 1})
             self._consume_offer(
@@ -319,26 +314,8 @@ class TestMysqlDatabaseReplicationExtension:
                 JujuIntegrationApplication("neighbor", "replication"),
             )
 
-            # WHEN post_deploy is called once per model
-            extension.post_deploy(TARGET_MODEL)
+            # WHEN post_deploy is called for the consumer model
             extension.post_deploy(NEIGHBOR_MODEL)
 
             # THEN no action is run
             assert juju.actions == []
-
-        def test_redeploy_after_model_migration_does_not_query_source_model(
-            self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
-        ) -> None:
-            # GIVEN a model that the replicator has already seen
-            migrated_model = JujuModelHandle(controller="migrated-controller", model=TARGET_MODEL.model)
-            juju.applications_by_model[_model_key(TARGET_MODEL)] = {"target": "mysql-k8s"}
-            extension.post_deploy(TARGET_MODEL)
-
-            # WHEN the model migrates and is redeployed under its new controller
-            extension.post_migrate_model(TARGET_MODEL.model, TARGET_MODEL.controller, migrated_model.controller)
-            juju.unavailable_models.add(_model_key(TARGET_MODEL))
-            juju.applications_by_model[_model_key(migrated_model)] = {"target": "mysql-k8s"}
-            extension.post_deploy(migrated_model)
-
-            # THEN replication discovery uses the new handle without querying the stale source handle
-            assert juju.listed_models == [TARGET_MODEL, migrated_model]

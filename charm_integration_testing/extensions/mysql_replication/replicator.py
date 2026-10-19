@@ -26,104 +26,70 @@ class MysqlReplicator:
         self.juju = juju
         self.logger = logger
         self.charm_info = charm_info
-        # Models seen across post_deploy calls, so a CMR pair split across two models can be
-        # discovered even though each call only receives one of the two models. Applications are
-        # looked up live on each call, so repeated deployments use the current model state.
-        self._known_models: list[JujuModelHandle] = []
 
     def try_replicate_all_database_clusters(self, model: JujuModelHandle) -> None:
-        if model not in self._known_models:
-            self._known_models.append(model)
-
-        applications_by_model = self._charm_applications_by_model()
-        if sum(len(apps) for apps in applications_by_model.values()) < 2:
-            # Skip if there are not 2+ matching database applications deployed across all known
-            # models.
+        applications = self._charm_applications(model)
+        if not applications:
             return
 
-        self._try_replicate_same_model_pairs(applications_by_model)
-        self._try_replicate_cross_model_pairs(applications_by_model)
+        self._try_replicate_same_model_pairs(model, applications)
+        self._try_replicate_cross_model_pairs(model, applications)
 
-    def post_migrate_model(self, model: str, source: str, target: str) -> None:
-        source_handle = JujuModelHandle(controller=source, model=model)
-        if source_handle not in self._known_models:
-            return
+    def _charm_applications(self, model: JujuModelHandle) -> set[str]:
+        """Return matching-charm applications in one model."""
+        applications = self.juju.list_applications(model)
+        return {name for name, info in applications.items() if info.charm == self.charm_info.name}
 
-        target_handle = JujuModelHandle(controller=target, model=model)
-        self._known_models = [
-            known_model
-            for known_model in self._known_models
-            if known_model != source_handle and known_model != target_handle
-        ]
-        self._known_models.append(target_handle)
-
-    def _charm_applications_by_model(self) -> dict[JujuModelHandle, set[str]]:
-        """Return the matching-charm applications found in each model seen so far."""
-        result: dict[JujuModelHandle, set[str]] = {}
-        for known_model in self._known_models:
-            apps = self.juju.list_applications(known_model)
-            matches = {name for name, info in apps.items() if info.charm == self.charm_info.name}
-            if matches:
-                result[known_model] = matches
-        return result
-
-    def _try_replicate_same_model_pairs(self, applications_by_model: dict[JujuModelHandle, set[str]]) -> None:
-        for model, applications in applications_by_model.items():
-            for application1 in applications:
-                for application2 in applications:
-                    if application1 != application2 and self.juju.integration_exists(
-                        application1,
-                        self.charm_info.offer_endpoint,
-                        application2,
-                        self.charm_info.consumer_endpoint,
-                        model,
-                    ):
-                        self.logger.info(
-                            f"Found replication integration between '{application1}' and '{application2}' "
-                            f"in model '{model.uri}'."
-                        )
-                        self.try_create_replication(model, application1, model, application2)
-
-    def _try_replicate_cross_model_pairs(self, applications_by_model: dict[JujuModelHandle, set[str]]) -> None:
-        """Find replication pairs where the offer and consumer live in different (known) models.
-
-        Only offers consumed by, and applications deployed in, models this replicator has already
-        observed via ``try_replicate_all_database_clusters`` can be matched here.
-        """
-        for consumer_model, consumer_applications in applications_by_model.items():
-            for offer_alias, offer_info in self.juju.list_consumed_offers(consumer_model).items():
-                if self.charm_info.offer_endpoint not in offer_info.endpoints:
-                    continue
-
-                parsed_offer_url = offer_info.parse_url()
-                offer_model = parsed_offer_url.model if parsed_offer_url is not None else None
-                if offer_model is None or offer_model not in applications_by_model:
-                    continue
-
-                offer_applications = applications_by_model[offer_model]
-                if len(offer_applications) != 1:
+    def _try_replicate_same_model_pairs(self, model: JujuModelHandle, applications: set[str]) -> None:
+        for application1 in applications:
+            for application2 in applications:
+                if application1 != application2 and self.juju.integration_exists(
+                    application1,
+                    self.charm_info.offer_endpoint,
+                    application2,
+                    self.charm_info.consumer_endpoint,
+                    model,
+                ):
                     self.logger.info(
-                        f"Skipping cross-model replication for offer '{offer_alias}' in model '{offer_model.uri}': "
-                        f"found {len(offer_applications)} '{self.charm_info.name}' applications."
+                        f"Found replication integration between '{application1}' and '{application2}' "
+                        f"in model '{model.uri}'."
                     )
-                    continue
-                (offer_application,) = offer_applications
+                    self.try_create_replication(model, application1, model, application2)
 
-                for consumer_application in consumer_applications:
-                    if self.juju.integration_exists(
-                        consumer_application,
-                        self.charm_info.consumer_endpoint,
-                        offer_alias,
-                        self.charm_info.offer_endpoint,
-                        consumer_model,
-                    ):
-                        self.logger.info(
-                            f"Found cross-model replication integration between '{offer_application}' "
-                            f"(model '{offer_model.uri}') and '{consumer_application}' (model '{consumer_model.uri}')."
-                        )
-                        self.try_create_replication(
-                            offer_model, offer_application, consumer_model, consumer_application
-                        )
+    def _try_replicate_cross_model_pairs(
+        self, consumer_model: JujuModelHandle, consumer_applications: set[str]
+    ) -> None:
+        for offer_alias, offer_info in self.juju.list_consumed_offers(consumer_model).items():
+            if self.charm_info.offer_endpoint not in offer_info.endpoints:
+                continue
+
+            parsed_offer_url = offer_info.parse_url()
+            if parsed_offer_url is None:
+                continue
+            offer_model = parsed_offer_url.model
+            offer_applications = self._charm_applications(offer_model)
+            if len(offer_applications) != 1:
+                self.logger.info(
+                    f"Skipping cross-model replication for offer '{offer_alias}' in model '{offer_model.uri}': "
+                    f"found {len(offer_applications)} '{self.charm_info.name}' applications."
+                )
+                continue
+            (offer_application,) = offer_applications
+
+            for consumer_application in consumer_applications:
+                if self.juju.integration_exists(
+                    consumer_application,
+                    self.charm_info.consumer_endpoint,
+                    offer_alias,
+                    self.charm_info.offer_endpoint,
+                    consumer_model,
+                ):
+                    self.logger.info(
+                        f"Found cross-model replication integration between '{offer_application}' "
+                        f"(model '{offer_model.uri}') and '{consumer_application}' "
+                        f"(model '{consumer_model.uri}')."
+                    )
+                    self.try_create_replication(offer_model, offer_application, consumer_model, consumer_application)
 
     def try_create_replication(
         self,
