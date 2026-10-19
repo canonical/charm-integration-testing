@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
-from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClientRegistry
 from resource_registry import ResourceRegistry
 from resource_tracking import (
@@ -90,7 +89,6 @@ def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str], froz
 @pytest.fixture
 def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
     logger: logging.Logger,
@@ -116,24 +114,25 @@ def resource_tracking_skips_by_application(
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
     if overrides_client is not None:
-        for handle in session_resource_registry.registered_handles():
-            if not isinstance(handle, JujuModelHandle):
-                continue
-            try:
-                applications = juju_client.list_applications(model=handle)
-            except Exception:
-                logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
-                continue
-            for application, info in applications.items():
-                if info.channel is None or info.base is None:
+        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+        if client_and_models is not None:
+            juju_client, model_handles = client_and_models
+            for handle in model_handles:
+                try:
+                    applications = juju_client.list_applications(model=handle)
+                except Exception:
+                    logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
                     continue
-                channel = CharmChannel.model_validate(str(info.channel))
-                key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
-                if key in _resource_tracking_skip_cache:
-                    continue
-                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
-                if resolved:
-                    _resource_tracking_skip_cache[key] = resolved
+                for application, info in applications.items():
+                    if info.channel is None or info.base is None:
+                        continue
+                    channel = CharmChannel.model_validate(str(info.channel))
+                    key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
+                    if key in _resource_tracking_skip_cache:
+                        continue
+                    resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
+                    if resolved:
+                        _resource_tracking_skip_cache[key] = resolved
 
     skips_by_scope: dict[tuple[str, str, str], frozenset[str]] = {}
     for (controller, model, application, _track, _base), resolved in _resource_tracking_skip_cache.items():
