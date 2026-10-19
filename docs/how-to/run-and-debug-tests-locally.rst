@@ -82,11 +82,11 @@ Each integrator gets an isolated bucket and an initial ``charmqa/`` directory
 marker for consumers such as Spark History Server. ``S3_BUCKET_NAMESPACE`` defaults to
 ``local``; CI uses each environment's ``s3-swift-secret`` value, so numbered
 environments have separate cleanup scopes even when they share a substrate.
-Session teardown tracks storage in the resource registry. Runs that create their
-controller attempt to delete their owned buckets after controller teardown,
-even if controller teardown fails. Runs reusing an existing controller preserve storage
-because that controller may still be using it. Swift-generated bucket keys are
-revoked before their buckets are deleted; local/static keys are never revoked.
+Session teardown tracks each bucket independently in the resource registry, which
+continues cleanup when an individual resource destroyer fails. Runs that create
+their controller attempt to delete their buckets; runs reusing an existing
+controller preserve storage because it may still be in use. Swift-generated bucket
+keys are revoked before their buckets are deleted; local/static keys are never revoked.
 
 Interrupted runs are swept by the scheduled environment cleanup using the
 existing age threshold (240 minutes by default). Only strictly named harness
