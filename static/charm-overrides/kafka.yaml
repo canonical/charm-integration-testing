@@ -4,6 +4,20 @@
 default_channel: 3/stable
 overrides:
   - criteria:
+      - track: '4'
+    configs:
+      roles: ['broker,controller', 'broker', 'controller']
+    constraints:
+      # ClusterState.ready_to_start requires a controller; deploy-anywhere.md documents combined and split roles.
+      - 'bool(endpoint[peer-cluster]) => config[roles] == "controller"'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
+      - 'not bool(endpoint[peer-cluster]) and not bool(endpoint[peer-cluster-orchestrator])
+        => config[roles] == "broker,controller"'
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) ==
+        tracks({self})'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => tracks(charms(endpoint[peer-cluster-orchestrator]))
+        == tracks({self})'
+  - criteria:
       - track: '3'
     provides:
       cos-agent:
