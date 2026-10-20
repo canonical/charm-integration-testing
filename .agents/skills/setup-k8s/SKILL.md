@@ -20,7 +20,20 @@ clusters. Setup does not create chaos experiments.
    This also runs the Chaos Mesh setup. Do not run it separately afterward.
    Wait for the script to finish successfully before proceeding.
 
-2. For manual charm work, bootstrap a controller and create a model only
+2. Before starting integration tests, export the kubeconfig in the calling shell:
+   ```bash
+   export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+   test -r "$KUBECONFIG_local_k8s"
+   ```
+   The setup script cannot change its parent shell's environment. Repeat the export
+   in each new test shell. The suffix identifies the Juju **cloud**, not the
+   controller or model: replace hyphens with underscores for other cloud names.
+   Configure every Kubernetes cloud used by target, neighbor or controller models.
+   Plain `KUBECONFIG` and an existing Juju cloud registration are not substitutes.
+   The suite needs this mapping for controller restart, resource tracking and
+   Kubernetes log collection, not just Chaos Mesh.
+
+3. For manual charm work, bootstrap a controller and create a model only
    if needed. Check `juju controllers` and `juju models` first. When using
    the integration test suite, let the suite handle controller bootstrap
    as described in [setup-charm-tests](../setup-charm-tests/SKILL.md).
@@ -31,7 +44,7 @@ clusters. Setup does not create chaos experiments.
    juju add-model testing
    ```
 
-3. For manual charm work, check the working model:
+4. For manual charm work, check the working model:
    ```
    juju status -m testing
    ```

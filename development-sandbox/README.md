@@ -63,6 +63,29 @@ juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
 juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
 ```
 
+## Kubernetes integration tests
+
+After `bin/setup-k8s.sh` succeeds, export the cloud-specific kubeconfig in the
+same VM shell that will launch the tests:
+
+```bash
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+test -r "$KUBECONFIG_local_k8s"
+```
+
+The setup script cannot export variables into its parent shell. Repeat the
+export in each new shell or arrange for it in that shell's environment.
+Use one `KUBECONFIG_<cloud_name>` per Kubernetes cloud, with hyphens replaced
+by underscores. The suffix is the Juju cloud name, not a controller or model
+name. Plain `KUBECONFIG` can be used by kubectl and Helm, but does not configure
+the test suite's per-cloud clients. Juju cloud registration alone is not enough.
+
+This is required for controller restart, resource tracking and Kubernetes log
+collection as well as chaos tests. Let the test suite bootstrap its controllers;
+missing kubeconfig configuration is not a reason to skip controller restart.
+See the [local test guide](../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite)
+for different target/neighbor clouds and troubleshooting.
+
 ## Token setup
 
 Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).

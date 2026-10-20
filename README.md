@@ -32,7 +32,27 @@ The following environment variables can be set for specific test scenarios:
 
 - `UV_FILE`: Path to a pre-downloaded `uv` binary (will be used when injecting validators, otherwise will be downloaded)
 - `UBUNTU_PRO_TOKEN`: Ubuntu Pro token (required for testing canonical-livepatch-server charms)
-- `KUBECONFIG_<cloud_name>`: Path to kubeconfig for a Kubernetes cloud registered in Juju. One variable per K8s cloud, where hyphens in the cloud name are replaced with underscores (e.g. `KUBECONFIG_microk8s=/home/user/.kube/microk8s.yaml`, `KUBECONFIG_local_k8s=/home/user/.kube/local-k8s.yaml`). Replaces the former single `KUBECONFIG` variable.
+
+### Kubernetes test configuration
+
+For tests using Kubernetes clouds, export `KUBECONFIG_<cloud_name>` **before starting
+the test process**. The value is a kubeconfig file path, not its YAML contents.
+Use the Juju cloud name, replacing hyphens with underscores. For the sandbox's
+`local-k8s` cloud:
+
+```bash
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+```
+
+Configure each Kubernetes cloud used by the run, including target, neighbor and
+controller clouds when they differ. Plain `KUBECONFIG`, the default
+`~/.kube/config`, and an existing `juju add-k8s` registration do not supply this
+mapping. It is needed for direct Kubernetes operations such as controller
+restart, resource tracking and Kubernetes log collection, not just chaos tests.
+Machine-only runs do not need it.
+
+See the [local Kubernetes configuration guide](docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite)
+for multiple-cloud examples and troubleshooting.
 
 ## Documentation
 

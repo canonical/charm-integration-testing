@@ -69,7 +69,106 @@ Next, bootstrap ``k8s`` and configure ``kubectl``:
 .. code:: bash
 
    sudo k8s bootstrap --address=127.0.0.1
+   mkdir -p ~/.kube
    sudo k8s config > ~/.kube/config
+
+.. _local-kubernetes-access:
+
+Configure Kubernetes access for the test suite
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Before starting ``scripts/run-tests.sh``, export a
+``KUBECONFIG_<cloud_name>`` variable for each Kubernetes cloud used by the run.
+The suffix is the **Juju cloud name**, with hyphens replaced by underscores,
+not a controller name, model name or Test Observer environment name.
+The fixture normalizes the suffix to lowercase and converts underscores back
+to hyphens. For example:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Juju cloud
+     - Variable
+   * - ``local-k8s``
+     - ``KUBECONFIG_local_k8s``
+   * - ``target-cloud``
+     - ``KUBECONFIG_target_cloud``
+   * - ``neighbor-cloud``
+     - ``KUBECONFIG_neighbor_cloud``
+
+For the sandbox cloud created by ``development-sandbox/bin/setup-k8s.sh``:
+
+.. code:: bash
+
+   export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+   test -r "$KUBECONFIG_local_k8s"
+   kubectl --kubeconfig "$KUBECONFIG_local_k8s" get namespaces
+
+The setup script cannot export variables into its parent shell. Run the export
+in the same shell that starts the tests, and repeat it for new shells. If
+standalone ``kubectl`` is unavailable in the sandbox, use ``sudo k8s kubectl``
+with the same ``--kubeconfig`` argument. The read-only API check does not prove
+that the credentials have all permissions needed for disruptive tests.
+
+For the manually configured ``K8S_CLOUD_NAME`` in this guide:
+
+.. code:: bash
+
+   export KUBECONFIG="$HOME/.kube/config"
+   export "KUBECONFIG_${K8S_CLOUD_NAME//-/_}=$KUBECONFIG"
+
+The second command uses Bash substitution. For ``K8S_CLOUD_NAME=k8s-cloud``,
+it exports ``KUBECONFIG_k8s_cloud``.
+
+.. important::
+
+   Plain ``KUBECONFIG`` configures tools such as kubectl and Helm, but does not
+   populate the test suite's per-cloud mapping. Neither the default
+   ``~/.kube/config`` nor Juju's stored ``add-k8s`` credentials supplies a fallback.
+   Juju commands can therefore work while the test suite cannot access Kubernetes.
+
+Each value must be a readable kubeconfig **file path**, not YAML contents or
+a colon-separated list of files. Prefer absolute paths; the suite's Kubernetes
+client uses that file's current context, so check that it targets the intended
+cluster. Do not print kubeconfig contents into logs or commit credentials.
+
+This mapping is needed for direct Kubernetes operations, including
+``test_controller_restart``, resource tracking and Kubernetes log collection,
+not just chaos experiments. Configure Kubernetes clouds hosting target or
+neighbor models and their controllers, including a different controller cloud
+in a multi-cloud run. Machine-only clouds need no mapping.
+
+For two different Kubernetes clouds:
+
+.. code:: bash
+
+   export KUBECONFIG_target_cloud=/path/to/target-kubeconfig.yaml
+   export KUBECONFIG_neighbor_cloud=/path/to/neighbor-kubeconfig.yaml
+
+These names correspond to ``--target-cloud target-cloud`` and
+``--neighbor-cloud neighbor-cloud``. If both models use ``local-k8s``, one
+``KUBECONFIG_local_k8s`` variable suffices, including with ``--same-controller``.
+If two Juju cloud names refer to the same cluster, configure both names; their
+values may point to the same file.
+
+Troubleshoot missing Kubernetes configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+An error such as ``No kubeconfig configured for Kubernetes cloud 'local-k8s'``
+or a teardown warning asking for ``KUBECONFIG_local_k8s`` means the suite lacks
+the cloud mapping. It does not by itself mean the cluster is unavailable.
+
+Check the Juju cloud name with ``juju clouds --client``. For an existing model,
+``juju show-model -m <controller>:<model>`` reports its cloud; the controller's
+own model may use a different cloud. Verify the matching variable is exported,
+the file is readable, and the read-only API check above succeeds. Missing files,
+authentication failures and permission errors require separate diagnosis.
+
+Export the variable **before** pytest starts: the mapping is read by a
+session-scoped fixture, and changing another shell's environment cannot update
+the running test process. Restart the test command with the corrected
+environment. Do not skip controller restart, bootstrap another controller or
+reinstall Kubernetes solely to work around a missing variable.
 
 Set up the k8s cloud
 ~~~~~~~~~~~~~~~~~~~~
@@ -112,12 +211,8 @@ infrastructure repositories manage the shared ``litmus-core`` Helm release.
 See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
 and chart versions.
 
-Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
-cloud, replacing hyphens in the cloud name with underscores. For example:
-
-.. code:: bash
-
-   export KUBECONFIG_local_k8s=/path/to/kubeconfig
+Configure :ref:`Kubernetes access for the test suite <local-kubernetes-access>`
+before running tests. The same cloud-specific mapping is used by chaos tools.
 
 The combined tool report runs once per session, when a test first requests
 ``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,

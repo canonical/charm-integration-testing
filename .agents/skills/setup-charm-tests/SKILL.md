@@ -130,6 +130,9 @@ pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caae
 # 2. Setup K8s only
 $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 
+# 3. Configure the test process in this shell
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+
 # That's it! Test suite will bootstrap controller when you run tests with --current-state
 ```
 
@@ -144,6 +147,9 @@ pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caae
 # 2. Setup both substrates
 $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
 $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+
+# 3. Configure the Kubernetes cloud in this shell
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
 
 # That's it! Test suite will bootstrap both controllers when you run tests with --current-state
 ```
@@ -175,8 +181,22 @@ Kubernetes. Pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'
 and, for a separate neighbor controller,
 `--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
 
-For Kubernetes sandbox tests, set
-`KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
+For Kubernetes sandbox tests, export the mapping before starting the test process:
+
+```bash
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+test -r "$KUBECONFIG_local_k8s"
+```
+
+The setup script cannot export into the calling shell; repeat this in each new
+test shell. Configure one `KUBECONFIG_<cloud_name>` for each Kubernetes cloud used
+by the run, including neighbor or controller clouds when different. Replace
+hyphens in the Juju cloud name with underscores; use a file path, not YAML contents.
+Plain `KUBECONFIG`, `~/.kube/config` and Juju cloud registration do not populate the
+suite's mapping. Direct Kubernetes access is needed for controller restart, resource
+tracking and Kubernetes log collection as well as chaos experiments. Machine-only
+runs do not need this configuration.
+
 Tests request experiments through `require_chaos_tool`, which selects a
 supporting client. Chaos Mesh CPU and memory experiments require the
 StressChaos CRD, while I/O latency requires the IOChaos CRD. If no configured
@@ -271,6 +291,12 @@ $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
 ```
+
+If the file exists but the suite reports no kubeconfig configured for
+`local-k8s`, export `KUBECONFIG_local_k8s` in the test shell as shown above.
+Do not bootstrap another controller or skip restart tests to work around this.
+For other cloud names and separate clusters, follow the
+[local configuration guide](../../../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite).
 
 ### Problem: "juju-crashdump: command not found"
 
