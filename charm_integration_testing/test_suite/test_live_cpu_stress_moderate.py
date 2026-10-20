@@ -60,6 +60,7 @@ def inject_cpu_stress(
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
+@pytest.mark.usefixtures("kubernetes_client")
 def test_live_cpu_stress_moderate(
     juju_client: JujuClient,
     chaos_tool_for_model: Callable[[JujuModelHandle], MetaChaosClient],

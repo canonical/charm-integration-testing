@@ -55,6 +55,7 @@ def observe_io_latency(
 
 
 @pytest.mark.state(requires=State.DEPLOYED, provides=State.DEPLOYED)
+@pytest.mark.usefixtures("kubernetes_client")
 def test_live_disk_io_latency(
     juju_client: JujuClient,
     require_chaos_tool: MetaChaosClient,

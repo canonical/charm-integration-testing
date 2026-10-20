@@ -138,6 +138,21 @@ not just chaos experiments. Configure Kubernetes clouds hosting target or
 neighbor models and their controllers, including a different controller cloud
 in a multi-cloud run. Machine-only clouds need no mapping.
 
+If a required cloud mapping is absent, dependent tests skip with an actionable
+reason naming ``KUBECONFIG_<cloud_name>``. This includes controller restart,
+pod deletion, Kubernetes unit reboot/rotation and follower restart, and API-based
+chaos tests. Native disk fill through Juju remains
+available without a mapping. Controller migration also checks both
+controllers before moving the model, because its Kubernetes workaround restarts
+them. A skip records missing coverage; it does not establish operation or endpoint
+health. Tests needing only Juju can still run with an already registered cloud.
+
+Only an absent mapping permits this skip. An explicit mapping to a missing or
+invalid file, authentication or permission errors, and failures during an
+operation remain errors. Resource tracking and Kubernetes log collection are
+separate from test skips: without access, collection may report warnings and
+the corresponding resource/log evidence will be unavailable.
+
 For two different Kubernetes clouds:
 
 .. code:: bash
@@ -167,8 +182,9 @@ authentication failures and permission errors require separate diagnosis.
 Export the variable **before** pytest starts: the mapping is read by a
 session-scoped fixture, and changing another shell's environment cannot update
 the running test process. Restart the test command with the corrected
-environment. Do not skip controller restart, bootstrap another controller or
-reinstall Kubernetes solely to work around a missing variable.
+environment. Review skip reasons when interpreting coverage; export the mapping
+and rerun to exercise the skipped operations. Do not bootstrap another controller
+or reinstall Kubernetes solely to work around a missing variable.
 
 Set up the k8s cloud
 ~~~~~~~~~~~~~~~~~~~~

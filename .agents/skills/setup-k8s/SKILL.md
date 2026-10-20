@@ -32,6 +32,8 @@ clusters. Setup does not create chaos experiments.
    Plain `KUBECONFIG` and an existing Juju cloud registration are not substitutes.
    The suite needs this mapping for controller restart, resource tracking and
    Kubernetes log collection, not just Chaos Mesh.
+   Without it, dependent tests skip and log/resource collection may warn about
+   missing access. Configured-but-invalid access and operation failures still fail.
 
 3. For manual charm work, bootstrap a controller and create a model only
    if needed. Check `juju controllers` and `juju models` first. When using

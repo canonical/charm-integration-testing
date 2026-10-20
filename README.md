@@ -51,6 +51,13 @@ mapping. It is needed for direct Kubernetes operations such as controller
 restart, resource tracking and Kubernetes log collection, not just chaos tests.
 Machine-only runs do not need it.
 
+Without a cloud mapping, tests requiring direct Kubernetes access skip with the
+variable to set; this is not restart, pod-deletion or chaos coverage. Tests using
+only Juju can still run when the cloud is already registered. An explicit mapping
+to a missing/invalid file, authentication or permission errors, and operation
+failures remain errors, not skips. Resource tracking and Kubernetes log collection
+also need the mapping and may report collection warnings without it.
+
 See the [local Kubernetes configuration guide](docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite)
 for multiple-cloud examples and troubleshooting.
 

@@ -200,9 +200,12 @@ runs do not need this configuration.
 Tests request experiments through `require_chaos_tool`, which selects a
 supporting client. Chaos Mesh CPU and memory experiments require the
 StressChaos CRD, while I/O latency requires the IOChaos CRD. If no configured
-client supports an experiment, it skips when requested. Missing Kubernetes
-configuration and API errors fail rather than skip. CRD presence does not
-prove that a chaos experiment will succeed.
+client supports an experiment, it skips when requested. An absent cloud mapping
+also skips tests needing direct Kubernetes access, with the variable to set.
+This leaves a coverage gap; export the mapping and rerun to exercise those tests.
+Invalid configured files, authentication/permission errors and operation failures
+still fail. Log/resource collection may warn separately when access is missing.
+CRD presence does not prove that a chaos experiment will succeed.
 
 Once setup is complete, run tests with the test suite. The suite handles controller bootstrap based on `--current-state`:
 
@@ -294,7 +297,8 @@ ls -la /home/ubuntu/k8s.yaml
 
 If the file exists but the suite reports no kubeconfig configured for
 `local-k8s`, export `KUBECONFIG_local_k8s` in the test shell as shown above.
-Do not bootstrap another controller or skip restart tests to work around this.
+Dependent tests skip until the mapping is supplied; do not mistake those skips
+for restart or endpoint-health coverage. Do not bootstrap another controller.
 For other cloud names and separate clusters, follow the
 [local configuration guide](../../../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite).
 

@@ -34,7 +34,7 @@ This installs:
 
 **Tip**: The `setup-charm-tests` skill is idempotent—safe to run multiple times.
 
-### Kubernetes cloud access (required before running tests)
+### Kubernetes cloud access (required for direct Kubernetes tests)
 
 For the sandbox's `local-k8s` cloud, export this in the shell that starts
 `scripts/run-tests.sh`, after substrate setup:
@@ -72,7 +72,12 @@ into its parent shell; repeat the export in each new shell, before pytest starts
 
 This configuration is needed for direct Kubernetes operations, including
 controller restart, resource tracking and Kubernetes log collection, not only
-chaos tests. Do not skip `test_controller_restart` to hide a missing mapping.
+chaos tests. Without a required cloud mapping, dependent tests skip automatically
+with the variable to set. This is missing coverage, not proof of restart or
+endpoint health; export the mapping and rerun to cover those operations.
+Explicit but invalid configuration, authentication/permission errors and operation
+failures remain errors. Resource tracking and Kubernetes log collection may
+report warnings separately when access is missing.
 See the [local configuration guide](../../../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite).
 
 ## Quick Start
@@ -703,8 +708,8 @@ Tests without state markers always run (unless they fail independently). These a
 ### Known Environmental Failures (Sandbox Constraints)
 
 Diagnose the failure before excluding a disruptive test. Missing
-`KUBECONFIG_<cloud_name>` is a configuration error, not a sandbox resource
-constraint; follow the Kubernetes cloud access steps above.
+`KUBECONFIG_<cloud_name>` causes dependent tests to skip, not a sandbox resource
+failure; follow the Kubernetes cloud access steps above to enable those tests.
 
 | Test | Issue | Workaround |
 |------|-------|-----------|

@@ -25,6 +25,7 @@ def _wait_for_leader_recovery(
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
+@pytest.mark.usefixtures("kubernetes_client")
 def test_reboot_leader(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,

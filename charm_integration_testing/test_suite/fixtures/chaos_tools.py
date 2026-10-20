@@ -15,6 +15,7 @@ from chaos_client.litmus_detection import litmus_is_available
 from juju import JujuBackend, JujuModelHandle
 from kubernetes_client import KubernetesBackend, KubernetesClientRegistry
 
+from test_suite.kubernetes import require_kubeconfig
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
 
@@ -84,6 +85,9 @@ def detect_chaos_tools(
             if cloud is None:
                 logger.info("Chaos detection not performed for model %s: non-Kubernetes model.", model.uri)
                 continue
+            if not kubernetes_client_registry.has_cloud(cloud):
+                logger.info("Chaos detection not performed for cloud %s: no kubeconfig supplied.", cloud)
+                continue
             kubernetes = kubernetes_client_registry.client_for_cloud(cloud)
             if id(kubernetes) in checked_clients:
                 continue
@@ -113,7 +117,7 @@ def chaos_client_for_model(
     """Build experiment clients for the model's substrate."""
     tools: list[ChaosClient] = []
     cloud = backend.kubernetes_cloud_for_model(model)
-    if cloud is not None:
+    if cloud is not None and kubernetes_client_registry.has_cloud(cloud):
         kubernetes = kubernetes_client_registry.client_for_cloud(cloud)
         if litmus_is_available(kubernetes.backend):
             tools.append(LitmusChaosClient(kubernetes.backend))
@@ -123,6 +127,8 @@ def chaos_client_for_model(
     tools.append(DiskFillClient(backend))
 
     def skip_unsupported(operation: str) -> NoReturn:
+        if cloud is not None:
+            require_kubeconfig(kubernetes_client_registry, cloud)
         pytest.skip(f"No available chaos client supports '{operation}' for {model.uri}.")
 
     return MetaChaosClient(tools, backend, resource_constraints_client, on_unsupported=skip_unsupported)

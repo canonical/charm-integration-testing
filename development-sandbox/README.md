@@ -81,8 +81,11 @@ name. Plain `KUBECONFIG` can be used by kubectl and Helm, but does not configure
 the test suite's per-cloud clients. Juju cloud registration alone is not enough.
 
 This is required for controller restart, resource tracking and Kubernetes log
-collection as well as chaos tests. Let the test suite bootstrap its controllers;
-missing kubeconfig configuration is not a reason to skip controller restart.
+collection as well as chaos tests. Without a cloud mapping, dependent tests skip
+with the variable to set; they do not establish coverage for those operations.
+Configured-but-invalid access and operation failures remain errors. Log collection
+and resource tracking can still warn about missing access. Let the test suite
+bootstrap its controllers.
 See the [local test guide](../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite)
 for different target/neighbor clouds and troubleshooting.
 
