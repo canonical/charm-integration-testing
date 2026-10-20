@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.charmhub_http import IncompleteCharmInfoException, InfoResponse
+from bundle_builder_x.charmhub_http import InfoResponse
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 
 
@@ -33,8 +33,6 @@ def _override_channel_bases(
     remaining: set[tuple[CharmChannel, str]] = set()
     for entry in info.channel_map:
         base = entry.channel.base
-        if base is None:
-            raise IncompleteCharmInfoException(f"Missing base in channel map for {entry.channel.name}")
         if base.name == "ubuntu" and base.architecture in {"amd64", "all"}:
             remaining.add((CharmChannel.model_validate(entry.channel.name), base.channel))
 

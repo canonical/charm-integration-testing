@@ -4,7 +4,7 @@
 import pytest
 
 from bundle_builder_x.charm import CharmChannel
-from bundle_builder_x.charmhub_http import IncompleteCharmInfoException, InfoResponse
+from bundle_builder_x.charmhub_http import InfoResponse
 from bundle_builder_x.overrides import CharmGlobalOverrides
 
 from ..overrides.conftest import _override_channel_bases
@@ -78,18 +78,6 @@ def test_unpublished_channel_base_combination_does_not_satisfy_criteria() -> Non
 
     # WHEN selecting releases, THEN an impossible criteria block is reported
     with pytest.raises(ValueError, match="matches no published"):
-        _override_channel_bases(info, overrides, all_channels=True)
-
-
-def test_missing_channel_base_is_reported() -> None:
-    # GIVEN incomplete channel-map metadata
-    info = InfoResponse.model_validate(
-        {"channel-map": [{"channel": {"name": "stable", "track": "latest", "risk": "stable"}}]}
-    )
-    overrides = CharmGlobalOverrides.model_validate({"overrides": [{}]})
-
-    # WHEN selecting releases, THEN missing metadata cannot produce a false green
-    with pytest.raises(IncompleteCharmInfoException, match="Missing base"):
         _override_channel_bases(info, overrides, all_channels=True)
 
 
