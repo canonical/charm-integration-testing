@@ -215,6 +215,30 @@ def test_missing_config_file_is_reported(tmp_path: Path) -> None:
         S3ProviderRegistry({"local": tmp_path / "missing"}, session).provider_for_cloud("local")
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "S3_CLEANUP_ACCESS_KEY=\n",
+        "S3_CLEANUP_SECRET_KEY=\n",
+        "S3_CLEANUP_ACCESS_KEY=\nS3_CLEANUP_SECRET_KEY=\n",
+        "S3_CLEANUP_ACCESS_KEY=not-logged\nS3_CLEANUP_SECRET_KEY=\n",
+        "S3_CLEANUP_ACCESS_KEY=\nS3_CLEANUP_SECRET_KEY=not-logged\n",
+    ],
+    ids=["empty-access", "empty-secret", "both-empty", "empty-secret-with-access", "empty-access-with-secret"],
+)
+def test_explicit_cleanup_credentials_must_be_complete(tmp_path: Path, extra: str) -> None:
+    # GIVEN a static config with explicitly supplied but incomplete cleanup credentials
+    config = tmp_path / "s3.conf"
+    config.write_text(STATIC_CONFIG + extra)
+    # WHEN loading it, THEN it cannot silently fall back to application credentials
+    with (
+        requests.Session() as session,
+        pytest.raises(ValueError, match="Missing S3 cleanup credential variables") as error,
+    ):
+        provider_from_config(config, session)
+    assert "not-logged" not in str(error.value)
+
+
 @dataclass(frozen=True)
 class MixedConfigParams:
     extra: str
