@@ -44,6 +44,11 @@ def parse_s3_config(content: str) -> dict[str, str]:
 def provider_from_config(path: Path, session: requests.Session) -> S3Provider:
     """Construct a provider from a file, independent of the process environment."""
     values = parse_s3_config(path.expanduser().read_text(encoding="utf-8"))
+    if any(value for name, value in values.items() if name.startswith("S3_OS_")):
+        if values.get("S3_ACCESS_KEY") or values.get("S3_SECRET_KEY"):
+            raise ValueError("Cannot mix static and Swift credentials in an S3 configuration file")
+        if not values.get("S3_OS_STORAGE_URL"):
+            raise ValueError("Missing Swift credential variable: S3_OS_STORAGE_URL")
     provider = provider_from_environment(values, session)
     if provider is None:
         raise ValueError(f"No S3 provider configured in '{path}'")
