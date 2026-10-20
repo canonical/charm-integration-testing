@@ -1,31 +1,30 @@
 ---
-# When client-cas or oauth is integrated, certificates is also required.
-# When zookeeper is integrated (pre-track-4 and latest/* non-stable), certificates is also required.
-# Track 4 is KRaft mode - the zookeeper endpoint no longer exists.
-# See: https://github.com/canonical/charm-integration-testing/issues/408
+# Source: https://github.com/canonical/kafka-operator
+# Track 4 uses KRaft; older tracks retain ZooKeeper and legacy endpoints.
 overrides:
   - criteria:
       - track: '4'
     requires:
-      certificates:
-        optional: true
       client-cas:
-        optional: true
+        optional: true  # TLSHandler handles absent CA transfer; only used for optional client mTLS.
       oauth:
         features: [tls]
     configs:
-      roles: ['broker,controller', 'broker']
+      roles: ['broker,controller', 'broker', 'controller']
     constraints:
-      - 'bool(endpoint[client-cas]) or bool(endpoint[oauth]) => bool(endpoint[certificates])'
-      - 'bool(endpoint[peer-cluster]) => config[roles] == "broker"'
-      - 'not bool(endpoint[peer-cluster]) => config[roles] == "broker,controller"'
-      # A broker only knows how to reach a KRaft controller of the same track;
-      # a track-3 (ZooKeeper) peer-cluster-orchestrator has no 'controller' role
-      # and cannot serve as one, leaving the broker blocked with "application
-      # needs to be related with a KRaft controller".
-      # See: https://github.com/canonical/charm-integration-testing/issues/751
-      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) ==
-        tracks({self})'
+      # TLSHandler._on_mtls_client_certificates_available defers without client TLS.
+      - 'bool(endpoint[client-cas]) => bool(endpoint[certificates])'
+      # ClusterState.ready_to_start and _controller_status enforce these split-role dependencies.
+      - 'bool(endpoint[peer-cluster]) => config[roles] == "controller"'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
+      - 'not bool(endpoint[peer-cluster]) and not bool(endpoint[peer-cluster-orchestrator])
+        => config[roles] == "broker,controller"'
+      # Check coverage as well as compatibility: external offers have no known track.
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) >=
+        tracks({self}) and tracks(charms(endpoint[peer-cluster])) <= tracks({self})'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => tracks(charms(endpoint[peer-cluster-orchestrator]))
+        >= tracks({self}) and tracks(charms(endpoint[peer-cluster-orchestrator]))
+        <= tracks({self})'
 
   # latest/stable is on ubuntu/20.04 (EOL April 2025). It uses the old 'kafka'
   # interface name (renamed to 'kafka-client' in track 3). No public Charmhub
@@ -44,8 +43,26 @@ overrides:
       zookeeper:
         optional: false
 
-  # latest/* (except stable): has kafka-client interface (like track 3) but fewer endpoints.
-  # ubuntu/22.04, simpler endpoint set than track 3.
+  # The Ubuntu 20.04 edge revision predates observability endpoints.
+  - criteria:
+      - all_of:
+          - track: 'latest'
+          - ubuntu_version: '20.04'
+          - none_of:
+              - risk: stable
+    provides:
+      kafka-client:
+        optional: true  # KafkaCharm._on_start requires ZooKeeper, not related clients.
+    requires:
+      certificates:
+        optional: true  # KafkaCharm._on_config_changed permits matching non-TLS ZooKeeper.
+      zookeeper:
+        features: [tls]
+    constraints:
+      - 'bool(endpoint[zookeeper]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'
+
+  # Newer latest/* revisions add observability endpoints on Ubuntu 22.04.
   - criteria:
       - track: 'latest'
         none_of:

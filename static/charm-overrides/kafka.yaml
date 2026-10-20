@@ -5,9 +5,14 @@ default_channel: 3/stable
 overrides:
   - criteria:
       - track: '4'
+    requires:
+      oauth:
+        features: [tls]
     configs:
       roles: ['broker,controller', 'broker', 'controller']
     constraints:
+      # TLSHandler._on_mtls_client_certificates_available defers without client TLS.
+      - 'bool(endpoint[client-cas]) => bool(endpoint[certificates])'
       # ClusterState.ready_to_start requires a controller; deploy-anywhere.md documents combined and split roles.
       - 'bool(endpoint[peer-cluster]) => config[roles] == "controller"'
       - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
