@@ -21,9 +21,9 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
 3. The server configuration file contains a bucket-management identity and a
    separate test identity limited to harness buckets. The script verifies that
    the test identity can read/write a harness bucket but cannot create a bucket
-   outside that scope. It writes the mode-0600 `s3.conf` credential file only after
-   that probe succeeds; the server configuration is created earlier so SeaweedFS
-   can start. Load the path-only shell file in the test shell:
+   or access objects, listings or tags outside that scope. It writes the mode-0600
+   `s3.conf` credential file only after that probe succeeds; the server configuration
+   is created earlier so SeaweedFS can start. Load the path-only shell file in the test shell:
 
    ```bash
    source "$HOME/.local/share/charmqa-s3/s3.env"

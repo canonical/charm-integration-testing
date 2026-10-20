@@ -85,7 +85,8 @@ use the RADOS Gateway or have a nonstandard endpoint, set the optional
 ``S3_ENDPOINT`` explicitly rather than treating a native Swift URL as an S3 URL.
 
 For a local S3-compatible server, supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY`` and
-``S3_SECRET_KEY`` instead, omitting ``S3_OS_STORAGE_URL`` from the file. Optionally supply
+``S3_SECRET_KEY`` instead, omitting all ``S3_OS_*`` values from the file. Static and
+Swift application credentials cannot be mixed. Optionally supply
 ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
 identity; the provider uses it for bucket creation and cleanup but sends only the
 ``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development

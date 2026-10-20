@@ -140,10 +140,30 @@ client = create_client(os.environ["S3_ACCESS_KEY"], os.environ["S3_SECRET_KEY"])
 cleanup_client = create_client(
     os.environ["S3_CLEANUP_ACCESS_KEY"], os.environ["S3_CLEANUP_SECRET_KEY"]
 )
+
+
+def remove_probe_bucket(name: str) -> None:
+    try:
+        cleanup_client.delete_object(Bucket=name, Key="probe")
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if error.get("Code") not in {"NoSuchKey", "NoSuchBucket"} and status != 404:
+            raise
+    finally:
+        try:
+            cleanup_client.delete_bucket(Bucket=name)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error.get("Code") != "NoSuchBucket" and status != 404:
+                raise
+
+
 bucket = "charmqa-s3-local-probe-" + uuid4().hex
 outside_bucket = "charmqa-outside-probe-" + uuid4().hex
 bucket_creation_attempted = False
-outside_bucket_created = False
+outside_bucket_creation_attempted = False
 try:
     bucket_creation_attempted = True
     cleanup_client.create_bucket(Bucket=bucket)
@@ -161,32 +181,43 @@ try:
         if error.get("Code") not in {"AccessDenied", "Forbidden"} and status != 403:
             raise
     else:
-        outside_bucket_created = True
+        outside_bucket_creation_attempted = True
         raise RuntimeError("The test S3 identity can create buckets outside its harness scope")
+    outside_bucket_creation_attempted = True
+    cleanup_client.create_bucket(Bucket=outside_bucket)
+    cleanup_client.put_object(Bucket=outside_bucket, Key="probe", Body=b"outside-scope")
+    cleanup_client.put_bucket_tagging(Bucket=outside_bucket, Tagging={"TagSet": [{"Key": "probe", "Value": "scope"}]})
+    for operation, arguments in (
+        ("get_object", {"Key": "probe"}),
+        ("put_object", {"Key": "probe", "Body": b"not-allowed"}),
+        ("delete_object", {"Key": "probe"}),
+        ("list_objects_v2", {}),
+        ("get_bucket_tagging", {}),
+        ("put_bucket_tagging", {"Tagging": {"TagSet": [{"Key": "probe", "Value": "not-allowed"}]}}),
+    ):
+        try:
+            response = getattr(client, operation)(Bucket=outside_bucket, **arguments)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if error.get("Code") not in {"AccessDenied", "Forbidden"} and status != 403:
+                raise
+        else:
+            if operation == "get_object":
+                response["Body"].close()
+            raise RuntimeError(f"The test S3 identity can {operation} outside its harness scope")
 finally:
     try:
         if bucket_creation_attempted:
-            try:
-                cleanup_client.delete_object(Bucket=bucket, Key="probe")
-            except ClientError as exc:
-                error = exc.response.get("Error", {})
-                status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-                if error.get("Code") not in {"NoSuchKey", "NoSuchBucket"} and status != 404:
-                    raise
-            finally:
-                try:
-                    cleanup_client.delete_bucket(Bucket=bucket)
-                except ClientError as exc:
-                    error = exc.response.get("Error", {})
-                    status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-                    if error.get("Code") != "NoSuchBucket" and status != 404:
-                        raise
-        if outside_bucket_created:
-            cleanup_client.delete_bucket(Bucket=outside_bucket)
+            remove_probe_bucket(bucket)
     finally:
-        client.close()
-        cleanup_client.close()
-print("Local S3 read/write passed; test credentials cannot create out-of-scope buckets")
+        try:
+            if outside_bucket_creation_attempted:
+                remove_probe_bucket(outside_bucket)
+        finally:
+            client.close()
+            cleanup_client.close()
+print("Local S3 read/write passed; out-of-scope bucket, object, listing and tagging operations denied")
 PY
 config_tmp="$(mktemp "${state}/s3.conf.XXXXXX")"
 temporary_files+=("${config_tmp}")
