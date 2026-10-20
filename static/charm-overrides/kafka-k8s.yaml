@@ -58,7 +58,7 @@ overrides:
         optional: true  # KafkaCharm._on_start requires ZooKeeper, not related clients.
     requires:
       certificates:
-        optional: true  # KafkaCharm._on_config_changed permits matching non-TLS ZooKeeper.
+        optional: true  # KafkaCharm._on_config_changed checks TLS parity; constraints below require TLS.
       zookeeper:
         features: [tls]
     constraints:
