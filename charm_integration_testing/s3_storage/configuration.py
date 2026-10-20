@@ -49,6 +49,11 @@ def provider_from_config(path: Path, session: requests.Session) -> S3Provider:
             raise ValueError("Cannot mix static and Swift credentials in an S3 configuration file")
         if not values.get("S3_OS_STORAGE_URL"):
             raise ValueError("Missing Swift credential variable: S3_OS_STORAGE_URL")
+    cleanup_variables = ("S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
+    if any(name in values for name in cleanup_variables):
+        missing = [name for name in cleanup_variables if not values.get(name)]
+        if missing:
+            raise ValueError("Missing S3 cleanup credential variables: " + ", ".join(missing))
     provider = provider_from_environment(values, session)
     if provider is None:
         raise ValueError(f"No S3 provider configured in '{path}'")
