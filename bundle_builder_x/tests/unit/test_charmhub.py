@@ -89,7 +89,14 @@ def _error_response(
 def _info_response_with_channels(*track_risk_pairs: tuple[str, str]) -> InfoResponse:
     """Build an InfoResponse whose channel_map contains the given (track, risk) pairs."""
     entries = [
-        InfoResponse.ChannelMapEntry(channel=InfoResponse.ChannelMapEntry.Channel(name=f"{t}/{r}", track=t, risk=r))
+        InfoResponse.ChannelMapEntry(
+            channel=InfoResponse.ChannelMapEntry.Channel(
+                name=f"{t}/{r}",
+                track=t,
+                risk=r,
+                base=CharmhubBase(name="ubuntu", channel="22.04", architecture="amd64"),
+            )
+        )
         for t, r in track_risk_pairs
     ]
     return InfoResponse(channel_map=entries)
