@@ -1,4 +1,7 @@
 ---
+# Source: https://github.com/canonical/kfp-operators
+#
+# Criteria separate database endpoint generations, including latest/edge on Ubuntu 24.04.
 default_channel: 2.5/stable  # Contains the model-name fix from canonical/kfp-operators#899.
 overrides:
   - criteria:
@@ -7,24 +10,24 @@ overrides:
       kfp-api:
         features: [kfp-api]
       kfp-api-grpc:
-        optional: true
+        optional: true  # Send only on a relation (charms/kfp-api/src/charm.py::_send_info).
       metrics-endpoint:
-        optional: true
+        optional: true  # Observability exporter (charms/kfp-api/src/charm.py::MetricsEndpointProvider).
       grafana-dashboard:
-        optional: true
+        optional: true  # Dashboard exporter (charms/kfp-api/src/charm.py::GrafanaDashboardProvider).
       provide-cmr-mesh:
-        optional: true
+        optional: true  # CMR policy integration is auxiliary (service_mesh.py::ServiceMeshConsumer).
     requires:
       kfp-viz:
         features: [kfp-viz]
       mysql:
-        optional: true
+        optional: true  # Either DB endpoint is accepted (charms/kfp-api/src/charm.py::_get_db_data).
       relational-db:
-        optional: true
+        optional: true  # Either DB endpoint is accepted (charms/kfp-api/src/charm.py::_get_db_data).
       service-mesh:
-        optional: true
+        optional: true  # Mesh policies are secondary (charms/kfp-api/src/charm.py::ServiceMeshConsumer).
       require-cmr-mesh:
-        optional: true
+        optional: true  # CMR policy integration is auxiliary (service_mesh.py::ServiceMeshConsumer).
     constraints:
       - '"kfp-api" in features(endpoint[kfp-api])'
       - '"kfp-viz" in features(endpoint[kfp-viz])'
@@ -37,12 +40,40 @@ overrides:
       kfp-api:
         features: [kfp-api]
       metrics-endpoint:
-        optional: true
+        optional: true  # Observability exporter (charms/kfp-api/src/charm.py::MetricsEndpointProvider).
       grafana-dashboard:
-        optional: true
+        optional: true  # Dashboard exporter (charms/kfp-api/src/charm.py::GrafanaDashboardProvider).
     requires:
       kfp-viz:
         features: [kfp-viz]
+    constraints:
+      - '"kfp-api" in features(endpoint[kfp-api])'
+      - '"kfp-viz" in features(endpoint[kfp-viz])'
+  # latest/edge on Ubuntu 24.04 removed mysql; relational-db is still required.
+  - criteria:
+      - track: 'latest'
+      - risk: 'edge'
+      - ubuntu_version: '24.04'
+    provides:
+      kfp-api:
+        features: [kfp-api]
+      kfp-api-grpc:
+        optional: true  # Send only on a relation (charms/kfp-api/src/charm.py::_send_info).
+      metrics-endpoint:
+        optional: true  # Observability exporter (charms/kfp-api/src/charm.py::MetricsEndpointProvider).
+      grafana-dashboard:
+        optional: true  # Dashboard exporter (charms/kfp-api/src/charm.py::GrafanaDashboardProvider).
+      provide-cmr-mesh:
+        optional: true  # CMR policy integration is auxiliary (service_mesh.py::ServiceMeshConsumer).
+    requires:
+      kfp-viz:
+        features: [kfp-viz]
+      relational-db:
+        optional: false  # Blocks when absent (charms/kfp-api/src/charm.py::_get_db_data).
+      service-mesh:
+        optional: true  # Mesh policies are secondary (charms/kfp-api/src/charm.py::ServiceMeshConsumer).
+      require-cmr-mesh:
+        optional: true  # CMR policy integration is auxiliary (service_mesh.py::ServiceMeshConsumer).
     constraints:
       - '"kfp-api" in features(endpoint[kfp-api])'
       - '"kfp-viz" in features(endpoint[kfp-viz])'
@@ -50,16 +81,16 @@ overrides:
       kfp-api:
         features: [kfp-api]
       metrics-endpoint:
-        optional: true
+        optional: true  # Observability exporter (charms/kfp-api/src/charm.py::MetricsEndpointProvider).
       grafana-dashboard:
-        optional: true
+        optional: true  # Dashboard exporter (charms/kfp-api/src/charm.py::GrafanaDashboardProvider).
     requires:
       kfp-viz:
         features: [kfp-viz]
       mysql:
-        optional: true
+        optional: true  # Either DB endpoint is accepted (charms/kfp-api/src/charm.py::_get_db_data).
       relational-db:
-        optional: true
+        optional: true  # Either DB endpoint is accepted (charms/kfp-api/src/charm.py::_get_db_data).
     constraints:
       - '"kfp-api" in features(endpoint[kfp-api])'
       - '"kfp-viz" in features(endpoint[kfp-viz])'
