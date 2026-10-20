@@ -213,3 +213,62 @@ def test_config_must_select_a_provider(tmp_path: Path, content: str) -> None:
 def test_missing_config_file_is_reported(tmp_path: Path) -> None:
     with requests.Session() as session, pytest.raises(FileNotFoundError):
         S3ProviderRegistry({"local": tmp_path / "missing"}, session).provider_for_cloud("local")
+
+
+@dataclass(frozen=True)
+class MixedConfigParams:
+    extra: str
+    error: str
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        MixedConfigParams("S3_ACCESS_KEY=not-logged\n", "Cannot mix static and Swift credentials"),
+        MixedConfigParams("S3_SECRET_KEY=not-logged\n", "Cannot mix static and Swift credentials"),
+        MixedConfigParams(
+            "S3_ACCESS_KEY=not-logged\nS3_SECRET_KEY=also-secret\n", "Cannot mix static and Swift credentials"
+        ),
+    ],
+    ids=["partial-access-key", "partial-secret-key", "complete-static-pair"],
+)
+def test_swift_config_rejects_static_credentials(tmp_path: Path, params: MixedConfigParams) -> None:
+    # GIVEN a valid Swift file with an extra static application credential
+    config = tmp_path / "s3.conf"
+    config.write_text(
+        "S3_OS_AUTH_URL=https://identity.test/v3\n"
+        "S3_OS_USERNAME=user\n"
+        "S3_OS_PASSWORD=test-password\n"
+        "S3_OS_USER_DOMAIN_NAME=users\n"
+        "S3_OS_PROJECT_NAME=project\n"
+        "S3_OS_PROJECT_DOMAIN_NAME=projects\n"
+        "S3_OS_STORAGE_URL=https://storage.test/swift/v1/AUTH_project\n"
+        "S3_CLEANUP_ACCESS_KEY=cleanup-access\n"
+        "S3_CLEANUP_SECRET_KEY=cleanup-secret\n" + params.extra
+    )
+    # WHEN loading it, THEN the unused identity is rejected without exposing secrets
+    with requests.Session() as session, pytest.raises(ValueError, match=params.error) as error:
+        provider_from_config(config, session)
+    assert "not-logged" not in str(error.value)
+    assert "also-secret" not in str(error.value)
+
+
+def test_partial_swift_config_does_not_fall_back_to_static(tmp_path: Path) -> None:
+    # GIVEN static credentials mixed with an incomplete Swift configuration
+    config = tmp_path / "s3.conf"
+    config.write_text(STATIC_CONFIG + "S3_OS_USERNAME=not-logged\n")
+    # WHEN loading it, THEN the Swift entries cannot be silently ignored
+    with requests.Session() as session, pytest.raises(ValueError, match="Cannot mix static and Swift credentials"):
+        provider_from_config(config, session)
+
+
+def test_swift_config_without_storage_url_reports_missing_selector(tmp_path: Path) -> None:
+    # GIVEN a Swift-only file missing the provider-selection URL
+    config = tmp_path / "s3.conf"
+    config.write_text("S3_OS_USERNAME=not-logged\n")
+    # WHEN loading it, THEN the missing Swift field is identified explicitly
+    with (
+        requests.Session() as session,
+        pytest.raises(ValueError, match="Missing Swift credential variable: S3_OS_STORAGE_URL"),
+    ):
+        provider_from_config(config, session)
