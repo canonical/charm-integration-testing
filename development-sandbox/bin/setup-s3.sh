@@ -24,7 +24,21 @@ case "$(uname -m)" in
         ;;
     *) echo "Unsupported architecture" >&2; exit 1 ;;
 esac
+if [[ -L "${state}" || ( -e "${state}" && ( ! -d "${state}" || ! -O "${state}" ) ) ]]; then
+    echo "S3 state must be an owned directory, not a symlink: ${state}" >&2
+    exit 1
+fi
 mkdir -p "${state}/data" "${state}/bin"
+chmod 700 "${state}"
+for file in "${state}/s3.json" "${state}/s3.conf" "${state}/s3.env"; do
+    if [[ -e "${file}" || -L "${file}" ]]; then
+        if [[ -L "${file}" || ! -f "${file}" || ! -O "${file}" ]]; then
+            echo "S3 credential path must be an owned regular file, not a symlink: ${file}" >&2
+            exit 1
+        fi
+        chmod 600 "${file}"
+    fi
+done
 temporary_files=()
 remove_temporary_files() {
     local file
@@ -113,6 +127,7 @@ for attempt in $(seq 1 30); do
 done
 if (( ! ready )); then
     echo "SeaweedFS is not reachable at ${S3_ENDPOINT}; credentials were not written" >&2
+    echo "Inspect journalctl -u charmqa-s3 and the service bind address; setup does not rebind an existing service." >&2
     exit 1
 fi
 cd "${project_root}"
@@ -170,7 +185,8 @@ try:
     client.put_object(Bucket=bucket, Key="probe", Body=b"local-s3")
     result = client.get_object(Bucket=bucket, Key="probe")
     try:
-        assert result["Body"].read() == b"local-s3"
+        if result["Body"].read() != b"local-s3":
+            raise RuntimeError("Local S3 canary content mismatch")
     finally:
         result["Body"].close()
     try:

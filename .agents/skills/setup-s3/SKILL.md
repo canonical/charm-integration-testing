@@ -40,10 +40,14 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
    that both Kubernetes pods and LXD units can reach port 8333.
 
 The service stores data under `$HOME/.local/share/charmqa-s3/`, outside the source
-tree. Re-running setup keeps existing data and keys. An inactive existing service,
+tree. Setup restricts that directory to mode 0700 and existing credential files
+to mode 0600 before reading them; symlinked or unowned credential paths are rejected.
+Re-running setup keeps existing data and keys. An inactive existing service,
 an unsupported older `s3.json` credential format, or a mismatched binary version
 requires inspection rather than automatic replacement. Use
-`sudo journalctl -u charmqa-s3` for diagnostics.
+`sudo journalctl -u charmqa-s3` for diagnostics. If the VM address changes, inspect
+the service bind address; setup reports an unreachable endpoint instead of
+automatically rebinding a service that may have active consumers.
 
 Normal suite teardown removes its buckets independently of controller cleanup.
 To remove buckets left by interrupted local runs:
