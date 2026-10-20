@@ -40,6 +40,9 @@ class JujuStub(JujuStubBase):
 
 
 class TestIstioMeshExtension:
+    def test_control_plane_defaults_to_track_2(self) -> None:
+        assert ISTIO_CONTROL_PLANE_CHANNEL == "2/stable"
+
     @pytest.fixture
     def logger(self) -> logging.Logger:
         return logging.getLogger("test")
