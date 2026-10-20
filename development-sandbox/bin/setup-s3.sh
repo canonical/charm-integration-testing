@@ -189,6 +189,7 @@ try:
             raise RuntimeError("Local S3 canary content mismatch")
     finally:
         result["Body"].close()
+    outside_bucket_creation_attempted = True
     try:
         client.create_bucket(Bucket=outside_bucket)
     except ClientError as exc:
@@ -197,9 +198,7 @@ try:
         if error.get("Code") not in {"AccessDenied", "Forbidden"} and status != 403:
             raise
     else:
-        outside_bucket_creation_attempted = True
         raise RuntimeError("The test S3 identity can create buckets outside its harness scope")
-    outside_bucket_creation_attempted = True
     cleanup_client.create_bucket(Bucket=outside_bucket)
     cleanup_client.put_object(Bucket=outside_bucket, Key="probe", Body=b"outside-scope")
     cleanup_client.put_bucket_tagging(Bucket=outside_bucket, Tagging={"TagSet": [{"Key": "probe", "Value": "scope"}]})

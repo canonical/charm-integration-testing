@@ -109,3 +109,48 @@ def test_setup_rejects_mismatched_canary_with_optimization(tmp_path: Path, optim
     assert result.returncode != 0
     assert "Local S3 canary content mismatch" in result.stderr
     assert "Local S3 read/write passed" not in result.stdout
+
+
+def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Path) -> None:
+    # GIVEN an overly permissive identity whose outside-bucket creation succeeds before raising
+    (tmp_path / "boto3.py").write_text(
+        "from io import BytesIO\n"
+        "from pathlib import Path\n"
+        "class Client:\n"
+        "    def __init__(self, application): self.application = application\n"
+        "    def create_bucket(self, Bucket):\n"
+        "        if self.application and Bucket.startswith('charmqa-outside-'):\n"
+        "            Path('created').write_text(Bucket)\n"
+        "            raise RuntimeError('creation response lost')\n"
+        "    def put_object(self, **kwargs): pass\n"
+        "    def get_object(self, **kwargs): return {'Body': BytesIO(b'local-s3')}\n"
+        "    def delete_object(self, **kwargs): pass\n"
+        "    def delete_bucket(self, Bucket):\n"
+        "        with Path('deleted').open('a') as output: output.write(Bucket + '\\n')\n"
+        "    def close(self): pass\n"
+        "def client(*args, **kwargs):\n"
+        "    return Client(kwargs['aws_access_key_id'] == 'test-access')\n"
+    )
+    probe = SETUP.read_text().split("poetry run python - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    # WHEN the actual setup probe encounters the post-mutation failure
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "S3_ENDPOINT": "http://s3.test",
+            "S3_ACCESS_KEY": "test-access",
+            "S3_SECRET_KEY": "test-secret",
+            "S3_CLEANUP_ACCESS_KEY": "cleanup-access",
+            "S3_CLEANUP_SECRET_KEY": "cleanup-secret",
+        },
+    )
+    # THEN both attempted buckets are cleaned and the original failure remains visible
+    assert result.returncode != 0
+    assert "creation response lost" in result.stderr
+    deleted = (tmp_path / "deleted").read_text().splitlines()
+    assert len(deleted) == 2
+    assert (tmp_path / "created").read_text() in deleted
