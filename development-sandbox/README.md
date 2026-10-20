@@ -17,7 +17,7 @@ All host operations go through a single entry point:
 | `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
 | `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
 
-Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
+Skills (`/develop-charm`, `/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
@@ -35,8 +35,41 @@ Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the
 ## Typical flow
 
 1. `scripts/sandbox.sh up` - provision or resume the VM.
-2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
+2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` for validator work. For a change to a charm project, use `/develop-charm`.
 3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
+
+## Working on a charm
+
+For charm maintenance work, start an interactive session and use `/develop-charm`.
+The skill helps make a requested change in a charm repository, run its documented
+checks, and record the results and evidence. It can clone a remote charm repository
+into `development-sandbox/workspaces/` or work with an existing checkout there.
+These workspaces are ignored by Git and persist on the host independently of the VM.
+
+Reports belong in `development-sandbox/reports/` and include the charm revision,
+the commands and environments tested, results, and links or paths to captured
+logs. They describe evidence for the scenarios actually run, not an overall
+quality score.
+
+The integration test suite can resolve charm releases from Charmhub or deploy
+the exact local `.charm` artifact. A run against a published charm revision
+does not verify unmerged local changes. Report local-source integration
+coverage only when that exact artifact was deployed; otherwise mark it as not run.
+
+To run the integration suite against a locally built artifact, pack the charm
+inside the sandbox, then pass its `.charm` file with `--target-charm-file`
+alongside the matching `--target-charm` name. The target uses the artifact's
+metadata-selected base; CharmHub neighbors resolve independently using their
+own Charmhub defaults. The suite unpacks the artifact into a project-scoped
+content-addressed cache.
+Snap-installed Juju uses `~/snap/juju/common/charm-artifacts/`, namespaced
+by mounted project path; without the Juju snap the cache is under the project's
+`.pytest_cache/charm-artifacts/`. Generated bundles are stored separately by
+project, controller, and model so concurrent models do not overwrite each
+other's bundles and a resumed run can reuse them. Local targets can be tested
+against a historical CharmHub revision or a second local artifact.
+See the [run-charm-tests skill](../.agents/skills/run-charm-tests/SKILL.md)
+for the full test arguments.
 
 ## Chaos Mesh
 
@@ -95,4 +128,3 @@ convention. The format is the standard Copilot MCP config:
 
 MCP config applies to both `sandbox.sh run 'task'` and `sandbox.sh run --interactive`.
 It has no effect on `up`, `shell`, `down`, or `destroy`.
-
