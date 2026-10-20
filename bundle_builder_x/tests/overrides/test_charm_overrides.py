@@ -3,9 +3,8 @@
 
 """Charm override file validation tests.
 
-Parametrized by (charm_name, channel): conftest computes the set of
-(charm_name, channel) pairs covered by each override file at collection time,
-applying first-met semantics so each channel maps to exactly one override block.
+Parametrized by (charm_name, channel, Ubuntu base) using published amd64 releases.
+Conftest applies first-match semantics so each release maps to one override block.
 
 For each pair the test calls charm_from_store and expects no UnparsableCharmException,
 which the production code raises when an override declares stale endpoint or config keys.
@@ -34,7 +33,7 @@ def test_charm_override_yaml_is_valid(
 
 
 def test_charm_override_file_is_valid(
-    charm_channel: tuple[str, CharmChannel, str | None],
+    charm_channel: tuple[str, CharmChannel, str],
     overrides_charmhub_client: CharmhubClient,
 ) -> None:
     charm_name, channel, ubuntu_version = charm_channel
@@ -53,14 +52,12 @@ def test_charm_override_file_is_valid(
             # A malformed/unexpected Charmhub response is a real failure, not evidence
             # that this (channel, ubuntu_version) combination simply isn't published.
             raise
-        # This (channel, ubuntu_version) combination isn't actually published for this
-        # charm (e.g. an old track never released a revision for a newer base, or vice
-        # versa) - unrelated to whether the override's declared endpoints are stale.
+        # A release can disappear between channel-map collection and refresh.
         pytest.skip(f"no release published for {charm_name} at {channel} / ubuntu {ubuntu_version}")
 
 
 def test_charm_override_constraints_lower_against_charm_metadata(
-    charm_channel: tuple[str, CharmChannel, str | None],
+    charm_channel: tuple[str, CharmChannel, str],
     overrides_charmhub_client: CharmhubClient,
 ) -> None:
     """charm_from_store only parses constraint syntax; a typo'd endpoint/config/feature name

@@ -20,21 +20,33 @@ from pydantic import ValidationError
 
 from bundle_builder_x.charm import CharmChannel
 from bundle_builder_x.charmhub import CharmhubClient
-from bundle_builder_x.overrides import CharmGlobalOverrides, CharmOverridesCriteria, OverridesClient
-
-# Sentinel Ubuntu version used to probe base-agnostic override blocks. It deliberately
-# never matches a real ``ubuntu_version`` criterion, so passing it exercises the same
-# "no base restriction" path a resolved-but-unlisted base would.
-_UNSCOPED_UBUNTU_VERSION = "unscoped"
+from bundle_builder_x.charmhub_http import IncompleteCharmInfoException, InfoResponse
+from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
 
 
-def _referenced_ubuntu_versions(criteria: CharmOverridesCriteria) -> set[str]:
-    """Recursively collect every explicit ubuntu_version referenced by a criteria block."""
-    versions = {criteria.ubuntu_version} if criteria.ubuntu_version else set()
-    for group in (criteria.all_of, criteria.any_of, criteria.none_of):
-        for nested in group or []:
-            versions |= _referenced_ubuntu_versions(nested)
-    return versions
+def _override_channel_bases(
+    info: InfoResponse,
+    overrides: CharmGlobalOverrides,
+    all_channels: bool,
+) -> list[tuple[CharmChannel, str]]:
+    """Select published amd64 Ubuntu releases using first-match override semantics."""
+    remaining: set[tuple[CharmChannel, str]] = set()
+    for entry in info.channel_map:
+        base = entry.channel.base
+        if base is None:
+            raise IncompleteCharmInfoException(f"Missing base in channel map for {entry.channel.name}")
+        if base.name == "ubuntu" and base.architecture in {"amd64", "all"}:
+            remaining.add((CharmChannel.model_validate(entry.channel.name), base.channel))
+
+    selected: list[tuple[CharmChannel, str]] = []
+    for override in overrides.overrides:
+        matched = sorted(cv for cv in remaining if override.meets(*cv))
+        remaining.difference_update(matched)
+        if not matched:
+            criteria = [c.model_dump(exclude_none=True) for c in override.criteria]
+            raise ValueError(f"override with criteria={criteria} matches no published amd64 Ubuntu (channel, base)")
+        selected.extend(matched if all_channels else matched[:1])
+    return selected
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -54,7 +66,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--all-channels",
         action="store_true",
         default=False,
-        help="Check every channel that matches an override's criteria instead of just one.",
+        help="Check every published amd64 Ubuntu channel/base pair matching each override instead of just one.",
     )
 
 
@@ -99,33 +111,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         except (yaml.YAMLError, ValidationError):
             continue  # YAML layer will catch this
 
-        # Some overrides only apply to a specific Ubuntu base (e.g. kubernetes-worker's
-        # legacy-charm blocks), so channel alone isn't enough to determine first-met
-        # coverage. Exercise every base referenced anywhere in this charm's overrides,
-        # plus a sentinel that matches no override's declared base, against every
-        # published channel, to also cover base-agnostic override blocks.
-        ubuntu_versions: set[str] = {_UNSCOPED_UBUNTU_VERSION}
-        for entry in global_overrides.overrides:
-            for criterion in entry.criteria:
-                ubuntu_versions |= _referenced_ubuntu_versions(criterion)
-
-        remaining = {(c, v) for c in client.get_charm_channels(charm_name) for v in ubuntu_versions}
-        for override in global_overrides.overrides:
-            matched = sorted(
-                (cv for cv in remaining if override.meets(*cv)),
-                key=lambda cv: (cv[0], cv[1]),
-            )
-            remaining = {cv for cv in remaining if cv not in matched}
-            if not matched:
-                criteria_repr = [c.model_dump(exclude_none=True) for c in override.criteria]
-                unmatched.append(
-                    f"{charm_name}: override with criteria={criteria_repr} matches no published "
-                    "(channel, ubuntu_version) combination"
-                )
-                continue
-            for channel, ubuntu_version in matched if all_channels else matched[:1]:
-                params.append((charm_name, channel, ubuntu_version))
-                ids.append(f"{charm_name}[{channel}][{ubuntu_version}]")
+        info = client.http_client.info(charm_name, include_channel_map=True)
+        try:
+            channel_bases = _override_channel_bases(info, global_overrides, all_channels)
+        except ValueError as exc:
+            unmatched.append(f"{charm_name}: {exc}")
+            continue
+        for channel, ubuntu_version in channel_bases:
+            params.append((charm_name, channel, ubuntu_version))
+            ids.append(f"{charm_name}[{channel}][{ubuntu_version}]")
 
     if unmatched:
         pytest.fail(

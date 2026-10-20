@@ -170,6 +170,7 @@ class InfoResponse(BaseModel):
             name: str
             track: str
             risk: str
+            base: CharmhubBase | None = None
 
         channel: Channel
 
