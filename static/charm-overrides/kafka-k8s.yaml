@@ -19,7 +19,10 @@ overrides:
       - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) and not bool(endpoint[peer-cluster-orchestrator])
         => config[roles] == "broker,controller"'
-      # Check coverage as well as compatibility: external offers have no known track.
+      # reachable() excludes opaque external peers, even when known peers share the endpoint.
+      - 'charms(endpoint[peer-cluster]) <= reachable(endpoint[peer-cluster])'
+      - 'charms(endpoint[peer-cluster-orchestrator]) <= reachable(endpoint[peer-cluster-orchestrator])'
+      # Require a known matching track and reject incompatible peers.
       - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) >=
         tracks({self}) and tracks(charms(endpoint[peer-cluster])) <= tracks({self})'
       - 'bool(endpoint[peer-cluster-orchestrator]) => tracks(charms(endpoint[peer-cluster-orchestrator]))
