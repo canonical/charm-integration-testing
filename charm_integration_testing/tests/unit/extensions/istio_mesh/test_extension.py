@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from extensions.istio_mesh.extension import (
+    ISTIO_CONTROL_PLANE_CHANNEL,
     ISTIO_CONTROL_PLANE_CHARM,
     ISTIO_MESH_DEPENDENT_CHARMS,
     IstioMeshExtension,
@@ -76,7 +77,7 @@ class TestIstioMeshExtension:
             # THEN istio-k8s is deployed on its pinned channel and awaited to settle
             assert juju.deployed == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM)]
             assert juju.deployed_with_channel == [
-                (TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM, "2/stable")
+                (TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHANNEL)
             ]
             assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
 
