@@ -22,3 +22,7 @@ overrides:
         optional: true
       send-ca-cert:
         optional: true
+    # send-ca-cert only transfers certificates obtained through the certificates
+    # integration; without it the charm defers and publishes nothing.
+    constraints:
+      - 'bool(endpoint[send-ca-cert]) => bool(endpoint[certificates])'
