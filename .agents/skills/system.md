@@ -52,6 +52,18 @@ $PROJECT_ROOT/
   pyproject.toml              # Root Poetry project (aggregates all subpackages)
 ```
 
+## Charm development
+
+- For requested changes to a charm project, use `/develop-charm`. Keep the charm
+  checkout under `$PROJECT_ROOT/development-sandbox/workspaces/`, separate from
+  this repository's source tree. That directory is host-mounted and gitignored.
+- Save evidence reports and supporting artifacts under
+  `$PROJECT_ROOT/development-sandbox/reports/`.
+- Report exact checks, charm revision, Juju version, base, substrate, and
+  scenarios tested. Clearly distinguish failures from blocked or unrun checks;
+  do not claim local-source integration coverage unless the exact changed charm
+  revision was deployed.
+
 ---
 
 ## Tools
@@ -185,6 +197,7 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 ## Important notes
 
 - **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
+- Exception: when working on a charm through `/develop-charm`, its checkout belongs under `development-sandbox/workspaces/`. Modify files there only as part of the requested charm work; do not change sandbox scripts or substrate configuration as a workaround.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.

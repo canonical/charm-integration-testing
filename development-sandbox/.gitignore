@@ -1,5 +1,8 @@
 # Development sandbox reports
 reports/
 
+# Maintainer charm checkouts
+workspaces/
+
 # Local MCP server config (point to this file with SANDBOX_MCP_CONFIG_FILE in .env)
 mcp.json
