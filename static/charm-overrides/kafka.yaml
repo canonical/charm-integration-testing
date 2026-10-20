@@ -13,10 +13,12 @@ overrides:
       - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
       - 'not bool(endpoint[peer-cluster]) and not bool(endpoint[peer-cluster-orchestrator])
         => config[roles] == "broker,controller"'
-      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) ==
-        tracks({self})'
+      # Check coverage as well as compatibility: external offers have no known track.
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) >=
+        tracks({self}) and tracks(charms(endpoint[peer-cluster])) <= tracks({self})'
       - 'bool(endpoint[peer-cluster-orchestrator]) => tracks(charms(endpoint[peer-cluster-orchestrator]))
-        == tracks({self})'
+        >= tracks({self}) and tracks(charms(endpoint[peer-cluster-orchestrator]))
+        <= tracks({self})'
   - criteria:
       - track: '3'
     provides:

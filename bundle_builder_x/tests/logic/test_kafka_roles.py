@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from bundle_builder_x import OverridesClient
-from bundle_builder_x.bundle_builder import BundleBuilder
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointType
 from bundle_builder_x.spec import AppSpec, IntegrationSpec
 
@@ -99,3 +99,74 @@ def test_kafka_peer_cluster_assigns_broker_and_controller_roles() -> None:
     assert bundle.applications["controller"].config["roles"] == "controller"
     assert set(bundle.applications) == set(applications)
     assert len(bundle.integrations) == 1
+
+
+@dataclass(frozen=True)
+class PeerParams:
+    endpoint: str
+    remote_endpoint: str
+    remote_type: EndpointType
+
+
+PEER_PARAMS = [
+    PeerParams("peer-cluster", "peer-cluster-orchestrator", EndpointType.PROVIDES),
+    PeerParams("peer-cluster-orchestrator", "peer-cluster", EndpointType.REQUIRES),
+]
+
+
+@pytest.mark.parametrize("params", PEER_PARAMS, ids=lambda p: p.endpoint)
+def test_kafka_peer_cluster_rejects_mismatched_track(params: PeerParams) -> None:
+    # GIVEN Kafka 4 and a track-3 peer without its own track constraints
+    peer = make_charm(
+        "peer",
+        channel="3/stable",
+        endpoints={
+            params.remote_endpoint: CharmEndpoint(type=params.remote_type, interface="peer_cluster", optional=True)
+        },
+    )
+    builder = BundleBuilder(charmhub_client=CharmhubClientStub(_make_kafka(), peer))
+
+    # WHEN either Kafka endpoint is explicitly integrated with that peer
+    # THEN its own track guard rejects the mismatched peer
+    with pytest.raises(UncompletableBundleError):
+        build_single_model(
+            builder,
+            applications={
+                "kafka": AppSpec(charm="kafka", channel="4/stable"),
+                "peer": AppSpec(charm="peer", channel="3/stable"),
+            },
+            integrations=[
+                IntegrationSpec(
+                    application="kafka",
+                    endpoint=params.endpoint,
+                    remote_application="peer",
+                    remote_endpoint=params.remote_endpoint,
+                )
+            ],
+            platform="machine",
+        )
+
+
+@pytest.mark.parametrize("params", PEER_PARAMS, ids=lambda p: p.endpoint)
+def test_kafka_peer_cluster_rejects_external_peer_with_unknown_track(params: PeerParams) -> None:
+    # GIVEN an external peer whose charm track is unavailable to the solver
+    builder = BundleBuilder(charmhub_client=CharmhubClientStub(_make_kafka()))
+
+    # WHEN a Kafka peer endpoint is connected through an opaque external offer
+    # THEN track equality fails closed rather than bypassing compatibility checks
+    with pytest.raises(UncompletableBundleError):
+        build_single_model(
+            builder,
+            applications={"kafka": AppSpec(charm="kafka", channel="4/stable")},
+            integrations=[
+                IntegrationSpec(
+                    application="kafka",
+                    endpoint=params.endpoint,
+                    remote_application="peer",
+                    remote_endpoint=params.remote_endpoint,
+                    remote_model="external",
+                    url="admin/external.peer",
+                )
+            ],
+            platform="machine",
+        )
