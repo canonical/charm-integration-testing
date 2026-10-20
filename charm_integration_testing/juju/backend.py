@@ -3,14 +3,13 @@
 
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
 
-from kubernetes_client import KubernetesClient
 from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
@@ -22,6 +21,7 @@ from .models import (
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuWorkloadInstance,
 )
 from .version import JujuVersion
 
@@ -152,12 +152,20 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Reboot a unit without waiting for it to recover."""
+        raise NotImplementedError("This backend does not support rebooting units.")
+
     def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
         """Restart one Juju non-leader without changing the application unit count."""
         raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")
 
     @abstractmethod
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        raise NotImplementedError
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Remove a specific unit when the backend supports targeted unit removal."""
         raise NotImplementedError
 
     @abstractmethod
@@ -358,6 +366,18 @@ class JujuBackend(ABC):
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        raise NotImplementedError
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     @abstractmethod
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
@@ -434,7 +454,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -485,24 +507,52 @@ class JujuBackend(ABC):
     def debug_log(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
-    @abstractmethod
-    def get_controller_kubeconfig(self, controller: str) -> Path | None:
-        """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers."""
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        """Return the model's Kubernetes cloud, or None when it is not Kubernetes-backed."""
+        return None
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        """Delete one workload instance by name."""
         raise NotImplementedError
 
-    @abstractmethod
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        """Return a KubernetesClient for a K8s controller's cloud, or None for machine controllers.
-
-        Resolution (cloud type, kubeconfig lookup, client construction/caching) is
-        delegated entirely to the backend, which is the single source of truth for
-        controller cloud configuration.
-        """
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        """Return ready workload instances associated with the requested Juju units."""
         raise NotImplementedError
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        """Return a client for the model's Kubernetes cloud, or None for a machine model.
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        """Return stable identifiers for the application's currently observed workload instances."""
+        raise NotImplementedError
 
-        Unsupported backends raise rather than infer the cloud from the controller.
-        """
-        raise NotImplementedError("Model-aware Kubernetes client resolution is not supported by this backend.")
+    def wait_for_workload_instances_ready(
+        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        """Wait until the application's workload instances are ready at the requested count."""
+        raise NotImplementedError
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        """Replace a workload instance and return the replacement instance's name."""
+        raise NotImplementedError
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        """Wait until the requested number of ready instances no longer includes prior identities."""
+        raise NotImplementedError

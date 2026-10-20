@@ -27,7 +27,7 @@ def test_pod_deletion(
 
     existing_uids = {pod.metadata.uid for pod in pods}
     pod_to_delete = pods[0]
-    kubernetes_client.delete_pod(namespace=namespace, pod_name=pod_to_delete.metadata.name)
+    juju_client.delete_pod(model=target_model_ref, pod_name=pod_to_delete.metadata.name)
 
     # Wait for a new pod to be created. Passing every pre-existing UID (not just the deleted
     # pod's) ensures an untouched sibling replica can't be mistaken for the deleted pod's

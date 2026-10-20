@@ -7,7 +7,7 @@ from datetime import timedelta
 from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from extensions.unseal_vault.vault_unsealer import VaultUnsealer
 from juju import JujuModelHandle
-from kubernetes_client.backend import KubernetesExtension
+from juju.extension import JujuExtension
 
 from ..shared import NullJujuBackend
 
@@ -75,42 +75,43 @@ class TestGenericUnsealVaultJujuExtension:
 
 
 class TestUnsealVaultK8sJujuExtension:
-    def _build_extension(self) -> UnsealVaultK8sJujuExtension:
-        extension = UnsealVaultK8sJujuExtension(NullJujuBackend(), TEST_MODEL.controller, logging.getLogger("test"))
-        extension.vault_unsealer = VaultUnsealerStub()
-        return extension
+    def _build_extension(self) -> tuple[UnsealVaultK8sJujuExtension, JujuBackendStub]:
+        juju = JujuBackendStub()
+        extension = UnsealVaultK8sJujuExtension(juju, logging.getLogger("test"))
+        extension.vault_unsealer = VaultUnsealerStub(juju)
+        return extension, juju
 
-    def test_is_also_a_kubernetes_extension(self) -> None:
-        # GIVEN the k8s vault extension
-        extension = self._build_extension()
+    def test_is_juju_extension(self) -> None:
+        extension, _ = self._build_extension()
 
-        # THEN it can be used wherever a KubernetesExtension is expected
-        assert isinstance(extension, KubernetesExtension)
+        assert isinstance(extension, JujuExtension)
 
-    def test_post_delete_pod_reunseals_without_reauthorizing(self) -> None:
-        # GIVEN an extension wrapping a stub unsealer, mimicking a vault-k8s pod deletion
-        extension = self._build_extension()
+    def test_inherited_juju_lifecycle_hooks_reuse_kubernetes_unsealer(self) -> None:
+        extension, juju = self._build_extension()
         unsealer = extension.vault_unsealer
         assert isinstance(unsealer, VaultUnsealerStub)
 
-        # WHEN post_delete_pod is called (e.g. after a pod is force-deleted by a test)
-        extension.post_delete_pod(TEST_MODEL.model, "vault-k8s-0")
+        extension.post_deploy(TEST_MODEL)
+        extension.post_scale(TEST_MODEL)
+        extension.post_restart_unit(TEST_MODEL, "vault-k8s/0")
+        extension.post_migrate_model("test-model", "source-controller", "target-controller")
 
-        # THEN the unsealer re-unseals vault, pairing the namespace with the controller the
-        # extension was built for, without re-authorizing the already-authorized charm
-        assert unsealer.calls == [(TEST_MODEL, False)]
+        target_model = JujuModelHandle(controller="target-controller", model="test-model")
+        assert unsealer.calls == [
+            (TEST_MODEL, True),
+            (TEST_MODEL, False),
+            (TEST_MODEL, False),
+            (target_model, False),
+        ]
+        assert juju.wait_calls == [target_model]
 
-    def test_post_restart_statefulset_reunseals_without_reauthorizing(self) -> None:
-        # GIVEN an extension wrapping a stub unsealer, mimicking a statefulset rollout restart
-        extension = self._build_extension()
+    def test_post_delete_pod_unseals_without_reauthorizing(self) -> None:
+        extension, _ = self._build_extension()
         unsealer = extension.vault_unsealer
         assert isinstance(unsealer, VaultUnsealerStub)
 
-        # WHEN post_restart_statefulset is called
-        extension.post_restart_statefulset(TEST_MODEL.model, "vault-k8s")
+        extension.post_delete_pod(TEST_MODEL, "vault-k8s-0")
 
-        # THEN the unsealer re-unseals vault, pairing the namespace with the controller the
-        # extension was built for, without re-authorizing the already-authorized charm
         assert unsealer.calls == [(TEST_MODEL, False)]
 
 

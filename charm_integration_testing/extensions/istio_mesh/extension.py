@@ -57,7 +57,7 @@ class IstioMeshExtension(JujuExtension):
         if not dependents:
             return
 
-        if self.juju.get_kubernetes_client_for_controller(model.controller) is None:
+        if not self.juju.is_k8s_model(model):
             return
 
         existing = self._find_istio_application(applications)

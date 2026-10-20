@@ -61,6 +61,15 @@ class JujuApplicationHealth:
 
 
 @dataclass(frozen=True)
+class JujuWorkloadInstance:
+    """Stable identity of one workload instance associated with a Juju unit."""
+
+    unit: str
+    name: str
+    identifier: str
+
+
+@dataclass(frozen=True)
 class JujuApplicationInfo:
     charm: str
     revision: int

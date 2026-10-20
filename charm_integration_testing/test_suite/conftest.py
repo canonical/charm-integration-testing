@@ -44,7 +44,7 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
@@ -188,13 +188,31 @@ def cloud_definitions() -> dict[str, tuple[Path, Path]]:
 
 
 @pytest.fixture(scope="session")
-def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str, tuple[Path, Path]]) -> JujuBackend:
-    return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs, cloud_definitions=cloud_definitions)
+def kubernetes_client_registry(cloud_kubeconfigs: dict[str, Path]) -> KubernetesClientRegistry:
+    """Own the shared Kubernetes clients used by Juju, chaos, and resource tracking."""
+    return KubernetesClientRegistry(cloud_kubeconfigs)
+
+
+@pytest.fixture(scope="session")
+def juju_backend(
+    kubernetes_client_registry: KubernetesClientRegistry,
+    cloud_definitions: dict[str, tuple[Path, Path]],
+) -> JujuBackend:
+    return JubilantBackend(
+        kubernetes_client_registry=kubernetes_client_registry,
+        cloud_definitions=cloud_definitions,
+    )
+
+
+@pytest.fixture(scope="session")
+def unseal_vault_k8s_extension(juju_backend: JujuBackend, logger: logging.Logger) -> UnsealVaultK8sJujuExtension:
+    return UnsealVaultK8sJujuExtension(juju_backend, logger)
 
 
 @pytest.fixture(scope="session", autouse=True)
 def register_test_clouds(
     juju_backend: JujuBackend,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
     cloud_kubeconfigs: dict[str, Path],
     cloud_definitions: dict[str, tuple[Path, Path]],
     target_cloud: str,
@@ -210,23 +228,17 @@ def register_test_clouds(
         juju_backend.register_cloud(cloud=cloud)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def kubernetes_client(
-    cloud_kubeconfigs: dict[str, Path],
-    target_cloud: str,
-    target_controller: str,
-    logger: logging.Logger,
+    kubernetes_client_registry: KubernetesClientRegistry,
+    target_model_ref: JujuModelHandle,
     juju_backend: JujuBackend,
 ) -> KubernetesClient | None:
-    """KubernetesClient for the target cloud, or None for machine clouds."""
-    path = cloud_kubeconfigs.get(target_cloud)
-    if path is None:
+    """Return the shared KubernetesClient for the target model."""
+    cloud = juju_backend.kubernetes_cloud_for_model(target_model_ref)
+    if cloud is None:
         return None
-    return KubernetesClient(
-        KubernetesBackend.k8s_client(kubeconfig=path),
-        logger=logger,
-        extensions=[UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)],
-    )
+    return kubernetes_client_registry.client_for_cloud(cloud)
 
 
 @pytest.fixture(scope="session")
@@ -250,11 +262,17 @@ def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
     juju_backend: JujuBackend,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
-            JujuCrashdumpCollector(logger, juju_backend, output_dir=log_dir),
+            JujuCrashdumpCollector(
+                logger,
+                juju_backend,
+                output_dir=log_dir,
+                kubernetes_client_registry=kubernetes_client_registry,
+            ),
         ],
         logger=logger,
     )
@@ -364,6 +382,8 @@ def _build_juju_client(
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
     remote_logging_endpoints_by_controller: dict[str, str],
+    kubernetes_client_registry: KubernetesClientRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -378,10 +398,15 @@ def _build_juju_client(
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
+            unseal_vault_k8s_extension,
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
-            RemoteLoggingExtension(juju_backend, remote_logging_endpoints_by_controller, session_resource_registry),
+            RemoteLoggingExtension(
+                juju_backend,
+                kubernetes_client_registry,
+                remote_logging_endpoints_by_controller,
+                session_resource_registry,
+            ),
         ],
     )
 
@@ -395,6 +420,8 @@ def juju_client(
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
     remote_logging_endpoints_by_controller: dict[str, str],
+    kubernetes_client_registry: KubernetesClientRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> JujuClient:
     return _build_juju_client(
         juju_backend,
@@ -404,6 +431,8 @@ def juju_client(
         session_resource_registry,
         persistence_extension,
         remote_logging_endpoints_by_controller,
+        kubernetes_client_registry,
+        unseal_vault_k8s_extension,
     )
 
 
@@ -417,6 +446,8 @@ def seed_persistence_state_for_resumed_run(
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     remote_logging_endpoints_by_controller: dict[str, str],
+    kubernetes_client_registry: KubernetesClientRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
@@ -463,6 +494,8 @@ def seed_persistence_state_for_resumed_run(
         session_resource_registry,
         persistence_extension,
         remote_logging_endpoints_by_controller,
+        kubernetes_client_registry,
+        unseal_vault_k8s_extension,
     )
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:

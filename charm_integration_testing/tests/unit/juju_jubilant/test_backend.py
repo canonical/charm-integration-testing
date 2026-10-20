@@ -3,11 +3,12 @@
 
 import logging
 import subprocess
+from collections.abc import Collection
 from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable, cast, overload
+from typing import Any, Callable, cast
 from unittest.mock import patch
 
 import jubilant
@@ -26,6 +27,7 @@ from juju import (
     JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
 )
 from juju.backend import JujuBackend
 from juju.version import JujuVersion
@@ -34,7 +36,7 @@ from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityE
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -248,12 +250,7 @@ class ModelLookupClientStub(JubilantClient):
         return self.models[model.uri]
 
 
-class UnusedKubernetesBackend(KubernetesBackend):
-    def __init__(self) -> None:
-        pass
-
-
-class TestModelKubernetesClient:
+class TestModelKubernetesCloud:
     @dataclass(frozen=True)
     class Params:
         label: str
@@ -267,25 +264,19 @@ class TestModelKubernetesClient:
 
     @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
     def test_uses_workload_cloud(self, params: Params) -> None:
-        # GIVEN a Kubernetes model on a different cloud from its controller
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
+        # GIVEN a Kubernetes model
         client = ModelLookupClientStub(
             {
                 TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workload-cloud")),
-                controller.uri: ShowModelStub(
-                    ModelInfoStub(type=params.controller_type, cloud=params.controller_cloud)
-                ),
             }
         )
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["workload-cloud"] = kubernetes
 
-        # WHEN resolving the workload model
-        result = backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving its cloud
+        result = backend.kubernetes_cloud_for_model(TEST_MODEL)
 
-        # THEN only the workload model's cloud is used
-        assert result is kubernetes
+        # THEN the workload model's cloud is returned without constructing a Kubernetes client
+        assert result == "workload-cloud"
         assert client.lookups == [TEST_MODEL.uri]
 
     def test_preserves_model_owner(self) -> None:
@@ -293,11 +284,8 @@ class TestModelKubernetesClient:
         model = JujuModelHandle(controller="shared", model="litmus", owner="other-user")
         client = ModelLookupClientStub({model.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="litmus"))})
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["litmus"] = kubernetes
-
-        # WHEN resolving its client, THEN the owner-qualified model is queried
-        assert backend.get_kubernetes_client_for_model(model) is kubernetes
+        # WHEN resolving its cloud, THEN the owner-qualified model is queried
+        assert backend.kubernetes_cloud_for_model(model) == "litmus"
         assert client.lookups == ["shared:other-user/litmus"]
 
     def test_machine_model_returns_none(self) -> None:
@@ -305,9 +293,8 @@ class TestModelKubernetesClient:
         client = ModelLookupClientStub({TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines"))})
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN no Kubernetes client is needed
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is None
-        assert backend._kubernetes_clients == {}
+        # WHEN resolving the model, THEN there is no Kubernetes cloud
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) is None
 
     def test_missing_kubeconfig_raises(self) -> None:
         # GIVEN a Kubernetes model whose cloud has no kubeconfig
@@ -316,9 +303,8 @@ class TestModelKubernetesClient:
         )
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN configuration failure is not treated as a machine model
-        with pytest.raises(RuntimeError, match="No kubeconfig configured for cloud 'missing'"):
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving the model, THEN the cloud is returned without checking local configuration
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "missing"
 
     def test_model_lookup_error_propagates(self) -> None:
         # GIVEN an inaccessible model
@@ -330,38 +316,20 @@ class TestModelKubernetesClient:
 
         # WHEN resolving the model, THEN the original error propagates
         with pytest.raises(RuntimeError) as exc_info:
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+            backend.kubernetes_cloud_for_model(TEST_MODEL)
         assert exc_info.value is error
 
     def test_rechecks_model_cloud(self) -> None:
-        # GIVEN a model with a previously resolved cloud
+        # GIVEN a model whose cloud changes
         model = ShowModelStub(ModelInfoStub(type="kubernetes", cloud="first"))
         client = ModelLookupClientStub({TEST_MODEL.uri: model})
         backend = JubilantBackend(client=client)
-        first = KubernetesClient(UnusedKubernetesBackend())
-        second = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients.update(first=first, second=second)
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is first
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "first"
 
-        # WHEN its cloud changes, THEN the next resolution uses the current model data
+        # WHEN its cloud changes, THEN the next lookup uses current model data
         model.info = ModelInfoStub(type="kubernetes", cloud="second")
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is second
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "second"
         assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
-
-    def test_controller_resolver_still_uses_controller_model(self) -> None:
-        # GIVEN a machine controller hosting a Kubernetes workload model
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
-        client = ModelLookupClientStub(
-            {
-                controller.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines")),
-                TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workloads")),
-            }
-        )
-        backend = JubilantBackend(client=client)
-
-        # WHEN using the existing controller API, THEN its meaning is unchanged
-        assert backend.get_kubernetes_client_for_controller(TEST_MODEL.controller) is None
-        assert client.lookups == [controller.uri]
 
 
 class TestJubilantClient:
@@ -548,6 +516,36 @@ class ModelExistsStub:
 
 
 class TestJubilantBackend:
+    class TestRemoveUnit:
+        def test_removes_a_specific_unit_on_machine_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a machine model and a client that records CLI calls
+            class RemoveUnitStub:
+                def __init__(self) -> None:
+                    self.cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+
+                def cli(self, *args: str, **kwargs: Any) -> str:
+                    self.cli_calls.append((args, kwargs))
+                    return ""
+
+            model_client = RemoveUnitStub()
+            backend = JubilantBackend(JubilantClientStub(client=model_client))
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: False)
+
+            # WHEN removing a specific unit
+            backend.remove_unit(TEST_MODEL, "mysql/2")
+
+            # THEN the unit removal command is non-interactive
+            assert model_client.cli_calls == [(("remove-unit", "mysql/2", "--no-prompt"), {})]
+
+        def test_rejects_targeted_removal_on_kubernetes_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a Kubernetes model
+            backend = JubilantBackend()
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: True)
+
+            # WHEN / THEN specific unit removal fails explicitly
+            with pytest.raises(ValueError, match="does not support removing a specific unit"):
+                backend.remove_unit(TEST_MODEL, "mysql/2")
+
     class TestWait:
         def test_wait_success(self) -> None:
             # GIVEN a backend with mocked status
@@ -1748,6 +1746,7 @@ class TestJubilantBackend:
         @dataclass
         class ModelStub:
             type: str = "kubernetes"
+            cloud: str = "test-cloud"
 
         @dataclass
         class ScpStub:
@@ -2806,7 +2805,8 @@ class TestJubilantBackend:
         def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2822,7 +2822,8 @@ class TestJubilantBackend:
         def test_register_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2847,7 +2848,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2866,7 +2868,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -3296,6 +3299,124 @@ class TestMigrationTolerance:
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
 
 
+class WorkloadKubernetesClientStub:
+    def __init__(self) -> None:
+        self.ready_pods = {"app/0": CharmPod(unit="app/0", name="app-0", uid="old-uid")}
+        self.restart_result = "app-0-replacement"
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def get_ready_charm_pods_by_unit(
+        self, application: str, namespace: str, units: Collection[str], timeout: timedelta
+    ) -> dict[str, CharmPod]:
+        self.calls.append(("ready-by-unit", (application, namespace, units, timeout), {}))
+        return self.ready_pods
+
+    def get_charm_pod_uids(self, application: str, namespace: str) -> set[str]:
+        self.calls.append(("instance-ids", (application, namespace), {}))
+        return {"old-uid"}
+
+    def wait_for_charm_pods_ready(
+        self, application: str, namespace: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self.calls.append(("wait-ready", (application, namespace, expected_count, timeout), {}))
+
+    def restart_pod(
+        self,
+        namespace: str,
+        pod_name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> str:
+        self.calls.append(
+            (
+                "restart",
+                (),
+                {
+                    "namespace": namespace,
+                    "pod_name": pod_name,
+                    "uid": uid,
+                    "timeout": timeout,
+                    "application": application,
+                    "unit": unit,
+                    "existing_uids": existing_uids,
+                },
+            )
+        )
+        return self.restart_result
+
+    def wait_for_charm_pods_replaced(
+        self,
+        application: str,
+        namespace: str,
+        expected_count: int,
+        previous_uids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self.calls.append(("wait-replaced", (application, namespace, expected_count, previous_uids, timeout), {}))
+
+    def delete_pod(self, namespace: str, pod_name: str) -> None:
+        self.calls.append(("delete", (namespace, pod_name), {}))
+
+
+class WorkloadOperationsBackend(JubilantBackend):
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "test-cloud"
+
+
+def test_workload_operations_use_registry_client_and_delegate_arguments(tmp_path: Path) -> None:
+    kubeconfig = tmp_path / "kubeconfig"
+    client = WorkloadKubernetesClientStub()
+    factory_calls: list[Path] = []
+
+    def create_client(path: Path) -> KubernetesClient:
+        factory_calls.append(path)
+        return cast(KubernetesClient, client)
+
+    backend = WorkloadOperationsBackend(
+        kubernetes_client_registry=KubernetesClientRegistry(
+            {"test-cloud": kubeconfig},
+            client_factory=create_client,
+        )
+    )
+    timeout = timedelta(seconds=30)
+    units = {"app/0"}
+    instance = JujuWorkloadInstance(unit="app/0", name="app-0", identifier="old-uid")
+    previous_ids = {"old-uid", "other-uid"}
+
+    assert backend.ready_workload_instances_by_unit(TEST_MODEL, "app", units, timeout) == {"app/0": instance}
+    assert backend.workload_instance_ids(TEST_MODEL, "app") == {"old-uid"}
+    backend.wait_for_workload_instances_ready(TEST_MODEL, "app", 1, timeout)
+    assert backend.restart_workload_instance(TEST_MODEL, "app", instance, previous_ids, timeout) == "app-0-replacement"
+    backend.wait_for_workload_instances_replaced(TEST_MODEL, "app", 1, previous_ids, timeout)
+    backend.delete_workload_instance(TEST_MODEL, "app-0")
+
+    assert factory_calls == [kubeconfig]
+    assert client.calls == [
+        ("ready-by-unit", ("app", "test-model", units, timeout), {}),
+        ("instance-ids", ("app", "test-model"), {}),
+        ("wait-ready", ("app", "test-model", 1, timeout), {}),
+        (
+            "restart",
+            (),
+            {
+                "namespace": "test-model",
+                "pod_name": "app-0",
+                "uid": "old-uid",
+                "timeout": timeout,
+                "application": "app",
+                "unit": "app/0",
+                "existing_uids": previous_ids,
+            },
+        ),
+        ("wait-replaced", ("app", "test-model", 1, previous_ids, timeout), {}),
+        ("delete", ("test-model", "app-0"), {}),
+    ]
+
+
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
 FOLLOWER_RESTART_TIMEOUT = timedelta(seconds=10)
 FOLLOWER_BOOT_ID = "11111111-1111-1111-1111-111111111111"
@@ -3370,15 +3491,13 @@ class FollowerRestartSshStub:
 class FollowerRestartBackendStub(JubilantBackend):
     def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
         self.stub = FollowerRestartSshStub()
-        super().__init__()
-        self.snapshots = [follower_status(), follower_status()]
         self.kube = kube
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+        registry = KubernetesClientRegistry(
+            {"fake-cloud": Path("fake-kubeconfig")} if kube is not None else {},
+            client_factory=lambda _: cast(KubernetesClient, kube),
+        )
+        super().__init__(kubernetes_client_registry=registry)
+        self.snapshots = [follower_status(), follower_status()]
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
@@ -3389,8 +3508,8 @@ class FollowerRestartBackendStub(JubilantBackend):
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         return self.snapshots.pop(0)
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        return cast(KubernetesClient | None, self.kube)
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "fake-cloud" if self.kube is not None else None
 
 
 def test_restarts_only_follower_pod() -> None:

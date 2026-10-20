@@ -15,7 +15,6 @@ from extensions.remote_logging.extension import (
 )
 from extensions.remote_logging.scraper import KUBERNETES_NAMESPACES_KEY, KUBERNETES_SCRAPER_NAME, USERDATA_KEY
 from juju.handles import JujuControllerHandle, JujuModelHandle
-from kubernetes_client import KubernetesClient
 from resource_registry import ResourceRegistry
 
 from ..shared import NullJujuBackend
@@ -74,6 +73,11 @@ class JujuStub(NullJujuBackend):
     kubernetes_by_cloud: dict[str, KubernetesStub] = field(default_factory=dict)
     controller_cloud_queries: list[tuple[str, str]] = field(default_factory=list)
 
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        if model.model == "controller" and model.controller in self.k8s_clouds:
+            return model.controller
+        return self.model_clouds.get(model.model)
+
     def is_k8s_cloud(self, cloud: str) -> bool:
         return cloud in self.k8s_clouds
 
@@ -81,14 +85,16 @@ class JujuStub(NullJujuBackend):
         self.controller_cloud_queries.append((cloud, controller))
         return cloud in self.k8s_clouds
 
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        return self.kubernetes if controller in self.k8s_clouds else None  # type: ignore[return-value]
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        cloud = self.model_clouds.get(model.model)
-        if cloud not in self.k8s_clouds:
-            return None
-        return self.kubernetes_by_cloud.get(cloud, self.kubernetes)  # type: ignore[return-value]
+class KubernetesRegistryStub:
+    def __init__(self, juju: JujuStub):
+        self.juju = juju
+
+    def has_cloud(self, cloud: str) -> bool:
+        return cloud in self.juju.k8s_clouds
+
+    def client_for_cloud(self, cloud: str) -> KubernetesStub:
+        return self.juju.kubernetes_by_cloud.get(cloud, self.juju.kubernetes)
 
 
 @pytest.fixture
@@ -110,6 +116,7 @@ def _extension(
 ) -> RemoteLoggingExtension:
     return RemoteLoggingExtension(
         juju,
+        KubernetesRegistryStub(juju),
         {CONTROLLER: LOKI_URL} if endpoints is None else endpoints,
         registry or _registry_with_controller(logger),
     )

@@ -5,11 +5,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
-from juju.client import JujuClient
+from juju.client import JujuClient, _JujuCleanupError
 from juju.extension import JujuExtension
 from juju.models import (
     JujuApplicationHealth,
@@ -18,6 +19,7 @@ from juju.models import (
     PersistenceKey,
 )
 from juju.version import JujuVersion
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -113,6 +115,77 @@ class WaitIdleBackendStub(NullJujuBackend):
         self.calls.append((models, timeout, count, strict_timeout))
 
 
+@dataclass
+class UnitOperationsBackendStub(NullJujuBackend):
+    units: list[str] = field(default_factory=list)
+    removed_units: list[str] = field(default_factory=list)
+
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        return list(self.units)
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.removed_units.append(unit)
+        self.units.remove(unit)
+
+
+@dataclass
+class WorkloadPodBackendStub(UnitOperationsBackendStub):
+    kubernetes_client: KubernetesClient | None = None
+
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return True
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        if self.kubernetes_client is None:
+            raise RuntimeError("No Kubernetes client configured.")
+        self.kubernetes_client.delete_pod(namespace=model.model, pod_name=instance_name)
+
+
+class RestartFollowerBackendStub(NullJujuBackend):
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        return f"{application}/1"
+
+
+class RebootUnitBackendStub(NullJujuBackend):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.units: list[tuple[JujuModelHandle, str]] = []
+        self.available_units: list[tuple[JujuModelHandle, str, timedelta | None]] = []
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.units.append((model, unit))
+        if self.error is not None:
+            raise self.error
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None = None) -> None:
+        self.available_units.append((model, unit, timeout))
+
+
+class LegacySSHBackendStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[JujuModelHandle, str, str]] = []
+
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> str:
+        self.calls.append((model, application, command))
+        return "output"
+
+
+class RestartLifecycleExtension(JujuExtension):
+    def __init__(self) -> None:
+        self.restarted_units: list[tuple[JujuModelHandle, str]] = []
+        self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
+        self.scaled_models: list[JujuModelHandle] = []
+
+    def post_scale(self, model: JujuModelHandle) -> None:
+        self.scaled_models.append(model)
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.restarted_units.append((model, unit))
+
+    def post_delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        self.deleted_pods.append((model, pod_name))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -121,6 +194,15 @@ class ExtensionStub(JujuExtension):
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
+
+    def post_validate_excluding_units(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        return {
+            unit: results
+            for unit, results in self.post_validate(model, application, level).items()
+            if unit not in excluded_units
+        }
 
 
 class PersistenceExtensionStub(JujuExtension):
@@ -363,6 +445,144 @@ class TestApplicationHealth:
             backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
 
 
+class TestJujuClientUnitOperations:
+    def test_lists_application_units_and_removes_specific_unit(self) -> None:
+        # GIVEN a backend with two units
+        backend = UnitOperationsBackendStub(units=["app/0", "app/1"])
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        # WHEN listing and removing a unit
+        units = client.application_units("app", model)
+        client.remove_unit("app/0", model)
+
+        # THEN unit lookup and removal are delegated through the client
+        assert units == ["app/0", "app/1"]
+        assert backend.removed_units == ["app/0"]
+        assert backend.units == ["app/1"]
+
+    def test_removing_a_unit_runs_the_post_scale_hook_once(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(UnitOperationsBackendStub(units=["app/0"]), LoggerStub(), [extension])  # type: ignore[arg-type]
+
+        client.remove_unit("app/0", model)
+
+        assert extension.scaled_models == [model]
+
+
+class TestJujuClientWorkloadInstanceOperations:
+    def test_multiple_cleanup_errors_are_preserved(self) -> None:
+        errors = [RuntimeError("first cleanup failed"), TimeoutError("second cleanup failed")]
+
+        with pytest.raises(_JujuCleanupError) as error:
+            JujuClient._raise_cleanup_errors(errors)
+
+        assert error.value.errors == tuple(errors)
+        assert error.value.__cause__ is errors[0]
+
+    def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        kubernetes_backend = MagicMock()
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
+        client = JujuClient(
+            backend,
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        client.delete_pod(model, "pod-0")
+
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.assert_called_once_with(name="pod-0", namespace="model")
+        assert extension.deleted_pods == [(model, "pod-0")]
+
+    def test_delete_pod_does_not_run_hook_when_deletion_fails(self) -> None:
+        kubernetes_backend = MagicMock()
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.side_effect = RuntimeError("delete failed")
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        model = JujuModelHandle(controller="controller", model="model")
+        client = JujuClient(
+            WorkloadPodBackendStub(kubernetes_client=kubernetes_client),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            client.delete_pod(model, "pod-0")
+
+        assert extension.deleted_pods == []
+
+    def test_follower_restart_runs_juju_lifecycle_hook(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(
+            RestartFollowerBackendStub(),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
+
+        assert extension.restarted_units == [(model, "app/1")]
+
+    def test_restart_completion_dispatches_hook_before_waiting_for_availability(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = RebootUnitBackendStub()
+
+        class OrderingExtension(RestartLifecycleExtension):
+            def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+                assert backend.available_units == []
+                super().post_restart_unit(model, unit)
+
+        extension = OrderingExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == []
+
+        client.wait_for_unit_restart_completion("app/1", model, timedelta(minutes=1))
+
+        assert backend.available_units == [(model, "app/1", timedelta(minutes=1))]
+        assert extension.restarted_units == [(model, "app/1")]
+
+    def test_reboot_unit_does_not_run_hook_when_backend_reboot_fails(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend_error = RuntimeError("reboot failed")
+        backend = RebootUnitBackendStub(error=backend_error)
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        with pytest.raises(RuntimeError, match="reboot failed"):
+            client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == []
+
+    def test_ssh_without_timeout_supports_legacy_backend_signature(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = LegacySSHBackendStub()
+        client = JujuClient(cast(Any, backend), cast(logging.Logger, LoggerStub()))
+
+        assert client.ssh("app/1", "true", model) == "output"
+        assert backend.calls == [(model, "app/1", "true")]
+
+    def test_rotate_application_units_rejects_applications_without_units(self) -> None:
+        backend = UnitOperationsBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        with pytest.raises(ValueError, match="it has no units"):
+            client.rotate_application_units("app", model, timeout=timedelta(minutes=5))
+
+        assert logger.infos == ["Rotating all units for app.", "Getting the units for app."]
+
+
 class TestJujuValidationError:
     class TestMessage:
         def test_single_unit_single_failure(self) -> None:
@@ -433,6 +653,45 @@ class TestJujuClientValidateModel:
         assert set(error.value.failed_validations) == {"target/0"}
         # With the extension removed, the unrelated backend failure is excluded.
         self._client(logger, backend).validate_model(self._model(), level="deep", applications=["target"])
+
+    def test_excluded_units_are_skipped_from_backend_and_extension_results(self, logger: LoggerStub) -> None:
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_pass()], "myapp/1": [_fail()]}},
+        )
+        extension = ExtensionStub({"myapp": {"myapp/0": [_pass()], "myapp/1": [_fail()]}})
+        client = self._client(logger, backend, [extension])
+
+        results = client.validate_model(self._model(), applications=["myapp"], excluded_units={"myapp/1"})
+
+        assert set(results) == {"myapp/0"}
+        assert results["myapp/0"] == [_pass(), _pass()]
+
+    def test_excluded_units_require_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class ExtensionWithoutExclusion(JujuExtension):
+            def post_validate(
+                self, model: JujuModelHandle, application: str, level: str
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [ExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_validate_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], excluded_units={"myapp/1"})
+
+    def test_excluded_units_require_persistence_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class PersistenceExtensionWithoutExclusion(JujuExtension):
+            def post_persistence(
+                self, model: JujuModelHandle, application: str, persistence: str | None = None
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [PersistenceExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_persistence_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], level=None, excluded_units={"myapp/1"})
 
     def test_raises_when_backend_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN the backend returns a FAIL result

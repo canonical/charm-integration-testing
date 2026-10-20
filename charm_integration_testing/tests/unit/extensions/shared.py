@@ -1,13 +1,11 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
-from pathlib import Path
 from typing import Any, Iterable
 
 from juju import JujuModelHandle
 from juju.backend import JujuBackend, JujuExecOutput, JujuTask
 from juju.models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
 from juju.version import JujuVersion
-from kubernetes_client import KubernetesClient
 
 from validators.base.validator import ValidationResult
 
@@ -27,6 +25,9 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def is_k8s_cloud(self, cloud: str) -> bool:
+        raise NotImplementedError
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
         raise NotImplementedError
 
     def num_units(self, model: JujuModelHandle, application: str) -> int:
@@ -155,6 +156,12 @@ class NullJujuBackend(JujuBackend):
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         raise NotImplementedError
 
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        raise NotImplementedError
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
@@ -214,7 +221,9 @@ class NullJujuBackend(JujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None:
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
@@ -238,9 +247,6 @@ class NullJujuBackend(JujuBackend):
     def validate_application(
         self, model: JujuModelHandle, application: str, level: str
     ) -> dict[str, list[ValidationResult]]:
-        raise NotImplementedError
-
-    def get_kubernetes_client(self, cloud: str) -> KubernetesClient:
         raise NotImplementedError
 
     def kill_controller(self, controller: str) -> None:
@@ -268,12 +274,6 @@ class NullJujuBackend(JujuBackend):
         raise NotImplementedError
 
     def debug_log(self, model: JujuModelHandle) -> str:
-        raise NotImplementedError
-
-    def get_controller_kubeconfig(self, controller: str) -> Path | None:
-        raise NotImplementedError
-
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
         raise NotImplementedError
 
 
@@ -386,9 +386,10 @@ class JujuStub(NullJujuBackend):
         """Mock SCP file transfer (captures call for verification)"""
         self.scp_calls.append((_model_key(model), source, destination))
 
-    def ssh(self, model: "JujuModelHandle", target: str, command: str) -> None:
+    def ssh(self, model: "JujuModelHandle", target: str, command: str, *, timeout: float | None = None) -> str | None:
         """Mock SSH command execution (captures call for verification)"""
         self.ssh_calls.append((_model_key(model), target, command))
+        return None
 
     def run_action(self, model: "JujuModelHandle", unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         """Mock running an action on a unit (captures call for verification)"""

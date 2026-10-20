@@ -39,6 +39,14 @@ class KubernetesScraperClient(Protocol):
     def restart_daemon_set(self, namespace: str, name: str) -> None: ...
 
 
+class KubernetesClientResolver(Protocol):
+    """Resolve shared Kubernetes clients by cloud."""
+
+    def has_cloud(self, cloud: str) -> bool: ...
+
+    def client_for_cloud(self, cloud: str) -> KubernetesScraperClient: ...
+
+
 def scraper_namespace(controller: str) -> str:
     return f"{KUBERNETES_NAMESPACE_PREFIX}{safe_controller_name(controller)}"
 
@@ -81,12 +89,25 @@ class RemoteLoggingExtension(JujuExtension):
     def __init__(
         self,
         juju: JujuBackend,
+        kubernetes_client_registry: KubernetesClientResolver,
         endpoints_by_controller: dict[str, str],
         resource_registry: ResourceRegistry,
     ) -> None:
         self.juju = juju
+        self.kubernetes_client_registry = kubernetes_client_registry
         self.endpoints_by_controller = endpoints_by_controller
         self.resource_registry = resource_registry
+
+    def _kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesScraperClient | None:
+        cloud = self.juju.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            return None
+        if not self.kubernetes_client_registry.has_cloud(cloud):
+            raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}' (model {model.uri}).")
+        return self.kubernetes_client_registry.client_for_cloud(cloud)
+
+    def _kubernetes_client_for_controller(self, controller: str) -> KubernetesScraperClient | None:
+        return self._kubernetes_client_for_model(JujuModelHandle(controller=controller, model=CONTROLLER_MODEL))
 
     def pre_bootstrap_controller(
         self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
@@ -101,7 +122,7 @@ class RemoteLoggingExtension(JujuExtension):
         if endpoint is None:
             return
 
-        kubernetes = self.juju.get_kubernetes_client_for_controller(controller)
+        kubernetes = self._kubernetes_client_for_controller(controller)
         if kubernetes is None:
             return
         self._deploy_scraper(
@@ -122,7 +143,7 @@ class RemoteLoggingExtension(JujuExtension):
         is_kubernetes = (
             self.juju.is_k8s_cloud_on_controller(cloud, controller)
             if cloud is not None
-            else self.juju.get_kubernetes_client_for_controller(controller) is not None
+            else self._kubernetes_client_for_controller(controller) is not None
         )
         if is_kubernetes:
             return model_config
@@ -134,7 +155,7 @@ class RemoteLoggingExtension(JujuExtension):
         if endpoint is None:
             return
 
-        kubernetes = self.juju.get_kubernetes_client_for_model(JujuModelHandle(controller=controller, model=model))
+        kubernetes = self._kubernetes_client_for_model(JujuModelHandle(controller=controller, model=model))
         if kubernetes is None:
             return
         self._ensure_scraper(kubernetes, endpoint, controller, model, cloud)
@@ -155,7 +176,7 @@ class RemoteLoggingExtension(JujuExtension):
         """Reconcile the ConfigMap and report whether a running scraper needs restarting."""
         namespace = scraper_namespace(controller)
         scraped = [name for name in data.get(KUBERNETES_NAMESPACES_KEY, "").split("\n") if name]
-        if not scraped and self.juju.get_kubernetes_client_for_controller(controller) is kubernetes:
+        if not scraped and self._kubernetes_client_for_controller(controller) is kubernetes:
             controller_model_namespace = controller_namespace(controller)
             scraped.append(controller_model_namespace)
         if model not in scraped:
@@ -191,7 +212,7 @@ class RemoteLoggingExtension(JujuExtension):
     ) -> None:
         handle = (
             LogScraperHandle(controller)
-            if self.juju.get_kubernetes_client_for_controller(controller) is kubernetes
+            if self._kubernetes_client_for_controller(controller) is kubernetes
             else LogScraperHandle(controller, cloud)
         )
         self._register_scraper(kubernetes, controller, handle)

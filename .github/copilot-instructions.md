@@ -145,7 +145,6 @@ After findings, include:
     operation (e.g. one `collect()` call) instead of the whole test session, and cache by
     controller/identity rather than derived values like filesystem paths (which can differ
     for equivalent inputs, e.g. relative vs. absolute vs. `~`-expanded paths).
-  - Example precedent: `KubernetesResourceCollector` resolves Kubernetes clients per
-    controller via `JujuBackend.get_kubernetes_client_for_controller()` inside `collect()`,
-    instead of a `kubernetes_clients_by_controller` fixture that pre-builds and caches
-    clients for the session.
+  - Example precedent: `KubernetesResourceCollector` resolves each model's Kubernetes cloud
+    through the backend and obtains its shared client from `KubernetesClientRegistry` inside
+    `collect()`, instead of a fixture that pre-builds a client mapping for the session.
