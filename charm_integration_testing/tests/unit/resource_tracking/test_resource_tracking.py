@@ -341,12 +341,23 @@ class TestStateResourceTracker:
         collector_b = _FakeCollector([CollectedResources("controller-b", "model-b", frozenset())])
         tracker = StateResourceTracker()
 
-        # WHEN the tracker collects for a state
-        tracker.collect(State.DEPLOYED, [collector_a, collector_b], _LOGGER)
+        # WHEN the tracker collects for a state with a skip for one model
+        tracker.collect(
+            State.DEPLOYED,
+            [collector_a, collector_b],
+            _LOGGER,
+            skips={("controller-a", "model-a", "target"): frozenset({"pvc"})},
+        )
 
         # THEN every collector's resources are recorded under that state
         assert tracker.observations() == (
-            ResourceObservation(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")})),
+            ResourceObservation(
+                State.DEPLOYED,
+                "controller-a",
+                "model-a",
+                frozenset({_pvc("data-0")}),
+                (("target", frozenset({"pvc"})),),
+            ),
             ResourceObservation(State.DEPLOYED, "controller-b", "model-b", frozenset()),
         )
 
@@ -712,6 +723,7 @@ class TestCalculateDiscrepancies:
             "test-controller",
             "test-model",
             frozenset({_pvc("data-target-0", application="target"), _pvc("data-neighbor-0", application="neighbor")}),
+            {"target": frozenset({"pvc"})},
         )
         tracker.record(
             State.DEPLOYED,
@@ -720,10 +732,8 @@ class TestCalculateDiscrepancies:
             frozenset({_pvc("data-neighbor-0", application="neighbor")}),
         )
 
-        # WHEN discrepancies are calculated with the target application skipping PVCs
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
-        )
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN the skipped application's dropped PVC is excluded, so nothing is reported
         assert discrepancies == []
@@ -731,35 +741,45 @@ class TestCalculateDiscrepancies:
     def test_skips_are_scoped_to_the_owning_model(self) -> None:
         # GIVEN the same application drifting a PVC in two models, skipped in only one
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(
+            State.DEPLOYED,
+            "controller-a",
+            "model-a",
+            frozenset({_pvc("data-0", application="target")}),
+            {"target": frozenset({"pvc"})},
+        )
         tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset({_pvc("data-0", application="target")}))
         tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset())
         tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset())
 
-        # WHEN discrepancies are calculated with the skip scoped to model-a only
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("controller-a", "model-a", "target"): frozenset({"pvc"})}
-        )
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN only model-b, which does not opt out, reports the dropped PVC
         assert len(discrepancies) == 1
         assert discrepancies[0].model == "model-b"
 
     def test_skip_excludes_kind_uniformly_across_visits(self) -> None:
-        # GIVEN a skipped PVC present on the baseline visit but absent on re-entry
-        # (as a transient collection difference would produce)
+        # GIVEN a skipped PVC observed before the skip was resolved for the model
         tracker = StateResourceTracker()
         tracker.record(
-            State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0", application="target")})
+            State.DEPLOYED,
+            "test-controller",
+            "test-model",
+            frozenset({_pvc("data-0", application="target")}),
         )
-        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset())
-
-        # WHEN discrepancies are calculated with the owning application skipping PVCs
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
+        tracker.record(
+            State.DEPLOYED,
+            "test-controller",
+            "test-model",
+            frozenset(),
+            {"target": frozenset({"pvc"})},
         )
 
-        # THEN the skip is applied uniformly to both visits, so no drift is reported
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
+
+        # THEN the recorded skip is applied uniformly to both visits, so no drift is reported
         assert discrepancies == []
 
 
@@ -855,7 +875,7 @@ class TestResourceConsistencyReport:
         tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN the report runs THEN it does not raise
-        run_resource_consistency_report(tracker, {})
+        run_resource_consistency_report(tracker)
 
     def test_raises_with_discrepancies_on_drift(self) -> None:
         # GIVEN a tracker whose revisit dropped a PVC
@@ -865,7 +885,7 @@ class TestResourceConsistencyReport:
 
         # WHEN the report runs THEN it raises carrying the structured discrepancies
         with pytest.raises(ResourceDiscrepancyError) as excinfo:
-            run_resource_consistency_report(tracker, {})
+            run_resource_consistency_report(tracker)
 
         assert excinfo.value.discrepancies == (
             ModelResourceDiscrepancy(
