@@ -1,0 +1,20 @@
+---
+# Source: istio-k8s revision 45 (155402d), src/charm.py and lib/charms/istio_k8s/v0/istio_metadata.py.
+default_channel: 2/stable
+overrides:
+  - criteria:
+      - track: '2'
+    requires:
+      charm-tracing:
+        optional: true  # __init__ sets the tracing endpoint to None without relations.
+      workload-tracing:
+        optional: true  # _workload_tracing_provider returns empty settings when not ready.
+      istio-ingress-config:
+        optional: true  # _external_authorizer_providers only processes ready relations.
+    provides:
+      istio-metadata:
+        optional: true  # IstioMetadataProvider.publish only writes to existing relations.
+      grafana-dashboard:
+        optional: true  # Observability provider; on_collect_status does not require consumers.
+      metrics-endpoint:
+        optional: true  # Observability provider; on_collect_status does not require consumers.

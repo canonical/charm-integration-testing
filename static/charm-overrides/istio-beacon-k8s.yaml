@@ -1,5 +1,6 @@
 ---
 listed: true
+default_channel: 2/stable
 overrides:
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:

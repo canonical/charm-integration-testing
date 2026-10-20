@@ -10,7 +10,7 @@ from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandl
 # relation to express the dependency.
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
-ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
+ISTIO_CONTROL_PLANE_CHANNEL = "2/stable"
 
 DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
