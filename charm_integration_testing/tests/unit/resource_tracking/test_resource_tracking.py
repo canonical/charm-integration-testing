@@ -928,3 +928,81 @@ class TestTrackStateResources:
         result = pytester.runpytest("-q")
 
         result.assert_outcomes(passed=1)
+
+    def test_resolves_skips_before_teardown_and_keeps_bundle_runs_lazy(self, pytester: pytest.Pytester) -> None:
+        pytester.makeconftest(
+            """
+            import logging
+            from types import SimpleNamespace
+
+            import pytest
+            from juju import JujuModelHandle
+            from test_suite.fixtures import resource_tracking
+
+            pytest_plugins = ["test_suite.fixtures.resource_tracking"]
+            client_requests = []
+
+            def pytest_addoption(parser):
+                parser.addoption("--charm-overrides", default=None)
+
+            def pytest_configure(config):
+                config.addinivalue_line("markers", "state(requires, provides): test suite environment state")
+
+            class Overrides:
+                def get_charm_resource_tracking_skips(self, charm, channel, base):
+                    return frozenset({"pvc"})
+
+            resource_tracking._resource_tracking_overrides_client = lambda request, logger: Overrides()
+
+            @pytest.fixture
+            def session_resource_registry(request):
+                handles = []
+                if request.node.name == "test_teardown":
+                    handles.append(JujuModelHandle(controller="test-controller", model="test-model"))
+                return SimpleNamespace(registered_handles=lambda: handles, handles=handles)
+
+            @pytest.fixture(scope="session")
+            def juju_client():
+                client_requests.append(True)
+                application = SimpleNamespace(
+                    charm="postgresql-k8s", channel="14/stable", base="ubuntu@22.04"
+                )
+                return SimpleNamespace(
+                    backend=SimpleNamespace(kubernetes_cloud_for_model=lambda _: None),
+                    list_applications=lambda model: {"postgresql": application},
+                )
+
+            @pytest.fixture
+            def kubernetes_client_registry():
+                return object()
+
+            @pytest.fixture
+            def logger():
+                return logging.getLogger("test")
+
+            @pytest.fixture
+            def client_request_log():
+                return client_requests
+            """
+        )
+        pytester.makepyfile(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            def test_bundle_only(resource_tracking_skips_by_application, client_request_log):
+                assert resource_tracking_skips_by_application == {}
+                assert not client_request_log
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.EMPTY_MODEL)
+            def test_teardown(resource_tracking_skips_by_application, session_resource_registry):
+                assert resource_tracking_skips_by_application == {
+                    ("test-controller", "test-model", "postgresql"): frozenset({"pvc"})
+                }
+                session_resource_registry.handles.clear()
+            """
+        )
+
+        result = pytester.runpytest("-q")
+
+        result.assert_outcomes(passed=2)

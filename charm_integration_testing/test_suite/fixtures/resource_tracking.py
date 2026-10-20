@@ -165,6 +165,7 @@ def track_state_resources(
     kubernetes_client_registry: KubernetesClientRegistry,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
+    resource_tracking_skips_by_application: dict[tuple[str, str, str], frozenset[str]],
     _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> Iterator[None]:
@@ -173,8 +174,8 @@ def track_state_resources(
     Collection is deliberately best-effort and never fails the test: the
     resulting discrepancies are reported separately at the end of the suite.
     Snapshots are recorded uniformly; per-charm skips are applied once at diff
-    time. Per-charm skips are accumulated as tests run, so the end-of-suite
-    report has the full map even after applications are removed.
+    time. Skips are resolved before each test and accumulated after passing
+    state-marked tests, so applications removed by a test remain represented.
     """
     yield
 
