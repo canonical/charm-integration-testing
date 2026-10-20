@@ -13,8 +13,7 @@ class CharmInfo:
     name: str
     offer_endpoint: str
     consumer_endpoint: str
-    # Workload status message the offer side's leader unit displays once ready to link (checked
-    # via wait_for_unit_message; the application status mirrors the same message but isn't checked).
+    # Status message shown when the offer side is ready to link.
     create_replication_message: str = "Ready to create replication"
 
 
@@ -132,7 +131,7 @@ class MysqlReplicator:
 
         leader_unit = f"{offer_application}/leader"
 
-        if not self._offer_awaiting_replication_setup(offer_model, leader_unit):
+        if not self._offer_awaiting_replication_setup(offer_model, offer_application, leader_unit):
             # Either replication was already created by a previous call, or the offer side isn't
             # ready yet for some other reason (e.g. still forming its cluster). Either way there's
             # nothing to do right now; a later post_deploy call will retry if it's still pending.
@@ -142,12 +141,20 @@ class MysqlReplicator:
         self.logger.info(f"Creating replication between '{offer_application}' and '{consumer_application}'.")
         self.juju.run_action(offer_model, leader_unit, "create-replication", {})
 
-    def _offer_awaiting_replication_setup(self, model: JujuModelHandle, unit: str) -> bool:
-        """Cheaply check whether ``unit`` is currently displaying the create-replication message.
+    def _offer_awaiting_replication_setup(self, model: JujuModelHandle, application: str, unit: str) -> bool:
+        """Check whether the offer application or leader unit is awaiting replication setup.
 
-        Used to distinguish "still needs replication set up" from "already done" without blocking
-        for the full wait_for_unit_message timeout in the (common, already-done) latter case.
+        Check the application message from a single status snapshot first, then use the unit wait
+        for backends or charms that only report the message on the unit.
         """
+        try:
+            health = self.juju.application_health(model, application)
+        except NotImplementedError:
+            pass
+        else:
+            if self.charm_info.create_replication_message.lower() in health.application_message.lower():
+                return True
+
         try:
             self.juju.wait_for_unit_message(
                 model, unit, self.charm_info.create_replication_message, timedelta(seconds=5)

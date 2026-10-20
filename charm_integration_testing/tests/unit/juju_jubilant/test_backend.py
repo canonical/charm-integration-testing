@@ -348,6 +348,7 @@ def test_application_health_uses_one_real_status_snapshot() -> None:
     # GIVEN Jubilant status types with mixed application, workload and agent states
     status = StatusStub(
         application_statuses={"app": "active"},
+        application_status_messages={"app": "Ready to create replication"},
         unit_workload_statuses={"app/2": "active", "app/7": "blocked"},
         unit_juju_statuses={"app/2": "executing", "app/7": "error"},
     )
@@ -355,7 +356,10 @@ def test_application_health_uses_one_real_status_snapshot() -> None:
 
     # WHEN reading health, THEN the adapter preserves all unit statuses from one snapshot
     assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
-        "active", {"app/2": "active", "app/7": "blocked"}, {"app/2": "executing", "app/7": "error"}
+        "active",
+        {"app/2": "active", "app/7": "blocked"},
+        {"app/2": "executing", "app/7": "error"},
+        "Ready to create replication",
     )
     assert status.call_count == 1
 
@@ -388,6 +392,7 @@ class StatusStub:
 
     call_count: int = 0
     application_statuses: dict[str, str] = field(default_factory=dict)
+    application_status_messages: dict[str, str] = field(default_factory=dict)
     unit_workload_statuses: dict[str, str] = field(default_factory=dict)
     unit_juju_statuses: dict[str, str] = field(default_factory=dict)
 
@@ -408,7 +413,7 @@ class StatusStub:
         # If statuses are provided, populate the apps dictionary for any apps/units supplied.
 
         # 1. Collect all application and unit names from application statuses and unit statuses.
-        app_names = set(self.application_statuses.keys())
+        app_names = set(self.application_statuses) | set(self.application_status_messages)
         unit_derived_app_names = set()
         for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
             for unit_id in status_dict.keys():
@@ -441,7 +446,10 @@ class StatusStub:
                 charm_rev=1,
                 exposed=False,
                 # These are the parameters we actually care about:
-                app_status=jubilant.statustypes.StatusInfo(current=self.application_statuses.get(app, "unknown")),
+                app_status=jubilant.statustypes.StatusInfo(
+                    current=self.application_statuses.get(app, "unknown"),
+                    message=self.application_status_messages.get(app, ""),
+                ),
                 units=units,
             )
 

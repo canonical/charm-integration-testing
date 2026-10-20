@@ -8,7 +8,7 @@ from datetime import timedelta
 import pytest
 from extensions.mysql_replication.extension import GenericMysqlDatabaseReplicationExtension
 from extensions.mysql_replication.replicator import CharmInfo, MysqlReplicator
-from juju import JujuConsumedOfferInfo, JujuModelHandle, JujuWaitTimeoutError
+from juju import JujuApplicationHealth, JujuConsumedOfferInfo, JujuModelHandle, JujuWaitTimeoutError
 from juju.models import JujuApplicationInfo, JujuIntegrationApplication
 
 from ..shared import JujuStub as JujuStubBase
@@ -34,6 +34,7 @@ class JujuStub(JujuStubBase):
     # that has moved past (or not yet reached) that message. Units not present here always
     # succeed immediately, preserving existing tests' assumptions.
     unit_messages: dict[str, str] = field(default_factory=dict)
+    application_messages: dict[str, str] = field(default_factory=dict)
     consumed_offers_by_model: dict[str, dict[str, JujuConsumedOfferInfo]] = field(default_factory=dict)
 
     def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
@@ -53,8 +54,15 @@ class JujuStub(JujuStubBase):
         """Return the number of units for an application"""
         return self.units.get(application, 0)
 
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        return JujuApplicationHealth(
+            status="blocked",
+            units={},
+            agents={},
+            application_message=self.application_messages.get(application, ""),
+        )
+
     def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
-        super().wait_for_unit_message(model, unit, message, timeout)
         current = self.unit_messages.get(unit)
         if current is not None and message.lower() not in current.lower():
             raise JujuWaitTimeoutError()
@@ -200,6 +208,19 @@ class TestMysqlDatabaseReplicationExtension:
             assert (TEST_MODEL.uri, "mysql-2", "0:10:00") not in juju.waited_settled
 
             # AND the create-replication action is run on the offer's leader unit
+            assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions
+
+        def test_runs_action_when_application_message_indicates_offer_ready(
+            self, extension: GenericMysqlDatabaseReplicationExtension, juju: JujuStub
+        ) -> None:
+            # GIVEN readiness is reported at application level while the leader unit has another message
+            juju.application_messages["mysql-1"] = "Ready to create replication"
+            juju.unit_messages["mysql-1/leader"] = "active"
+
+            # WHEN try_create_replication is called
+            extension.mysql_replicator.try_create_replication(TEST_MODEL, "mysql-1", TEST_MODEL, "mysql-2")
+
+            # THEN readiness is recognized without waiting for the mismatched unit message
             assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions
 
     class TestCrossModelReplication:
