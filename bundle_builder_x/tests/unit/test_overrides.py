@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,46 @@ from bundle_builder_x.overrides import CharmOverridesCriteria, OverridesClient
 
 def _ch(track: str, risk: str = "stable") -> CharmChannel:
     return CharmChannel(track=track, risk=risk, branch="")
+
+
+class TestLivepatchOverrideCriteria:
+    @dataclass(frozen=True)
+    class Params:
+        channel: str
+        base: str
+        expected_constraint: str | None
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params("latest/edge", "24.04", "endpoint[postgresql]"),
+            Params("latest/edge", "26.04", "endpoint[postgresql]"),
+            Params("latest/beta", "24.04", "endpoint[database]"),
+            Params("latest/stable", "22.04", "config[ingress-interface]"),
+            Params("legacy/edge", "22.04", "config[ingress-interface]"),
+            Params("latest/stable", "24.04", None),
+            Params("latest/beta", "26.04", None),
+            Params("legacy/edge", "24.04", None),
+            Params("future/edge", "22.04", None),
+            Params("future/edge", "24.04", None),
+            Params("latest/edge", "28.04", None),
+        ],
+        ids=lambda params: f"{params.channel}-{params.base}",
+    )
+    def test_only_verified_generations_receive_overrides(self, params: Params) -> None:
+        # GIVEN the repository's Livepatch override and a channel/base pair
+        client = OverridesClient(overrides=Path(__file__).resolve().parents[3] / "static/charm-overrides")
+
+        # WHEN resolving constraints using first-match criteria
+        constraints = client.get_charm_constraints_overrides(
+            "canonical-livepatch-server-k8s", CharmChannel.model_validate(params.channel), params.base
+        )
+
+        # THEN verified generations retain their rules, while unknown combinations get none
+        if params.expected_constraint is None:
+            assert constraints == []
+        else:
+            assert any(params.expected_constraint in constraint for constraint in constraints)
 
 
 class TestCharmOverridesCriteriaUbuntuVersion:

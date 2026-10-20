@@ -25,9 +25,11 @@ overrides:
     constraints:
       - len(endpoint[database-legacy]) + len(endpoint[database]) == 1
 
-  # The 12-factor rewrite renames database to postgresql and always wires ingress.
+  # Verified latest/edge rewrite: database becomes postgresql; ingress is always wired.
   - criteria:
-      - any_of:
+      - track: latest
+        risk: edge
+        any_of:
           - ubuntu_version: '24.04'
           - ubuntu_version: '26.04'
     provides: *observability
@@ -36,7 +38,12 @@ overrides:
       - len(endpoint[database-legacy]) + len(endpoint[postgresql]) == 1
 
   # Ubuntu 22.04 (latest and legacy tracks) supports both ingress implementations.
-  - requires: *database_alternatives
+  - criteria:
+      - ubuntu_version: '22.04'
+        any_of:
+          - track: latest
+          - track: legacy
+    requires: *database_alternatives
     configs:
       # _update_ingress_method() in charm.py only wires IngressPerAppRequirer when
       # this equals "ingress"; default wires require_nginx_route() instead.
