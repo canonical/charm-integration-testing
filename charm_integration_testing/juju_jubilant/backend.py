@@ -516,26 +516,59 @@ class JubilantBackend(JujuCmdBackend):
         if not unique_models:
             return
 
-        timeout_wait_states: dict[str, JujuWaitState] = {}
-        with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
-            future_by_model = {
-                model: executor.submit(
-                    self.wait_idle,
-                    model=model,
-                    timeout=timeout,
-                    count=count,
-                    strict_timeout=strict_timeout,
-                )
-                for model in unique_models
-            }
-            for model, future in future_by_model.items():
-                try:
-                    future.result()
-                except JujuWaitTimeoutError as error:
-                    timeout_wait_states[model.uri] = error.wait_state
+        timeout = self.default_timeout if timeout is None else timeout
+        successes = self.default_successes if count is None else count
+        delay = self.default_delay
+        success_count = 0
+        last_wait_states: dict[str, JujuWaitState] = {}
+        start = datetime.now()
 
-        if timeout_wait_states:
-            raise JujuWaitTimeoutError(wait_state=self._combine_wait_states(timeout_wait_states))
+        with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
+            while True:
+                iteration_start = datetime.now()
+                timeout_reached = iteration_start - start > timeout
+                if timeout_reached and (strict_timeout or success_count == 0):
+                    break
+
+                futures = {model: executor.submit(self.status, model) for model in unique_models}
+                wait_states: dict[str, JujuWaitState] = {}
+                for model, future in futures.items():
+                    try:
+                        status = future.result()
+                    except TransientModelUnavailabilityError as error:
+                        wait_states[model.uri] = JujuWaitState(
+                            message=(
+                                f"Model {model.uri} temporarily unavailable during migration: {error.stderr.strip()}"
+                            )
+                        )
+                        continue
+
+                    is_ready, wait_state = all_statuses_are_in(
+                        status,
+                        application_statuses={"active"},
+                        unit_statuses={"active"},
+                        unit_agent_statuses={"idle"},
+                    )
+                    if not is_ready:
+                        wait_states[model.uri] = wait_state
+
+                if wait_states:
+                    success_count = 0
+                    last_wait_states = wait_states
+                else:
+                    success_count += 1
+                    last_wait_states = {
+                        model.uri: JujuWaitState(insufficient_status_checks=True) for model in unique_models
+                    }
+                    if success_count >= successes:
+                        return
+
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
+
+        if not last_wait_states:
+            last_wait_states = {model.uri: JujuWaitState(insufficient_status_checks=True) for model in unique_models}
+        raise JujuWaitTimeoutError(wait_state=self._combine_wait_states(last_wait_states))
 
     def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         self.wait(
