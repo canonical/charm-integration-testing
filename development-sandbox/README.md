@@ -68,7 +68,10 @@ juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
 
 For tests whose bundles include s3-integrator, use the
 [setup-s3 skill](../.agents/skills/setup-s3/SKILL.md) and load
-`$HOME/.local/share/charmqa-s3/s3.env` before running the suite. The endpoint must
+`$HOME/.local/share/charmqa-s3/s3.env` before running the suite. This exports only
+`S3_CONFIG_localhost`, pointing to the protected `s3.conf` file; credentials are
+not exported. For another logical cloud, set `S3_CONFIG_<cloud>` to its config
+path, replacing hyphens with underscores in the variable name. The endpoint must
 be reachable from deployed units, not just from the VM. Local S3 uses generated
 test credentials scoped to harness buckets, plus a separate bucket-management
 identity kept for setup and cleanup; it does not need production Swift credentials.

@@ -188,12 +188,16 @@ finally:
         cleanup_client.close()
 print("Local S3 read/write passed; test credentials cannot create out-of-scope buckets")
 PY
+config_tmp="$(mktemp "${state}/s3.conf.XXXXXX")"
+temporary_files+=("${config_tmp}")
+printf 'S3_ENDPOINT=%s\nS3_ACCESS_KEY=%s\nS3_SECRET_KEY=%s\n' \
+    "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" > "${config_tmp}"
+printf 'S3_CLEANUP_ACCESS_KEY=%s\nS3_CLEANUP_SECRET_KEY=%s\nS3_BUCKET_NAMESPACE=local\n' \
+    "${S3_CLEANUP_ACCESS_KEY}" "${S3_CLEANUP_SECRET_KEY}" >> "${config_tmp}"
+mv "${config_tmp}" "${state}/s3.conf"
 env_tmp="$(mktemp "${state}/s3.env.XXXXXX")"
 temporary_files+=("${env_tmp}")
-printf 'export S3_ENDPOINT=%q\nexport S3_ACCESS_KEY=%q\nexport S3_SECRET_KEY=%q\n' \
-    "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" > "${env_tmp}"
-printf 'export S3_CLEANUP_ACCESS_KEY=%q\nexport S3_CLEANUP_SECRET_KEY=%q\nexport S3_BUCKET_NAMESPACE=local\n' \
-    "${S3_CLEANUP_ACCESS_KEY}" "${S3_CLEANUP_SECRET_KEY}" >> "${env_tmp}"
+printf 'export S3_CONFIG_localhost=%q\n' "${state}/s3.conf" > "${env_tmp}"
 mv "${env_tmp}" "${state}/s3.env"
-echo "Load credentials with: source ${state}/s3.env"
+echo "Load the localhost cloud's S3 config path with: source ${state}/s3.env"
 echo "This service is for this disposable VM only; do not expose it publicly."

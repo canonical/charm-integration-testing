@@ -53,13 +53,29 @@ S3 storage
 Bundles containing an ``unconfigured`` ``s3-integrator`` require external object
 storage. The post-deploy extension configures it; no MinIO charm is deployed.
 An integrator with an explicit endpoint is left untouched.
-The extension depends on the ``S3Provider`` interface; ``SwiftS3Provider`` and
-``StaticS3Provider`` share the bucket lifecycle while supplying different
-credential strategies.
+The extension looks up the model's current Juju cloud through the backend, then
+obtains its provider from ``S3ProviderRegistry``. Pass configuration paths using
+``S3_CONFIG_<cloud>``, just as kubeconfigs use ``KUBECONFIG_<cloud>``. Variable
+suffixes are lowercased and underscores become hyphens; for example,
+``S3_CONFIG_target_cloud=/protected/target-s3.conf`` configures ``target-cloud``.
+The suite does not read ambient S3 credential variables.
+
+Each logical Juju cloud has one S3 configuration per run. Register distinct cloud
+aliases when models on the same physical substrate need different credentials.
+Models on the same cloud share a provider, including models created later in a
+cross-model run. Equivalent configurations reuse the same provider even when
+their file paths differ. Conflicting paths for the same normalized alias fail
+explicitly.
+
+Configuration files contain unquoted, single-line ``KEY=value`` entries, with
+optional comments. They are parsed, never sourced or evaluated. Keep credential
+files outside the checkout and restrict permissions with ``chmod 600``.
+``SwiftS3Provider`` and ``StaticS3Provider`` share the bucket lifecycle while
+supplying different credential strategies.
 
 For Swift, supply ``S3_OS_AUTH_URL``, ``S3_OS_PASSWORD``,
 ``S3_OS_PROJECT_DOMAIN_NAME``, ``S3_OS_PROJECT_NAME``, ``S3_OS_STORAGE_URL``,
-``S3_OS_USERNAME`` and ``S3_OS_USER_DOMAIN_NAME`` in the environment. Also supply
+``S3_OS_USERNAME`` and ``S3_OS_USER_DOMAIN_NAME`` in the configuration file. Also supply
 ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for a persistent cleanup
 identity. The test-storage account must be able to create and revoke its own
 Keystone EC2 credentials and create/delete buckets and objects.
@@ -69,13 +85,20 @@ use the RADOS Gateway or have a nonstandard endpoint, set the optional
 ``S3_ENDPOINT`` explicitly rather than treating a native Swift URL as an S3 URL.
 
 For a local S3-compatible server, supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY`` and
-``S3_SECRET_KEY`` instead, and unset ``S3_OS_STORAGE_URL``. Optionally supply
+``S3_SECRET_KEY`` instead, omitting ``S3_OS_STORAGE_URL`` from the file. Optionally supply
 ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
 identity; the provider uses it for bucket creation and cleanup but sends only the
 ``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development
 sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions the service with
-that separate identity and a test identity restricted to harness buckets. Load
-``$HOME/.local/share/charmqa-s3/s3.env`` in the test shell.
+that separate identity and a test identity restricted to harness buckets. It writes
+the protected ``$HOME/.local/share/charmqa-s3/s3.conf`` file. Load the path-only
+``s3.env`` in the same directory to export ``S3_CONFIG_localhost`` in the test shell:
+
+.. code:: bash
+
+   bash development-sandbox/bin/setup-s3.sh
+   source "$HOME/.local/share/charmqa-s3/s3.env"
+
 ``S3_REGION`` defaults to ``us-east-1``.
 
 Each integrator gets an isolated bucket and an initial ``charmqa/`` directory
@@ -105,7 +128,8 @@ manually with:
 
 .. code:: bash
 
-   poetry run python scripts/cleanup-s3.py --age-minutes 240
+   poetry run python scripts/cleanup-s3.py \
+     --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
 
 Supported test environments opt into Swift storage with ``swift-storage:
 true`` and select their own repository secret using ``s3-swift-secret`` in
@@ -133,14 +157,17 @@ non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
 The parser accepts comments and values containing ``=``; do not quote values or
 put them on multiple lines. Optional ``S3_ENDPOINT`` and ``S3_REGION`` values
 select a nonstandard endpoint or region. In cross-model runs, each integrator uses the
-provider selected by its own environment, so both environment secrets must be
+provider selected by its model's cloud, so both environment secrets must be
 configured. The cleanup identity must be able to list buckets, read harness
 bucket tags, and remove buckets, object versions, and incomplete uploads. The
 test-storage account must also allow its generated bucket key to create buckets,
 write bucket tags, and upload the marker object. Scheduled cleanup uses the
 same environment secret and namespace as test provisioning. CI validates each
 Swift-enabled environment's configuration before its test step starts and
-reports missing variable names; non-Swift environments skip this check.
+reports missing variable names; non-Swift environments skip this check. CI writes
+mode-0600 files under the runner's temporary directory and passes
+``S3_CONFIG_target_cloud`` and ``S3_CONFIG_neighbor_cloud`` alongside the matching
+kubeconfig paths. Credentials themselves are not exported through ``GITHUB_ENV``.
 
 Set up Juju and k8s
 -------------------

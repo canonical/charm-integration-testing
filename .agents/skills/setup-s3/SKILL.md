@@ -21,20 +21,22 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
 3. The server configuration file contains a bucket-management identity and a
    separate test identity limited to harness buckets. The script verifies that
    the test identity can read/write a harness bucket but cannot create a bucket
-   outside that scope. It writes the mode-0600 shell credential file only after
+   outside that scope. It writes the mode-0600 `s3.conf` credential file only after
    that probe succeeds; the server configuration is created earlier so SeaweedFS
-   can start. Load the shell file in the test shell:
+   can start. Load the path-only shell file in the test shell:
 
    ```bash
    source "$HOME/.local/share/charmqa-s3/s3.env"
    ```
 
-   Unset `S3_OS_STORAGE_URL` when switching away from Swift; otherwise the suite
-   selects Keystone authentication instead of these local S3 keys.
+   This exports `S3_CONFIG_localhost`, not credentials. For another logical Juju
+   cloud, set `S3_CONFIG_<cloud>` to the config path, replacing hyphens with
+   underscores in the variable name. Ambient `S3_*` credential variables are not
+   used by the suite.
 
 4. Run the suite through `scripts/run-tests.sh`. Its post-deploy extension finds
    s3-integrator on either substrate and creates a separate bucket per integrator.
-   Use the VM address in `S3_ENDPOINT`, not localhost or cluster-only DNS. Confirm
+   Use the VM address in the config's `S3_ENDPOINT`, not localhost or cluster-only DNS. Confirm
    that both Kubernetes pods and LXD units can reach port 8333.
 
 The service stores data under `$HOME/.local/share/charmqa-s3/`, outside the source
@@ -47,8 +49,8 @@ Normal suite teardown removes its buckets after consumers stop. To remove bucket
 left by interrupted local runs:
 
 ```bash
-source "$HOME/.local/share/charmqa-s3/s3.env"
-poetry run python scripts/cleanup-s3.py --age-minutes 240
+poetry run python scripts/cleanup-s3.py \
+  --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
 ```
 
 Stop the service with `sudo systemctl stop charmqa-s3`. Do not delete its state
