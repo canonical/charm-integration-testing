@@ -45,8 +45,8 @@ an unsupported older `s3.json` credential format, or a mismatched binary version
 requires inspection rather than automatic replacement. Use
 `sudo journalctl -u charmqa-s3` for diagnostics.
 
-Normal suite teardown removes its buckets after consumers stop. To remove buckets
-left by interrupted local runs:
+Normal suite teardown removes its buckets independently of controller cleanup.
+To remove buckets left by interrupted local runs:
 
 ```bash
 poetry run python scripts/cleanup-s3.py \
