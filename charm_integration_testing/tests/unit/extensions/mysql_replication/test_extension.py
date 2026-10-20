@@ -223,6 +223,21 @@ class TestMysqlDatabaseReplicationExtension:
             # THEN readiness is recognized without waiting for the mismatched unit message
             assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions
 
+        def test_falls_back_to_unit_message_when_application_health_is_unsupported(self, charm_info: CharmInfo) -> None:
+            # GIVEN a backend that does not implement application health
+            class UnitMessageOnlyJujuStub(JujuStub):
+                def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+                    raise NotImplementedError
+
+            juju = UnitMessageOnlyJujuStub(unit_messages={"mysql-1/leader": "Ready to create replication"})
+            replicator = MysqlReplicator(charm_info, juju, logging.getLogger("test"))
+
+            # WHEN replication readiness is checked
+            replicator.try_create_replication(TEST_MODEL, "mysql-1", TEST_MODEL, "mysql-2")
+
+            # THEN the unit-level fallback allows the action to proceed
+            assert (TEST_MODEL.uri, "mysql-1/leader", "create-replication", {}) in juju.actions
+
     class TestCrossModelReplication:
         """Covers replication pairs where the offer and consumer are deployed to separate
         models, connected via a consumed offer (CMR) rather than a same-model integration.

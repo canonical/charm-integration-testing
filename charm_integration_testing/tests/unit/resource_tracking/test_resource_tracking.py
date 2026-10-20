@@ -930,6 +930,17 @@ class TestTrackStateResources:
         result.assert_outcomes(passed=1)
 
     def test_resolves_skips_before_teardown_and_keeps_bundle_runs_lazy(self, pytester: pytest.Pytester) -> None:
+        overrides_dir = pytester.path / "overrides"
+        overrides_dir.mkdir()
+        (overrides_dir / "postgresql-k8s.yaml").write_text(
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '14'\n"
+            "    resource_tracking:\n"
+            "      skip:\n"
+            "        - pvc\n",
+            encoding="utf-8",
+        )
         pytester.makeconftest(
             """
             import logging
@@ -937,7 +948,6 @@ class TestTrackStateResources:
 
             import pytest
             from juju import JujuModelHandle
-            from test_suite.fixtures import resource_tracking
 
             pytest_plugins = ["test_suite.fixtures.resource_tracking"]
             client_requests = []
@@ -947,12 +957,6 @@ class TestTrackStateResources:
 
             def pytest_configure(config):
                 config.addinivalue_line("markers", "state(requires, provides): test suite environment state")
-
-            class Overrides:
-                def get_charm_resource_tracking_skips(self, charm, channel, base):
-                    return frozenset({"pvc"})
-
-            resource_tracking._resource_tracking_overrides_client = lambda request, logger: Overrides()
 
             @pytest.fixture
             def session_resource_registry(request):
@@ -1003,6 +1007,6 @@ class TestTrackStateResources:
             """
         )
 
-        result = pytester.runpytest("-q")
+        result = pytester.runpytest("--charm-overrides", str(overrides_dir), "-q")
 
         result.assert_outcomes(passed=2)
