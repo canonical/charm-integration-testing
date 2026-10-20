@@ -229,8 +229,10 @@ class MixedConfigParams:
         MixedConfigParams(
             "S3_ACCESS_KEY=not-logged\nS3_SECRET_KEY=also-secret\n", "Cannot mix static and Swift credentials"
         ),
+        MixedConfigParams("S3_ACCESS_KEY=\n", "Cannot mix static and Swift credentials"),
+        MixedConfigParams("S3_SECRET_KEY=\n", "Cannot mix static and Swift credentials"),
     ],
-    ids=["partial-access-key", "partial-secret-key", "complete-static-pair"],
+    ids=["partial-access-key", "partial-secret-key", "complete-static-pair", "empty-access-key", "empty-secret-key"],
 )
 def test_swift_config_rejects_static_credentials(tmp_path: Path, params: MixedConfigParams) -> None:
     # GIVEN a valid Swift file with an extra static application credential
@@ -253,10 +255,15 @@ def test_swift_config_rejects_static_credentials(tmp_path: Path, params: MixedCo
     assert "also-secret" not in str(error.value)
 
 
-def test_partial_swift_config_does_not_fall_back_to_static(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "entry",
+    ["S3_OS_USERNAME=not-logged\n", "S3_OS_USERNAME=\n", "S3_OS_STORAGE_URL=\n"],
+    ids=["partial-swift", "empty-username", "empty-storage-url"],
+)
+def test_partial_swift_config_does_not_fall_back_to_static(tmp_path: Path, entry: str) -> None:
     # GIVEN static credentials mixed with an incomplete Swift configuration
     config = tmp_path / "s3.conf"
-    config.write_text(STATIC_CONFIG + "S3_OS_USERNAME=not-logged\n")
+    config.write_text(STATIC_CONFIG + entry)
     # WHEN loading it, THEN the Swift entries cannot be silently ignored
     with requests.Session() as session, pytest.raises(ValueError, match="Cannot mix static and Swift credentials"):
         provider_from_config(config, session)
