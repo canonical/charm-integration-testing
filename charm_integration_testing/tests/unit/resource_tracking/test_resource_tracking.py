@@ -31,6 +31,8 @@ from test_suite.test_resource_consistency_report import (
 
 from ..extensions.shared import NullJujuBackend
 
+pytest_plugins = ["pytester"]
+
 
 def _pvc(name: str, storage: str = "1Gi", application: str = "", namespace: str = "test-model") -> PvcSnapshot:
     return PvcSnapshot(
@@ -873,3 +875,56 @@ class TestResourceConsistencyReport:
                 qualified={"missing": (_qs(_pvc("data-1")),)},
             ),
         )
+
+
+class TestTrackStateResources:
+    def test_teardown_does_not_request_another_fixture(self, pytester: pytest.Pytester) -> None:
+        pytester.makeconftest(
+            """
+            import logging
+            from types import SimpleNamespace
+
+            import pytest
+            from juju import JujuModelHandle
+
+            pytest_plugins = ["test_suite.fixtures.resource_tracking"]
+
+            def pytest_addoption(parser):
+                parser.addoption("--charm-overrides", default=None)
+
+            def pytest_configure(config):
+                config.addinivalue_line("markers", "state(requires, provides): test suite environment state")
+
+            @pytest.fixture
+            def session_resource_registry():
+                model = JujuModelHandle(controller="test-controller", model="test-model")
+                return SimpleNamespace(registered_handles=lambda: [model])
+
+            @pytest.fixture(scope="session")
+            def juju_client():
+                backend = SimpleNamespace(kubernetes_cloud_for_model=lambda _: None)
+                return SimpleNamespace(backend=backend)
+
+            @pytest.fixture
+            def kubernetes_client_registry():
+                return object()
+
+            @pytest.fixture
+            def logger():
+                return logging.getLogger("test")
+            """
+        )
+        pytester.makepyfile(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+            def test_state_marked_test(juju_client):
+                pass
+            """
+        )
+
+        result = pytester.runpytest("-q")
+
+        result.assert_outcomes(passed=1)

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClientRegistry
 from resource_registry import ResourceRegistry
 from resource_tracking import (
@@ -86,6 +87,38 @@ def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str], froz
     return {}
 
 
+def _update_resource_tracking_skips(
+    overrides_client: OverridesClient | None,
+    juju_client: JujuClient | None,
+    model_handles: list[JujuModelHandle],
+    skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
+    logger: logging.Logger,
+) -> dict[tuple[str, str, str], frozenset[str]]:
+    if overrides_client is not None and juju_client is not None:
+        for handle in model_handles:
+            try:
+                applications = juju_client.list_applications(model=handle)
+            except Exception:
+                logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
+                continue
+            for application, info in applications.items():
+                if info.channel is None or info.base is None:
+                    continue
+                channel = CharmChannel.model_validate(str(info.channel))
+                key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
+                if key in skip_cache:
+                    continue
+                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
+                if resolved:
+                    skip_cache[key] = resolved
+
+    skips_by_scope: dict[tuple[str, str, str], frozenset[str]] = {}
+    for (controller, model, application, _track, _base), resolved in skip_cache.items():
+        scope = (controller, model, application)
+        skips_by_scope[scope] = skips_by_scope.get(scope, frozenset()) | resolved
+    return skips_by_scope
+
+
 @pytest.fixture
 def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
@@ -113,32 +146,17 @@ def resource_tracking_skips_by_application(
     that never runs that track/base keeps tracking the kind.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
-    if overrides_client is not None:
-        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
-        if client_and_models is not None:
-            juju_client, model_handles = client_and_models
-            for handle in model_handles:
-                try:
-                    applications = juju_client.list_applications(model=handle)
-                except Exception:
-                    logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
-                    continue
-                for application, info in applications.items():
-                    if info.channel is None or info.base is None:
-                        continue
-                    channel = CharmChannel.model_validate(str(info.channel))
-                    key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
-                    if key in _resource_tracking_skip_cache:
-                        continue
-                    resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
-                    if resolved:
-                        _resource_tracking_skip_cache[key] = resolved
-
-    skips_by_scope: dict[tuple[str, str, str], frozenset[str]] = {}
-    for (controller, model, application, _track, _base), resolved in _resource_tracking_skip_cache.items():
-        scope = (controller, model, application)
-        skips_by_scope[scope] = skips_by_scope.get(scope, frozenset()) | resolved
-    return skips_by_scope
+    client_and_models = (
+        get_juju_client_for_registered_models(request, session_resource_registry)
+        if overrides_client is not None
+        else None
+    )
+    if client_and_models is None:
+        return _update_resource_tracking_skips(None, None, [], _resource_tracking_skip_cache, logger)
+    juju_client, model_handles = client_and_models
+    return _update_resource_tracking_skips(
+        overrides_client, juju_client, model_handles, _resource_tracking_skip_cache, logger
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -147,6 +165,7 @@ def track_state_resources(
     kubernetes_client_registry: KubernetesClientRegistry,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
+    _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> Iterator[None]:
     """Snapshot resources per scheduler state after each passing state-marked test.
@@ -154,9 +173,8 @@ def track_state_resources(
     Collection is deliberately best-effort and never fails the test: the
     resulting discrepancies are reported separately at the end of the suite.
     Snapshots are recorded uniformly; per-charm skips are applied once at diff
-    time.  ``resource_tracking_skips_by_application`` is depended on here only to
-    accumulate each application's resolved skip set into the session cache as the
-    suite progresses, so the end-of-suite report has the full map.
+    time. Per-charm skips are accumulated as tests run, so the end-of-suite
+    report has the full map even after applications are removed.
     """
     yield
 
@@ -172,8 +190,14 @@ def track_state_resources(
     if client_and_models is None:
         return
 
-    juju_client, _ = client_and_models
-    request.getfixturevalue("resource_tracking_skips_by_application")
+    juju_client, model_handles = client_and_models
+    _update_resource_tracking_skips(
+        _resource_tracking_overrides_client(request, logger),
+        juju_client,
+        model_handles,
+        _resource_tracking_skip_cache,
+        logger,
+    )
 
     # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
     # skip models whose controllers are not Kubernetes-based.
