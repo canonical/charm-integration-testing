@@ -383,7 +383,11 @@ class _S3Bucket(S3Bucket):
             if self._client is not None and (
                 self._credential_provider.per_bucket_credentials or completed or not self._create_attempted
             ):
-                self._client.close()
+                try:
+                    self._client.close()
+                except Exception:
+                    self._pending_bucket_deletions.add(self)
+                    raise
                 self._client = None
         if completed:
             self._pending_bucket_deletions.discard(self)
