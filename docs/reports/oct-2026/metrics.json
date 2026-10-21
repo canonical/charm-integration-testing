@@ -1,0 +1,204 @@
+{
+  "denominator": "419 unique GitHub issues canonically resolved from all 426 Test Observer GitHub records returned by charm filter",
+  "unique_issues_reviewed": 419,
+  "open_issues": 112,
+  "closed_issues": 307,
+  "issue_comments_reviewed": 924,
+  "pull_request_targets_reviewed": 4,
+  "registry_records_covered": 426,
+  "all_registry_association_weight": 144587,
+  "issue_registry_association_weight": 143698,
+  "primary_themes": [
+    {
+      "theme": "integration-contract",
+      "label": "Integration contract / metadata / topology",
+      "issues": 113,
+      "percent_of_419": 26.97,
+      "open_issues": 22,
+      "percent_of_112_open": 19.64,
+      "registry_association_weight": 29904,
+      "responsibility": {
+        "test-harness": 64,
+        "unknown": 31,
+        "charm": 11,
+        "deployment-configuration": 6,
+        "infrastructure-platform": 1
+      }
+    },
+    {
+      "theme": "lifecycle-recovery",
+      "label": "Lifecycle transitions and recovery",
+      "issues": 71,
+      "percent_of_419": 16.95,
+      "open_issues": 30,
+      "percent_of_112_open": 26.79,
+      "registry_association_weight": 8753,
+      "responsibility": {
+        "unknown": 27,
+        "charm": 26,
+        "test-harness": 10,
+        "infrastructure-platform": 8
+      }
+    },
+    {
+      "theme": "configuration-prerequisites",
+      "label": "Configuration and deployment prerequisites",
+      "issues": 68,
+      "percent_of_419": 16.23,
+      "open_issues": 18,
+      "percent_of_112_open": 16.07,
+      "registry_association_weight": 13915,
+      "responsibility": {
+        "test-harness": 25,
+        "deployment-configuration": 15,
+        "unknown": 14,
+        "charm": 7,
+        "infrastructure-platform": 6,
+        "upstream-workload": 1
+      }
+    },
+    {
+      "theme": "test-harness-signal",
+      "label": "Test harness, scheduling and signal validity",
+      "issues": 46,
+      "percent_of_419": 10.98,
+      "open_issues": 4,
+      "percent_of_112_open": 3.57,
+      "registry_association_weight": 39438,
+      "responsibility": {
+        "test-harness": 38,
+        "unknown": 8
+      }
+    },
+    {
+      "theme": "reconciliation-readiness",
+      "label": "Reconciliation, retries and readiness",
+      "issues": 37,
+      "percent_of_419": 8.83,
+      "open_issues": 14,
+      "percent_of_112_open": 12.5,
+      "registry_association_weight": 8370,
+      "responsibility": {
+        "charm": 18,
+        "unknown": 17,
+        "infrastructure-platform": 1,
+        "test-harness": 1
+      }
+    },
+    {
+      "theme": "compatibility-release",
+      "label": "Release / channel / Juju compatibility",
+      "issues": 28,
+      "percent_of_419": 6.68,
+      "open_issues": 6,
+      "percent_of_112_open": 5.36,
+      "registry_association_weight": 18461,
+      "responsibility": {
+        "test-harness": 10,
+        "unknown": 8,
+        "charm": 7,
+        "deployment-configuration": 2,
+        "infrastructure-platform": 1
+      }
+    },
+    {
+      "theme": "infrastructure-platform",
+      "label": "Infrastructure / Juju / external platform",
+      "issues": 16,
+      "percent_of_419": 3.82,
+      "open_issues": 7,
+      "percent_of_112_open": 6.25,
+      "registry_association_weight": 15041,
+      "responsibility": {
+        "infrastructure-platform": 16
+      }
+    },
+    {
+      "theme": "workload-functional",
+      "label": "Other workload functionality / startup",
+      "issues": 16,
+      "percent_of_419": 3.82,
+      "open_issues": 6,
+      "percent_of_112_open": 5.36,
+      "registry_association_weight": 866,
+      "responsibility": {
+        "unknown": 11,
+        "charm": 5
+      }
+    },
+    {
+      "theme": "hardcoded-environment",
+      "label": "Hardcoded environment assumptions",
+      "issues": 14,
+      "percent_of_419": 3.34,
+      "open_issues": 3,
+      "percent_of_112_open": 2.68,
+      "registry_association_weight": 5382,
+      "responsibility": {
+        "charm": 9,
+        "upstream-workload": 3,
+        "test-harness": 2
+      }
+    },
+    {
+      "theme": "observability-privacy",
+      "label": "Observability, diagnostics and privacy",
+      "issues": 5,
+      "percent_of_419": 1.19,
+      "open_issues": 0,
+      "percent_of_112_open": 0.0,
+      "registry_association_weight": 2647,
+      "responsibility": {
+        "test-harness": 3,
+        "charm": 2
+      }
+    },
+    {
+      "theme": "resource-ownership-isolation",
+      "label": "Resource ownership and deployment isolation",
+      "issues": 4,
+      "percent_of_419": 0.95,
+      "open_issues": 2,
+      "percent_of_112_open": 1.79,
+      "registry_association_weight": 643,
+      "responsibility": {
+        "unknown": 3,
+        "charm": 1
+      }
+    },
+    {
+      "theme": "insufficient-evidence",
+      "label": "Insufficient evidence to classify",
+      "issues": 1,
+      "percent_of_419": 0.24,
+      "open_issues": 0,
+      "percent_of_112_open": 0.0,
+      "registry_association_weight": 278,
+      "responsibility": {
+        "unknown": 1
+      }
+    }
+  ],
+  "responsibility_all": {
+    "test-harness": 153,
+    "unknown": 120,
+    "charm": 86,
+    "infrastructure-platform": 33,
+    "deployment-configuration": 23,
+    "upstream-workload": 4
+  },
+  "responsibility_open": {
+    "unknown": 47,
+    "charm": 32,
+    "test-harness": 17,
+    "infrastructure-platform": 11,
+    "deployment-configuration": 4,
+    "upstream-workload": 1
+  },
+  "state_reasons": {
+    "completed": 273,
+    "not_planned": 18,
+    "duplicate": 16
+  },
+  "source_validation_warnings": []
+}
