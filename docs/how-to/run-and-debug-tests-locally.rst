@@ -74,6 +74,13 @@ files outside the checkout and restrict permissions with ``chmod 600``.
 ``SwiftS3Provider`` and ``StaticS3Provider`` share the bucket lifecycle while
 supplying different credential strategies.
 
+The generic ``s3_storage`` package contains contracts, the shared lifecycle,
+static configuration, and registries. Swift support lives in the sibling
+``s3_storage_swift`` package, which depends on the generic package, never the
+reverse. The suite fixture and cleanup CLI explicitly select its static/Swift
+configuration loader; the registry accepts that loader without knowing about
+Keystone credentials or HTTP sessions.
+
 For Swift, supply ``S3_OS_AUTH_URL``, ``S3_OS_PASSWORD``,
 ``S3_OS_PROJECT_DOMAIN_NAME``, ``S3_OS_PROJECT_NAME``, ``S3_OS_STORAGE_URL``,
 ``S3_OS_USERNAME`` and ``S3_OS_USER_DOMAIN_NAME`` in the configuration file. Also supply
