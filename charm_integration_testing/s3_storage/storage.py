@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -16,6 +15,7 @@ import boto3  # type: ignore[import-untyped]
 from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
+from .identity import bucket_owner_identity as make_bucket_owner_identity
 from .provider import CredentialProvider, S3Bucket, S3Credentials, S3Provider, StaticCredentialProvider
 
 if TYPE_CHECKING:
@@ -25,12 +25,6 @@ if TYPE_CHECKING:
 S3_PATH = "charmqa"
 S3_OWNER_TAG = "charmqa-storage-owner"
 S3_ACCESS_KEY_TAG = "charmqa-ec2-access"
-
-
-def _stable_bucket_owner(*values: str) -> str:
-    """Return a stable opaque ownership marker for bucket tags."""
-    serialized = json.dumps(values, separators=(",", ":"))
-    return hashlib.sha256(serialized.encode()).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -96,7 +90,7 @@ class S3Storage(S3Provider):
         if bucket_owner_identity is not None:
             self._bucket_owner = bucket_owner_identity
         elif credential_provider.ownership_identity is not None:
-            self._bucket_owner = _stable_bucket_owner(
+            self._bucket_owner = make_bucket_owner_identity(
                 "s3-storage", self._endpoint, namespace, region, *credential_provider.ownership_identity
             )
         else:
@@ -416,7 +410,7 @@ class StaticS3Provider(S3Storage):
             region=region,
             client_factory=client_factory,
             identity=identity,
-            bucket_owner_identity=_stable_bucket_owner(
+            bucket_owner_identity=make_bucket_owner_identity(
                 "static",
                 endpoint.rstrip("/"),
                 namespace,

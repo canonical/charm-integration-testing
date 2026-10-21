@@ -1,24 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import hashlib
-import hmac
-import json
-import secrets
 from collections.abc import Mapping
 
+from .identity import provider_identity
 from .provider import S3Credentials, S3Provider
 from .storage import StaticS3Provider
 
 _S3_VARIABLES = ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY")
 _S3_CLEANUP_VARIABLES = ("S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
-_IDENTITY_KEY = secrets.token_bytes(32)
-
-
-def _provider_identity(*values: str) -> str:
-    """Return an opaque identity for deduplicating identical provider configurations in this process."""
-    serialized = json.dumps(values, separators=(",", ":"))
-    return hmac.new(_IDENTITY_KEY, serialized.encode(), hashlib.sha256).hexdigest()
 
 
 def _get_environment_value(environ: Mapping[str, str], name: str, prefix: str) -> str | None:
@@ -34,6 +24,12 @@ def _require_environment_value(environ: Mapping[str, str], name: str, prefix: st
 
 def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S3Provider | None:
     """Construct a static S3 provider from explicit configuration values."""
+    if any(f"{prefix}{name}" in environ for name in _S3_CLEANUP_VARIABLES):
+        missing_cleanup = [
+            f"{prefix}{name}" for name in _S3_CLEANUP_VARIABLES if not _get_environment_value(environ, name, prefix)
+        ]
+        if missing_cleanup:
+            raise ValueError("Missing S3 cleanup credential variables: " + ", ".join(missing_cleanup))
     namespace = _get_environment_value(environ, "S3_BUCKET_NAMESPACE", prefix) or "local"
     region = _get_environment_value(environ, "S3_REGION", prefix) or "us-east-1"
     if any(_get_environment_value(environ, name, prefix) for name in _S3_VARIABLES):
@@ -48,7 +44,7 @@ def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S
                 _require_environment_value(environ, "S3_SECRET_KEY", prefix),
             ),
             region=region,
-            identity=_provider_identity(
+            identity=provider_identity(
                 "static",
                 _require_environment_value(environ, "S3_ENDPOINT", prefix),
                 namespace,
