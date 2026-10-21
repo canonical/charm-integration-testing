@@ -1,18 +1,16 @@
 ---
 # Source: https://github.com/canonical/airbyte-k8s-operator
-# Select the configured backend; MinIO is excluded by minio.yaml, so S3 is chosen.
+# All published tracks share these endpoints and config; this default block covers them.
 overrides:
-  - criteria:
-      - track: '1'
-        risk: edge
-        ubuntu_version: '22.04'
-    configs:
+  - configs:
       storage-type: [MINIO, S3]
     requires:
       object-storage:
         optional: true  # src/charm.py::_validate requires this only in MINIO mode
+      s3-parameters:
+        optional: true  # src/charm.py::_validate requires this only in S3 mode
     constraints:
-      # Model exactly one storage backend and keep the charm config aligned with it.
-      - 'config[storage-type] == "MINIO" => bool(endpoint[object-storage])'
-      - 'config[storage-type] == "S3" => bool(endpoint[s3-parameters])'
-      - 'not (bool(endpoint[object-storage]) and bool(endpoint[s3-parameters]))'
+      # Exactly one backend is wired, and its relation selects the matching mode.
+      - 'len(endpoint[object-storage]) + len(endpoint[s3-parameters]) == 1'
+      - 'bool(endpoint[object-storage]) => config[storage-type] == "MINIO"'
+      - 'bool(endpoint[s3-parameters]) => config[storage-type] == "S3"'
