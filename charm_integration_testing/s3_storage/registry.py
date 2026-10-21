@@ -31,14 +31,3 @@ class S3ProviderRegistry:
             provider = self._provider_factory(config)
             self._providers_by_cloud[cloud] = self._providers.setdefault(provider.handle, provider)
         return self._providers_by_cloud[cloud]
-
-    def cleanup_pending_resources(self) -> None:
-        """Attempt pending cleanup for every used provider before dependencies close."""
-        failures: list[Exception] = []
-        for provider in self._providers.values():
-            try:
-                provider.cleanup_pending_resources()
-            except Exception as exc:
-                failures.append(exc)
-        if failures:
-            raise RuntimeError(f"Pending S3 cleanup failed for {len(failures)} provider(s)") from failures[0]
