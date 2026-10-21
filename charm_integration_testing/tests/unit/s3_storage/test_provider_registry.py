@@ -20,8 +20,6 @@ STATIC_CONFIG = (
 @dataclass
 class ProviderStub(S3Provider):
     identity: str
-    cleanup_calls: int = 0
-    fail_cleanup: bool = False
 
     @property
     def handle(self) -> S3StorageHandle:
@@ -40,11 +38,6 @@ class ProviderStub(S3Provider):
 
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
         raise NotImplementedError
-
-    def cleanup_pending_resources(self) -> None:
-        self.cleanup_calls += 1
-        if self.fail_cleanup:
-            raise RuntimeError("Cleanup failed")
 
 
 @dataclass
@@ -78,27 +71,6 @@ def test_providers_are_deduplicated_by_identity_not_path() -> None:
     registry = S3ProviderRegistry({"target-cloud": Path("first"), "neighbor-cloud": Path("second")}, factory)
 
     assert registry.provider_for_cloud("target-cloud") is registry.provider_for_cloud("neighbor-cloud")
-    registry.cleanup_pending_resources()
-
-    assert factory.providers[Path("first")].cleanup_calls == 1
-    assert factory.providers[Path("second")].cleanup_calls == 0
-
-
-def test_cleanup_attempts_every_used_provider_and_surfaces_failures() -> None:
-    first = ProviderStub("first", fail_cleanup=True)
-    second = ProviderStub("second")
-    unused = ProviderStub("unused")
-    factory = ProviderFactory({Path("first"): first, Path("second"): second, Path("unused"): unused})
-    registry = S3ProviderRegistry({str(path): path for path in factory.providers}, factory)
-    registry.provider_for_cloud("first")
-    registry.provider_for_cloud("second")
-
-    with pytest.raises(RuntimeError, match="Pending S3 cleanup failed for 1 provider") as error:
-        registry.cleanup_pending_resources()
-
-    assert str(error.value.__cause__) == "Cleanup failed"
-    assert first.cleanup_calls == second.cleanup_calls == 1
-    assert unused.cleanup_calls == 0
 
 
 def test_missing_cloud_configuration_fails_without_creating_a_provider() -> None:
