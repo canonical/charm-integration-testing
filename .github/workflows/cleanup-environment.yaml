@@ -213,6 +213,39 @@ jobs:
             ] |
             {count: length, sample: .[:20]}
           '
+
+          echo "==> ClusterRoleBindings referencing ServiceAccounts in any stale/missing namespace"
+          kubectl get clusterrolebindings --output json | jq --argjson age "$AGE_THRESHOLD" --argjson namespaces "$namespaces" '
+            def stale_namespace($name):
+              ($namespaces | map(select(.name == $name)) | .[0]) as $namespace |
+              ($namespace == null or $namespace.age_minutes > $age);
+            [
+              .items[] |
+              . as $binding |
+              [
+                .subjects[]? |
+                select(.kind == "ServiceAccount" and (.namespace // "") != "") |
+                select(stale_namespace(.namespace)) |
+                {name, namespace}
+              ] | unique as $stale_subjects |
+              select($stale_subjects | length > 0) |
+              {
+                name: $binding.metadata.name,
+                created: $binding.metadata.creationTimestamp,
+                role: $binding.roleRef.name,
+                subjects: $stale_subjects
+              }
+            ] |
+            {
+              count: length,
+              name_prefix_counts: (
+                group_by(.name | split("-")[0]) |
+                map({prefix: .[0].name | split("-")[0], count: length}) |
+                sort_by(-.count) | .[:20]
+              ),
+              sample: .[:20]
+            }
+          '
       - name: Remove orphaned rawfile PV directories from nodes
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
