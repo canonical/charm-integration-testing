@@ -376,6 +376,7 @@ def register_preexisting_neighbor_cloud(
 
 def _build_juju_client(
     juju_backend: JujuBackend,
+    charmhub_client: CharmhubClient,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -390,7 +391,7 @@ def _build_juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioMeshExtension(juju_backend, logger),
+            IstioMeshExtension(juju_backend, logger, charmhub_client),
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
             MysqlDatabaseReplicationExtension(juju_backend, logger),
@@ -414,6 +415,7 @@ def _build_juju_client(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
+    charmhub_client: CharmhubClient,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -425,6 +427,7 @@ def juju_client(
 ) -> JujuClient:
     return _build_juju_client(
         juju_backend,
+        charmhub_client,
         target_controller,
         logger,
         ubuntu_pro_token,
@@ -441,6 +444,7 @@ def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
     persistence_extension: ValidatorInjectorExtension,
     juju_backend: JujuBackend,
+    charmhub_client: CharmhubClient,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -488,6 +492,7 @@ def seed_persistence_state_for_resumed_run(
 
     client = _build_juju_client(
         juju_backend,
+        charmhub_client,
         target_controller,
         logger,
         ubuntu_pro_token,
@@ -999,7 +1004,7 @@ def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     return juju_backend.cli_version()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charm_overrides(request: pytest.FixtureRequest) -> Path:
     """Path to the unified charm overrides directory, passed via ``--charm-overrides``."""
     value = request.config.getoption("--charm-overrides")
@@ -1012,7 +1017,7 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
@@ -1038,7 +1043,7 @@ def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.
     return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
     """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
     return CharmhubClient(logger=logger, overrides_client=overrides_client)

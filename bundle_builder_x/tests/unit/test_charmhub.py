@@ -110,6 +110,29 @@ class _StubHttpClient(CharmhubHttpClient):
         return self._response
 
 
+class TestDefaultChannel:
+    @pytest.mark.parametrize("channel", ["1.31/candidate", "future/stable"])
+    def test_uses_store_default(self, channel: str) -> None:
+        response = InfoResponse.model_validate({"default-release": {"channel": {"name": channel}}})
+        client = CharmhubClient(http_client=_StubHttpClient(response))
+
+        assert client.get_charm_default_channel("istio-k8s") == channel
+
+    def test_override_takes_precedence(self) -> None:
+        client = CharmhubClient(
+            http_client=cast(CharmhubHttpClient, _NullHttpClient()),
+            overrides_client=_StubOverridesClient({"default_channel": "custom/stable"}),
+        )
+
+        assert client.get_charm_default_channel("istio-k8s") == "custom/stable"
+
+    def test_missing_default_fails_explicitly(self) -> None:
+        client = CharmhubClient(http_client=_StubHttpClient(InfoResponse()))
+
+        with pytest.raises(IncompleteCharmInfoException, match="No default channel.*istio-k8s"):
+            client.get_charm_default_channel("istio-k8s")
+
+
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
 _UBUNTU_VERSION = "22.04"
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})

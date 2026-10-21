@@ -1,6 +1,5 @@
 ---
 # Source: istio-k8s revision 45 (155402d), src/charm.py and lib/charms/istio_k8s/v0/istio_metadata.py.
-default_channel: 2/stable
 overrides:
   - criteria:
       - track: '2'
