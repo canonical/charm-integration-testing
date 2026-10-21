@@ -205,7 +205,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           namespaces=$(mktemp)
           trap 'rm -f "$namespaces"' EXIT
           kubectl get namespaces --output json | jq '[.items[].metadata.name]' > "$namespaces"
