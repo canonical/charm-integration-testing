@@ -144,6 +144,30 @@ jobs:
               ((.spec.finalizers // []) | join(","))
             ] | @tsv
           '
+
+          for resource in clusterroles clusterrolebindings; do
+            echo "==> $resource: age and cleanup-name coverage"
+            kubectl get "$resource" --output json | jq --argjson age "$AGE_THRESHOLD" '
+              [
+                .items[] | {
+                  name: .metadata.name,
+                  created: .metadata.creationTimestamp,
+                  age_minutes: ((now - (.metadata.creationTimestamp | fromdateiso8601)) / 60 | floor),
+                  matches_cleanup_pattern: (.metadata.name | test("^(controller-)?charmqa-"))
+                }
+              ] |
+              {
+                total: length,
+                older_than_threshold: ([.[] | select(.age_minutes > $age)] | length),
+                old_matching_cleanup_pattern: ([.[] | select(.age_minutes > $age and .matches_cleanup_pattern)] | length),
+                old_not_matching_cleanup_pattern: ([.[] | select(.age_minutes > $age and (.matches_cleanup_pattern | not))] | length),
+                oldest_not_matching_cleanup_pattern: (
+                  [.[] | select(.matches_cleanup_pattern | not)] |
+                  sort_by(.created) | .[:10] | map({name, created, age_minutes})
+                )
+              }
+            '
+          done
       - name: Remove orphaned rawfile PV directories from nodes
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
