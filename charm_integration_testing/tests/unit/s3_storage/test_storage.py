@@ -47,6 +47,55 @@ def expected_tagging() -> dict[str, Any]:
     return {"TagSet": [{"Key": "charmqa-storage-owner", "Value": ANY}]}
 
 
+def test_bucket_destroyer_retries_client_close_failure(client: S3Client) -> None:
+    # GIVEN a provisioned bucket whose client fails its first close
+    storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
+    bucket = storage.new_bucket()
+    with Stubber(client) as stubber:
+        stubber.add_response("create_bucket", {}, {"Bucket": bucket.handle.name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
+        bucket.provision()
+        empty_bucket(stubber, bucket.handle.name)
+        stubber.add_client_error(
+            "list_multipart_uploads", service_error_code="NoSuchBucket", expected_params={"Bucket": bucket.handle.name}
+        )
+        # WHEN the registered destroyer runs, THEN the failed close is retried rather than silently lost
+        with patch.object(client, "close", side_effect=[RuntimeError("Close failed"), None]) as close:
+            storage.bucket_destroyer(bucket)()
+            assert close.call_count == 2
+        stubber.assert_no_pending_responses()
+
+
+def test_persistent_client_close_failure_remains_pending(client: S3Client) -> None:
+    # GIVEN a provisioned bucket whose client cannot be closed
+    storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
+    bucket = storage.new_bucket()
+    with Stubber(client) as stubber:
+        stubber.add_response("create_bucket", {}, {"Bucket": bucket.handle.name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
+        bucket.provision()
+        empty_bucket(stubber, bucket.handle.name)
+        for _ in range(2):
+            stubber.add_client_error(
+                "list_multipart_uploads",
+                service_error_code="NoSuchBucket",
+                expected_params={"Bucket": bucket.handle.name},
+            )
+        # WHEN both immediate cleanup attempts fail, THEN the caller sees the error and a later retry can recover
+        with patch.object(client, "close", side_effect=RuntimeError("Close failed")):
+            with pytest.raises(RuntimeError, match="Failed to clean 1 pending S3 resource") as error:
+                storage.bucket_destroyer(bucket)()
+            assert str(error.value.__cause__) == "Close failed"
+        with patch.object(client, "close") as close:
+            storage.cleanup_pending_resources()
+            close.assert_called_once()
+        stubber.assert_no_pending_responses()
+
+
 def test_provision_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:
     storage = S3Storage(
         "https://s3.test",

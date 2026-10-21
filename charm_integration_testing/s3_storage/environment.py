@@ -32,7 +32,7 @@ def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S
             raise ValueError("Missing S3 cleanup credential variables: " + ", ".join(missing_cleanup))
     namespace = _get_environment_value(environ, "S3_BUCKET_NAMESPACE", prefix) or "local"
     region = _get_environment_value(environ, "S3_REGION", prefix) or "us-east-1"
-    if any(_get_environment_value(environ, name, prefix) for name in _S3_VARIABLES):
+    if any(f"{prefix}{name}" in environ for name in (*_S3_VARIABLES, *_S3_CLEANUP_VARIABLES)):
         missing = [f"{prefix}{name}" for name in _S3_VARIABLES if not _get_environment_value(environ, name, prefix)]
         if missing:
             raise ValueError("Missing S3 credential variables: " + ", ".join(missing))
