@@ -55,8 +55,9 @@ storage. The post-deploy extension configures it; no MinIO charm is deployed.
 An integrator with an explicit endpoint is left untouched.
 The extension looks up the model's current Juju cloud through the backend, then
 obtains its provider from ``S3ProviderRegistry``. Pass configuration paths using
-``S3_CONFIG_<cloud>``, just as kubeconfigs use ``KUBECONFIG_<cloud>``. Variable
-suffixes are lowercased and underscores become hyphens; for example,
+``S3_CONFIG_<cloud>``, just as Kubernetes configuration files use
+``KUBECONFIG_<cloud>``. Variable suffixes are converted to lowercase, and
+underscores become hyphens; for example,
 ``S3_CONFIG_target_cloud=/protected/target-s3.conf`` configures ``target-cloud``.
 The suite does not read ambient S3 credential variables.
 
