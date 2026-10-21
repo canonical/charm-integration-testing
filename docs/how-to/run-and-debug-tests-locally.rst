@@ -122,7 +122,7 @@ it exports ``KUBECONFIG_k8s_cloud``.
 
 .. important::
 
-   Plain ``KUBECONFIG`` configures tools such as kubectl and Helm, but does not
+   Plain ``KUBECONFIG`` configures tools such as ``kubectl`` and Helm, but does not
    populate the test suite's per-cloud mapping. Neither the default
    ``~/.kube/config`` nor Juju's stored ``add-k8s`` credentials supplies a fallback.
    Juju commands can therefore work while the test suite cannot access Kubernetes.
