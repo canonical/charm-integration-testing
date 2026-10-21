@@ -150,9 +150,9 @@ class InfoResponse(BaseModel):
         model_config = ConfigDict(frozen=True)
 
         class Channel(BaseModel):
-            name: str
+            model_config = ConfigDict(frozen=True)
 
-        channel: Channel | None = None
+            name: str
 
         class Revision(BaseModel):
             model_config = ConfigDict(frozen=True)
@@ -164,6 +164,7 @@ class InfoResponse(BaseModel):
             def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
                 return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
+        channel: Channel | None = None
         revision: Revision = Field(default_factory=Revision)
 
     class ChannelMapEntry(BaseModel):

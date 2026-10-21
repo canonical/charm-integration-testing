@@ -13,8 +13,6 @@ from extensions.istio_mesh.extension import (
 )
 from juju import JujuModelHandle
 
-from bundle_builder_x import CharmhubClient
-
 from ..shared import JujuStub as JujuStubBase
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -40,7 +38,7 @@ class JujuStub(JujuStubBase):
         super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
 
 
-class CharmhubStub(CharmhubClient):
+class CharmhubStub:
     def __init__(self, channel: str = "test-track/candidate") -> None:
         self.channel = channel
         self.requested: list[str] = []
@@ -65,7 +63,7 @@ class TestIstioMeshExtension:
             # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s
             juju = JujuStub(applications={"other-app": "other-charm"})
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -83,7 +81,7 @@ class TestIstioMeshExtension:
                 applications={"dependent": dependent_charm},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -105,7 +103,7 @@ class TestIstioMeshExtension:
                 applications={"dependent": dependent_charm, ISTIO_CONTROL_PLANE_CHARM: ISTIO_CONTROL_PLANE_CHARM},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -121,7 +119,7 @@ class TestIstioMeshExtension:
                 applications={"beacon": ISTIO_BEACON_CHARM, "ingress": ISTIO_INGRESS_CHARM},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -142,7 +140,7 @@ class TestIstioMeshExtension:
                 },
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -156,7 +154,7 @@ class TestIstioMeshExtension:
             # GIVEN istio-beacon-k8s is present but the controller isn't backed by Kubernetes
             juju = JujuStub(applications={"istio-beacon-k8s": ISTIO_BEACON_CHARM}, is_k8s=False)
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, charmhub)
+            extension = IstioMeshExtension(juju, logger, charmhub.get_charm_default_channel)
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)

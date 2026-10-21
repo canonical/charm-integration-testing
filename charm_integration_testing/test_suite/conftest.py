@@ -391,7 +391,7 @@ def _build_juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioMeshExtension(juju_backend, logger, charmhub_client),
+            IstioMeshExtension(juju_backend, logger, charmhub_client.get_charm_default_channel),
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
             MysqlDatabaseReplicationExtension(juju_backend, logger),

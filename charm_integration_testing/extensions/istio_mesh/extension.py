@@ -2,11 +2,10 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Callable
 from datetime import timedelta
 
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
-
-from bundle_builder_x import CharmhubClient
 
 # Charms that need a reconciling istio-k8s control plane to reach "active", with no Juju
 # relation to express the dependency.
@@ -48,10 +47,10 @@ class IstioMeshExtension(JujuExtension):
     juju: JujuBackend
     logger: logging.Logger
 
-    def __init__(self, juju: JujuBackend, logger: logging.Logger, charmhub_client: CharmhubClient) -> None:
+    def __init__(self, juju: JujuBackend, logger: logging.Logger, resolve_channel: Callable[[str], str]) -> None:
         self.juju = juju
         self.logger = logger
-        self.charmhub_client = charmhub_client
+        self.resolve_channel = resolve_channel
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         applications = self.juju.list_applications(model)
@@ -78,7 +77,7 @@ class IstioMeshExtension(JujuExtension):
         existing = self._find_istio_application(self.juju.list_applications(model))
         if existing is not None:
             return existing
-        channel = self.charmhub_client.get_charm_default_channel(ISTIO_CONTROL_PLANE_CHARM)
+        channel = self.resolve_channel(ISTIO_CONTROL_PLANE_CHARM)
         try:
             self.juju.deploy_application(
                 model,
