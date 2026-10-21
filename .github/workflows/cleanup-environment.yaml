@@ -177,7 +177,7 @@ jobs:
               echo "::error::kubectl debug failed for $node (exit status: $debug_status)"
               exit "$debug_status"
             fi
-            if [[ "$debug_output" =~ (node-debugger-[^[:space:].]+) ]]; then
+            if [[ "$debug_output" =~ (node-debugger-[a-z0-9.-]*[a-z0-9]) ]]; then
               pod_name="${BASH_REMATCH[1]}"
             else
               echo "::error::Could not determine the debug pod name for $node"
