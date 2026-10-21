@@ -150,9 +150,9 @@ jobs:
           while IFS= read -r node; do
             echo "==> Checking node: $node"
 
-            # kubectl debug creates the pod and returns immediately without streaming output.
-            # Capture the pod name from its output, then wait for completion and print logs.
-            pod_name=$(kubectl debug "node/$node" \
+            # kubectl debug can create the pod before reporting a later error.
+            debug_status=0
+            debug_output=$(kubectl debug "node/$node" \
               --image=ubuntu:24.04 \
               --profile=sysadmin \
               -- bash -c "
@@ -173,10 +173,24 @@ jobs:
                     rm -rf \"\$storage/\$dir\"
                   fi
                 done
-              " 2>&1 | grep -oE 'node-debugger-[^ .]+' | head -1)
-            if [[ -z "$pod_name" ]]; then
-              echo "  Warning: could not determine debug pod name for $node"
-              continue
+              " 2>&1) || debug_status=$?
+            printf '%s\n' "$debug_output"
+            if [[ "$debug_output" =~ (node-debugger-[^[:space:].]+) ]]; then
+              pod_name="${BASH_REMATCH[1]}"
+            else
+              echo "::error::Could not determine the debug pod name for $node"
+              if (( debug_status == 0 )); then
+                exit 1
+              fi
+              exit "$debug_status"
+            fi
+            if (( debug_status != 0 )); then
+              pod=$(kubectl get "pod/$pod_name" --ignore-not-found --output=name)
+              if [[ -z "$pod" ]]; then
+                echo "::error::kubectl debug failed for $node (exit status: $debug_status)"
+                exit "$debug_status"
+              fi
+              echo "  Warning: kubectl debug exited with status $debug_status after creating $pod_name"
             fi
 
             # Wait up to 5 minutes for the pod to finish, then print its logs
