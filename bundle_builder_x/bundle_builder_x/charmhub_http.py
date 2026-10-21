@@ -149,11 +149,6 @@ class InfoResponse(BaseModel):
     class DefaultRelease(BaseModel):
         model_config = ConfigDict(frozen=True)
 
-        class Channel(BaseModel):
-            model_config = ConfigDict(frozen=True)
-
-            name: str
-
         class Revision(BaseModel):
             model_config = ConfigDict(frozen=True)
 
@@ -164,7 +159,6 @@ class InfoResponse(BaseModel):
             def parse_yaml(cls, metadata_yaml: str) -> CharmMetadata:
                 return CharmMetadata(**yaml.safe_load(metadata_yaml))
 
-        channel: Channel | None = None
         revision: Revision = Field(default_factory=Revision)
 
     class ChannelMapEntry(BaseModel):
@@ -306,7 +300,6 @@ class CharmhubHttpClient:
         request_headers = {"Content-Type": "application/json"}
         fields = [
             "result.deployable-on",
-            "default-release.channel",
             "default-release.revision.metadata-yaml",
         ]
         if include_channel_map:

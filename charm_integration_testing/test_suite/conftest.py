@@ -376,7 +376,7 @@ def register_preexisting_neighbor_cloud(
 
 def _build_juju_client(
     juju_backend: JujuBackend,
-    charmhub_client: CharmhubClient,
+    istio_mesh_extension: IstioMeshExtension,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -391,7 +391,7 @@ def _build_juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioMeshExtension(juju_backend, logger, charmhub_client.get_charm_default_channel),
+            istio_mesh_extension,
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
             MysqlDatabaseReplicationExtension(juju_backend, logger),
@@ -415,7 +415,7 @@ def _build_juju_client(
 @pytest.fixture
 def juju_client(
     juju_backend: JujuBackend,
-    charmhub_client: CharmhubClient,
+    istio_mesh_extension: IstioMeshExtension,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -427,7 +427,7 @@ def juju_client(
 ) -> JujuClient:
     return _build_juju_client(
         juju_backend,
-        charmhub_client,
+        istio_mesh_extension,
         target_controller,
         logger,
         ubuntu_pro_token,
@@ -444,7 +444,7 @@ def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
     persistence_extension: ValidatorInjectorExtension,
     juju_backend: JujuBackend,
-    charmhub_client: CharmhubClient,
+    istio_mesh_extension: IstioMeshExtension,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -492,7 +492,7 @@ def seed_persistence_state_for_resumed_run(
 
     client = _build_juju_client(
         juju_backend,
-        charmhub_client,
+        istio_mesh_extension,
         target_controller,
         logger,
         ubuntu_pro_token,
@@ -932,7 +932,7 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
@@ -1049,6 +1049,23 @@ def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -
     return CharmhubClient(logger=logger, overrides_client=overrides_client)
 
 
+@pytest.fixture(scope="session")
+def istio_mesh_extension(
+    charmhub_client: CharmhubClient,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+    target_model_ref: JujuModelHandle,
+    target_arch: str,
+    neighbor_model_ref: JujuModelHandle | None,
+    neighbor_arch: str,
+) -> IstioMeshExtension:
+    """Wire the control-plane extension with the store client and model architectures."""
+    architectures = {target_model_ref: target_arch}
+    if neighbor_model_ref is not None:
+        architectures[neighbor_model_ref] = neighbor_arch
+    return IstioMeshExtension(juju_backend, logger, charmhub_client, architectures)
+
+
 @pytest.fixture
 def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
     """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
@@ -1065,7 +1082,7 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_arch(
     request: pytest.FixtureRequest,
     target_arch: str,

@@ -74,16 +74,6 @@ class CharmhubClient:
         self.overrides_client = overrides_client if overrides_client is not None else OverridesClient()
         self.timeline = (timeline if timeline is not None else NullTimeline()).child("charmhub")
 
-    def get_charm_default_channel(self, charm_name: str) -> str:
-        """Return the configured default channel, falling back to Charmhub's default release."""
-        override = self.overrides_client.get_charm_default_channel(charm_name)
-        if override is not None:
-            return override
-        channel = self.http_client.info(charm_name).default_release.channel
-        if channel is None:
-            raise IncompleteCharmInfoException(f"No default channel returned for charm {charm_name}")
-        return channel.name
-
     def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
         """Return all published channels for a charm, sorted by track then risk tier (stable first)."""
         info = self.http_client.info(charm_name, include_channel_map=True)

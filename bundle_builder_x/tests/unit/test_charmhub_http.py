@@ -3,7 +3,6 @@
 
 import pytest
 from pydantic import ValidationError
-from requests import Response
 
 from bundle_builder_x.charmhub_http import (
     CHARMHUB_API_URL_ENV,
@@ -24,30 +23,6 @@ def test_channel_map_requires_base(base_fields: dict[str, None]) -> None:
 
 
 class TestCharmhubHttpClient:
-    @pytest.mark.parametrize("include_channel_map", [False, True])
-    def test_info_requests_default_channel(self, monkeypatch: pytest.MonkeyPatch, include_channel_map: bool) -> None:
-        # GIVEN a transport that records the requested fields and returns a default channel
-        client = CharmhubHttpClient()
-        requested_fields: set[str] = set()
-
-        def get(url: str, params: dict[str, str], headers: dict[str, str], timeout: float) -> Response:
-            requested_fields.update(params["fields"].split(","))
-            response = Response()
-            response.status_code = 200
-            response._content = b'{"default-release": {"channel": {"name": "1.31/candidate"}}}'
-            return response
-
-        monkeypatch.setattr(client.session, "get", get)
-
-        # WHEN fetching charm information through the real HTTP client method
-        info = client.info("istio-k8s", include_channel_map=include_channel_map)
-
-        # THEN the default channel is requested and parsed, with the optional channel map preserved
-        assert "default-release.channel" in requested_fields
-        assert ("channel-map" in requested_fields) == include_channel_map
-        assert info.default_release.channel is not None
-        assert info.default_release.channel.name == "1.31/candidate"
-
     class TestBaseUrlResolution:
         def test_uses_hardcoded_default_when_no_arg_and_no_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
             # GIVEN no base_url argument and no env var
