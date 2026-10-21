@@ -3,6 +3,7 @@
 
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,39 @@ SWIFT_CONFIG = (
     "S3_OS_STORAGE_URL=https://storage.test/swift/v1/AUTH_project\n"
     "S3_CLEANUP_ACCESS_KEY=cleanup-access\nS3_CLEANUP_SECRET_KEY=cleanup-secret\n"
 )
+
+
+@dataclass(frozen=True)
+class EquivalentURLParams:
+    endpoint: str
+    auth_url: str
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(
+            EquivalentURLParams("https://explicit.test/", "https://identity.test/v3"), id="endpoint-trailing-slash"
+        ),
+        pytest.param(
+            EquivalentURLParams("https://explicit.test", "https://identity.test/v3/"), id="auth-trailing-slash"
+        ),
+        pytest.param(EquivalentURLParams("https://explicit.test", "https://identity.test"), id="auth-implicit-version"),
+        pytest.param(EquivalentURLParams("https://explicit.test/", "https://identity.test/"), id="both-normalized"),
+    ],
+)
+def test_equivalent_swift_urls_share_provider_identity(tmp_path: Path, params: EquivalentURLParams) -> None:
+    # GIVEN equivalent URLs that storage and Keystone already normalize for requests
+    path = tmp_path / "s3.conf"
+    path.write_text(SWIFT_CONFIG + "S3_ENDPOINT=https://explicit.test\n")
+    with requests.Session() as session:
+        expected = provider_from_config(path, session)
+        path.write_text(
+            SWIFT_CONFIG.replace("https://identity.test/v3", params.auth_url) + f"S3_ENDPOINT={params.endpoint}\n"
+        )
+        # WHEN loading the equivalent configuration, THEN its handle deduplicates
+        actual = provider_from_config(path, session)
+    assert actual.handle == expected.handle
 
 
 def test_generic_package_import_does_not_load_swift() -> None:

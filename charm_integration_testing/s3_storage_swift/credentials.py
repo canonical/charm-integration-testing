@@ -20,6 +20,11 @@ class SwiftCredentials:
     project_domain_name: str
     storage_url: str
 
+    def auth_endpoint(self) -> str:
+        """Return the Keystone v3 endpoint used for requests and provider deduplication."""
+        url = self.auth_url.rstrip("/")
+        return url if url.endswith("/v3") else f"{url}/v3"
+
     def s3_endpoint(self) -> str:
         """RGW exposes S3 at the origin of its /swift/v1 account endpoint."""
         url = urlsplit(self.storage_url)
@@ -63,9 +68,7 @@ class KeystoneClient:
         self.credentials = credentials
         self.session = session
         self.timeout = timeout
-        self._url = credentials.auth_url.rstrip("/")
-        if not self._url.endswith("/v3"):
-            self._url += "/v3"
+        self._url = credentials.auth_endpoint()
 
     def _authenticate(self) -> tuple[str, _Token]:
         response = self.session.post(

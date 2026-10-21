@@ -55,7 +55,7 @@ def provider_from_environment(
         values["S3_OS_PROJECT_DOMAIN_NAME"],
         values["S3_OS_STORAGE_URL"],
     )
-    endpoint = values.get("S3_ENDPOINT") or credentials.s3_endpoint()
+    endpoint = (values.get("S3_ENDPOINT") or credentials.s3_endpoint()).rstrip("/")
     namespace = values.get("S3_BUCKET_NAMESPACE") or "local"
     region = values.get("S3_REGION") or "us-east-1"
     return SwiftS3Provider(
@@ -69,7 +69,7 @@ def provider_from_environment(
             endpoint,
             namespace,
             region,
-            credentials.auth_url,
+            credentials.auth_endpoint(),
             credentials.username,
             credentials.password,
             credentials.user_domain_name,
