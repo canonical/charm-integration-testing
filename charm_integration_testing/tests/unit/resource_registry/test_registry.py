@@ -284,25 +284,74 @@ class TestResourceRegistryTeardown:
         assert order == ["child", "parent"]
 
     def test_teardown_continues_after_child_failure(self) -> None:
+        # GIVEN a parent with a failing child and a succeeding sibling
         order: list[str] = []
         registry = _registry()
         parent = HandleStub("parent")
-        failed_child = HandleStub("failed-child")
-        next_child = HandleStub("next-child")
-
+        failing_child = HandleStub("failing-child")
+        sibling = HandleStub("sibling")
         registry.register(parent, destroyer=lambda: order.append("parent"))
-        registry.register(
-            failed_child,
-            destroyer=lambda: (_ for _ in ()).throw(RuntimeError("child teardown failed")),
-            parent=parent,
-        )
-        registry.register(next_child, destroyer=lambda: order.append("next-child"), parent=parent)
 
+        def fail_child() -> None:
+            order.append("failing-child")
+            raise RuntimeError("child teardown failed")
+
+        registry.register(failing_child, destroyer=fail_child, parent=parent)
+        registry.register(sibling, destroyer=lambda: order.append("sibling"), parent=parent)
+
+        # WHEN the parent is torn down
         with pytest.raises(RuntimeError, match="child teardown failed"):
             registry.teardown(parent)
 
-        assert order == ["next-child", "parent"]
+        # THEN every child and the parent are processed and deregistered
+        assert order == ["failing-child", "sibling", "parent"]
         assert registry.registered_handles() == []
+
+    def test_teardown_reports_every_child_failure(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN two failing children and a failing parent
+        registry = _registry()
+        parent = HandleStub("parent")
+        destroyed: list[str] = []
+
+        def fail(name: str) -> None:
+            destroyed.append(name)
+            raise RuntimeError(f"{name} teardown failed")
+
+        registry.register(parent, destroyer=lambda: fail("parent"))
+        registry.register(HandleStub("first"), destroyer=lambda: fail("first"), parent=parent)
+        registry.register(HandleStub("second"), destroyer=lambda: fail("second"), parent=parent)
+
+        # WHEN the parent is torn down, THEN cleanup continues and each child failure is reported
+        with pytest.raises(RuntimeError, match="parent teardown failed"):
+            registry.teardown(parent)
+        assert destroyed == ["first", "second", "parent"]
+        assert registry.registered_handles() == []
+        assert "first teardown failed" in caplog.text
+        assert "second teardown failed" in caplog.text
+
+    def test_teardown_reports_child_failures_when_parent_log_collection_fails(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # GIVEN two failing children and a parent whose log collection fails
+        registry = _registry()
+        parent = HandleStub("parent")
+        destroyed: list[str] = []
+
+        def fail(name: str) -> None:
+            destroyed.append(name)
+            raise RuntimeError(f"{name} teardown failed")
+
+        registry.register(parent, destroyer=lambda: destroyed.append("parent"), collectors=[FailingCollector()])
+        registry.register(HandleStub("first"), destroyer=lambda: fail("first"), parent=parent)
+        registry.register(HandleStub("second"), destroyer=lambda: fail("second"), parent=parent)
+
+        # WHEN torn down, THEN child diagnostics survive the parent log failure
+        with pytest.raises(RuntimeError, match="collection failed"):
+            registry.teardown(parent)
+        assert destroyed == ["first", "second", "parent"]
+        assert registry.registered_handles() == []
+        assert "first teardown failed" in caplog.text
+        assert "second teardown failed" in caplog.text
 
     def test_teardown_failing_destroyer_raises(self) -> None:
         # GIVEN a resource with a failing destroyer
