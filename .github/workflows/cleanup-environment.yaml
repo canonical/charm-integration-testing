@@ -204,18 +204,29 @@ jobs:
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
-          # Preserve Helm-managed webhooks regardless of their age or release name.
-          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          set -euo pipefail
+
+          namespaces=$(mktemp)
+          trap 'rm -f "$namespaces"' EXIT
+          kubectl get namespaces --output json | jq '[.items[].metadata.name]' > "$namespaces"
+
+          # Helm ownership does not protect webhooks whose QA target namespaces are gone.
+          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces "$namespaces" '
+            def orphaned_qa_webhook:
+              (.webhooks | length > 0) and
+              all(.webhooks[];
+                (.clientConfig.service.namespace // "") as $namespace |
+                ($namespace | test("^(controller-)?charmqa-")) and
+                (($namespaces[0] | index($namespace)) == null)
+              );
+            def helm_managed:
+              .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
+              or (
+                (.metadata.annotations["meta.helm.sh/release-name"] // "") != ""
+                and (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
+              );
             .items[] |
-            select(
-              (
-                .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
-                or (
-                  (.metadata.annotations["meta.helm.sh/release-name"] // "") != ""
-                  and (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
-                )
-              ) | not
-            ) |
+            select((helm_managed | not) or orphaned_qa_webhook) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
