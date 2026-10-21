@@ -149,8 +149,6 @@ jobs:
           fi
           while IFS= read -r node; do
             echo "==> Checking node: $node"
-
-            # kubectl debug can create the pod before reporting a later error.
             debug_status=0
             debug_output=$(kubectl debug "node/$node" \
               --image=ubuntu:24.04 \
@@ -175,22 +173,15 @@ jobs:
                 done
               " 2>&1) || debug_status=$?
             printf '%s\n' "$debug_output"
+            if (( debug_status != 0 )); then
+              echo "::error::kubectl debug failed for $node (exit status: $debug_status)"
+              exit "$debug_status"
+            fi
             if [[ "$debug_output" =~ (node-debugger-[^[:space:].]+) ]]; then
               pod_name="${BASH_REMATCH[1]}"
             else
               echo "::error::Could not determine the debug pod name for $node"
-              if (( debug_status == 0 )); then
-                exit 1
-              fi
-              exit "$debug_status"
-            fi
-            if (( debug_status != 0 )); then
-              pod=$(kubectl get "pod/$pod_name" --ignore-not-found --output=name)
-              if [[ -z "$pod" ]]; then
-                echo "::error::kubectl debug failed for $node (exit status: $debug_status)"
-                exit "$debug_status"
-              fi
-              echo "  Warning: kubectl debug exited with status $debug_status after creating $pod_name"
+              exit 1
             fi
 
             # Wait up to 5 minutes for the pod to finish, then print its logs
@@ -268,7 +259,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find stale cluster RBAC
+      - name: Find old QA cluster RBAC
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -278,65 +269,6 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-
-          tmpdir=$(mktemp -d)
-          trap 'rm -rf "$tmpdir"' EXIT
-          kubectl get namespaces --output json | jq --argjson age "$AGE_THRESHOLD" '
-            [
-              .items[] |
-              {
-                name: .metadata.name,
-                stale: (
-                  (.metadata.name | test("^(controller-)?charmqa-")) and
-                  ((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60))
-                )
-              }
-            ]
-          ' > "$tmpdir/namespaces.json"
-          kubectl get clusterrolebindings --output json > "$tmpdir/clusterrolebindings.json"
-          kubectl get rolebindings --all-namespaces --output json > "$tmpdir/rolebindings.json"
-          jq --slurpfile namespaces "$tmpdir/namespaces.json" '
-            def stale_namespace($name):
-              ($namespaces[0] | map(select(.name == $name)) | .[0]) as $namespace |
-              ($namespace == null or $namespace.stale);
-            def stale_service_account:
-              .kind == "ServiceAccount" and
-              ((.namespace // "") != "") and
-              stale_namespace(.namespace);
-            [
-              .items[] |
-              select((.subjects // []) | length > 0) |
-              select(all(.subjects[]; stale_service_account))
-            ]
-          ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/stale-clusterrolebindings.json"
-
-          jq -c '[.[].metadata.name]' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-binding-names.json"
-          jq -c '[.[].roleRef | select(.kind == "ClusterRole") | .name] | unique' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-role-refs.json"
-          jq -c '[.[] | select(.stale) | .name]' "$tmpdir/namespaces.json" > "$tmpdir/stale-namespace-names.json"
-          jq --slurpfile stale "$tmpdir/stale-binding-names.json" '
-            [
-              .items[] |
-              select((.metadata.name as $name | $stale[0] | index($name)) == null) |
-              select(.roleRef.kind == "ClusterRole") |
-              .roleRef.name
-            ] | unique
-          ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/active-cluster-role-refs.json"
-          jq --slurpfile namespaces "$tmpdir/namespaces.json" '
-            [
-              .items[] |
-              .metadata.namespace as $namespace |
-              select(($namespaces[0] | map(select(.name == $namespace)) | .[0]) as $namespace_info | $namespace_info != null and ($namespace_info.stale | not)) |
-              select(.roleRef.kind == "ClusterRole") |
-              .roleRef.name
-            ] | unique
-          ' "$tmpdir/rolebindings.json" > "$tmpdir/active-namespaced-role-refs.json"
-          jq -nr --slurpfile candidates "$tmpdir/stale-role-refs.json" --slurpfile active "$tmpdir/active-cluster-role-refs.json" --slurpfile active_namespaced "$tmpdir/active-namespaced-role-refs.json" '
-            $candidates[0][] as $role |
-            select(($active[0] | index($role)) == null and ($active_namespaced[0] | index($role)) == null) |
-            $role
-          ' > "$tmpdir/orphaned-roles.txt"
-          jq -r '.[] | "ClusterRoleBinding/" + .metadata.name' "$tmpdir/stale-clusterrolebindings.json" >> resources_to_remove.txt
-          sed 's#^#ClusterRole/#' "$tmpdir/orphaned-roles.txt" >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
