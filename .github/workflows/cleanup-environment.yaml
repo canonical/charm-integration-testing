@@ -411,33 +411,35 @@ jobs:
           kubectl get namespaces --output json | jq --argjson age "$AGE_THRESHOLD" '
             [
               .items[] |
-              select(.metadata.name | test("^(controller-)?charmqa-")) |
               {
                 name: .metadata.name,
-                stale: ((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60))
+                stale: (
+                  (.metadata.name | test("^(controller-)?charmqa-")) and
+                  ((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60))
+                )
               }
             ]
-          ' > "$tmpdir/charmqa-namespaces.json"
+          ' > "$tmpdir/namespaces.json"
           kubectl get clusterrolebindings --output json > "$tmpdir/clusterrolebindings.json"
           kubectl get rolebindings --all-namespaces --output json > "$tmpdir/rolebindings.json"
-          jq --argjson age "$AGE_THRESHOLD" --slurpfile namespaces "$tmpdir/charmqa-namespaces.json" '
+          jq --slurpfile namespaces "$tmpdir/namespaces.json" '
             def stale_namespace($name):
               ($namespaces[0] | map(select(.name == $name)) | .[0]) as $namespace |
               ($namespace == null or $namespace.stale);
-            def stale_qa_service_account:
+            def stale_service_account:
               .kind == "ServiceAccount" and
-              ((.namespace // "") | test("^(controller-)?charmqa-")) and
+              ((.namespace // "") != "") and
               stale_namespace(.namespace);
             [
               .items[] |
               select((.subjects // []) | length > 0) |
-              select(all(.subjects[]; stale_qa_service_account))
+              select(all(.subjects[]; stale_service_account))
             ]
           ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/stale-clusterrolebindings.json"
 
           jq -c '[.[].metadata.name]' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-binding-names.json"
           jq -c '[.[].roleRef | select(.kind == "ClusterRole") | .name] | unique' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-role-refs.json"
-          jq -c '[.[] | select(.stale) | .name]' "$tmpdir/charmqa-namespaces.json" > "$tmpdir/stale-namespace-names.json"
+          jq -c '[.[] | select(.stale) | .name]' "$tmpdir/namespaces.json" > "$tmpdir/stale-namespace-names.json"
           jq --slurpfile stale "$tmpdir/stale-binding-names.json" '
             [
               .items[] |
@@ -446,10 +448,11 @@ jobs:
               .roleRef.name
             ] | unique
           ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/active-cluster-role-refs.json"
-          jq --slurpfile stale_namespaces "$tmpdir/stale-namespace-names.json" '
+          jq --slurpfile namespaces "$tmpdir/namespaces.json" '
             [
               .items[] |
-              select((.metadata.namespace as $namespace | $stale_namespaces[0] | index($namespace)) == null) |
+              .metadata.namespace as $namespace |
+              select(($namespaces[0] | map(select(.name == $namespace)) | .[0]) as $namespace_info | $namespace_info != null and ($namespace_info.stale | not)) |
               select(.roleRef.kind == "ClusterRole") |
               .roleRef.name
             ] | unique
