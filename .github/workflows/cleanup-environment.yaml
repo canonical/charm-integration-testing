@@ -404,36 +404,32 @@ jobs:
             ]
           ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/stale-clusterrolebindings.json"
 
-          stale_bindings=$(jq -c '[.[].metadata.name]' "$tmpdir/stale-clusterrolebindings.json")
-          stale_role_refs=$(jq -c '[.[].roleRef | select(.kind == "ClusterRole") | .name] | unique' "$tmpdir/stale-clusterrolebindings.json")
-          active_cluster_role_refs=$(jq -c --argjson stale "$stale_bindings" '
+          jq -c '[.[].metadata.name]' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-binding-names.json"
+          jq -c '[.[].roleRef | select(.kind == "ClusterRole") | .name] | unique' "$tmpdir/stale-clusterrolebindings.json" > "$tmpdir/stale-role-refs.json"
+          jq -c '[.[] | select(.stale) | .name]' "$tmpdir/charmqa-namespaces.json" > "$tmpdir/stale-namespace-names.json"
+          jq --slurpfile stale "$tmpdir/stale-binding-names.json" '
             [
               .items[] |
-              select((.metadata.name as $name | $stale | index($name)) == null) |
+              select((.metadata.name as $name | $stale[0] | index($name)) == null) |
               select(.roleRef.kind == "ClusterRole") |
               .roleRef.name
             ] | unique
-          ' "$tmpdir/clusterrolebindings.json")
-          stale_namespace_names=$(jq -c '[.[] | select(.stale) | .name]' "$tmpdir/charmqa-namespaces.json")
-          active_role_refs=$(jq -c --argjson stale_namespaces "$stale_namespace_names" '
+          ' "$tmpdir/clusterrolebindings.json" > "$tmpdir/active-cluster-role-refs.json"
+          jq --slurpfile stale_namespaces "$tmpdir/stale-namespace-names.json" '
             [
               .items[] |
-              select((.metadata.namespace as $namespace | $stale_namespaces | index($namespace)) == null) |
+              select((.metadata.namespace as $namespace | $stale_namespaces[0] | index($namespace)) == null) |
               select(.roleRef.kind == "ClusterRole") |
               .roleRef.name
             ] | unique
-          ' "$tmpdir/rolebindings.json")
-          orphaned_roles=$(jq -nr --argjson candidates "$stale_role_refs" --argjson active "$active_cluster_role_refs" --argjson active_namespaced "$active_role_refs" '
-            $candidates[] as $role |
-            select(($active | index($role)) == null and ($active_namespaced | index($role)) == null) |
+          ' "$tmpdir/rolebindings.json" > "$tmpdir/active-namespaced-role-refs.json"
+          jq -nr --slurpfile candidates "$tmpdir/stale-role-refs.json" --slurpfile active "$tmpdir/active-cluster-role-refs.json" --slurpfile active_namespaced "$tmpdir/active-namespaced-role-refs.json" '
+            $candidates[0][] as $role |
+            select(($active[0] | index($role)) == null and ($active_namespaced[0] | index($role)) == null) |
             $role
-          ')
+          ' > "$tmpdir/orphaned-roles.txt"
           jq -r '.[] | "ClusterRoleBinding/" + .metadata.name' "$tmpdir/stale-clusterrolebindings.json" >> resources_to_remove.txt
-          if [[ -n "$orphaned_roles" ]]; then
-            while IFS= read -r role; do
-              echo "ClusterRole/$role" >> resources_to_remove.txt
-            done <<< "$orphaned_roles"
-          fi
+          sed 's#^#ClusterRole/#' "$tmpdir/orphaned-roles.txt" >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
