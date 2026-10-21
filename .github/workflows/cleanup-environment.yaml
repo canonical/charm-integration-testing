@@ -180,6 +180,39 @@ jobs:
               }
             '
           done
+
+          namespaces=$(kubectl get namespaces --output json | jq -c --argjson age "$AGE_THRESHOLD" '
+            [.items[] | {
+              name: .metadata.name,
+              age_minutes: ((now - (.metadata.creationTimestamp | fromdateiso8601)) / 60 | floor)
+            }]
+          ')
+          echo "==> ClusterRoleBindings referencing Charm QA service accounts in stale/missing namespaces"
+          kubectl get clusterrolebindings --output json | jq --argjson age "$AGE_THRESHOLD" --argjson namespaces "$namespaces" '
+            [
+              .items[] |
+              . as $binding |
+              [
+                .subjects[]? |
+                select(.kind == "ServiceAccount" and ((.namespace // "") | test("^(controller-)?charmqa-")))
+              ] as $qa_subjects |
+              select($qa_subjects | length > 0) |
+              [
+                $qa_subjects[].namespace as $subject_namespace |
+                ($namespaces | map(select(.name == $subject_namespace)) | .[0]) as $namespace |
+                select(($namespace == null) or ($namespace.age_minutes > $age)) |
+                $subject_namespace
+              ] | unique as $stale_namespaces |
+              select($stale_namespaces | length > 0) |
+              {
+                name: $binding.metadata.name,
+                created: $binding.metadata.creationTimestamp,
+                role: $binding.roleRef.name,
+                stale_subject_namespaces: $stale_namespaces
+              }
+            ] |
+            {count: length, sample: .[:20]}
+          '
       - name: Remove orphaned rawfile PV directories from nodes
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
