@@ -36,6 +36,7 @@ packages = [
     { include = "resource_registry" },
     { include = "resource_tracking" },
     { include = "s3_storage" },
+    { include = "s3_storage_swift" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
     { include = "utils" },

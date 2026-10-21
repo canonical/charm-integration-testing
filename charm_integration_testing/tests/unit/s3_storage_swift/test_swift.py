@@ -14,16 +14,9 @@ import requests
 from botocore.stub import ANY, Stubber  # type: ignore[import-untyped]
 from mypy_boto3_s3 import S3Client
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from s3_storage import (
-    KeystoneClient,
-    S3Credentials,
-    S3Provider,
-    S3Storage,
-    SwiftCredentialProvider,
-    SwiftCredentials,
-    SwiftS3Provider,
-)
-from s3_storage.environment import provider_from_environment
+from s3_storage import S3Credentials, S3Provider, S3Storage
+from s3_storage_swift import KeystoneClient, SwiftCredentialProvider, SwiftCredentials, SwiftS3Provider
+from s3_storage_swift.configuration import provider_from_environment
 
 CREDS = S3Credentials("test-access", "test-secret")
 CLEANUP_CREDS = S3Credentials("cleanup-access", "cleanup-secret")
@@ -753,12 +746,9 @@ def test_keystone_error_does_not_include_secrets() -> None:
         assert CREDS.secret_key not in repr(CREDS)
 
 
-def test_environment_ignores_cloud_auth_without_storage_url() -> None:
-    with requests.Session() as session:
-        assert (
-            provider_from_environment({"S3_OS_AUTH_URL": SWIFT.auth_url, "S3_OS_PASSWORD": SWIFT.password}, session)
-            is None
-        )
+def test_environment_rejects_swift_config_without_storage_url() -> None:
+    with requests.Session() as session, pytest.raises(ValueError, match="S3_OS_STORAGE_URL"):
+        provider_from_environment({"S3_OS_AUTH_URL": SWIFT.auth_url, "S3_OS_PASSWORD": SWIFT.password}, session)
 
 
 def test_environment_constructs_swift_provider() -> None:
@@ -773,8 +763,6 @@ def test_environment_constructs_swift_provider() -> None:
         "S3_CLEANUP_ACCESS_KEY": CLEANUP_CREDS.access_key,
         "S3_CLEANUP_SECRET_KEY": CLEANUP_CREDS.secret_key,
     }
-    with pytest.raises(ValueError, match="requests session"):
-        provider_from_environment(environ)
     with requests.Session() as session:
         provider = provider_from_environment(environ, session)
     assert provider is not None
