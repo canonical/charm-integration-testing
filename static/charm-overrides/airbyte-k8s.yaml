@@ -1,0 +1,15 @@
+---
+# Source: https://github.com/canonical/airbyte-k8s-operator
+# Select Airbyte's S3 mode because MinIO is excluded by minio.yaml.
+overrides:
+  - criteria:
+      - track: '1'
+        risk: edge
+        ubuntu_version: '22.04'
+    configs:
+      storage-type: [S3]
+    requires:
+      object-storage:
+        optional: true  # src/charm.py::_validate only requires MinIO in MINIO mode
+    constraints:
+      - 'config[storage-type] == "S3" => bool(endpoint[s3-parameters])'
