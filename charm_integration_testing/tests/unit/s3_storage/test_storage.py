@@ -347,7 +347,7 @@ def test_static_environment_constructs_provider() -> None:
     }
     # WHEN fixture wiring reads the environment
     provider = provider_from_environment(environ)
-    # THEN static credentials are passed through without Keystone authentication
+    # THEN static credentials are passed through to the provider
     assert isinstance(provider, StaticS3Provider)
     assert provider.endpoint == environ["S3_ENDPOINT"]
     assert provider.region == "local-region"
