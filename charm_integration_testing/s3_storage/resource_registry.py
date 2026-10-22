@@ -20,7 +20,7 @@ class S3ResourceRegistry:
         self._cleanup_buckets = cleanup_buckets
         resource_registry.register(
             handle=provider.handle,
-            destroyer=provider.cleanup_pending_resources if cleanup_buckets else None,
+            destroyer=self._cleanup_pending_resources if cleanup_buckets else None,
         )
 
     def new_bucket(self) -> S3Bucket:
@@ -32,3 +32,12 @@ class S3ResourceRegistry:
             parent=self._provider.handle,
         )
         return bucket
+
+    def _cleanup_pending_resources(self) -> None:
+        try:
+            self._provider.cleanup_pending_resources()
+        except Exception as cleanup_error:
+            try:
+                self._provider.cleanup_pending_resources()
+            except Exception as retry_error:
+                raise retry_error from cleanup_error
