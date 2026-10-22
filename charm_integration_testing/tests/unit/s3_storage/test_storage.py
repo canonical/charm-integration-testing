@@ -47,6 +47,73 @@ def expected_tagging() -> dict[str, Any]:
     return {"TagSet": [{"Key": "charmqa-storage-owner", "Value": ANY}]}
 
 
+class PerBucketCredentialProvider(StaticCredentialProvider):
+    per_bucket_credentials = True
+
+    def provisioning_credentials(self, bucket_credentials: S3Credentials) -> S3Credentials:
+        return bucket_credentials
+
+
+@pytest.mark.parametrize("failed_closures", [1, 2], ids=["immediate-retry", "later-retry"])
+def test_per_bucket_cleanup_retries_the_original_cleanup_client(client: S3Client, failed_closures: int) -> None:
+    # GIVEN separate bucket and cleanup clients whose cleanup-client close fails
+    cleanup_client: S3Client = boto3.client(
+        "s3",
+        aws_access_key_id=CLEANUP_CREDS.access_key,
+        aws_secret_access_key=CLEANUP_CREDS.secret_key,
+        region_name="us-east-1",
+    )
+    cleanup_client_creations = 0
+
+    def client_factory(credentials: S3Credentials) -> S3Client:
+        nonlocal cleanup_client_creations
+        if credentials == CREDS:
+            return client
+        assert credentials == CLEANUP_CREDS
+        cleanup_client_creations += 1
+        return cleanup_client
+
+    storage = S3Storage(
+        "https://s3.test",
+        NAMESPACE,
+        PerBucketCredentialProvider(CREDS, CLEANUP_CREDS),
+        client_factory=client_factory,
+    )
+    bucket = storage.new_bucket()
+    try:
+        with Stubber(client) as provisioning, Stubber(cleanup_client) as cleanup:
+            name = bucket.handle.name
+            provisioning.add_response("create_bucket", {}, {"Bucket": name})
+            tagging = expected_tagging()
+            tagging["TagSet"].append({"Key": "charmqa-ec2-access", "Value": CREDS.access_key})
+            provisioning.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": tagging})
+            provisioning.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
+            provisioning.add_response("head_bucket", {}, {"Bucket": name})
+            bucket.provision()
+            empty_bucket(cleanup, name)
+            for _ in range(failed_closures):
+                cleanup.add_client_error(
+                    "list_multipart_uploads", service_error_code="NoSuchBucket", expected_params={"Bucket": name}
+                )
+
+            # WHEN cleanup is retried, THEN the failed client is retained rather than replaced
+            with patch.object(
+                cleanup_client, "close", side_effect=[RuntimeError("Close failed")] * failed_closures + [None]
+            ) as close:
+                if failed_closures == 2:
+                    with pytest.raises(RuntimeError, match="Failed to clean 1 pending S3 resource"):
+                        storage.bucket_destroyer(bucket)()
+                    storage.cleanup_pending_resources()
+                else:
+                    storage.bucket_destroyer(bucket)()
+                assert close.call_count == failed_closures + 1
+            assert cleanup_client_creations == 1
+            provisioning.assert_no_pending_responses()
+            cleanup.assert_no_pending_responses()
+    finally:
+        cleanup_client.close()
+
+
 def test_bucket_destroyer_retries_client_close_failure(client: S3Client) -> None:
     # GIVEN a provisioned bucket whose client fails its first close
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
