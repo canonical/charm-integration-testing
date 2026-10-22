@@ -112,6 +112,29 @@ jobs:
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
+      S3_SWIFT_SECRET_NAMES: >-
+        ["S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6",
+        "S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2"]
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
       UV_FILE: ${{ github.workspace }}/static/uv
@@ -172,7 +195,7 @@ jobs:
         shell: bash
         env:
           SWIFT_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Key comes from the repo-owned environment map.
+          SWIFT_CONFIG: ${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.target_env_info.outputs.s3-swift-secret) && secrets[steps.target_env_info.outputs.s3-swift-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Fixed workflow allowlist guards the dynamic lookup.
         run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/target-s3.conf"
       - name: Check neighbor Swift storage credentials
@@ -181,7 +204,7 @@ jobs:
         shell: bash
         env:
           SWIFT_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Key comes from the repo-owned environment map.
+          SWIFT_CONFIG: ${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.neighbor_env_info.outputs.s3-swift-secret) && secrets[steps.neighbor_env_info.outputs.s3-swift-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Fixed workflow allowlist guards the dynamic lookup.
         run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/neighbor-s3.conf"
       - name: Log job information
