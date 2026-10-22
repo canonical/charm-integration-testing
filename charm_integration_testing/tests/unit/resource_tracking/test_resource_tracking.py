@@ -906,6 +906,7 @@ class TestTrackStateResources:
 
             import pytest
             from juju import JujuModelHandle
+            from test_suite.fixtures.juju import needs_juju_client
 
             pytest_plugins = ["test_suite.fixtures.resource_tracking"]
 
@@ -919,6 +920,12 @@ class TestTrackStateResources:
             def session_resource_registry():
                 model = JujuModelHandle(controller="test-controller", model="test-model")
                 return SimpleNamespace(registered_handles=lambda: [model])
+
+            @pytest.fixture
+            def juju_client_if_needed(request, session_resource_registry):
+                if not needs_juju_client(request, session_resource_registry):
+                    return None
+                return request.getfixturevalue("juju_client")
 
             @pytest.fixture(scope="session")
             def juju_client():
@@ -968,6 +975,7 @@ class TestTrackStateResources:
 
             import pytest
             from juju import JujuModelHandle
+            from test_suite.fixtures.juju import needs_juju_client
 
             pytest_plugins = ["test_suite.fixtures.resource_tracking"]
             client_requests = []
@@ -984,6 +992,12 @@ class TestTrackStateResources:
                 if request.node.name == "test_teardown":
                     handles.append(JujuModelHandle(controller="test-controller", model="test-model"))
                 return SimpleNamespace(registered_handles=lambda: handles, handles=handles)
+
+            @pytest.fixture
+            def juju_client_if_needed(request, session_resource_registry):
+                if not needs_juju_client(request, session_resource_registry):
+                    return None
+                return request.getfixturevalue("juju_client")
 
             @pytest.fixture(scope="session")
             def juju_client():

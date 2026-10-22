@@ -31,7 +31,7 @@ from resource_tracking import (
 
 from bundle_builder_x import CharmChannel, OverridesClient
 from test_suite.conftest import failure_message, skipped_message
-from test_suite.fixtures.juju import get_juju_client_for_registered_models
+from test_suite.fixtures.juju import get_registered_model_handles
 from test_suite.scheduler.markers import read_state_marker
 
 
@@ -86,6 +86,7 @@ def _resolve_resource_tracking_skips(
 def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
+    juju_client_if_needed: JujuClient | None,
     logger: logging.Logger,
 ) -> dict[tuple[str, str, str], frozenset[str]]:
     """Map each ``(controller, model, application)`` to the kinds it opts out of tracking.
@@ -104,15 +105,11 @@ def resource_tracking_skips_by_application(
     whole model, while a different model keeps tracking the kind.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
-    client_and_models = (
-        get_juju_client_for_registered_models(request, session_resource_registry)
-        if overrides_client is not None
-        else None
+    return _resolve_resource_tracking_skips(
+        overrides_client,
+        juju_client_if_needed,
+        get_registered_model_handles(session_resource_registry),
     )
-    if client_and_models is None:
-        return {}
-    juju_client, model_handles = client_and_models
-    return _resolve_resource_tracking_skips(overrides_client, juju_client, model_handles)
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +117,7 @@ def track_state_resources(
     request: pytest.FixtureRequest,
     kubernetes_client_registry: KubernetesClientRegistry,
     session_resource_registry: ResourceRegistry,
+    juju_client_if_needed: JujuClient | None,
     state_resource_tracker: StateResourceTracker,
     resource_tracking_skips_by_application: dict[tuple[str, str, str], frozenset[str]],
     logger: logging.Logger,
@@ -143,14 +141,14 @@ def track_state_resources(
     marker = read_state_marker(request.node)
     if marker is None:
         return
-    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
-    if client_and_models is None:
+    if juju_client_if_needed is None:
         return
-
-    juju_client, model_handles = client_and_models
+    model_handles = get_registered_model_handles(session_resource_registry)
+    if not model_handles:
+        return
     post_test_skips = _resolve_resource_tracking_skips(
         _resource_tracking_overrides_client(request, logger),
-        juju_client,
+        juju_client_if_needed,
         model_handles,
     )
     skips = dict(resource_tracking_skips_by_application)
@@ -162,7 +160,7 @@ def track_state_resources(
     # Adding an lxd/openstack collector here keeps the tracker itself substrate-agnostic.
     collectors: list[ResourceCollector] = [
         KubernetesResourceCollector(
-            juju_client.backend,
+            juju_client_if_needed.backend,
             kubernetes_client_registry,
             session_resource_registry,
             sources=DEFAULT_KUBERNETES_SOURCES,
