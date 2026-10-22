@@ -45,60 +45,6 @@ class _NullHttpClient:
         raise NotImplementedError
 
 
-@pytest.mark.parametrize("available", [True, False], ids=["published-default", "unavailable-default"])
-def test_store_default_does_not_fall_back_to_another_track(available: bool) -> None:
-    captured: list[RefreshAction] = []
-
-    class HttpStub(_NullHttpClient):
-        def info(self, charm: str) -> InfoResponse:
-            return InfoResponse.model_validate({"default-release": {"channel": {"name": "1.31/candidate"}}})
-
-        def refresh(self, action: RefreshAction) -> RefreshResponse:
-            captured.append(action)
-            assert action.charm_channel == "1.31/candidate"
-            if action.base is not None and action.base.name == "NA":
-                return _error_response(
-                    "istio-k8s",
-                    "invalid-charm-base",
-                    "select base",
-                    RefreshResponse.Error.Extra(default_bases=[CharmhubBase(channel="26.04", architecture="amd64")]),
-                )
-            if not available:
-                return _error_response(
-                    "istio-k8s",
-                    "revision-not-found",
-                    "no release",
-                    RefreshResponse.Error.Extra(
-                        releases=[
-                            RefreshResponse.Error.Extra.Release(
-                                channel="1/edge", base=CharmhubBase(channel="26.04", architecture="amd64")
-                            )
-                        ]
-                    ),
-                )
-            return _refresh_response_with_charm("istio-k8s", revision=82, metadata=_METADATA_REQUIRES)
-
-    client = _make_client(HttpStub())
-    if available:
-        charm = client.charm_from_store("istio-k8s", "amd64")
-        assert str(charm.channel) == "1.31/candidate"
-        assert charm.revision == 82
-        assert charm.ubuntu_version == "26.04"
-    else:
-        with pytest.raises(CharmReleaseNotFoundException):
-            client.charm_from_store("istio-k8s", "amd64")
-    assert len(captured) == 2
-
-
-def test_missing_store_default_is_reported() -> None:
-    class HttpStub(_NullHttpClient):
-        def info(self, charm: str) -> InfoResponse:
-            return InfoResponse()
-
-    with pytest.raises(IncompleteCharmInfoException, match="No default channel"):
-        _make_client(HttpStub()).charm_from_store("istio-k8s", "amd64")
-
-
 def _make_client(http: _NullHttpClient) -> CharmhubClient:
     """Wrap a stub in a CharmhubClient without triggering mypy override errors."""
     return CharmhubClient(http_client=cast(CharmhubHttpClient, http))

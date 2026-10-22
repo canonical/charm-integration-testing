@@ -336,7 +336,7 @@ def persistence_extension(
 ) -> ValidatorInjectorExtension:
     """Session-scoped validator injector, and the owner of the canary persistence state.
 
-    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    One instance is shared by the session-scoped ``juju_client`` fixture,
     so the state it holds is the single source of truth. The persistence op is auto-decided from
     that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
     (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
@@ -375,9 +375,11 @@ def register_preexisting_neighbor_cloud(
         juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
-def _build_juju_client(
+@pytest.fixture(scope="session")
+def juju_client(
     juju_backend: JujuBackend,
     istio_mesh_extension: IstioMeshExtension,
+    register_test_clouds: None,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -410,34 +412,6 @@ def _build_juju_client(
                 session_resource_registry,
             ),
         ],
-    )
-
-
-@pytest.fixture(scope="session")
-def juju_client(
-    juju_backend: JujuBackend,
-    istio_mesh_extension: IstioMeshExtension,
-    register_test_clouds: None,
-    target_controller: str,
-    logger: logging.Logger,
-    ubuntu_pro_token: str | None,
-    session_resource_registry: ResourceRegistry,
-    persistence_extension: ValidatorInjectorExtension,
-    remote_logging_endpoints_by_controller: dict[str, str],
-    kubernetes_client_registry: KubernetesClientRegistry,
-    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
-) -> JujuClient:
-    return _build_juju_client(
-        juju_backend,
-        istio_mesh_extension,
-        target_controller,
-        logger,
-        ubuntu_pro_token,
-        session_resource_registry,
-        persistence_extension,
-        remote_logging_endpoints_by_controller,
-        kubernetes_client_registry,
-        unseal_vault_k8s_extension,
     )
 
 
