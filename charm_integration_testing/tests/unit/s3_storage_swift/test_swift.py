@@ -356,19 +356,16 @@ def test_registry_retries_pending_credential_revocation() -> None:
     )
     bucket = storage.new_bucket()
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(handle=storage.handle, destroyer=storage.cleanup_pending_resources)
-    registry.register(handle=bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+    registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with pytest.raises(RuntimeError, match="could not be revoked"):
         bucket.provision()
     with pytest.warns(ResourceTeardownWarning):
         registry.teardown_all()
 
-    # The provider retries the pending key after bucket teardown.
+    # The bucket destroyer retries once, then provider cleanup retries after registry teardown.
     assert keystone.delete_attempts == ["test-access-1"] * 2
     assert keystone.deleted == []
-
-    # A later session cleanup retries the still-pending key.
     storage.cleanup_pending_resources()
     assert keystone.delete_attempts == ["test-access-1"] * 3
     assert keystone.deleted == ["test-access-1"]
