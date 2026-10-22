@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from chaos_client import IoLatencyInjection
 from juju import JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 from test_suite import test_live_disk_io_latency as module
 from test_suite.test_live_disk_io_latency import (
     DELAY,
@@ -30,6 +31,7 @@ RESOLVED_DURATION = timedelta(minutes=20)
 def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     waits = iter(["baseline", "recovery"])
     hold = MagicMock()
     # The experiment was created at t=0; 5s elapsed (e.g. awaiting confirmed injection) by
@@ -58,9 +60,9 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
 
     if failure:
         with pytest.raises(RuntimeError, match=failure):
-            run_disk_io_latency(juju, chaos, MODEL, "target", None)
+            run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
     else:
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
         assert events == ["baseline", "io_latency", "observe", "cleanup", "recovery", "validation"]
         juju.validate_model.assert_called_once_with(model=MODEL, level="deep")
         chaos.io_latency.assert_called_once_with(
@@ -89,10 +91,11 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
 
 def test_skips_before_baseline_wait_when_unsupported() -> None:
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     chaos.supports.return_value = False
 
     with pytest.raises(pytest.skip.Exception, match="io_latency"):
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
 
     chaos.supports.assert_called_once_with("io_latency")
     juju.multi_model_idle_for_period.assert_not_called()
@@ -102,13 +105,14 @@ def test_skips_before_baseline_wait_when_unsupported() -> None:
 def test_observation_duration_clamped_when_confirmation_outlasts_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """A short per-charm duration may fully elapse while io_latency() awaits confirmation."""
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     hold = MagicMock()
     # Confirmation alone takes longer than the resolved duration.
     monkeypatch.setattr(module, "monotonic", lambda: RESOLVED_DURATION.total_seconds() + 5.0)
     monkeypatch.setattr(module, "observe_io_latency", lambda chaos, model, unit, volume_path, seconds: hold(seconds))
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=0.0)
 
-    run_disk_io_latency(juju, chaos, MODEL, "target", None)
+    run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
 
     # Never pass a negative remaining duration; observe_io_latency must still check for a
     # normally completed status instead of being skipped outright.
@@ -118,12 +122,13 @@ def test_observation_duration_clamped_when_confirmation_outlasts_it(monkeypatch:
 def test_reports_both_errors_when_observation_and_cleanup_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cleanup failure must not hide the original fault that failed the live test."""
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", MagicMock(side_effect=RuntimeError("fault not injected")))
     chaos.cleanup_all.side_effect = RuntimeError("cleanup unreachable")
 
     with pytest.raises(RuntimeError, match="fault not injected") as excinfo:
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
 
     # The original observation error must be preserved (not replaced), chained from the
     # cleanup failure so neither error is lost.
@@ -136,11 +141,12 @@ def test_keyboard_interrupt_during_observation_still_runs_cleanup_and_propagates
 ) -> None:
     """An operator interruption must not be swallowed, and cleanup must still run."""
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", MagicMock(side_effect=KeyboardInterrupt))
 
     with pytest.raises(KeyboardInterrupt):
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, KubernetesClientRegistry({}))
 
     chaos.cleanup_all.assert_called_once()
 
@@ -148,9 +154,10 @@ def test_keyboard_interrupt_during_observation_still_runs_cleanup_and_propagates
 @pytest.mark.parametrize("neighbor", [MODEL, JujuModelHandle(controller="other", model="neighbor")])
 def test_neighbor_validation(neighbor: JujuModelHandle, monkeypatch: pytest.MonkeyPatch) -> None:
     juju, chaos = MagicMock(), MagicMock()
+    juju.backend.kubernetes_cloud_for_model.return_value = None
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", lambda *args, **kwargs: None)
-    run_disk_io_latency(juju, chaos, MODEL, "target", neighbor)
+    run_disk_io_latency(juju, chaos, MODEL, "target", neighbor, KubernetesClientRegistry({}))
     models = [MODEL] if neighbor == MODEL else [MODEL, neighbor]
     assert [call.kwargs for call in juju.validate_model.call_args_list] == [
         {"model": model, "level": "deep"} for model in models

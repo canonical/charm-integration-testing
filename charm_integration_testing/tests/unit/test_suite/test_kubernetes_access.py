@@ -4,17 +4,26 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from inspect import unwrap
+from logging import getLogger
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 import pytest
+from chaos_client import MetaChaosClient, ResourceConstraintsClient
 from juju import JujuClient, JujuModelHandle, JujuVersion
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
 from kubernetes.config import ConfigException  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesClientRegistry
 from test_suite import conftest
 from test_suite import test_controller_restart as restart
+from test_suite import test_live_cpu_stress_moderate as cpu
+from test_suite import test_live_disk_io_latency as io_latency
+from test_suite import test_live_memory_stress_moderate as memory
 from test_suite import test_model_controller_migration as migration
+from test_suite import test_reboot_leader as leader
+from test_suite import test_scale_remove_follower as follower
+from test_suite import test_unit_rotation as rotation
+from test_suite.kubernetes import require_model_kubeconfig
 
 from ..extensions.shared import NullJujuBackend
 
@@ -153,3 +162,114 @@ def test_configured_missing_file_fails_instead_of_skipping(tmp_path: Path) -> No
     # WHEN constructing the client, THEN a configuration error is not converted to a skip
     with pytest.raises(ConfigException):
         unwrap(conftest.kubernetes_client)(registry, TARGET, backend)
+
+
+@dataclass(frozen=True)
+class PreflightParams:
+    label: str
+    run: Callable[[JujuClient, KubernetesClientRegistry], None]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        PreflightParams(
+            "leader",
+            lambda client, registry: leader.test_reboot_leader(client, TARGET, "target", None, None, None, registry),
+        ),
+        PreflightParams(
+            "follower",
+            lambda client, registry: follower.test_scale_remove_follower(
+                client, TARGET, None, "target", None, registry
+            ),
+        ),
+        PreflightParams(
+            "rotation",
+            lambda client, registry: rotation.test_unit_rotation(client, TARGET, None, "target", None, registry),
+        ),
+        PreflightParams(
+            "cpu",
+            lambda client, registry: cpu.test_live_cpu_stress_moderate(
+                client,
+                lambda model: pytest.fail("Chaos resolution must not precede the preflight."),
+                TARGET,
+                "target",
+                "database",
+                None,
+                "neighbor",
+                "database",
+                timedelta(seconds=10),
+                timedelta(minutes=2),
+                timedelta(minutes=15),
+                1,
+                timedelta(minutes=5),
+                registry,
+            ),
+        ),
+        PreflightParams(
+            "memory",
+            lambda client, registry: memory.test_live_memory_stress_moderate(
+                client,
+                lambda model: pytest.fail("Chaos resolution must not precede the preflight."),
+                TARGET,
+                "target",
+                "database",
+                None,
+                "neighbor",
+                "database",
+                timedelta(seconds=10),
+                timedelta(minutes=15),
+                1,
+                timedelta(minutes=5),
+                128,
+                timedelta(minutes=2),
+                registry,
+            ),
+        ),
+        PreflightParams(
+            "io-latency",
+            lambda client, registry: io_latency.test_live_disk_io_latency(
+                client,
+                MetaChaosClient([], client.backend, ResourceConstraintsClient()),
+                TARGET,
+                "target",
+                None,
+                registry,
+            ),
+        ),
+    ],
+    ids=lambda params: params.label,
+)
+def test_explicit_preflight_skips_before_test_operations(params: PreflightParams) -> None:
+    # GIVEN no mapping and a backend that rejects operations other than cloud resolution
+    backend = CloudBackend({TARGET.uri: "workload-cloud"})
+    client = JujuClient(backend, getLogger(__name__))
+
+    # WHEN invoking the test directly, THEN it skips without depending on pytest fixture setup
+    with pytest.raises(pytest.skip.Exception, match="Set KUBECONFIG_workload_cloud"):
+        params.run(client, KubernetesClientRegistry({}))
+    assert backend.resolved == [TARGET]
+
+
+@pytest.mark.parametrize("cloud", [None, "workload-cloud"], ids=["machine", "configured-kubernetes"])
+def test_model_preflight_requires_no_unused_kubernetes_client(cloud: str | None) -> None:
+    # GIVEN a machine model or a mapping whose file must not be loaded by the preflight
+    backend = CloudBackend({TARGET.uri: cloud})
+    registry = KubernetesClientRegistry({cloud: Path("not-loaded.yaml")} if cloud is not None else {})
+
+    # WHEN checking access, THEN only current cloud resolution and mapping presence are needed
+    require_model_kubeconfig(backend, registry, TARGET)
+    assert backend.resolved == [TARGET]
+
+
+def test_model_preflight_resolves_cloud_again_after_topology_changes() -> None:
+    # GIVEN a model whose substrate changes after its first preflight
+    backend = CloudBackend({TARGET.uri: None})
+    registry = KubernetesClientRegistry({})
+    require_model_kubeconfig(backend, registry, TARGET)
+    backend.clouds[TARGET.uri] = "new-cloud"
+
+    # WHEN checking again, THEN the new cloud requires its own mapping
+    with pytest.raises(pytest.skip.Exception, match="Set KUBECONFIG_new_cloud"):
+        require_model_kubeconfig(backend, registry, TARGET)
+    assert backend.resolved == [TARGET, TARGET]

@@ -5,10 +5,12 @@ from datetime import timedelta
 
 import pytest
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 
 from bundle_builder_x import Charm
 
 from .fixtures.integration_spec import require_principal_charm
+from .kubernetes import require_model_kubeconfig
 from .scheduler.states import State
 
 _TIMEOUT = timedelta(minutes=15)
@@ -25,7 +27,6 @@ def _wait_for_leader_recovery(
 
 
 @pytest.mark.state(requires=State.DEPLOYED_HA, provides=State.DEPLOYED_HA)
-@pytest.mark.usefixtures("kubernetes_client")
 def test_reboot_leader(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
@@ -33,7 +34,9 @@ def test_reboot_leader(
     target_deployed_charm: Charm | None,
     neighbor_model_ref: JujuModelHandle | None,
     neighbor_application: str | None,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
+    require_model_kubeconfig(juju_client.backend, kubernetes_client_registry, target_model_ref)
     charm = require_principal_charm(target_deployed_charm)
     current_units = juju_client.num_units(target_application, model=target_model_ref)
     if current_units < charm.ha_units:

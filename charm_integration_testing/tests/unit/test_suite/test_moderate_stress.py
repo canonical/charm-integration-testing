@@ -17,6 +17,7 @@ from juju import (
     JujuModelHandle,
     JujuValidationError,
 )
+from kubernetes_client import KubernetesClientRegistry
 from test_suite import moderate_stress
 from test_suite import test_live_cpu_stress_moderate as cpu
 from test_suite import test_live_memory_stress_moderate as memory
@@ -58,6 +59,9 @@ def result(
 
 
 class Backend(NullJujuBackend):
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return None
+
     def __init__(self, clock: Clock, events: list[str]) -> None:
         self.clock = clock
         self.events = events
@@ -194,6 +198,7 @@ class Harness:
                 recovery,
                 workers,
                 duration,
+                KubernetesClientRegistry({}),
             )
         else:
             memory.test_live_memory_stress_moderate(
@@ -211,6 +216,7 @@ class Harness:
                 duration,
                 size_mb,
                 margin,
+                KubernetesClientRegistry({}),
             )
 
 
