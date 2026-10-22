@@ -128,8 +128,11 @@ existing controller preserve both buckets and provider-pending resources because
 storage may still be in use. Swift-generated bucket keys are revoked before their
 buckets are deleted; local/static keys are never revoked.
 
-Interrupted runs are swept by the scheduled environment cleanup using the
-existing age threshold (240 minutes by default). Only strictly named harness
+Scheduled cleanup covers the five existing shared-substrate representatives
+using the existing age threshold (240 minutes by default). S3 cleanup is scoped
+to each representative's configured storage namespace; sharing a Kubernetes
+cluster does not extend that sweep to other S3 namespaces. Use the cleanup CLI
+with the relevant configuration to sweep those namespaces. Only strictly named harness
 buckets in the matching namespace and with the matching provider ownership tag
 are eligible; log containers, other providers' buckets, and externally
 configured buckets are not touched. Buckets without ownership tags are retained
