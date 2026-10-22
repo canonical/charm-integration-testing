@@ -6,11 +6,13 @@ from datetime import timedelta
 
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
 
+from bundle_builder_x import CharmhubClient
+from bundle_builder_x import JujuVersion as BundleJujuVersion
+
 # Charms that need a reconciling istio-k8s control plane to reach "active", with no Juju
 # relation to express the dependency.
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
-ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
 
 DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
@@ -47,9 +49,15 @@ class IstioMeshExtension(JujuExtension):
     juju: JujuBackend
     logger: logging.Logger
 
-    def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        juju: JujuBackend,
+        logger: logging.Logger,
+        charmhub_client: CharmhubClient,
+    ) -> None:
         self.juju = juju
         self.logger = logger
+        self.charmhub_client = charmhub_client
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         applications = self.juju.list_applications(model)
@@ -76,13 +84,21 @@ class IstioMeshExtension(JujuExtension):
         existing = self._find_istio_application(self.juju.list_applications(model))
         if existing is not None:
             return existing
+        charm = self.charmhub_client.charm_from_store(
+            charm_name=ISTIO_CONTROL_PLANE_CHARM,
+            ubuntu_arch=self.juju.model_architecture(model),
+            platform="kubernetes",
+            juju_version=BundleJujuVersion.parse(str(self.juju.version(model))),
+        )
         try:
             self.juju.deploy_application(
                 model,
                 ISTIO_CONTROL_PLANE_CHARM,
                 application=ISTIO_CONTROL_PLANE_CHARM,
                 trust=True,
-                channel=ISTIO_CONTROL_PLANE_CHANNEL,
+                channel=str(charm.channel),
+                revision=charm.revision,
+                base=f"ubuntu@{charm.ubuntu_version}",
             )
             self.logger.info(f"Deployed '{ISTIO_CONTROL_PLANE_CHARM}' into '{model.uri}'.")
             return ISTIO_CONTROL_PLANE_CHARM
