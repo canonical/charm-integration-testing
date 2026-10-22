@@ -6,7 +6,6 @@ environments:
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: PROD_SQA_KUBECONFIG
-    swift-storage: true
     s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config: {}
@@ -39,7 +38,6 @@ environments:
     platform: kubernetes
     cloud-type: k8s
     kubeconfig-secret: STG_SQA_KUBECONFIG
-    swift-storage: true
     s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config: {}
@@ -60,7 +58,6 @@ environments:
     platform: machine
     cloud-type: o7k
     novarc-secret: PROD_SQA_NOVARC
-    swift-storage: true
     s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1
     arch: amd64
   ps6-sqa-prod_charm_qa_openstack-2:
@@ -74,7 +71,6 @@ environments:
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
-    swift-storage: true
     s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1
     arch: amd64
     bootstrap-config:
@@ -130,7 +126,6 @@ environments:
     # The internal Loki receiver is HTTP-only and reachable only from these private runners.
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
-    swift-storage: true
     s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1
     arch: amd64
     bootstrap-config:

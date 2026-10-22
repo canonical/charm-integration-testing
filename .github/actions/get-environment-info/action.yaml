@@ -24,12 +24,9 @@ outputs:
     description: Name of the GitHub Actions secret holding the novarc (o7k environments
       only).
     value: ${{ steps.lookup.outputs.novarc-secret }}
-  swift-storage:
-    description: Whether this environment uses Swift-backed test storage.
-    value: ${{ steps.lookup.outputs.swift-storage }}
   s3-swift-secret:
-    description: Name of the GitHub Actions secret containing this environment's Swift
-      S3 config.
+    description: Optional name of the GitHub Actions secret enabling Swift-backed
+      S3 storage for this environment.
     value: ${{ steps.lookup.outputs.s3-swift-secret }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as
@@ -71,14 +68,7 @@ runs:
         kubeconfig_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["kubeconfig-secret"] // ""' "${table}")
         novarc_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["novarc-secret"] // ""' "${table}")
         remote_logging=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["remote-logging"] // ""' "${table}")
-        swift_storage=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["swift-storage"] // false' "${table}")
         s3_swift_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["s3-swift-secret"] // ""' "${table}")
-        if [[ "${swift_storage}" == "true" ]]; then
-          if [[ -z "${s3_swift_secret}" ]]; then
-            echo "::error::Swift-enabled environment '${ENVIRONMENT_NAME}' must set s3-swift-secret."
-            exit 1
-          fi
-        fi
 
         # Write Juju config objects to per-environment temp files so that
         # multiple calls (e.g. target + neighbor) don't overwrite each other.
@@ -94,7 +84,6 @@ runs:
         echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
         echo "kubeconfig-secret=${kubeconfig_secret}" >> "${GITHUB_OUTPUT}"
         echo "novarc-secret=${novarc_secret}" >> "${GITHUB_OUTPUT}"
-        echo "swift-storage=${swift_storage}" >> "${GITHUB_OUTPUT}"
         echo "s3-swift-secret=${s3_swift_secret}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
