@@ -203,14 +203,19 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert "scripts/load-swift-config.py" in credential_step["run"]
     assert "SWIFT_CONFIG" not in step["env"]
     assert credential_step["if"] == (
-        "${{ !cancelled() && steps.env_info.outcome == 'success' && " "steps.env_info.outputs.s3-swift-secret != '' }}"
+        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
+        "steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-swift-secret != '' }}"
     )
     assert install_step["id"] == "s3_dependencies"
     assert install_step["if"] == (
-        "${{ !cancelled() && steps.s3_credentials.outcome == 'success' && "
+        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
+        "steps.s3_credentials.outcome == 'success' && "
         "steps.s3_credentials.outputs.available == 'true' }}"
     )
-    assert step["if"] == "${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}"
+    assert step["if"] == (
+        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
+        "steps.s3_dependencies.outcome == 'success' }}"
+    )
 
 
 def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> None:
@@ -230,6 +235,7 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     assert set(schedule["jobs"]) == {"cleanup-schedule"}
     job = schedule["jobs"]["cleanup-schedule"]
     assert job["strategy"]["matrix"] == {"environment": expected}
+    assert len(expected) == len(set(expected))
     assert job["strategy"]["fail-fast"] is False
     assert job["uses"] == "./.github/workflows/cleanup-environment.yaml"
     assert job["with"] == {"environment": "${{ matrix.environment }}"}
@@ -237,10 +243,14 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     assert job["secrets"] == "inherit"
     assert all(not name.startswith("S3_") for name in events["workflow_call"]["secrets"])
     substrates = set()
+    swift_secrets = []
     for name in expected:
         info = environments[name]
         substrates.add((info.get("kubeconfig-secret"), info.get("novarc-secret")))
+        swift_secrets.append(info["s3-swift-secret"])
     assert len(substrates) == len(expected)
+    assert all(swift_secrets)
+    assert len(swift_secrets) == len(set(swift_secrets))
     assert events["workflow_dispatch"]["inputs"]["environment"]["options"] == expected
     assert "cleanup_substrate" not in events["workflow_call"]["inputs"]
     assert "cleanup_substrate" not in events["workflow_dispatch"]["inputs"]
@@ -255,6 +265,39 @@ def test_cleanup_preserves_per_environment_cancellation() -> None:
         "group": "${{ github.workflow }}-${{ inputs.environment }}",
         "cancel-in-progress": True,
     }
+
+
+@pytest.mark.parametrize(
+    ("threshold", "expected_status"),
+    [
+        pytest.param("1.5", 0, id="positive-fraction"),
+        pytest.param("0", 1, id="zero"),
+        pytest.param("-1", 1, id="negative"),
+        pytest.param("nan", 1, id="nan"),
+        pytest.param("inf", 1, id="infinity"),
+    ],
+)
+def test_cleanup_validates_finite_positive_threshold(tmp_path: Path, threshold: str, expected_status: int) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = workflow["jobs"]["cleanup-environment"]["steps"]
+    validator = next(step for step in steps if step.get("id") == "age_threshold")
+    guarded = [step for step in steps if "!cancelled()" in step.get("if", "")]
+
+    assert steps.index(validator) < min(steps.index(step) for step in guarded)
+    assert all("steps.age_threshold.outcome == 'success'" in step["if"] for step in guarded)
+
+    result = subprocess.run(
+        ["bash", "-c", validator["run"]],
+        capture_output=True,
+        check=False,
+        env={**os.environ, "AGE_THRESHOLD": threshold},
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == expected_status
+    if expected_status:
+        assert "age_threshold must be a positive finite number" in result.stdout
 
 
 @pytest.mark.parametrize("missing_variable", ["all", "S3_OS_PASSWORD", None], ids=["absent", "partial", "complete"])
@@ -317,10 +360,14 @@ def test_cleanup_entrypoint_passes_config_and_age_to_provider(
     class ProviderStub:
         def __init__(self) -> None:
             self.age: timedelta | None = None
+            self.pending_cleanup_calls = 0
 
         def cleanup_stale(self, age: timedelta) -> list[str]:
             self.age = age
             return ["stale-bucket"]
+
+        def cleanup_pending_resources(self) -> None:
+            self.pending_cleanup_calls += 1
 
     session = SessionStub()
     provider = ProviderStub()
@@ -339,6 +386,7 @@ def test_cleanup_entrypoint_passes_config_and_age_to_provider(
 
     assert observed == {"config": Path("/test/storage.conf"), "session": session}
     assert provider.age == timedelta(minutes=17.5)
+    assert provider.pending_cleanup_calls == 1
     assert capsys.readouterr().out == "Removed S3 bucket stale-bucket\n"
 
 
@@ -361,6 +409,8 @@ class SessionStub:
 class FailingProviderStub:
     def cleanup_stale(self, age):
         raise RuntimeError("cleanup failed")
+    def cleanup_pending_resources(self):
+        pass
 
 module.requests.Session = SessionStub
 module.provider_from_config = lambda path, session: FailingProviderStub()

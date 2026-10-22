@@ -17,8 +17,11 @@ def main() -> None:
     args = parser.parse_args()
     with requests.Session() as session:
         provider = provider_from_config(args.config, session)
-        for bucket in provider.cleanup_stale(timedelta(minutes=args.age_minutes)):
-            print(f"Removed S3 bucket {bucket}")
+        try:
+            for bucket in provider.cleanup_stale(timedelta(minutes=args.age_minutes)):
+                print(f"Removed S3 bucket {bucket}")
+        finally:
+            provider.cleanup_pending_resources()
 
 
 if __name__ == "__main__":
