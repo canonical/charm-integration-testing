@@ -9,7 +9,7 @@
 #
 # After this script completes, register the cloud and bootstrap a controller:
 #   juju add-k8s local-k8s --client
-#   juju bootstrap local-k8s <controller-name>
+#   juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
 #   juju add-model <model-name>
 
 set -euo pipefail

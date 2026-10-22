@@ -8,7 +8,7 @@
 #   /project/development-sandbox/bin/setup-lxd.sh
 #
 # After this script completes, bootstrap a controller:
-#   juju bootstrap localhost <controller-name>
+#   juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
 #   juju add-model <model-name>
 
 set -euo pipefail

@@ -101,7 +101,7 @@ For a manually bootstrapped LXD test controller, use the same sizing:
 
 .. code:: bash
 
-   juju bootstrap localhost ${LXD_CONTROLLER_NAME} --bootstrap-constraints root-disk=5G
+   juju bootstrap localhost lxd-test-controller --bootstrap-constraints root-disk=5G
 
 Chaos tools
 ~~~~~~~~~~~
