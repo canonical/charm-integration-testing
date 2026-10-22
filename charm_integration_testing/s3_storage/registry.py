@@ -6,7 +6,6 @@ from pathlib import Path
 
 from .configuration import provider_from_config
 from .provider import S3Provider
-from .storage import S3StorageHandle
 
 
 class S3ProviderRegistry:
@@ -20,7 +19,7 @@ class S3ProviderRegistry:
         self._configs = dict(configs)
         self._provider_factory = provider_factory
         self._providers_by_cloud: dict[str, S3Provider] = {}
-        self._providers: dict[S3StorageHandle, S3Provider] = {}
+        self._providers: dict[str, S3Provider] = {}
 
     def provider_for_cloud(self, cloud: str) -> S3Provider:
         if cloud not in self._providers_by_cloud:
@@ -29,5 +28,5 @@ class S3ProviderRegistry:
             except KeyError as exc:
                 raise ValueError(f"No S3 configuration for Juju cloud '{cloud}'; set S3_CONFIG_<cloud>") from exc
             provider = self._provider_factory(config)
-            self._providers_by_cloud[cloud] = self._providers.setdefault(provider.handle, provider)
+            self._providers_by_cloud[cloud] = self._providers.setdefault(provider.handle.resource_id, provider)
         return self._providers_by_cloud[cloud]
