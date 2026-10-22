@@ -4,6 +4,7 @@
 import hashlib
 import json
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -80,6 +81,42 @@ class KeystoneStub(KeystoneClient):
                 self.fail_delete_attempts[access_key] = failures_remaining - 1
             raise RuntimeError("Credential revocation failed")
         self.deleted.append(access_key)
+
+
+@pytest.mark.parametrize(
+    "auth_url",
+    ["https://identity.test", "https://identity.test/", "https://identity.test/v3/"],
+    ids=["implicit-version", "implicit-version-slash", "explicit-version-slash"],
+)
+def test_swift_stale_cleanup_accepts_equivalent_auth_urls(client: S3Client, auth_url: str) -> None:
+    # GIVEN a bucket tagged by the canonical provider and an equivalent cleanup configuration
+    original_keystone = KeystoneStub()
+    original = SwiftS3Provider("https://s3.test", NAMESPACE, original_keystone, CLEANUP_CREDS)
+    keystone = KeystoneStub()
+    keystone.credentials = replace(SWIFT, auth_url=auth_url)
+    storage = SwiftS3Provider("https://s3.test/", NAMESPACE, keystone, CLEANUP_CREDS)
+
+    # WHEN sweeping with the alternate URL, THEN the original tag is recognized and its key revoked
+    with patch.object(storage, "_client_factory", return_value=client), Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]})
+        stubber.add_response(
+            "get_bucket_tagging",
+            {
+                "TagSet": [
+                    {"Key": "charmqa-storage-owner", "Value": original._bucket_owner},
+                    {"Key": "charmqa-ec2-access", "Value": "bucket-access"},
+                ]
+            },
+            {"Bucket": OLD_BUCKET},
+        )
+        empty_bucket(stubber, OLD_BUCKET)
+        assert storage.cleanup_stale(timedelta(hours=4), NOW) == [OLD_BUCKET]
+        assert keystone.deleted == ["bucket-access"]
+        stubber.assert_no_pending_responses()
+    assert (
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS).ownership_identity
+        == SwiftCredentialProvider(original_keystone, CLEANUP_CREDS).ownership_identity
+    )
 
 
 def response(status: int, body: dict[str, Any], headers: dict[str, str] | None = None) -> requests.Response:

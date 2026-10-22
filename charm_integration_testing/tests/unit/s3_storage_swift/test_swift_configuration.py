@@ -57,6 +57,9 @@ def test_equivalent_swift_urls_share_provider_identity(tmp_path: Path, params: E
         # WHEN loading the equivalent configuration, THEN its handle deduplicates
         actual = provider_from_config(path, session)
     assert actual.handle == expected.handle
+    assert isinstance(actual, SwiftS3Provider)
+    assert isinstance(expected, SwiftS3Provider)
+    assert actual._bucket_owner == expected._bucket_owner
 
 
 def test_generic_package_import_does_not_load_swift() -> None:

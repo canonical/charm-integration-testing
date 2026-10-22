@@ -25,7 +25,7 @@ class SwiftCredentialProvider(CredentialProvider):
         credentials = self.keystone.credentials
         return (
             "swift",
-            credentials.auth_url,
+            credentials.auth_endpoint(),
             credentials.username,
             credentials.user_domain_name,
             credentials.project_name,
@@ -65,7 +65,7 @@ class SwiftS3Provider(S3Storage):
                 endpoint.rstrip("/"),
                 namespace,
                 region,
-                keystone.credentials.auth_url,
+                keystone.credentials.auth_endpoint(),
                 keystone.credentials.username,
                 keystone.credentials.user_domain_name,
                 keystone.credentials.project_name,
