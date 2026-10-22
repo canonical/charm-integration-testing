@@ -86,14 +86,14 @@ def test_ci_checks_each_environment_swift_secret_before_test_entrypoints() -> No
 
     assert len(test_steps) == 2
     assert "continue-on-error" not in target_check
-    assert target_check["if"] == "${{ steps.target_env_info.outputs.swift-storage == 'true' }}"
+    assert target_check["if"] == "${{ steps.target_env_info.outputs.s3-swift-secret != '' }}"
     assert target_check["env"]["SWIFT_SECRET_NAME"] == "${{ steps.target_env_info.outputs.s3-swift-secret }}"
     assert target_check["env"]["SWIFT_CONFIG"] == TARGET_SECRET_EXPRESSION
     assert "scripts/load-swift-config.py" in target_check["run"]
     assert target_check["id"] == "target_s3_config"
     assert '"${RUNNER_TEMP}/target-s3.conf"' in target_check["run"]
     assert neighbor_check["if"] == (
-        "${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.swift-storage == 'true' }}"
+        "${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-swift-secret != '' }}"
     )
     assert neighbor_check["env"]["SWIFT_SECRET_NAME"] == "${{ steps.neighbor_env_info.outputs.s3-swift-secret }}"
     assert neighbor_check["env"]["SWIFT_CONFIG"] == NEIGHBOR_SECRET_EXPRESSION
@@ -159,19 +159,21 @@ def test_ci_preflight_checks_environment_secrets(
         assert f"{secret_name} is missing: {missing_variable}" in result.stdout
 
 
-def test_environment_info_exposes_swift_storage_flag() -> None:
+def test_environment_info_exposes_optional_swift_secret() -> None:
     action = yaml.safe_load((ROOT / ".github/actions/get-environment-info/action.yaml").read_text())
     lookup = action["runs"]["steps"][0]["run"]
     environment_lookups = [line for line in lookup.splitlines() if "yq " in line and ".environments[" in line]
 
-    assert action["outputs"]["swift-storage"]["value"] == "${{ steps.lookup.outputs.swift-storage }}"
+    assert "swift-storage" not in action["outputs"]
     assert action["outputs"]["s3-swift-secret"]["value"] == "${{ steps.lookup.outputs.s3-swift-secret }}"
     assert any(
-        "swift_storage=$(yq -r" in line and "swift-storage" in line and "// false" in line
+        "s3_swift_secret=$(yq -r" in line and "s3-swift-secret" in line and '// ""' in line
         for line in lookup.splitlines()
     )
-    assert "must set s3-swift-secret" in lookup
-    assert 'echo "swift-storage=${swift_storage}"' in lookup
+    assert "swift_storage" not in lookup
+    assert 'echo "s3-swift-secret=${s3_swift_secret}"' in lookup
+    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
+    assert all("swift-storage" not in environment for environment in environments.values())
     assert environment_lookups
     assert all("yq -r" in line for line in environment_lookups if " -o=json " not in line)
     assert all("strenv(ENVIRONMENT_NAME)" in line for line in environment_lookups)
