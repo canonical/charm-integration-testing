@@ -25,6 +25,10 @@ class SwiftCredentials:
         url = self.auth_url.rstrip("/")
         return url if url.endswith("/v3") else f"{url}/v3"
 
+    def storage_endpoint(self) -> str:
+        """Normalize the Swift account URL without discarding its ownership scope."""
+        return self.storage_url.rstrip("/")
+
     def s3_endpoint(self) -> str:
         """RGW exposes S3 at the origin of its /swift/v1 account endpoint."""
         url = urlsplit(self.storage_url)

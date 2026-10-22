@@ -30,6 +30,7 @@ SWIFT_CONFIG = (
 class EquivalentURLParams:
     endpoint: str
     auth_url: str
+    storage_url: str = "https://storage.test/swift/v1/AUTH_project"
 
 
 @pytest.mark.parametrize(
@@ -43,6 +44,12 @@ class EquivalentURLParams:
         ),
         pytest.param(EquivalentURLParams("https://explicit.test", "https://identity.test"), id="auth-implicit-version"),
         pytest.param(EquivalentURLParams("https://explicit.test/", "https://identity.test/"), id="both-normalized"),
+        pytest.param(
+            EquivalentURLParams(
+                "https://explicit.test", "https://identity.test/v3", "https://storage.test/swift/v1/AUTH_project/"
+            ),
+            id="storage-trailing-slash",
+        ),
     ],
 )
 def test_equivalent_swift_urls_share_provider_identity(tmp_path: Path, params: EquivalentURLParams) -> None:
@@ -52,7 +59,10 @@ def test_equivalent_swift_urls_share_provider_identity(tmp_path: Path, params: E
     with requests.Session() as session:
         expected = provider_from_config(path, session)
         path.write_text(
-            SWIFT_CONFIG.replace("https://identity.test/v3", params.auth_url) + f"S3_ENDPOINT={params.endpoint}\n"
+            SWIFT_CONFIG.replace("https://identity.test/v3", params.auth_url).replace(
+                "https://storage.test/swift/v1/AUTH_project", params.storage_url
+            )
+            + f"S3_ENDPOINT={params.endpoint}\n"
         )
         # WHEN loading the equivalent configuration, THEN its handle deduplicates
         actual = provider_from_config(path, session)
@@ -60,6 +70,22 @@ def test_equivalent_swift_urls_share_provider_identity(tmp_path: Path, params: E
     assert isinstance(actual, SwiftS3Provider)
     assert isinstance(expected, SwiftS3Provider)
     assert actual._bucket_owner == expected._bucket_owner
+
+
+def test_distinct_swift_accounts_keep_distinct_identities(tmp_path: Path) -> None:
+    # GIVEN two Swift accounts served by the same S3 origin
+    path = tmp_path / "s3.conf"
+    path.write_text(SWIFT_CONFIG)
+    with requests.Session() as session:
+        original = provider_from_config(path, session)
+        path.write_text(SWIFT_CONFIG.replace("AUTH_project", "AUTH_other"))
+        # WHEN loading the other account, THEN endpoint equivalence must not merge ownership
+        other = provider_from_config(path, session)
+    assert isinstance(original, SwiftS3Provider)
+    assert isinstance(other, SwiftS3Provider)
+    assert original.endpoint == other.endpoint
+    assert original.handle != other.handle
+    assert original._bucket_owner != other._bucket_owner
 
 
 def test_generic_package_import_does_not_load_swift() -> None:

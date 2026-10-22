@@ -88,12 +88,15 @@ class KeystoneStub(KeystoneClient):
     ["https://identity.test", "https://identity.test/", "https://identity.test/v3/"],
     ids=["implicit-version", "implicit-version-slash", "explicit-version-slash"],
 )
-def test_swift_stale_cleanup_accepts_equivalent_auth_urls(client: S3Client, auth_url: str) -> None:
+@pytest.mark.parametrize(
+    "storage_url", [SWIFT.storage_url, f"{SWIFT.storage_url}/"], ids=["storage-canonical", "storage-trailing-slash"]
+)
+def test_swift_stale_cleanup_accepts_equivalent_urls(client: S3Client, auth_url: str, storage_url: str) -> None:
     # GIVEN a bucket tagged by the canonical provider and an equivalent cleanup configuration
     original_keystone = KeystoneStub()
     original = SwiftS3Provider("https://s3.test", NAMESPACE, original_keystone, CLEANUP_CREDS)
     keystone = KeystoneStub()
-    keystone.credentials = replace(SWIFT, auth_url=auth_url)
+    keystone.credentials = replace(SWIFT, auth_url=auth_url, storage_url=storage_url)
     storage = SwiftS3Provider("https://s3.test/", NAMESPACE, keystone, CLEANUP_CREDS)
 
     # WHEN sweeping with the alternate URL, THEN the original tag is recognized and its key revoked

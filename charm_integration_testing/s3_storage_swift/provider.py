@@ -30,7 +30,7 @@ class SwiftCredentialProvider(CredentialProvider):
             credentials.user_domain_name,
             credentials.project_name,
             credentials.project_domain_name,
-            credentials.storage_url,
+            credentials.storage_endpoint(),
             self.cleanup_credentials.access_key,
         )
 
@@ -70,7 +70,7 @@ class SwiftS3Provider(S3Storage):
                 keystone.credentials.user_domain_name,
                 keystone.credentials.project_name,
                 keystone.credentials.project_domain_name,
-                keystone.credentials.storage_url,
+                keystone.credentials.storage_endpoint(),
                 cleanup_credentials.access_key,
             ),
         )

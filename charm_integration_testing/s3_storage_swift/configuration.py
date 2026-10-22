@@ -75,7 +75,7 @@ def provider_from_environment(
             credentials.user_domain_name,
             credentials.project_name,
             credentials.project_domain_name,
-            credentials.storage_url,
+            credentials.storage_endpoint(),
             values["S3_CLEANUP_ACCESS_KEY"],
             values["S3_CLEANUP_SECRET_KEY"],
         ),
