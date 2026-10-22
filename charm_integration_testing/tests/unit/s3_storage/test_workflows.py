@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -25,8 +26,36 @@ SWIFT_CONFIG_VARIABLES = (
     "S3_ENDPOINT",
     "S3_REGION",
 )
-TARGET_SECRET_EXPRESSION = "${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}"
-NEIGHBOR_SECRET_EXPRESSION = "${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}"
+TARGET_SECRET_EXPRESSION = (
+    "${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.target_env_info.outputs.s3-swift-secret) "
+    "&& secrets[steps.target_env_info.outputs.s3-swift-secret] || '' }}"
+)
+NEIGHBOR_SECRET_EXPRESSION = (
+    "${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.neighbor_env_info.outputs.s3-swift-secret) "
+    "&& secrets[steps.neighbor_env_info.outputs.s3-swift-secret] || '' }}"
+)
+
+
+def test_ci_swift_secret_lookup_is_restricted_before_dereferencing() -> None:
+    # GIVEN a fixed workflow allowlist independent of checked-out environment metadata
+    workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
+    job = workflow["jobs"]["execute-charm-test"]
+    allowed = json.loads(job["env"]["S3_SWIFT_SECRET_NAMES"])
+    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
+    assert set(allowed) == {environment["s3-swift-secret"] for environment in environments.values()}
+    assert len(allowed) == len(set(allowed))
+    assert all(name.startswith("S3_SWIFT_CONFIG_") for name in allowed)
+
+    # WHEN metadata selects an unrelated secret, THEN it cannot reach the dynamic lookup
+    assert "PROD_SQA_KUBECONFIG" not in allowed
+    assert "TEST_OBSERVER_TOKEN" not in allowed
+    assert "" not in allowed
+    for side in ("target", "neighbor"):
+        step = next(step for step in job["steps"] if step.get("id") == f"{side}_s3_config")
+        selected = f"steps.{side}_env_info.outputs.s3-swift-secret"
+        assert step["env"]["SWIFT_CONFIG"] == (
+            "${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), " f"{selected}) && secrets[{selected}] || '' }}}}"
+        )
 
 
 def test_ci_test_entrypoints_receive_cloud_scoped_config_paths() -> None:
