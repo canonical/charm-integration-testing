@@ -744,14 +744,15 @@ def test_cleanup_stale_failure_does_not_create_temporary_key(client: S3Client) -
         stubber.assert_no_pending_responses()
 
 
-def test_keystone_scopes_credentials_and_refreshes_for_cleanup() -> None:
+@pytest.mark.parametrize("delete_status", [204, 404], ids=["deleted", "already-absent"])
+def test_keystone_scopes_credentials_and_refreshes_for_cleanup(delete_status: int) -> None:
     # GIVEN a valid Keystone v3 identity response
     token = response(
         201, {"token": {"user": {"id": "user-id"}, "project": {"id": "project-id"}}}, {"X-Subject-Token": "token"}
     )
     credential = response(201, {"credential": {"access": CREDS.access_key, "secret": CREDS.secret_key}})
     with requests.Session() as session, patch.object(session, "post", side_effect=[token, credential, token]) as post:
-        with patch.object(session, "delete", return_value=response(204, {})) as delete:
+        with patch.object(session, "delete", return_value=response(delete_status, {})) as delete:
             keystone = KeystoneClient(SWIFT, session)
             # WHEN a key is created and revoked
             assert keystone.create_credentials() == CREDS
