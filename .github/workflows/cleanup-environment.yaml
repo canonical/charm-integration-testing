@@ -79,6 +79,29 @@ jobs:
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
+      S3_SWIFT_SECRET_NAMES: >-
+        ["S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6",
+        "S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1",
+        "S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1",
+        "S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2"]
     steps:
 
       ##################################################################################
@@ -139,7 +162,7 @@ jobs:
         shell: bash
         env:
           SWIFT_SECRET_NAME: ${{ steps.env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG || secrets[steps.env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Dynamic fallback key comes from the repo-owned environment map.
+          SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG || (contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.env_info.outputs.s3-swift-secret) && secrets[steps.env_info.outputs.s3-swift-secret] || '') }}  # zizmor: ignore[overprovisioned-secrets] Fixed workflow allowlist guards the dynamic fallback.
         run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/cleanup-s3.conf"
       - name: Install S3 cleanup dependencies
