@@ -91,6 +91,13 @@ This installs:
 ```
 
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
+
+This historical reproduction preserves execution 509067's empty bootstrap
+constraints. For a new run, replace the Kubernetes neighbor's
+`--neighbor-controller-bootstrap-constraints ''` with
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
+The results below describe the historical command, not the updated disk sizing.
+
 ```bash
 # Reproduce Issue #693 test execution 509067
 # Using a UNIQUE PREFIX to avoid conflicts with other agents
