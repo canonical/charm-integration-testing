@@ -373,6 +373,7 @@ class JubilantBackend(JujuCmdBackend):
             status=app.app_status.current,
             units={name: unit.workload_status.current for name, unit in app.units.items()},
             agents={name: unit.juju_status.current for name, unit in app.units.items()},
+            application_message=app.app_status.message,
         )
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
