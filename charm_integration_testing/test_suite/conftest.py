@@ -84,7 +84,7 @@ from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
 )
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
-from test_suite.fixtures.juju import get_juju_client_for_registered_models
+from test_suite.fixtures.juju import get_registered_model_handles, needs_juju_client
 from test_suite.remote_logging import (
     build_remote_logging_endpoints_by_controller,
     remote_logging_existing_state_warning,
@@ -436,6 +436,17 @@ def juju_client(
         kubernetes_client_registry,
         unseal_vault_k8s_extension,
     )
+
+
+@pytest.fixture
+def juju_client_if_needed(
+    request: pytest.FixtureRequest, session_resource_registry: ResourceRegistry
+) -> JujuClient | None:
+    """Return a Juju client only when models exist or the test itself needs one."""
+    if not needs_juju_client(request, session_resource_registry):
+        return None
+    juju_client: JujuClient = request.getfixturevalue("juju_client")
+    return juju_client
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -1135,17 +1146,16 @@ def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
     session_resource_registry: ResourceRegistry,
+    juju_client_if_needed: JujuClient | None,
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _print_all_model_statuses() -> None:
-        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
-        if client_and_models is None:
+        if juju_client_if_needed is None:
             return
-        juju_client, model_handles = client_and_models
-        for handle in model_handles:
+        for handle in get_registered_model_handles(session_resource_registry):
             try:
-                juju_client.print_status(model=handle)
+                juju_client_if_needed.print_status(model=handle)
             except Exception:
                 logger.warning(f"Failed to print status for model '{handle.uri}'")
 
@@ -1301,18 +1311,16 @@ def record_charm_info_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charm_info_execution_metadata(
-    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
+    juju_client_if_needed: JujuClient | None,
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
-        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
-        if client_and_models is None:
+        if juju_client_if_needed is None:
             return
-        juju_client, model_handles = client_and_models
-        for handle in model_handles:
-            record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
+        for handle in get_registered_model_handles(session_resource_registry):
+            record_charm_info_execution_metadata_instantaneous(juju_client_if_needed, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -1571,19 +1579,17 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
+    juju_client_if_needed: JujuClient | None,
     execution_metadata: Callable[[str, str | int], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     yield
 
     # Save Juju version for each registered model
-    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
-    if client_and_models is not None:
-        juju_client, model_handles = client_and_models
-        for handle in model_handles:
-            execution_metadata("juju:version", str(juju_client.version(handle)))
+    if juju_client_if_needed is not None:
+        for handle in get_registered_model_handles(session_resource_registry):
+            execution_metadata("juju:version", str(juju_client_if_needed.version(handle)))
 
 
 @pytest.fixture
