@@ -418,6 +418,42 @@ def test_static_stale_cleanup_checks_ownership_tag(client: S3Client) -> None:
         stubber.assert_no_pending_responses()
 
 
+@pytest.mark.parametrize(
+    "failure_stage", ["bucket", "listing", "none"], ids=["bucket-error", "listing-error", "close-only"]
+)
+def test_stale_cleanup_reports_sweep_and_client_close_failures(client: S3Client, failure_stage: str) -> None:
+    # GIVEN a stale sweep whose client close fails, optionally after an S3 error
+    storage = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, client_factory=lambda _: client)
+    close_failure = RuntimeError("Close failed")
+    with Stubber(client) as stubber:
+        if failure_stage == "listing":
+            stubber.add_client_error("list_buckets", service_error_code="AccessDenied", expected_params={})
+        else:
+            buckets = [{"Name": OLD_BUCKET}] if failure_stage == "bucket" else []
+            stubber.add_response("list_buckets", {"Buckets": buckets}, {})
+            if failure_stage == "bucket":
+                stubber.add_client_error(
+                    "get_bucket_tagging", service_error_code="AccessDenied", expected_params={"Bucket": OLD_BUCKET}
+                )
+
+        # WHEN cleanup closes its client, THEN both diagnostics survive and the first failure remains the cause
+        with patch.object(client, "close", side_effect=close_failure) as close:
+            with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources") as error:
+                storage.cleanup_stale(timedelta(hours=4), NOW)
+        assert "client close: RuntimeError" in str(error.value)
+        if failure_stage == "none":
+            assert error.value.__cause__ is close_failure
+        else:
+            assert error.value.__cause__ is not None
+            assert "AccessDenied" in str(error.value.__cause__)
+            expected_context = (
+                OLD_BUCKET if failure_stage == "bucket" else f"sweep: {type(error.value.__cause__).__name__}"
+            )
+            assert expected_context in str(error.value)
+        close.assert_called_once()
+        stubber.assert_no_pending_responses()
+
+
 def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
@@ -628,3 +664,51 @@ def test_direct_provider_handles_distinguish_endpoints_and_credentials() -> None
     ]
 
     assert len({provider.handle.resource_id for provider in providers}) == len(providers)
+
+
+@pytest.mark.parametrize("credential_kind", ["application", "cleanup"], ids=["application-secret", "cleanup-secret"])
+def test_direct_static_handles_include_secrets_without_changing_ownership(credential_kind: str) -> None:
+    # GIVEN matching non-secret identities but different application or cleanup secrets
+    original = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, cleanup_credentials=CLEANUP_CREDS)
+    credentials = (
+        S3Credentials(CREDS.access_key, "different-application-secret") if credential_kind == "application" else CREDS
+    )
+    cleanup_credentials = (
+        S3Credentials(CLEANUP_CREDS.access_key, "different-cleanup-secret")
+        if credential_kind == "cleanup"
+        else CLEANUP_CREDS
+    )
+
+    # WHEN constructed directly, THEN credential configurations differ but persistent ownership is unchanged
+    other = StaticS3Provider("https://s3.test", NAMESPACE, credentials, cleanup_credentials=cleanup_credentials)
+    assert original.handle.resource_id != other.handle.resource_id
+    assert original._bucket_owner == other._bucket_owner
+    assert credentials.secret_key not in other.handle.resource_id
+    assert cleanup_credentials.secret_key not in other.handle.resource_id
+
+
+@pytest.mark.parametrize("cleanup_credentials", [None, CREDS, CLEANUP_CREDS], ids=["implicit", "same", "separate"])
+def test_direct_static_handle_matches_environment_configuration(cleanup_credentials: S3Credentials | None) -> None:
+    # GIVEN the same effective configuration constructed directly and through the environment boundary
+    environ = {
+        "S3_ENDPOINT": "https://s3.test/",
+        "S3_BUCKET_NAMESPACE": NAMESPACE,
+        "S3_ACCESS_KEY": CREDS.access_key,
+        "S3_SECRET_KEY": CREDS.secret_key,
+    }
+    if cleanup_credentials is not None:
+        environ.update(
+            S3_CLEANUP_ACCESS_KEY=cleanup_credentials.access_key, S3_CLEANUP_SECRET_KEY=cleanup_credentials.secret_key
+        )
+    direct = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, cleanup_credentials=cleanup_credentials)
+
+    # WHEN loading it, THEN both entrypoints use one canonical handle and ownership identity
+    loaded = provider_from_environment(environ)
+    assert isinstance(loaded, StaticS3Provider)
+    assert loaded.handle == direct.handle
+    assert loaded._bucket_owner == direct._bucket_owner
+
+
+def test_direct_static_handle_preserves_explicit_identity() -> None:
+    provider = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, identity="explicit-provider")
+    assert provider.handle.identity == "explicit-provider"

@@ -3,7 +3,6 @@
 
 from collections.abc import Mapping
 
-from .identity import provider_identity
 from .provider import S3Credentials, S3Provider
 from .storage import StaticS3Provider
 
@@ -45,16 +44,6 @@ def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S
                 _require_environment_value(environ, "S3_SECRET_KEY", prefix),
             ),
             region=region,
-            identity=provider_identity(
-                "static",
-                endpoint,
-                namespace,
-                region,
-                _require_environment_value(environ, "S3_ACCESS_KEY", prefix),
-                _require_environment_value(environ, "S3_SECRET_KEY", prefix),
-                _get_environment_value(environ, "S3_CLEANUP_ACCESS_KEY", prefix) or "",
-                _get_environment_value(environ, "S3_CLEANUP_SECRET_KEY", prefix) or "",
-            ),
             cleanup_credentials=(
                 S3Credentials(
                     _require_environment_value(environ, "S3_CLEANUP_ACCESS_KEY", prefix),

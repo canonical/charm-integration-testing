@@ -16,6 +16,7 @@ from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from .identity import bucket_owner_identity as make_bucket_owner_identity
+from .identity import provider_identity
 from .provider import CredentialProvider, S3Bucket, S3Credentials, S3Provider, StaticCredentialProvider
 
 if TYPE_CHECKING:
@@ -257,9 +258,18 @@ class S3Storage(S3Provider):
                         failures.append(f"{name}: {type(exc).__name__}")
                         if first_failure is None:
                             first_failure = exc
+        except Exception as exc:
+            failures.append(f"sweep: {type(exc).__name__}")
+            if first_failure is None:
+                first_failure = exc
         finally:
             if client is not None:
-                client.close()
+                try:
+                    client.close()
+                except Exception as exc:
+                    failures.append(f"client close: {type(exc).__name__}")
+                    if first_failure is None:
+                        first_failure = exc
         if failures:
             raise RuntimeError("Failed to clean stale S3 resources: " + "; ".join(failures)) from first_failure
         return removed
@@ -417,6 +427,17 @@ class StaticS3Provider(S3Storage):
         cleanup_credentials: S3Credentials | None = None,
     ) -> None:
         credential_provider = StaticCredentialProvider(credentials, cleanup_credentials)
+        if identity is None:
+            identity = provider_identity(
+                "static",
+                endpoint.rstrip("/"),
+                namespace,
+                region,
+                credentials.access_key,
+                credentials.secret_key,
+                credential_provider.cleanup_credentials.access_key,
+                credential_provider.cleanup_credentials.secret_key,
+            )
         super().__init__(
             endpoint,
             namespace,
