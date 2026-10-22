@@ -1716,10 +1716,14 @@ class TestJubilantBackend:
                 trust: bool = False,
                 force: bool = False,
                 channel: str | None = None,
+                revision: int | None = None,
+                base: str | None = None,
             ) -> None:
                 self.charm = charm
                 self.app = app
                 self.config = config
+                self.revision = revision
+                self.base = base
 
         def test(self) -> None:
             # GIVEN
@@ -1728,13 +1732,20 @@ class TestJubilantBackend:
 
             # WHEN
             JubilantBackend(client).deploy_application(
-                TEST_MODEL, charm="my-charm", application="my-app", config={"setting": "value"}
+                TEST_MODEL,
+                charm="my-charm",
+                application="my-app",
+                config={"setting": "value"},
+                revision=82,
+                base="ubuntu@26.04",
             )
 
             # THEN
             assert stub.charm == "my-charm"
             assert stub.app == "my-app"
             assert stub.config == {"setting": "value"}
+            assert stub.revision == 82
+            assert stub.base == "ubuntu@26.04"
 
     class TestConfigureApplication:
         @dataclass
@@ -3097,6 +3108,43 @@ class TestDeployBundleFile:
 
         # THEN the predicate returns True
         assert result is True
+
+
+class TestJubilantBackendModelArchitecture:
+    @dataclass
+    class ConstraintsStub:
+        constraints: dict[str, Any]
+
+        def model_constraints(self) -> dict[str, Any]:
+            return self.constraints
+
+    @pytest.mark.parametrize(
+        "constraints,expected",
+        [({"arch": "amd64"}, "amd64"), ({"arch": "arm64"}, "arm64"), ({}, "amd64")],
+    )
+    def test_reads_model_constraints(self, constraints: dict[str, Any], expected: str) -> None:
+        model = JujuModelHandle(controller="destination", model="migrated")
+        stub = self.ConstraintsStub(constraints)
+
+        class Client(JubilantClientStub):
+            def model(self, requested: JujuModelHandle | None) -> Any:
+                assert requested == model
+                return self.client
+
+        client = Client(stub)
+        backend = JubilantBackend(client)
+
+        assert backend.model_architecture(model) == expected
+
+        # A later lookup must reflect changed constraints rather than a cached value.
+        stub.constraints = {"arch": "s390x"}
+        assert backend.model_architecture(model) == "s390x"
+
+    def test_rejects_invalid_architecture(self) -> None:
+        backend = JubilantBackend(JubilantClientStub(self.ConstraintsStub({"arch": 42})))
+
+        with pytest.raises(ValueError, match="Invalid architecture constraint"):
+            backend.model_architecture(TEST_MODEL)
 
 
 class TestJubilantBackendVersion:

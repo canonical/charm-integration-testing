@@ -728,6 +728,9 @@ class JubilantBackend(JujuCmdBackend):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
@@ -736,6 +739,8 @@ class JubilantBackend(JujuCmdBackend):
             trust=trust,
             force=force,
             channel=channel,
+            revision=revision,
+            base=base,
         )
 
     def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
@@ -981,6 +986,14 @@ class JubilantBackend(JujuCmdBackend):
 
     def version(self, model: JujuModelHandle) -> JujuVersion:
         return JujuVersion.parse(str(self.status(model).model.version).strip())
+
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        constraints = self.client.model(model).model_constraints()
+        # Juju defaults to amd64 when no model architecture constraint is set.
+        architecture = constraints.get("arch") or "amd64"
+        if not isinstance(architecture, str):
+            raise ValueError(f"Invalid architecture constraint for model '{model.uri}': {architecture!r}")
+        return architecture
 
     def cli_version(self) -> JujuVersion:
         return JujuVersion.parse(str(self.client.model(None).version()).strip())

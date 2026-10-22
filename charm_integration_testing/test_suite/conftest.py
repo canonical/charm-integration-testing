@@ -336,7 +336,7 @@ def persistence_extension(
 ) -> ValidatorInjectorExtension:
     """Session-scoped validator injector, and the owner of the canary persistence state.
 
-    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    One instance is shared by the session-scoped ``juju_client`` fixture,
     so the state it holds is the single source of truth. The persistence op is auto-decided from
     that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
     (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
@@ -375,8 +375,11 @@ def register_preexisting_neighbor_cloud(
         juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
-def _build_juju_client(
+@pytest.fixture(scope="session")
+def juju_client(
     juju_backend: JujuBackend,
+    istio_mesh_extension: IstioMeshExtension,
+    register_test_clouds: None,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
@@ -391,7 +394,7 @@ def _build_juju_client(
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioMeshExtension(juju_backend, logger),
+            istio_mesh_extension,
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
             MysqlDatabaseReplicationExtension(juju_backend, logger),
@@ -409,32 +412,6 @@ def _build_juju_client(
                 session_resource_registry,
             ),
         ],
-    )
-
-
-@pytest.fixture(scope="session")
-def juju_client(
-    juju_backend: JujuBackend,
-    register_test_clouds: None,
-    target_controller: str,
-    logger: logging.Logger,
-    ubuntu_pro_token: str | None,
-    session_resource_registry: ResourceRegistry,
-    persistence_extension: ValidatorInjectorExtension,
-    remote_logging_endpoints_by_controller: dict[str, str],
-    kubernetes_client_registry: KubernetesClientRegistry,
-    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
-) -> JujuClient:
-    return _build_juju_client(
-        juju_backend,
-        target_controller,
-        logger,
-        ubuntu_pro_token,
-        session_resource_registry,
-        persistence_extension,
-        remote_logging_endpoints_by_controller,
-        kubernetes_client_registry,
-        unseal_vault_k8s_extension,
     )
 
 
@@ -982,7 +959,7 @@ def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     return juju_backend.cli_version()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charm_overrides(request: pytest.FixtureRequest) -> Path:
     """Path to the unified charm overrides directory, passed via ``--charm-overrides``."""
     value = request.config.getoption("--charm-overrides")
@@ -995,7 +972,7 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
@@ -1021,10 +998,20 @@ def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.
     return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
     """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
     return CharmhubClient(logger=logger, overrides_client=overrides_client)
+
+
+@pytest.fixture(scope="session")
+def istio_mesh_extension(
+    charmhub_client: CharmhubClient,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+) -> IstioMeshExtension:
+    """Wire the control-plane extension with the backend and store client."""
+    return IstioMeshExtension(juju_backend, logger, charmhub_client)
 
 
 @pytest.fixture
