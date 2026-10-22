@@ -104,6 +104,7 @@ class S3Storage(S3Provider):
         self._client_factory = client_factory or self._make_client
         self._pending_revocations: set[str] = set()
         self._pending_bucket_deletions: set[_S3Bucket] = set()
+        self._pending_cleanup_clients: list[S3Client] = []
 
     @property
     def endpoint(self) -> str:
@@ -168,8 +169,15 @@ class S3Storage(S3Provider):
         )
 
     def cleanup_pending_resources(self) -> None:
-        """Retry bucket deletion and credential revocation left pending by bucket cleanup."""
+        """Retry bucket deletion, credential revocation, and client closure left pending by cleanup."""
         failures: list[Exception] = []
+        for client in list(self._pending_cleanup_clients):
+            try:
+                client.close()
+            except Exception as exc:
+                failures.append(exc)
+            else:
+                self._pending_cleanup_clients.remove(client)
         for bucket in list(self._pending_bucket_deletions):
             try:
                 bucket.cleanup()
@@ -267,6 +275,7 @@ class S3Storage(S3Provider):
                 try:
                     client.close()
                 except Exception as exc:
+                    self._pending_cleanup_clients.append(client)
                     failures.append(f"client close: {type(exc).__name__}")
                     if first_failure is None:
                         first_failure = exc

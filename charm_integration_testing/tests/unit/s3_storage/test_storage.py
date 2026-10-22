@@ -454,6 +454,20 @@ def test_stale_cleanup_reports_sweep_and_client_close_failures(client: S3Client,
         stubber.assert_no_pending_responses()
 
 
+def test_stale_cleanup_retries_failed_sweep_client_close(client: S3Client) -> None:
+    storage = StaticS3Provider("https://s3.test", NAMESPACE, CREDS, client_factory=lambda _: client)
+    with Stubber(client) as stubber:
+        stubber.add_response("list_buckets", {"Buckets": []}, {})
+        with patch.object(client, "close", side_effect=[RuntimeError("Close failed"), None]) as close:
+            with pytest.raises(RuntimeError, match="Failed to clean stale S3 resources"):
+                storage.cleanup_stale(timedelta(hours=4), NOW)
+
+            storage.cleanup_pending_resources()
+
+        assert close.call_count == 2
+        stubber.assert_no_pending_responses()
+
+
 def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
