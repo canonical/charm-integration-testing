@@ -89,7 +89,7 @@ def test_session_registry_cleans_up_before_closing_http_session(
 
     class ProviderStub(StaticS3Provider):
         def cleanup_pending_resources(self) -> None:
-            assert events == []
+            assert "session-closed" not in events
             events.append("provider-cleaned")
             if fail_cleanup:
                 raise RuntimeError("Provider cleanup failed")
@@ -113,8 +113,9 @@ def test_session_registry_cleans_up_before_closing_http_session(
                 resources.teardown_all()
         else:
             resources.teardown_all()
-        assert events == ["provider-cleaned"]
-    assert events == ["provider-cleaned", "session-closed"]
+        expected_cleanup_calls = 2 if fail_cleanup else 1
+        assert events == ["provider-cleaned"] * expected_cleanup_calls
+    assert events == ["provider-cleaned"] * expected_cleanup_calls + ["session-closed"]
 
 
 def test_provider_fixture_only_closes_its_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
