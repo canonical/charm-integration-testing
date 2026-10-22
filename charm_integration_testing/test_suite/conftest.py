@@ -932,7 +932,7 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
@@ -1054,16 +1054,9 @@ def istio_mesh_extension(
     charmhub_client: CharmhubClient,
     juju_backend: JujuBackend,
     logger: logging.Logger,
-    target_model_ref: JujuModelHandle,
-    target_arch: str,
-    neighbor_model_ref: JujuModelHandle | None,
-    neighbor_arch: str,
 ) -> IstioMeshExtension:
-    """Wire the control-plane extension with the store client and model architectures."""
-    architectures = {target_model_ref: target_arch}
-    if neighbor_model_ref is not None:
-        architectures[neighbor_model_ref] = neighbor_arch
-    return IstioMeshExtension(juju_backend, logger, charmhub_client, architectures)
+    """Wire the control-plane extension with the backend and store client."""
+    return IstioMeshExtension(juju_backend, logger, charmhub_client)
 
 
 @pytest.fixture
@@ -1082,7 +1075,7 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     return value
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def neighbor_arch(
     request: pytest.FixtureRequest,
     target_arch: str,

@@ -152,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        """Return the default architecture for new applications in the model."""
+        raise NotImplementedError
+
     def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
         """Reboot a unit without waiting for it to recover."""
         raise NotImplementedError("This backend does not support rebooting units.")
@@ -412,6 +416,9 @@ class JujuBackend(ABC):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         raise NotImplementedError
 

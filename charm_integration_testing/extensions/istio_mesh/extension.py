@@ -54,12 +54,10 @@ class IstioMeshExtension(JujuExtension):
         juju: JujuBackend,
         logger: logging.Logger,
         charmhub_client: CharmhubClient,
-        model_architectures: dict[JujuModelHandle, str],
     ) -> None:
         self.juju = juju
         self.logger = logger
         self.charmhub_client = charmhub_client
-        self.model_architectures = model_architectures
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         applications = self.juju.list_applications(model)
@@ -88,7 +86,7 @@ class IstioMeshExtension(JujuExtension):
             return existing
         charm = self.charmhub_client.charm_from_store(
             charm_name=ISTIO_CONTROL_PLANE_CHARM,
-            ubuntu_arch=self.model_architectures[model],
+            ubuntu_arch=self.juju.model_architecture(model),
             platform="kubernetes",
             juju_version=BundleJujuVersion.parse(str(self.juju.version(model))),
         )
@@ -99,6 +97,8 @@ class IstioMeshExtension(JujuExtension):
                 application=ISTIO_CONTROL_PLANE_CHARM,
                 trust=True,
                 channel=str(charm.channel),
+                revision=charm.revision,
+                base=f"ubuntu@{charm.ubuntu_version}",
             )
             self.logger.info(f"Deployed '{ISTIO_CONTROL_PLANE_CHARM}' into '{model.uri}'.")
             return ISTIO_CONTROL_PLANE_CHARM

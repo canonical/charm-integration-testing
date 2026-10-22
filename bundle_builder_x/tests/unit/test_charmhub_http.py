@@ -1,7 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from typing import Any, cast
+
 import pytest
+import requests
 from pydantic import ValidationError
 
 from bundle_builder_x.charmhub_http import (
@@ -10,6 +13,29 @@ from bundle_builder_x.charmhub_http import (
     CharmhubHttpClient,
     InfoResponse,
 )
+
+
+def test_info_requests_and_parses_default_channel() -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, Any]:
+            return {"default-release": {"channel": {"name": "1.31/candidate"}}}
+
+    class Session:
+        def mount(self, *args: Any) -> None:
+            pass
+
+        def get(self, **kwargs: Any) -> Response:
+            assert "default-release.channel" in kwargs["params"]["fields"].split(",")
+            return Response()
+
+    response = CharmhubHttpClient(session=cast(requests.Session, Session())).info("istio-k8s")
+    assert response.default_release.channel is not None
+    assert response.default_release.channel.name == "1.31/candidate"
+    with pytest.raises(ValidationError, match="frozen"):
+        response.default_release.channel.name = "1/stable"  # type: ignore[misc]  # Verify runtime immutability.
 
 
 @pytest.mark.parametrize("base_fields", [{}, {"base": None}], ids=["missing", "null"])

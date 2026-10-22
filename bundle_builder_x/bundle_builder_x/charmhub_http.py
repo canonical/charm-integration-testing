@@ -149,6 +149,13 @@ class InfoResponse(BaseModel):
     class DefaultRelease(BaseModel):
         model_config = ConfigDict(frozen=True)
 
+        class Channel(BaseModel):
+            model_config = ConfigDict(frozen=True)
+
+            name: str
+
+        channel: Channel | None = None
+
         class Revision(BaseModel):
             model_config = ConfigDict(frozen=True)
 
@@ -299,6 +306,7 @@ class CharmhubHttpClient:
         request_url = self._info_endpoint.format(charm=charm)
         request_headers = {"Content-Type": "application/json"}
         fields = [
+            "default-release.channel",
             "result.deployable-on",
             "default-release.revision.metadata-yaml",
         ]

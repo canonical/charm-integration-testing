@@ -189,6 +189,9 @@ class NullJujuBackend(JujuBackend):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         raise NotImplementedError
 
@@ -340,6 +343,9 @@ class JujuStub(NullJujuBackend):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         """Mock deploying an application (captures call for verification)"""
         self.deployed.append(

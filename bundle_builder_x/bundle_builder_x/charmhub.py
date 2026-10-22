@@ -624,51 +624,17 @@ class CharmhubClient:
         platform: str | None,
         ubuntu_version: str | None = None,
     ) -> Charm:
-        # Get default ubuntu version if not provided
-        if not ubuntu_version:
-            ubuntu_version = self._default_ubuntu_version(charm_name, ubuntu_arch)
-
-        # Get default refresh info
-        refresh_info = self._default_refresh_info(
-            charm_name,
-            CharmhubBase(
-                channel=ubuntu_version,
-                architecture=ubuntu_arch,
-            ),
-        )
-
-        # Check for errors and incomplete data
-        if refresh_info.effective_channel is None:
-            raise ReleaseUnavailableError(
-                kind=ReleaseUnavailableKind.NO_SUITABLE_CHANNEL,
-                request=ReleaseRequest(
-                    charm_name=charm_name,
-                    architecture=ubuntu_arch,
-                    platform=platform,
-                    base=ubuntu_version,
-                ),
-                detail=(
-                    f"Failed to find suitable channel for charm {charm_name} with Ubuntu "
-                    f"{ubuntu_version} and architecture {ubuntu_arch}"
-                ),
-            )
-        if refresh_info.charm is None:
-            raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no charm and no error")
-        if refresh_info.charm.revision is None:
-            raise IncompleteCharmInfoException(f"Refresh info for charm {charm_name} returned no revision")
-
-        return self._ensure_compatibility(
-            charm=self._build_charm(
-                charm_name=charm_name,
-                channel=CharmChannel.model_validate(refresh_info.effective_channel),
-                revision=refresh_info.charm.revision,
-                ubuntu_version=ubuntu_version,
-                ubuntu_arch=ubuntu_arch,
-                metadata=refresh_info.charm.metadata,
-                config_schema=refresh_info.charm.config,
-            ),
+        info = self.http_client.info(charm_name)
+        channel = info.default_release.channel
+        if channel is None:
+            raise IncompleteCharmInfoException(f"No default channel returned for charm {charm_name}")
+        return self._charm_from_store_by_channel(
+            charm_name=charm_name,
+            ubuntu_arch=ubuntu_arch,
             juju_version=juju_version,
             platform=platform,
+            charm_channel=CharmChannel.model_validate(channel.name),
+            ubuntu_version=ubuntu_version,
         )
 
     def _get_ubuntu_version_from_bases(

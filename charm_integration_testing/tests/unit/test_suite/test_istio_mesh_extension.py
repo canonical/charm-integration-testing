@@ -34,6 +34,9 @@ class CharmhubStub:
 
 
 class JujuStub(JujuStubBase):
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        return "amd64" if model.controller == "target" else "arm64"
+
     def cli_version(self) -> JujuVersion:
         return JujuVersion.parse("4.0.15")
 
@@ -41,19 +44,15 @@ class JujuStub(JujuStubBase):
         return JujuVersion.parse("3.6.29" if model.controller == "target" else "3.6.24")
 
 
-@pytest.mark.parametrize("cmr,use_neighbor", [(False, False), (True, False), (True, True)])
-def test_resolves_channel_for_model_architecture_and_version(cmr: bool, use_neighbor: bool) -> None:
+@pytest.mark.parametrize("controller", ["target", "neighbor", "migration-destination"])
+def test_resolves_channel_for_model_architecture_and_version(controller: str) -> None:
     # GIVEN models with different architectures and Juju versions, both older than the CLI
-    target = JujuModelHandle(controller="target", model="target")
-    neighbor = JujuModelHandle(controller="neighbor", model="neighbor") if cmr else None
     charmhub = CharmhubStub()
     factory = cast(Callable[..., IstioMeshExtension], inspect.unwrap(istio_mesh_extension))
     juju = JujuStub(applications={"beacon": "istio-beacon-k8s"})
-    extension = factory(
-        cast(CharmhubClient, charmhub), juju, logging.getLogger("test"), target, "amd64", neighbor, "arm64"
-    )
-    model = neighbor if use_neighbor else target
-    assert model is not None
+    extension = factory(cast(CharmhubClient, charmhub), juju, logging.getLogger("test"))
+    # The model can be created after the fixture, including on a migration destination.
+    model = JujuModelHandle(controller=controller, model="test-model")
 
     # WHEN resolving the control-plane channel
     extension.post_deploy(model)
@@ -63,8 +62,8 @@ def test_resolves_channel_for_model_architecture_and_version(cmr: bool, use_neig
     assert charmhub.calls == [
         {
             "charm_name": "istio-k8s",
-            "ubuntu_arch": "arm64" if use_neighbor else "amd64",
+            "ubuntu_arch": "amd64" if controller == "target" else "arm64",
             "platform": "kubernetes",
-            "juju_version": BundleJujuVersion.parse("3.6.24" if use_neighbor else "3.6.29"),
+            "juju_version": BundleJujuVersion.parse("3.6.29" if controller == "target" else "3.6.24"),
         }
     ]

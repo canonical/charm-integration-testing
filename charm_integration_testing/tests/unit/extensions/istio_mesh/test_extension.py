@@ -25,9 +25,13 @@ ISTIO_INGRESS_CHARM = "istio-ingress-k8s"
 @dataclass
 class JujuStub(JujuStubBase):
     deployed_with_channel: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
+    deployed_releases: list[tuple[int | None, str | None]] = field(default_factory=list)
 
     def version(self, model: JujuModelHandle) -> JujuVersion:
         return JujuVersion.parse("4.0.15")
+
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        return "amd64"
 
     def deploy_application(
         self,
@@ -38,8 +42,12 @@ class JujuStub(JujuStubBase):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         self.deployed_with_channel.append((model.uri, charm, application, channel))
+        self.deployed_releases.append((revision, base))
         super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
 
 
@@ -76,7 +84,7 @@ class TestIstioMeshExtension:
             # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s
             juju = JujuStub(applications={"other-app": "other-charm"})
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -94,7 +102,7 @@ class TestIstioMeshExtension:
                 applications={"dependent": dependent_charm},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -105,6 +113,7 @@ class TestIstioMeshExtension:
                 (TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM, charmhub.channel)
             ]
             assert charmhub.requested == [ISTIO_CONTROL_PLANE_CHARM]
+            assert juju.deployed_releases == [(1, "ubuntu@24.04")]
             assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
 
         @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
@@ -116,7 +125,7 @@ class TestIstioMeshExtension:
                 applications={"dependent": dependent_charm, ISTIO_CONTROL_PLANE_CHARM: ISTIO_CONTROL_PLANE_CHARM},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -132,7 +141,7 @@ class TestIstioMeshExtension:
                 applications={"beacon": ISTIO_BEACON_CHARM, "ingress": ISTIO_INGRESS_CHARM},
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -153,7 +162,7 @@ class TestIstioMeshExtension:
                 },
             )
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
@@ -167,7 +176,7 @@ class TestIstioMeshExtension:
             # GIVEN istio-beacon-k8s is present but the controller isn't backed by Kubernetes
             juju = JujuStub(applications={"istio-beacon-k8s": ISTIO_BEACON_CHARM}, is_k8s=False)
             charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub), {TEST_MODEL: "amd64"})
+            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
 
             # WHEN post_deploy is called
             extension.post_deploy(TEST_MODEL)
