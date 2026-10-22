@@ -5,9 +5,9 @@ overrides:
   - criteria:
       - ubuntu_version: '20.04'
     configs:
-      entity_id: ['https://login.staging.ubuntu.com']
+      entity_id: ['https://saml.canonical.test/metadata']
       metadata_url:
-        - 'https://raw.githubusercontent.com/canonical/saml-integrator-operator/5eacedca342b048acd4fa4570a158e502895b995/tests/unit/files/metadata_unsigned.xml'
+        - 'https://raw.githubusercontent.com/canonical/saml-integrator-operator/5eacedca342b048acd4fa4570a158e502895b995/tests/unit/files/metadata_default_namespaces.xml'
     constraints:
       - 'set(config[entity_id])'
       - 'set(config[metadata_url])'
