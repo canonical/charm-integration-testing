@@ -138,7 +138,7 @@ jobs:
           fi
       - name: Check S3 cleanup credentials
         id: s3_credentials
-        if: ${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.swift-storage == 'true' }}
+        if: ${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-swift-secret != '' }}
         shell: bash
         env:
           SWIFT_SECRET_NAME: ${{ steps.env_info.outputs.s3-swift-secret }}

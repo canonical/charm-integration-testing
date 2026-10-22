@@ -214,8 +214,7 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert "scripts/load-swift-config.py" in credential_step["run"]
     assert "SWIFT_CONFIG" not in step["env"]
     assert credential_step["if"] == (
-        "${{ !cancelled() && steps.env_info.outcome == 'success' && "
-        "steps.env_info.outputs.swift-storage == 'true' }}"
+        "${{ !cancelled() && steps.env_info.outcome == 'success' && " "steps.env_info.outputs.s3-swift-secret != '' }}"
     )
     assert install_step["id"] == "s3_dependencies"
     assert install_step["if"] == (
