@@ -286,6 +286,7 @@ class _S3Bucket(S3Bucket):
         self._credentials: S3Credentials | None = None
         self._credentials_revoked = False
         self._client: S3Client | None = None
+        self._cleanup_client: S3Client | None = None
         self._create_attempted = False
 
     @property
@@ -371,11 +372,13 @@ class _S3Bucket(S3Bucket):
                     self._pending_revocations.discard(self._credentials.access_key)
                     self._credentials_revoked = True
                 if self._create_attempted:
-                    cleanup_client = self._client_factory(self._credential_provider.cleanup_credentials)
+                    if self._cleanup_client is None:
+                        self._cleanup_client = self._client_factory(self._credential_provider.cleanup_credentials)
                     try:
-                        S3Storage._delete_bucket(cleanup_client, self._handle.name)
+                        S3Storage._delete_bucket(self._cleanup_client, self._handle.name)
                     finally:
-                        cleanup_client.close()
+                        self._cleanup_client.close()
+                        self._cleanup_client = None
             elif self._client is not None and self._create_attempted:
                 S3Storage._delete_bucket(self._client, self._handle.name)
             completed = True
