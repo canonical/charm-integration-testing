@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from s3_storage import CredentialProvider, S3Credentials, S3Storage
-from s3_storage.identity import bucket_owner_identity
+from s3_storage.identity import bucket_owner_identity, provider_identity
 
 from .credentials import KeystoneClient
 
@@ -54,6 +54,23 @@ class SwiftS3Provider(S3Storage):
         identity: str | None = None,
     ) -> None:
         self.keystone = keystone
+        if identity is None:
+            credentials = keystone.credentials
+            identity = provider_identity(
+                "swift",
+                endpoint.rstrip("/"),
+                namespace,
+                region,
+                credentials.auth_endpoint(),
+                credentials.username,
+                credentials.password,
+                credentials.user_domain_name,
+                credentials.project_name,
+                credentials.project_domain_name,
+                credentials.storage_endpoint(),
+                cleanup_credentials.access_key,
+                cleanup_credentials.secret_key,
+            )
         super().__init__(
             endpoint,
             namespace,

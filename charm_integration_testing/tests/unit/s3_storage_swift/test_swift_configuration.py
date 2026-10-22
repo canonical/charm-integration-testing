@@ -3,14 +3,14 @@
 
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 import requests
-from s3_storage import StaticS3Provider
+from s3_storage import S3Credentials, StaticS3Provider
 from s3_storage.configuration import provider_from_config as static_provider_from_config
-from s3_storage_swift import SwiftS3Provider
+from s3_storage_swift import KeystoneClient, SwiftS3Provider
 from s3_storage_swift.configuration import provider_from_config
 
 STATIC_CONFIG = (
@@ -86,6 +86,55 @@ def test_distinct_swift_accounts_keep_distinct_identities(tmp_path: Path) -> Non
     assert original.endpoint == other.endpoint
     assert original.handle != other.handle
     assert original._bucket_owner != other._bucket_owner
+
+
+def test_direct_swift_handle_matches_configuration(tmp_path: Path) -> None:
+    # GIVEN equivalent file and direct construction, including explicit endpoint and region
+    path = tmp_path / "s3.conf"
+    path.write_text(SWIFT_CONFIG + "S3_ENDPOINT=https://explicit.test/\nS3_REGION=eu-west-1\n")
+    with requests.Session() as session:
+        configured = provider_from_config(path, session)
+        assert isinstance(configured, SwiftS3Provider)
+        direct = SwiftS3Provider(
+            "https://explicit.test",
+            configured.handle.namespace,
+            configured.keystone,
+            S3Credentials("cleanup-access", "cleanup-secret"),
+            region="eu-west-1",
+        )
+    # THEN constructor entrypoints agree without changing persistent bucket ownership
+    assert direct.handle == configured.handle
+    assert direct._bucket_owner == configured._bucket_owner
+
+
+@pytest.mark.parametrize("credential_kind", ["password", "cleanup-secret"])
+def test_direct_swift_handles_distinguish_secret_changes(tmp_path: Path, credential_kind: str) -> None:
+    # GIVEN matching non-secret identities but different password or cleanup-secret values
+    path = tmp_path / "s3.conf"
+    path.write_text(SWIFT_CONFIG)
+    with requests.Session() as session:
+        configured = provider_from_config(path, session)
+        assert isinstance(configured, SwiftS3Provider)
+        credentials = configured.keystone.credentials
+        original = SwiftS3Provider(
+            configured.endpoint,
+            configured.handle.namespace,
+            configured.keystone,
+            S3Credentials("cleanup-access", "cleanup-secret"),
+        )
+        if credential_kind == "password":
+            credentials = replace(credentials, password="different-password")
+        cleanup = S3Credentials(
+            "cleanup-access", "different-cleanup-secret" if credential_kind == "cleanup-secret" else "cleanup-secret"
+        )
+        other = SwiftS3Provider(
+            configured.endpoint, configured.handle.namespace, KeystoneClient(credentials, session), cleanup
+        )
+    # THEN direct handles distinguish the effective configuration while owner tags remain stable
+    assert original.handle != other.handle
+    assert original._bucket_owner == other._bucket_owner
+    assert credentials.password not in other.handle.resource_id
+    assert cleanup.secret_key not in other.handle.resource_id
 
 
 def test_generic_package_import_does_not_load_swift() -> None:

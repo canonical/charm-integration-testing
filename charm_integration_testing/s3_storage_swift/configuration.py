@@ -8,7 +8,6 @@ import requests
 from s3_storage import S3Credentials, S3Provider
 from s3_storage.configuration import S3_CONFIG_VARIABLES, parse_s3_config
 from s3_storage.environment import provider_from_environment as static_provider_from_environment
-from s3_storage.identity import provider_identity
 
 from .credentials import KeystoneClient, SwiftCredentials
 from .provider import SwiftS3Provider
@@ -64,21 +63,6 @@ def provider_from_environment(
         KeystoneClient(credentials, session),
         S3Credentials(values["S3_CLEANUP_ACCESS_KEY"], values["S3_CLEANUP_SECRET_KEY"]),
         region=region,
-        identity=provider_identity(
-            "swift",
-            endpoint,
-            namespace,
-            region,
-            credentials.auth_endpoint(),
-            credentials.username,
-            credentials.password,
-            credentials.user_domain_name,
-            credentials.project_name,
-            credentials.project_domain_name,
-            credentials.storage_endpoint(),
-            values["S3_CLEANUP_ACCESS_KEY"],
-            values["S3_CLEANUP_SECRET_KEY"],
-        ),
     )
 
 
