@@ -20,10 +20,11 @@ STATIC_CONFIG = (
 @dataclass
 class ProviderStub(S3Provider):
     identity: str
+    namespace: str = "test"
 
     @property
     def handle(self) -> S3StorageHandle:
-        return S3StorageHandle("test", self.identity)
+        return S3StorageHandle(self.namespace, self.identity)
 
     @property
     def endpoint(self) -> str:
@@ -71,6 +72,32 @@ def test_providers_are_deduplicated_by_identity_not_path() -> None:
     registry = S3ProviderRegistry({"target-cloud": Path("first"), "neighbor-cloud": Path("second")}, factory)
 
     assert registry.provider_for_cloud("target-cloud") is registry.provider_for_cloud("neighbor-cloud")
+
+
+def test_providers_with_the_same_resource_id_share_a_cache_entry() -> None:
+    # GIVEN distinct handles whose effective resource identities are equal
+    first = ProviderStub("shared", "first")
+    second = ProviderStub("shared", "second")
+    assert first.handle != second.handle
+    assert first.handle.resource_id == second.handle.resource_id
+    factory = ProviderFactory({Path("first"): first, Path("second"): second})
+    registry = S3ProviderRegistry({"first-cloud": Path("first"), "second-cloud": Path("second")}, factory)
+
+    # WHEN both clouds are resolved, THEN only one provider can reach resource registration
+    assert registry.provider_for_cloud("first-cloud") is first
+    assert registry.provider_for_cloud("second-cloud") is first
+
+
+def test_equivalent_static_endpoint_files_reuse_the_same_provider(tmp_path: Path) -> None:
+    # GIVEN file contents differing only in a normalized endpoint slash
+    first = tmp_path / "first.conf"
+    second = tmp_path / "second.conf"
+    first.write_text(STATIC_CONFIG)
+    second.write_text(STATIC_CONFIG.replace("http://s3.test:8333", "http://s3.test:8333/"))
+    registry = S3ProviderRegistry({"first": first, "second": second})
+
+    # WHEN both aliases are used, THEN the lazy registry reuses the effective provider
+    assert registry.provider_for_cloud("first") is registry.provider_for_cloud("second")
 
 
 def test_missing_cloud_configuration_fails_without_creating_a_provider() -> None:
