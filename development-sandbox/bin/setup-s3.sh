@@ -28,8 +28,15 @@ if [[ -L "${state}" || ( -e "${state}" && ( ! -d "${state}" || ! -O "${state}" )
     echo "S3 state must be an owned directory, not a symlink: ${state}" >&2
     exit 1
 fi
-mkdir -p "${state}/data" "${state}/bin"
+mkdir -p "${state}"
 chmod 700 "${state}"
+for directory in "${state}/data" "${state}/bin"; do
+    if [[ -L "${directory}" || ( -e "${directory}" && ( ! -d "${directory}" || ! -O "${directory}" ) ) ]]; then
+        echo "S3 state path must be an owned directory, not a symlink: ${directory}" >&2
+        exit 1
+    fi
+done
+mkdir -p "${state}/data" "${state}/bin"
 for file in "${state}/s3.json" "${state}/s3.conf" "${state}/s3.env"; do
     if [[ -e "${file}" || -L "${file}" ]]; then
         if [[ -L "${file}" || ! -f "${file}" || ! -O "${file}" ]]; then
@@ -133,6 +140,9 @@ fi
 cd "${project_root}"
 poetry run python - <<'PY'
 import os
+import sys
+from collections.abc import Callable
+from functools import partial
 from uuid import uuid4
 
 import boto3
@@ -179,6 +189,7 @@ bucket = "charmqa-s3-local-probe-" + uuid4().hex
 outside_bucket = "charmqa-outside-probe-" + uuid4().hex
 bucket_creation_attempted = False
 outside_bucket_creation_attempted = False
+probe_error: Exception | None = None
 try:
     bucket_creation_attempted = True
     cleanup_client.create_bucket(Bucket=bucket)
@@ -221,17 +232,28 @@ try:
             if operation == "get_object":
                 response["Body"].close()
             raise RuntimeError(f"The test S3 identity can {operation} outside its harness scope")
+except Exception as exc:
+    probe_error = exc
+    raise
 finally:
-    try:
-        if bucket_creation_attempted:
-            remove_probe_bucket(bucket)
-    finally:
+    cleanup_actions: list[Callable[[], None]] = []
+    if bucket_creation_attempted:
+        cleanup_actions.append(partial(remove_probe_bucket, bucket))
+    if outside_bucket_creation_attempted:
+        cleanup_actions.append(partial(remove_probe_bucket, outside_bucket))
+    cleanup_actions.extend((client.close, cleanup_client.close))
+    cleanup_error: Exception | None = None
+    for cleanup in cleanup_actions:
         try:
-            if outside_bucket_creation_attempted:
-                remove_probe_bucket(outside_bucket)
-        finally:
-            client.close()
-            cleanup_client.close()
+            cleanup()
+        except Exception as exc:
+            print(f"Local S3 probe cleanup failed: {exc}", file=sys.stderr)
+            if cleanup_error is None:
+                cleanup_error = exc
+    if cleanup_error is not None:
+        if probe_error is not None:
+            raise probe_error from cleanup_error
+        raise cleanup_error
 print("Local S3 read/write passed; out-of-scope bucket, object, listing and tagging operations denied")
 PY
 config_tmp="$(mktemp "${state}/s3.conf.XXXXXX")"

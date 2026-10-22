@@ -148,8 +148,8 @@ manually with:
    poetry run python scripts/cleanup-s3.py \
      --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
 
-Supported test environments opt into Swift storage with ``swift-storage:
-true`` and select their own repository secret using ``s3-swift-secret`` in
+Supported test environments opt into Swift storage with ``swift-storage: true``
+and select their own repository secret using ``s3-swift-secret`` in
 ``static/environments.yaml``. Create one repository secret per enabled
 environment (22 with the current environment table) and store that
 environment's credentials there, using a dedicated test-storage account

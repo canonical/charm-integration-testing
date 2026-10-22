@@ -37,6 +37,42 @@ def test_setup_restricts_existing_credentials_before_reading_them(tmp_path: Path
         assert path.read_text() == "unchanged"
 
 
+def test_setup_restricts_state_before_creating_children(tmp_path: Path) -> None:
+    # GIVEN a permissive state directory with a path that prevents child creation
+    state = tmp_path / ".local/share/charmqa-s3"
+    state.mkdir(parents=True)
+    state.chmod(0o755)
+    (state / "data").write_text("unchanged")
+
+    # WHEN mkdir fails, THEN the containing directory has already been restricted
+    result = subprocess.run(
+        ["bash", str(SETUP)], capture_output=True, text=True, check=False, env={**os.environ, "HOME": str(tmp_path)}
+    )
+    assert result.returncode != 0
+    assert state.stat().st_mode & 0o777 == 0o700
+    assert (state / "data").read_text() == "unchanged"
+
+
+@pytest.mark.parametrize("name", ["bin", "data"])
+def test_setup_rejects_symlinked_state_subdirectories(tmp_path: Path, name: str) -> None:
+    # GIVEN a service-data or executable directory redirected outside owned state
+    state = tmp_path / ".local/share/charmqa-s3"
+    state.mkdir(parents=True)
+    target = tmp_path / "unrelated"
+    target.mkdir()
+    target.chmod(0o755)
+    (state / name).symlink_to(target, target_is_directory=True)
+
+    # WHEN setup starts, THEN it rejects the path before downloading or starting a service
+    result = subprocess.run(
+        ["bash", str(SETUP)], capture_output=True, text=True, check=False, env={**os.environ, "HOME": str(tmp_path)}
+    )
+    assert result.returncode != 0
+    assert "must be an owned directory, not a symlink" in result.stderr
+    assert target.stat().st_mode & 0o777 == 0o755
+    assert list(target.iterdir()) == []
+
+
 @pytest.mark.parametrize("name", ["s3.json", "s3.conf", "s3.env"])
 def test_setup_rejects_symlinked_credentials(tmp_path: Path, name: str) -> None:
     # GIVEN a credential path that points outside the S3 state directory
@@ -111,11 +147,13 @@ def test_setup_rejects_mismatched_canary_with_optimization(tmp_path: Path, optim
     assert "Local S3 read/write passed" not in result.stdout
 
 
-def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cleanup_failure", ["none", "delete", "application-close", "cleanup-close"])
+def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Path, cleanup_failure: str) -> None:
     # GIVEN an overly permissive identity whose outside-bucket creation succeeds before raising
     (tmp_path / "boto3.py").write_text(
         "from io import BytesIO\n"
         "from pathlib import Path\n"
+        f"cleanup_failure = {cleanup_failure!r}\n"
         "class Client:\n"
         "    def __init__(self, application): self.application = application\n"
         "    def create_bucket(self, Bucket):\n"
@@ -127,7 +165,12 @@ def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Pa
         "    def delete_object(self, **kwargs): pass\n"
         "    def delete_bucket(self, Bucket):\n"
         "        with Path('deleted').open('a') as output: output.write(Bucket + '\\n')\n"
-        "    def close(self): pass\n"
+        "        if cleanup_failure == 'delete' and not Bucket.startswith('charmqa-outside-'):\n"
+        "            raise RuntimeError('probe bucket cleanup failed')\n"
+        "    def close(self):\n"
+        "        name = 'application-close' if self.application else 'cleanup-close'\n"
+        "        with Path('closed').open('a') as output: output.write(name + '\\n')\n"
+        "        if cleanup_failure == name: raise RuntimeError(name + ' failed')\n"
         "def client(*args, **kwargs):\n"
         "    return Client(kwargs['aws_access_key_id'] == 'test-access')\n"
     )
@@ -150,7 +193,10 @@ def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Pa
     )
     # THEN both attempted buckets are cleaned and the original failure remains visible
     assert result.returncode != 0
-    assert "creation response lost" in result.stderr
+    assert result.stderr.rstrip().endswith("RuntimeError: creation response lost")
+    if cleanup_failure != "none":
+        assert "Local S3 probe cleanup failed:" in result.stderr
     deleted = (tmp_path / "deleted").read_text().splitlines()
     assert len(deleted) == 2
     assert (tmp_path / "created").read_text() in deleted
+    assert (tmp_path / "closed").read_text().splitlines() == ["application-close", "cleanup-close"]
