@@ -165,13 +165,21 @@ These parameters MUST be included when reproducing test observer executions (mat
 |-----------|---|---------|
 | `--target-application` | **REQUIRED** - Application name for test results and logging | `'target'` or `'glauth-utils'` |
 | `--neighbor-application` | **REQUIRED** for CMR tests - Neighbor app name | `'neighbor'` or `'glauth-k8s'` |
-| `--target-controller-bootstrap-constraints` | Specifies machine constraints for target controller (can be empty) | `''` or `'mem=8G'` |
-| `--neighbor-controller-bootstrap-constraints` | Specifies machine constraints for neighbor controller (can be empty) | `''` or `'mem=8G'` |
+| `--target-controller-bootstrap-constraints` | Controller constraints as inline JSON or a JSON file path (can be empty) | `'{}'` or `'{"mem":"8G"}'` |
+| `--neighbor-controller-bootstrap-constraints` | Neighbor controller constraints as inline JSON or a JSON file path (can be empty) | `'{}'` or `'{"mem":"8G"}'` |
 | `--mermaid-output` | **REQUIRED** - Path to save bundle diagram | `'./generated-bundle.mmd'` |
 | `--log-level` | Logging detail for test framework (separate from `--log-cli-level`) | `'INFO'` or `'DEBUG'` |
 | `--prefix` | Prefix for generated controller names and models | `'test-509067'` |
 | `--target-downgrade-revision` | For downgrade tests; use `'default'` for standard runs | `'default'` or a specific revision |
 | `--target-platform` | Machine type: `'machine'` for LXD, `'kubernetes'` for K8s | `'machine'` or `'kubernetes'` |
+
+For local Kubernetes controllers, use a 5 GB root disk (`root-disk=5G`), matching
+the Kubernetes `bootstrap-constraints` in `static/environments.yaml`. Pass
+`--target-controller-bootstrap-constraints '{"root-disk":"5G"}'` and, for a separate
+Kubernetes neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`. These options
+accept JSON, unlike Juju's `--bootstrap-constraints`. Preserve any
+additional constraints when reproducing a specific execution.
 
 **Common Mistake:**
 ```bash

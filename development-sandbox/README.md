@@ -47,6 +47,15 @@ See the [setup-k8s skill](../.agents/skills/setup-k8s/SKILL.md) for installation
 and checks, and [setup-charm-tests](../.agents/skills/setup-charm-tests/SKILL.md)
 for test prerequisites.
 
+## Kubernetes controller disks
+
+Use a 5 GB controller root disk, matching the Kubernetes bootstrap constraints
+in [`static/environments.yaml`](../static/environments.yaml). For suite-managed
+controllers, pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`
+and, for a separate Kubernetes neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
+For manual bootstrap, use `juju bootstrap ... --bootstrap-constraints root-disk=5G`.
+
 ## Token setup
 
 Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).
