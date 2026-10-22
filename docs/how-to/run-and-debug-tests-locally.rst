@@ -76,9 +76,10 @@ Set up the k8s cloud
 
 It is also needed to setup the k8s cloud in juju. Do this with the following commands:
 
-Use a 5 GB controller root disk (``root-disk=5G``), matching the Kubernetes
-``bootstrap-constraints`` in ``static/environments.yaml``. This is a controller
-bootstrap constraint, not a workload storage setting.
+Test controllers in the VM should use a 5 GB root disk (``root-disk=5G``) on
+both LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack bootstrap
+constraints in ``static/environments.yaml``. This is a controller bootstrap
+constraint, not a workload storage setting.
 
 .. code:: bash
 
@@ -90,11 +91,17 @@ bootstrap constraint, not a workload storage setting.
 
 When the test suite bootstraps controllers instead, pass
 ``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
-``scripts/run-tests.sh``. For a separate Kubernetes neighbor controller, also pass
+``scripts/run-tests.sh``. For a separate neighbor controller, also pass
 ``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
 These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
 When reproducing a specific execution, preserve any other bootstrap constraints
 from that execution's environment.
+
+For a manually bootstrapped LXD test controller, use the same sizing:
+
+.. code:: bash
+
+   juju bootstrap localhost ${LXD_CONTROLLER_NAME} --bootstrap-constraints root-disk=5G
 
 Chaos tools
 ~~~~~~~~~~~

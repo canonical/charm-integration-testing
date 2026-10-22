@@ -53,5 +53,5 @@ fi
 echo ""
 echo "LXD substrate ready."
 echo "  Next steps:"
-echo "    juju bootstrap localhost <controller-name>"
+echo "    juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G"
 echo "    juju add-model <model-name>"

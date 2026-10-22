@@ -101,7 +101,7 @@ UNIQUE_PREFIX="test-cmr-$(date +%s)"
   --target-cloud "localhost" \
   --target-bundle "./generated-target-bundle.yaml" \
   --target-controller-bootstrap-config '{}' \
-  --target-controller-bootstrap-constraints '' \
+  --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --target-model-config '{}' \
   \
   --neighbor-cloud "local-k8s" \
@@ -152,10 +152,11 @@ These parameters MUST be included when reproducing test observer executions (mat
 | `--target-downgrade-revision` | For downgrade tests; use `'default'` for standard runs | `'default'` or a specific revision |
 | `--target-platform` | Machine type: `'machine'` for LXD, `'kubernetes'` for K8s | `'machine'` or `'kubernetes'` |
 
-For local Kubernetes controllers, use a 5 GB root disk (`root-disk=5G`), matching
-the Kubernetes `bootstrap-constraints` in `static/environments.yaml`. Pass
+For test controllers in the VM, use a 5 GB root disk (`root-disk=5G`) on both
+LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack sizing in
+`static/environments.yaml`. Pass
 `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'` and, for a separate
-Kubernetes neighbor controller,
+neighbor controller,
 `--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`. These options
 accept JSON, unlike Juju's `--bootstrap-constraints`. Preserve any
 additional constraints when reproducing a specific execution.
@@ -168,7 +169,7 @@ additional constraints when reproducing a specific execution.
 # ✅ CORRECT - Includes all required parameters
 ./scripts/run-tests.sh \
   --target-cloud localhost \
-  --target-controller-bootstrap-constraints '' \
+  --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --target-charm postgresql ...
 ```
 
@@ -724,7 +725,7 @@ juju clouds | grep local-k8s
 $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 
 # Bootstrap a K8s controller
-juju bootstrap local-k8s k8s-ctrl
+juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
 ```
 
 ### Problem: "Charm deployment timeout"
