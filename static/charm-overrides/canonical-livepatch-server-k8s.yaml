@@ -1,22 +1,54 @@
 ---
+# Published bases carry different charm generations; the first matching block wins.
+# Sources: canonical/livepatch-k8s-operator src/charm.py (rev50, rev98);
+# Charmhub revisions 101/102 src/charm.py and paas_charm/charm.py.
 overrides:
-  - requires:
+  # Ubuntu 20.04 and beta's Ubuntu 24.04 revision predate ingress-interface.
+  - criteria:
+      - any_of:
+          - ubuntu_version: '20.04'
+          - ubuntu_version: '24.04'
+            track: latest
+            risk: beta
+    # rev50 _on_database_event() rejects simultaneous database relations.
+    requires: &database_alternatives
       database-legacy:
         optional: true
       database:
         optional: true
-    # Remove after: https://github.com/canonical/livepatch-k8s-operator/pull/76
-    provides:
+    # Additive observability providers; upstream fix: canonical/livepatch-k8s-operator#76.
+    provides: &observability
       grafana-dashboard:
         optional: true
       metrics-endpoint:
         optional: true
+    constraints:
+      - len(endpoint[database-legacy]) + len(endpoint[database]) == 1
+
+  # Verified latest/edge rewrite: database becomes postgresql; ingress is always wired.
+  - criteria:
+      - track: latest
+        risk: edge
+        any_of:
+          - ubuntu_version: '24.04'
+          - ubuntu_version: '26.04'
+    provides: *observability
+    constraints:
+      # paas_charm requires postgresql; _on_legacy_db_relation_joined() rejects both.
+      - len(endpoint[database-legacy]) + len(endpoint[postgresql]) == 1
+
+  # Ubuntu 22.04 (latest and legacy tracks) supports both ingress implementations.
+  - criteria:
+      - ubuntu_version: '22.04'
+        any_of:
+          - track: latest
+          - track: legacy
+    requires: *database_alternatives
     configs:
       # _update_ingress_method() in charm.py only wires IngressPerAppRequirer when
       # this equals "ingress"; default wires require_nginx_route() instead.
       ingress-interface: [ingress, null]
     constraints:
-      # Mutually exclusive, and one database connection must be present
       - len(endpoint[database-legacy]) + len(endpoint[database]) == 1
       # ingress and nginx-route are mutually exclusive: only one method is ever
       # configured by _update_ingress_method(), see charm.py.

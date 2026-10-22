@@ -7,6 +7,7 @@ from .istio_mesh import IstioMeshExtension
 from .lego import LegoExtension
 from .metacontroller import MetacontrollerExtension
 from .mysql_replication import MysqlDatabaseReplicationExtension, MysqlK8sDatabaseReplicationExtension
+from .remote_logging import RemoteLoggingExtension
 from .temporal import TemporalExtension
 from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from .validator_injection import ValidatorInjectorExtension
@@ -20,6 +21,7 @@ __all__ = [
     "MysqlK8sDatabaseReplicationExtension",
     "PostgresqlDatabaseReplicationExtension",
     "PostgresqlK8sDatabaseReplicationExtension",
+    "RemoteLoggingExtension",
     "TemporalExtension",
     "UnsealVaultJujuExtension",
     "UnsealVaultK8sJujuExtension",

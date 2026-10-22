@@ -3,11 +3,12 @@
 
 import logging
 import subprocess
+from collections.abc import Collection
 from dataclasses import field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Any, Callable, cast, overload
+from typing import Any, Callable, cast
 from unittest.mock import patch
 
 import jubilant
@@ -16,6 +17,7 @@ import yaml
 from jubilant.statustypes import AppStatus, ModelStatus, UnitStatus
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuClient,
     JujuConsumedOfferInfo,
@@ -25,6 +27,7 @@ from juju import (
     JujuRestartNotSupportedError,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
 )
 from juju.backend import JujuBackend
 from juju.version import JujuVersion
@@ -33,7 +36,7 @@ from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityE
 from juju_jubilant.client import JubilantClient
 from juju_jubilant.wait import _parse_bundle
 from kubernetes.client import V1ObjectMeta, V1Pod  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import CharmPod, KubernetesClient, KubernetesClientRegistry
 from pydantic.dataclasses import dataclass
 
 TEST_MODEL: JujuModelHandle = JujuModelHandle(controller="test-controller", model="test-model")
@@ -156,10 +159,67 @@ class JubilantClientStub(JubilantClient):
 class JubilantCliStub:
     results: dict[tuple[str, ...], str] = field(default_factory=dict)
     executions: list[tuple[str, ...]] = field(default_factory=list)
+    execution_options: list[dict[str, Any]] = field(default_factory=list)
 
     def cli(self, *args: str, **kwargs: Any) -> str:
         self.executions.append(tuple(args))
+        self.execution_options.append(kwargs)
         return self.results.get(tuple(args), "")
+
+
+class TestIsK8sCloud:
+    @pytest.mark.parametrize(
+        ("cloud_type", "expected"),
+        [
+            pytest.param("k8s", True, id="kubernetes"),
+            pytest.param("lxd", False, id="machine"),
+        ],
+    )
+    def test_reads_local_cloud_type_through_jubilant(self, cloud_type: str, expected: bool) -> None:
+        # GIVEN a cloud registered with the local Juju client
+        command = ("clouds", "--client", "--format", "json")
+        cli = JubilantCliStub(results={command: f'{{"test-cloud": {{"type": "{cloud_type}"}}}}'})
+        backend = JubilantBackend(client=JubilantClientStub(cli))
+
+        # WHEN its substrate is queried
+        result = backend.is_k8s_cloud("test-cloud")
+
+        # THEN Jubilant runs the model-less client-cloud query and returns the cloud type
+        assert result is expected
+        assert cli.executions == [command]
+        assert cli.execution_options == [{"include_model": False}]
+
+    def test_reads_controller_cloud_type_through_jubilant(self) -> None:
+        # GIVEN a cloud registered on the target controller
+        command = ("clouds", "--controller", "target-controller", "--format", "json")
+        cli = JubilantCliStub(results={command: '{"neighbor-cloud": {"type": "k8s"}}'})
+        backend = JubilantBackend(client=JubilantClientStub(cli))
+
+        # WHEN its substrate is queried
+        result = backend.is_k8s_cloud_on_controller("neighbor-cloud", "target-controller")
+
+        # THEN Jubilant queries the target controller's cloud registry
+        assert result
+        assert cli.executions == [command]
+        assert cli.execution_options == [{"include_model": False}]
+
+    def test_missing_cloud_raises_targeted_error(self) -> None:
+        command = ("clouds", "--client", "--format", "json")
+        backend = JubilantBackend(client=JubilantClientStub(JubilantCliStub(results={command: "{}"})))
+
+        with pytest.raises(ValueError, match="Cloud 'missing' is not registered"):
+            backend.is_k8s_cloud("missing")
+
+    def test_missing_controller_cloud_raises_targeted_error(self) -> None:
+        command = ("clouds", "--controller", "target-controller", "--format", "json")
+        backend = JubilantBackend(client=JubilantClientStub(JubilantCliStub(results={command: "{}"})))
+
+        with pytest.raises(ValueError, match="Cloud 'missing' is not registered with controller"):
+            backend.is_k8s_cloud_on_controller("missing", "target-controller")
+
+
+def test_juju_cmd_backend_does_not_require_cloud_detection() -> None:
+    assert "is_k8s_cloud" not in JujuCmdBackend.__abstractmethods__
 
 
 @dataclass
@@ -190,12 +250,7 @@ class ModelLookupClientStub(JubilantClient):
         return self.models[model.uri]
 
 
-class UnusedKubernetesBackend(KubernetesBackend):
-    def __init__(self) -> None:
-        pass
-
-
-class TestModelKubernetesClient:
+class TestModelKubernetesCloud:
     @dataclass(frozen=True)
     class Params:
         label: str
@@ -209,25 +264,19 @@ class TestModelKubernetesClient:
 
     @pytest.mark.parametrize("params", test_cases, ids=lambda params: params.label)
     def test_uses_workload_cloud(self, params: Params) -> None:
-        # GIVEN a Kubernetes model on a different cloud from its controller
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
+        # GIVEN a Kubernetes model
         client = ModelLookupClientStub(
             {
                 TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workload-cloud")),
-                controller.uri: ShowModelStub(
-                    ModelInfoStub(type=params.controller_type, cloud=params.controller_cloud)
-                ),
             }
         )
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["workload-cloud"] = kubernetes
 
-        # WHEN resolving the workload model
-        result = backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving its cloud
+        result = backend.kubernetes_cloud_for_model(TEST_MODEL)
 
-        # THEN only the workload model's cloud is used
-        assert result is kubernetes
+        # THEN the workload model's cloud is returned without constructing a Kubernetes client
+        assert result == "workload-cloud"
         assert client.lookups == [TEST_MODEL.uri]
 
     def test_preserves_model_owner(self) -> None:
@@ -235,11 +284,8 @@ class TestModelKubernetesClient:
         model = JujuModelHandle(controller="shared", model="litmus", owner="other-user")
         client = ModelLookupClientStub({model.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="litmus"))})
         backend = JubilantBackend(client=client)
-        kubernetes = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients["litmus"] = kubernetes
-
-        # WHEN resolving its client, THEN the owner-qualified model is queried
-        assert backend.get_kubernetes_client_for_model(model) is kubernetes
+        # WHEN resolving its cloud, THEN the owner-qualified model is queried
+        assert backend.kubernetes_cloud_for_model(model) == "litmus"
         assert client.lookups == ["shared:other-user/litmus"]
 
     def test_machine_model_returns_none(self) -> None:
@@ -247,9 +293,8 @@ class TestModelKubernetesClient:
         client = ModelLookupClientStub({TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines"))})
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN no Kubernetes client is needed
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is None
-        assert backend._kubernetes_clients == {}
+        # WHEN resolving the model, THEN there is no Kubernetes cloud
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) is None
 
     def test_missing_kubeconfig_raises(self) -> None:
         # GIVEN a Kubernetes model whose cloud has no kubeconfig
@@ -258,9 +303,8 @@ class TestModelKubernetesClient:
         )
         backend = JubilantBackend(client=client)
 
-        # WHEN resolving the model, THEN configuration failure is not treated as a machine model
-        with pytest.raises(RuntimeError, match="No kubeconfig configured for cloud 'missing'"):
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+        # WHEN resolving the model, THEN the cloud is returned without checking local configuration
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "missing"
 
     def test_model_lookup_error_propagates(self) -> None:
         # GIVEN an inaccessible model
@@ -272,38 +316,20 @@ class TestModelKubernetesClient:
 
         # WHEN resolving the model, THEN the original error propagates
         with pytest.raises(RuntimeError) as exc_info:
-            backend.get_kubernetes_client_for_model(TEST_MODEL)
+            backend.kubernetes_cloud_for_model(TEST_MODEL)
         assert exc_info.value is error
 
     def test_rechecks_model_cloud(self) -> None:
-        # GIVEN a model with a previously resolved cloud
+        # GIVEN a model whose cloud changes
         model = ShowModelStub(ModelInfoStub(type="kubernetes", cloud="first"))
         client = ModelLookupClientStub({TEST_MODEL.uri: model})
         backend = JubilantBackend(client=client)
-        first = KubernetesClient(UnusedKubernetesBackend())
-        second = KubernetesClient(UnusedKubernetesBackend())
-        backend._kubernetes_clients.update(first=first, second=second)
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is first
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "first"
 
-        # WHEN its cloud changes, THEN the next resolution uses the current model data
+        # WHEN its cloud changes, THEN the next lookup uses current model data
         model.info = ModelInfoStub(type="kubernetes", cloud="second")
-        assert backend.get_kubernetes_client_for_model(TEST_MODEL) is second
+        assert backend.kubernetes_cloud_for_model(TEST_MODEL) == "second"
         assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
-
-    def test_controller_resolver_still_uses_controller_model(self) -> None:
-        # GIVEN a machine controller hosting a Kubernetes workload model
-        controller = JujuModelHandle(controller=TEST_MODEL.controller, model="controller")
-        client = ModelLookupClientStub(
-            {
-                controller.uri: ShowModelStub(ModelInfoStub(type="iaas", cloud="machines")),
-                TEST_MODEL.uri: ShowModelStub(ModelInfoStub(type="kubernetes", cloud="workloads")),
-            }
-        )
-        backend = JubilantBackend(client=client)
-
-        # WHEN using the existing controller API, THEN its meaning is unchanged
-        assert backend.get_kubernetes_client_for_controller(TEST_MODEL.controller) is None
-        assert client.lookups == [controller.uri]
 
 
 class TestJubilantClient:
@@ -318,12 +344,55 @@ class TestJubilantClient:
         assert model.model == "test-controller:my-model"
 
 
+def test_application_health_uses_one_real_status_snapshot() -> None:
+    # GIVEN Jubilant status types with mixed application, workload and agent states
+    status = StatusStub(
+        application_statuses={"app": "active"},
+        application_status_messages={"app": "Ready to create replication"},
+        unit_workload_statuses={"app/2": "active", "app/7": "blocked"},
+        unit_juju_statuses={"app/2": "executing", "app/7": "error"},
+    )
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN reading health, THEN the adapter preserves all unit statuses from one snapshot
+    assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
+        "active",
+        {"app/2": "active", "app/7": "blocked"},
+        {"app/2": "executing", "app/7": "error"},
+        "Ready to create replication",
+    )
+    assert status.call_count == 1
+
+
+def test_application_health_missing_application_fails() -> None:
+    # GIVEN an empty status snapshot
+    status = StatusStub()
+    backend = JubilantBackend(client=JubilantClientStub(status))
+
+    # WHEN checking a disappeared application, THEN absence does not count as healthy
+    with pytest.raises(RuntimeError, match="missing") as caught:
+        backend.application_health(TEST_MODEL, "missing")
+    assert TEST_MODEL.uri in str(caught.value)
+    assert isinstance(caught.value.__cause__, KeyError)
+    assert status.call_count == 1
+
+
+def test_application_health_does_not_relabel_status_errors() -> None:
+    backend = JubilantBackend()
+    error = KeyError("status parsing failed")
+    with patch.object(backend, "status", side_effect=error):
+        with pytest.raises(KeyError) as caught:
+            backend.application_health(TEST_MODEL, "target")
+    assert caught.value is error
+
+
 @dataclass
 class StatusStub:
     """Stub for status() method"""
 
     call_count: int = 0
     application_statuses: dict[str, str] = field(default_factory=dict)
+    application_status_messages: dict[str, str] = field(default_factory=dict)
     unit_workload_statuses: dict[str, str] = field(default_factory=dict)
     unit_juju_statuses: dict[str, str] = field(default_factory=dict)
 
@@ -344,7 +413,7 @@ class StatusStub:
         # If statuses are provided, populate the apps dictionary for any apps/units supplied.
 
         # 1. Collect all application and unit names from application statuses and unit statuses.
-        app_names = set(self.application_statuses.keys())
+        app_names = set(self.application_statuses) | set(self.application_status_messages)
         unit_derived_app_names = set()
         for status_dict in (self.unit_workload_statuses, self.unit_juju_statuses):
             for unit_id in status_dict.keys():
@@ -377,7 +446,10 @@ class StatusStub:
                 charm_rev=1,
                 exposed=False,
                 # These are the parameters we actually care about:
-                app_status=jubilant.statustypes.StatusInfo(current=self.application_statuses.get(app, "unknown")),
+                app_status=jubilant.statustypes.StatusInfo(
+                    current=self.application_statuses.get(app, "unknown"),
+                    message=self.application_status_messages.get(app, ""),
+                ),
                 units=units,
             )
 
@@ -452,6 +524,36 @@ class ModelExistsStub:
 
 
 class TestJubilantBackend:
+    class TestRemoveUnit:
+        def test_removes_a_specific_unit_on_machine_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a machine model and a client that records CLI calls
+            class RemoveUnitStub:
+                def __init__(self) -> None:
+                    self.cli_calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+
+                def cli(self, *args: str, **kwargs: Any) -> str:
+                    self.cli_calls.append((args, kwargs))
+                    return ""
+
+            model_client = RemoveUnitStub()
+            backend = JubilantBackend(JubilantClientStub(client=model_client))
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: False)
+
+            # WHEN removing a specific unit
+            backend.remove_unit(TEST_MODEL, "mysql/2")
+
+            # THEN the unit removal command is non-interactive
+            assert model_client.cli_calls == [(("remove-unit", "mysql/2", "--no-prompt"), {})]
+
+        def test_rejects_targeted_removal_on_kubernetes_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            # GIVEN a Kubernetes model
+            backend = JubilantBackend()
+            monkeypatch.setattr(backend, "is_k8s_model", lambda model: True)
+
+            # WHEN / THEN specific unit removal fails explicitly
+            with pytest.raises(ValueError, match="does not support removing a specific unit"):
+                backend.remove_unit(TEST_MODEL, "mysql/2")
+
     class TestWait:
         def test_wait_success(self) -> None:
             # GIVEN a backend with mocked status
@@ -816,42 +918,87 @@ class TestJubilantBackend:
             # WHEN waiting for both models
             backend.wait_idle_multi_model([model_1, model_2], timeout=timedelta(seconds=10), count=3)
 
-            # THEN each single-model wait completes
+            # THEN each model was sampled for every successful poll
             assert stub_1.call_count == 3
             assert stub_2.call_count == 3
 
-        def test_multi_model_wait_delegates_unique_models(self) -> None:
-            # GIVEN a backend that records single-model waits
-            calls: list[tuple[str, timedelta | None, int | None, bool]] = []
-
-            class RecordingBackend(JubilantBackend):
-                def wait_idle(
-                    self,
-                    model: JujuModelHandle,
-                    timeout: timedelta | None,
-                    count: int | None,
-                    strict_timeout: bool = False,
-                    applications: list[str] | None = None,
-                ) -> None:
-                    calls.append((model.uri, timeout, count, strict_timeout))
-
-            backend = RecordingBackend()
-            timeout = timedelta(seconds=10)
+        def test_multi_model_wait_requires_simultaneous_idle_period(self) -> None:
+            # GIVEN each model is idle for three polls, but never at the same time
+            ready_status = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            ).status()
+            busy_status = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "executing"},
+            ).status()
             model_1 = JujuModelHandle(controller="test-controller", model="model-1")
             model_2 = JujuModelHandle(controller="test-controller", model="model-2")
 
-            # WHEN waiting for models with a duplicate
+            class NonOverlappingIdleBackend(JubilantBackend):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.default_delay = timedelta(milliseconds=1)
+                    self.statuses = {
+                        model_1: [ready_status] * 3 + [busy_status],
+                        model_2: [busy_status] * 3 + [ready_status] * 3 + [busy_status],
+                    }
+                    self.status_calls = {model_1: 0, model_2: 0}
+
+                def status(self, model: JujuModelHandle) -> jubilant.Status:
+                    index = self.status_calls[model]
+                    self.status_calls[model] += 1
+                    return self.statuses[model][min(index, len(self.statuses[model]) - 1)]
+
+            backend = NonOverlappingIdleBackend()
+
+            # WHEN waiting for both models to be idle together
+            with pytest.raises(JujuWaitTimeoutError):
+                backend.wait_idle_multi_model(
+                    [model_1, model_2],
+                    timeout=timedelta(milliseconds=50),
+                    count=3,
+                )
+
+        def test_multi_model_wait_polls_all_unique_models_together_per_round(self) -> None:
+            # GIVEN status calls that synchronize at a barrier within each poll
+            calls: list[str] = []
+            models_polled_together = Barrier(2, timeout=5)
+            ready_status = StatusStub(
+                application_statuses={"app": "active"},
+                unit_workload_statuses={"app/0": "active"},
+                unit_juju_statuses={"app/0": "idle"},
+            ).status()
+
+            class RecordingBackend(JubilantBackend):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.default_delay = timedelta(0)
+
+                def status(self, model: JujuModelHandle) -> jubilant.Status:
+                    calls.append(model.uri)
+                    models_polled_together.wait()
+                    return ready_status
+
+            backend = RecordingBackend()
+            model_1 = JujuModelHandle(controller="test-controller", model="model-1")
+            model_2 = JujuModelHandle(controller="test-controller", model="model-2")
+
+            # WHEN waiting for duplicate model handles
             backend.wait_idle_multi_model(
                 [model_2, model_1, model_2],
-                timeout=timeout,
-                count=4,
+                timeout=timedelta(seconds=10),
+                count=2,
                 strict_timeout=True,
             )
 
-            # THEN each unique model is delegated once with the same settings
-            assert sorted(calls) == [
-                (model_1.uri, timeout, 4, True),
-                (model_2.uri, timeout, 4, True),
+            # THEN each unique model is sampled together in each coordinated poll
+            expected_models = {model_1.uri, model_2.uri}
+            assert [set(calls[index : index + 2]) for index in range(0, len(calls), 2)] == [
+                expected_models,
+                expected_models,
             ]
 
         def test_empty_multi_model_wait_returns_immediately(self) -> None:
@@ -863,72 +1010,38 @@ class TestJubilantBackend:
 
             # THEN no error is raised
 
-        def test_multi_model_wait_runs_single_model_waits_concurrently(self) -> None:
-            # GIVEN waits that only complete after both worker threads have started
-            workers_started = Barrier(2, timeout=5)
-
-            class ConcurrentBackend(JubilantBackend):
-                def wait_idle(
-                    self,
-                    model: JujuModelHandle,
-                    timeout: timedelta | None,
-                    count: int | None,
-                    strict_timeout: bool = False,
-                    applications: list[str] | None = None,
-                ) -> None:
-                    workers_started.wait()
-
-            backend = ConcurrentBackend()
-
-            # WHEN waiting for both models
-            backend.wait_idle_multi_model(
-                [
-                    JujuModelHandle(controller="test-controller", model="model-1"),
-                    JujuModelHandle(controller="test-controller", model="model-2"),
-                ],
-                timeout=timedelta(seconds=10),
-                count=3,
-            )
-
-            # THEN both workers reached the barrier concurrently
-            assert not workers_started.broken
-
         def test_multi_model_wait_aggregates_timeouts(self) -> None:
-            # GIVEN multiple models whose single-model waits time out differently
-            class TimeoutBackend(JubilantBackend):
-                def wait_idle(
-                    self,
-                    model: JujuModelHandle,
-                    timeout: timedelta | None,
-                    count: int | None,
-                    strict_timeout: bool = False,
-                    applications: list[str] | None = None,
-                ) -> None:
-                    if model.model == "model-1":
-                        raise JujuWaitTimeoutError(
-                            JujuWaitState(
-                                message="not ready",
-                                noncompliant_applications={"app": None},
-                            )
-                        )
-                    raise JujuWaitTimeoutError(
-                        JujuWaitState(
-                            message="agent not idle",
-                            insufficient_status_checks=True,
-                            noncompliant_units={"app/0": None},
-                            noncompliant_unit_agents={"app/0": None},
-                        )
-                    )
-
-            backend = TimeoutBackend()
+            # GIVEN multiple models with different statuses in the failing poll
             model_1 = JujuModelHandle(controller="test-controller", model="model-1")
             model_2 = JujuModelHandle(controller="test-controller", model="model-2")
+            statuses = {
+                model_1: StatusStub(
+                    application_statuses={"app": "blocked"},
+                    unit_workload_statuses={"app/0": "active"},
+                    unit_juju_statuses={"app/0": "idle"},
+                ).status(),
+                model_2: StatusStub(
+                    application_statuses={"app": "active"},
+                    unit_workload_statuses={"app/0": "active"},
+                    unit_juju_statuses={"app/0": "executing"},
+                ).status(),
+            }
+
+            class TimeoutBackend(JubilantBackend):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.default_delay = timedelta(0)
+
+                def status(self, model: JujuModelHandle) -> jubilant.Status:
+                    return statuses[model]
+
+            backend = TimeoutBackend()
 
             # WHEN waiting for both models
             with pytest.raises(JujuWaitTimeoutError) as exc_info:
                 backend.wait_idle_multi_model(
                     [model_1, model_2],
-                    timeout=timedelta(seconds=10),
+                    timeout=timedelta(milliseconds=1),
                     count=3,
                 )
 
@@ -938,23 +1051,20 @@ class TestJubilantBackend:
                 == f"waiting for models: [{model_1.uri}, {model_2.uri}] to become idle"
             )
             assert f"{model_1.uri}::app" in exc_info.value.wait_state.noncompliant_applications
-            assert f"{model_2.uri}::app/0" in exc_info.value.wait_state.noncompliant_units
             assert f"{model_2.uri}::app/0" in exc_info.value.wait_state.noncompliant_unit_agents
-            assert exc_info.value.wait_state.insufficient_status_checks
+            assert not exc_info.value.wait_state.insufficient_status_checks
 
         def test_multi_model_wait_propagates_unexpected_errors(self) -> None:
-            # GIVEN a model whose single-model wait fails unexpectedly
+            # GIVEN a model whose status query fails unexpectedly
             class ErrorBackend(JubilantBackend):
-                def wait_idle(
-                    self,
-                    model: JujuModelHandle,
-                    timeout: timedelta | None,
-                    count: int | None,
-                    strict_timeout: bool = False,
-                    applications: list[str] | None = None,
-                ) -> None:
+                def status(self, model: JujuModelHandle) -> jubilant.Status:
                     if model.model == "model-2":
                         raise RuntimeError("status failed")
+                    return StatusStub(
+                        application_statuses={"app": "active"},
+                        unit_workload_statuses={"app/0": "active"},
+                        unit_juju_statuses={"app/0": "idle"},
+                    ).status()
 
             backend = ErrorBackend()
 
@@ -1652,6 +1762,7 @@ class TestJubilantBackend:
         @dataclass
         class ModelStub:
             type: str = "kubernetes"
+            cloud: str = "test-cloud"
 
         @dataclass
         class ScpStub:
@@ -2710,7 +2821,8 @@ class TestJubilantBackend:
         def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2726,7 +2838,8 @@ class TestJubilantBackend:
         def test_register_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2751,7 +2864,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_already_registered_is_a_noop(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -2770,7 +2884,8 @@ class TestJubilantBackend:
         def test_add_k8s_cloud_reraises_other_errors(self, tmp_path: Path) -> None:
             stub = self.SetupStub()
             backend = JubilantBackend(
-                JubilantClientStub(client=stub), cloud_kubeconfigs={"my-k8s": tmp_path / "kubeconfig"}
+                JubilantClientStub(client=stub),
+                kubernetes_client_registry=KubernetesClientRegistry({"my-k8s": tmp_path / "kubeconfig"}),
             )
             (tmp_path / "kubeconfig").write_text("kubeconfig-content")
 
@@ -3200,53 +3315,122 @@ class TestMigrationTolerance:
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
 
 
-def test_application_health_uses_one_status_snapshot() -> None:
-    from types import SimpleNamespace
-    from unittest.mock import Mock
+class WorkloadKubernetesClientStub:
+    def __init__(self) -> None:
+        self.ready_pods = {"app/0": CharmPod(unit="app/0", name="app-0", uid="old-uid")}
+        self.restart_result = "app-0-replacement"
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
-    from juju import JujuApplicationHealth
+    def get_ready_charm_pods_by_unit(
+        self, application: str, namespace: str, units: Collection[str], timeout: timedelta
+    ) -> dict[str, CharmPod]:
+        self.calls.append(("ready-by-unit", (application, namespace, units, timeout), {}))
+        return self.ready_pods
 
-    status = SimpleNamespace(
-        apps={
-            "app": SimpleNamespace(
-                app_status=SimpleNamespace(current="active"),
-                units={
-                    "app/0": SimpleNamespace(
-                        workload_status=SimpleNamespace(current="active"), juju_status=SimpleNamespace(current="idle")
-                    ),
-                    "app/1": SimpleNamespace(
-                        workload_status=SimpleNamespace(current="blocked"), juju_status=SimpleNamespace(current="error")
-                    ),
+    def get_charm_pod_uids(self, application: str, namespace: str) -> set[str]:
+        self.calls.append(("instance-ids", (application, namespace), {}))
+        return {"old-uid"}
+
+    def wait_for_charm_pods_ready(
+        self, application: str, namespace: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self.calls.append(("wait-ready", (application, namespace, expected_count, timeout), {}))
+
+    def restart_pod(
+        self,
+        namespace: str,
+        pod_name: str,
+        uid: str,
+        timeout: timedelta,
+        *,
+        application: str,
+        unit: str,
+        existing_uids: Collection[str],
+    ) -> str:
+        self.calls.append(
+            (
+                "restart",
+                (),
+                {
+                    "namespace": namespace,
+                    "pod_name": pod_name,
+                    "uid": uid,
+                    "timeout": timeout,
+                    "application": application,
+                    "unit": unit,
+                    "existing_uids": existing_uids,
                 },
             )
-        }
-    )
-    backend = JubilantBackend()
-    with patch.object(backend, "status", Mock(return_value=status)) as read_status:
-        assert backend.application_health(TEST_MODEL, "app") == JujuApplicationHealth(
-            "active", {"app/0": "active", "app/1": "blocked"}, {"app/0": "idle", "app/1": "error"}
         )
-        read_status.assert_called_once_with(TEST_MODEL)
+        return self.restart_result
+
+    def wait_for_charm_pods_replaced(
+        self,
+        application: str,
+        namespace: str,
+        expected_count: int,
+        previous_uids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self.calls.append(("wait-replaced", (application, namespace, expected_count, previous_uids, timeout), {}))
+
+    def delete_pod(self, namespace: str, pod_name: str) -> None:
+        self.calls.append(("delete", (namespace, pod_name), {}))
 
 
-def test_application_health_missing_application_has_context() -> None:
-    backend = JubilantBackend()
-    with patch.object(backend, "status", return_value=follower_status()) as read_status:
-        with pytest.raises(RuntimeError, match="missing") as caught:
-            backend.application_health(TEST_MODEL, "absent-app")
-    assert "absent-app" in str(caught.value)
-    assert TEST_MODEL.uri in str(caught.value)
-    assert isinstance(caught.value.__cause__, KeyError)
-    read_status.assert_called_once_with(TEST_MODEL)
+class WorkloadOperationsBackend(JubilantBackend):
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "test-cloud"
 
 
-def test_application_health_does_not_relabel_status_errors() -> None:
-    backend = JubilantBackend()
-    error = KeyError("status parsing failed")
-    with patch.object(backend, "status", side_effect=error):
-        with pytest.raises(KeyError) as caught:
-            backend.application_health(TEST_MODEL, "target")
-    assert caught.value is error
+def test_workload_operations_use_registry_client_and_delegate_arguments(tmp_path: Path) -> None:
+    kubeconfig = tmp_path / "kubeconfig"
+    client = WorkloadKubernetesClientStub()
+    factory_calls: list[Path] = []
+
+    def create_client(path: Path) -> KubernetesClient:
+        factory_calls.append(path)
+        return cast(KubernetesClient, client)
+
+    backend = WorkloadOperationsBackend(
+        kubernetes_client_registry=KubernetesClientRegistry(
+            {"test-cloud": kubeconfig},
+            client_factory=create_client,
+        )
+    )
+    timeout = timedelta(seconds=30)
+    units = {"app/0"}
+    instance = JujuWorkloadInstance(unit="app/0", name="app-0", identifier="old-uid")
+    previous_ids = {"old-uid", "other-uid"}
+
+    assert backend.ready_workload_instances_by_unit(TEST_MODEL, "app", units, timeout) == {"app/0": instance}
+    assert backend.workload_instance_ids(TEST_MODEL, "app") == {"old-uid"}
+    backend.wait_for_workload_instances_ready(TEST_MODEL, "app", 1, timeout)
+    assert backend.restart_workload_instance(TEST_MODEL, "app", instance, previous_ids, timeout) == "app-0-replacement"
+    backend.wait_for_workload_instances_replaced(TEST_MODEL, "app", 1, previous_ids, timeout)
+    backend.delete_workload_instance(TEST_MODEL, "app-0")
+
+    assert factory_calls == [kubeconfig]
+    assert client.calls == [
+        ("ready-by-unit", ("app", "test-model", units, timeout), {}),
+        ("instance-ids", ("app", "test-model"), {}),
+        ("wait-ready", ("app", "test-model", 1, timeout), {}),
+        (
+            "restart",
+            (),
+            {
+                "namespace": "test-model",
+                "pod_name": "app-0",
+                "uid": "old-uid",
+                "timeout": timeout,
+                "application": "app",
+                "unit": "app/0",
+                "existing_uids": previous_ids,
+            },
+        ),
+        ("wait-replaced", ("app", "test-model", 1, previous_ids, timeout), {}),
+        ("delete", ("test-model", "app-0"), {}),
+    ]
 
 
 FOLLOWER_MODEL = JujuModelHandle(controller="controller", model="model")
@@ -3323,15 +3507,13 @@ class FollowerRestartSshStub:
 class FollowerRestartBackendStub(JubilantBackend):
     def __init__(self, kube: FollowerRestartKubernetesStub | None = None) -> None:
         self.stub = FollowerRestartSshStub()
-        super().__init__()
-        self.snapshots = [follower_status(), follower_status()]
         self.kube = kube
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str) -> None: ...
-
-    @overload
-    def ssh(self, model: JujuModelHandle, application: str, command: str, *, timeout: float) -> str: ...
+        registry = KubernetesClientRegistry(
+            {"fake-cloud": Path("fake-kubeconfig")} if kube is not None else {},
+            client_factory=lambda _: cast(KubernetesClient, kube),
+        )
+        super().__init__(kubernetes_client_registry=registry)
+        self.snapshots = [follower_status(), follower_status()]
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
@@ -3342,8 +3524,8 @@ class FollowerRestartBackendStub(JubilantBackend):
     def status(self, model: JujuModelHandle) -> jubilant.Status:
         return self.snapshots.pop(0)
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
-        return cast(KubernetesClient | None, self.kube)
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        return "fake-cloud" if self.kube is not None else None
 
 
 def test_restarts_only_follower_pod() -> None:

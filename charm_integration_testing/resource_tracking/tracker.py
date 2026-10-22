@@ -20,7 +20,7 @@ change here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from test_suite.scheduler.states import State
@@ -42,6 +42,7 @@ class ResourceObservation:
     controller: str
     model: str
     snapshots: frozenset[ResourceSnapshot]
+    skips_by_application: tuple[tuple[str, frozenset[str]], ...] = ()
 
 
 class StateResourceTracker:
@@ -54,10 +55,30 @@ class StateResourceTracker:
     def __init__(self) -> None:
         self._observations: list[ResourceObservation] = []
 
-    def record(self, state: State, controller: str, model: str, snapshots: frozenset[ResourceSnapshot]) -> None:
-        """Record a set of observed resources for a (state, controller, model) scope."""
+    def record(
+        self,
+        state: State,
+        controller: str,
+        model: str,
+        snapshots: frozenset[ResourceSnapshot],
+        skips_by_application: Mapping[str, frozenset[str]] | None = None,
+    ) -> None:
+        """Record resources and their resolved application skips for one scope."""
+        skips = tuple(
+            sorted(
+                (application, frozenset(resource_types))
+                for application, resource_types in (skips_by_application or {}).items()
+                if resource_types
+            )
+        )
         self._observations.append(
-            ResourceObservation(state=state, controller=controller, model=model, snapshots=snapshots)
+            ResourceObservation(
+                state=state,
+                controller=controller,
+                model=model,
+                snapshots=snapshots,
+                skips_by_application=skips,
+            )
         )
 
     def collect(
@@ -65,6 +86,7 @@ class StateResourceTracker:
         state: State,
         collectors: Sequence[ResourceCollector],
         logger: logging.Logger,
+        skips: Mapping[tuple[str, str, str], frozenset[str]] | None = None,
     ) -> None:
         """Snapshot resources from every collector and record them for ``state``.
 
@@ -73,7 +95,18 @@ class StateResourceTracker:
         """
         for collector in collectors:
             for collected in collector.collect(logger):
-                self.record(state, collected.controller, collected.model, collected.snapshots)
+                skips_by_application = {
+                    application: resource_types
+                    for (controller, model, application), resource_types in (skips or {}).items()
+                    if controller == collected.controller and model == collected.model
+                }
+                self.record(
+                    state,
+                    collected.controller,
+                    collected.model,
+                    collected.snapshots,
+                    skips_by_application,
+                )
 
     def observations(self) -> tuple[ResourceObservation, ...]:
         """Return all recorded observations, in the order they were recorded."""

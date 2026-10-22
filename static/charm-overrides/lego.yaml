@@ -3,6 +3,26 @@
 # `plugin-config-secret-id` (also required to reach active) needs a live Juju secret URI
 # only available post-deploy, so it's set at runtime by LegoExtension instead of here.
 overrides:
+  # Track 4 stable on Ubuntu 22.04 predates these relation endpoints.
+  - criteria:
+      - track: '4'
+        risk: stable
+      - ubuntu_version: '22.04'
+    configs:
+      email: [test@example.com]  # required; src/charm.py LegoCharm._validate_charm_config_options blocks without it
+      plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin
+
+  # Track 4 candidate on Ubuntu 22.04 has receive-ca-cert but not ingress.
+  - criteria:
+      - track: '4'
+        risk: candidate
+      - ubuntu_version: '22.04'
+    requires:
+      receive-ca-cert:
+        optional: true  # never checked in src/charm.py LegoCharm._on_collect_status
+    configs:
+      email: [test@example.com]  # required; src/charm.py LegoCharm._validate_charm_config_options blocks without it
+      plugin: [httpreq]  # LegoExtension always configures the httpreq DNS plugin
   - requires:
       ingress:
         optional: true  # unconditional: plugin pinned to httpreq below, never http-01/http (src/charm.py LegoCharm._on_collect_status)

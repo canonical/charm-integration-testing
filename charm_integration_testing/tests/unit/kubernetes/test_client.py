@@ -4,28 +4,20 @@
 import logging
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from kubernetes.client import ApiException, V1ObjectMeta, V1Pod, V1PodStatus  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesExtension, PodStatus
+from kubernetes.client import (  # type: ignore[import-untyped]
+    ApiException,
+    V1ObjectMeta,
+    V1Pod,
+    V1PodCondition,
+    V1PodStatus,
+)
+from kubernetes_client import CharmPod, KubernetesBackend, KubernetesClient, PodStatus
 from urllib3.exceptions import ProtocolError, ReadTimeoutError
-
-
-class KubernetesExtensionSpy(KubernetesExtension):
-    """Spy extension that records hook invocations."""
-
-    def __init__(self) -> None:
-        self.post_delete_pod_calls: list[tuple[str, str]] = []
-        self.post_restart_statefulset_calls: list[tuple[str, str]] = []
-
-    def post_delete_pod(self, namespace: str, pod_name: str) -> None:
-        self.post_delete_pod_calls.append((namespace, pod_name))
-
-    def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-        self.post_restart_statefulset_calls.append((namespace, statefulset_name))
 
 
 def create_sample_pod(
@@ -76,6 +68,7 @@ class KubernetesBackendStub(KubernetesBackend):
     list_namespaced_pvcs_raises: Exception | None = None
     delete_pod_raises: Exception | None = None
     delete_pod_call_count: int = 0
+    delete_pod_body: Any = None
 
     def __post_init__(self) -> None:
         self.core_v1_api = self
@@ -100,8 +93,9 @@ class KubernetesBackendStub(KubernetesBackend):
         assert self.list_namespaced_pvcs_result is not None
         return self.list_namespaced_pvcs_result
 
-    def delete_namespaced_pod(self, name: str, namespace: str) -> None:
+    def delete_namespaced_pod(self, name: str, namespace: str, body: Any = None) -> None:
         self.delete_pod_call_count += 1
+        self.delete_pod_body = body
         if self.delete_pod_raises:
             raise self.delete_pod_raises
 
@@ -226,6 +220,92 @@ class TestPodStatus:
         assert PodStatus.SUCCEEDED.value == "Succeeded"
         assert PodStatus.FAILED.value == "Failed"
         assert PodStatus.UNKNOWN.value == "Unknown"
+
+
+@pytest.mark.parametrize(
+    ("apply_method", "api_name", "create_method", "patch_method", "body"),
+    [
+        pytest.param(
+            "apply_config_map",
+            "core_v1_api",
+            "create_namespaced_config_map",
+            "patch_namespaced_config_map",
+            {"metadata": {"name": "logs"}, "data": {"config.yaml": "value"}},
+            id="config-map",
+        ),
+        pytest.param(
+            "apply_daemon_set",
+            "apps_v1_api",
+            "create_namespaced_daemon_set",
+            "patch_namespaced_daemon_set",
+            {"metadata": {"name": "logs"}, "spec": {"selector": {}}},
+            id="daemon-set",
+        ),
+    ],
+)
+class TestApplyKubernetesResource:
+    def test_creates_missing_resource(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN a Kubernetes API that accepts resource creation
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied
+        getattr(client, apply_method)("logging", body)
+
+        # THEN it is created without an update request
+        getattr(api, create_method).assert_called_once_with(namespace="logging", body=body, _request_timeout=30)
+        getattr(api, patch_method).assert_not_called()
+
+    def test_patches_existing_resource(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN resource creation reports that it already exists
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        getattr(api, create_method).side_effect = ApiException(status=409)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied
+        getattr(client, apply_method)("logging", body)
+
+        # THEN the existing resource is patched without requiring metadata.resourceVersion
+        getattr(api, patch_method).assert_called_once_with(
+            name="logs", namespace="logging", body=body, _request_timeout=30
+        )
+
+    def test_propagates_non_conflict_create_error(
+        self,
+        apply_method: str,
+        api_name: str,
+        create_method: str,
+        patch_method: str,
+        body: dict[str, Any],
+    ) -> None:
+        # GIVEN resource creation fails for a reason other than an existing object
+        backend = MagicMock()
+        api = getattr(backend, api_name)
+        getattr(api, create_method).side_effect = ApiException(status=403)
+        client = KubernetesClient(backend)
+
+        # WHEN the resource is applied, THEN the original error propagates
+        with pytest.raises(ApiException) as exc_info:
+            getattr(client, apply_method)("logging", body)
+
+        assert exc_info.value.status == 403
+        getattr(api, patch_method).assert_not_called()
 
 
 class TestKubernetesClientInit:
@@ -835,6 +915,233 @@ class TestKubernetesClientInit:
                 exc_info.value
             )
 
+    class TestWaitForPodReady:
+        """Test suite for wait_for_pod_ready method."""
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_ready_condition_after_running(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running pod that becomes ready after an initial read
+            running_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            running_pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            ready_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            mock_backend = MagicMock()
+            mock_backend.core_v1_api.read_namespaced_pod.side_effect = [running_pod, ready_pod]
+            client = KubernetesClient(
+                backend=mock_backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for readiness
+            result = client.wait_for_pod_ready("test-pod", "test-namespace")
+
+            # THEN returns the pod only after the Ready condition is true
+            assert result == ready_pod
+            assert mock_sleep.call_count == 1
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_terminating_pod_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running, ready pod that is terminating, followed by a live ready pod
+            terminating_pod = create_sample_pod("test-pod", "test-namespace", "Running", "old-uid")
+            terminating_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            terminating_pod.metadata.deletion_timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            ready_pod = create_sample_pod("test-pod", "test-namespace", "Running", "new-uid")
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            backend = MagicMock()
+            backend.core_v1_api.read_namespaced_pod.side_effect = [terminating_pod, ready_pod]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for readiness
+            result = client.wait_for_pod_ready("test-pod", "test-namespace")
+
+            # THEN the terminating pod is not accepted as ready
+            assert result == ready_pod
+            assert mock_sleep.call_count == 1
+
+    class TestWaitForCharmPodsReady:
+        """Test suite for wait_for_charm_pods_ready method."""
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_expected_ready_pod_set(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a deployment that first has too few ready pods, then reaches the desired replica count
+            pending_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", labels={"app.kubernetes.io/name": "app"}
+            )
+            ready_pod = create_sample_pod("app-hash-pod-2", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[pending_pod]),
+                V1PodListStub(items=[ready_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the application pod set
+            result = client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
+            # THEN it returns only after the desired pods are Running and Ready
+            assert result == [ready_pod]
+            assert mock_sleep.call_count == 1
+
+        def test_returns_ready_pod_references_keyed_by_juju_unit(self) -> None:
+            first = create_sample_pod("app-0", "test-namespace", uid="uid-0")
+            first.metadata.annotations = {"unit.juju.is/id": "app/0"}
+            second = create_sample_pod("app-1", "test-namespace", uid="uid-1")
+            second.metadata.annotations = {"unit.juju.is/id": "app/1"}
+            client = KubernetesClient(backend=MagicMock())
+
+            with patch.object(client, "wait_for_charm_pods_ready", return_value=[first, second]) as wait:
+                result = client.get_ready_charm_pods_by_unit(
+                    "app",
+                    "test-namespace",
+                    ["app/0", "app/1"],
+                    timedelta(seconds=10),
+                )
+
+            assert result == {
+                "app/0": CharmPod(unit="app/0", name="app-0", uid="uid-0"),
+                "app/1": CharmPod(unit="app/1", name="app-1", uid="uid-1"),
+            }
+            wait.assert_called_once_with("app", "test-namespace", expected_count=2, timeout=timedelta(seconds=10))
+
+        @pytest.mark.parametrize(
+            ("pods", "message"),
+            [
+                ([create_sample_pod("app-0", uid="uid-0")], "Expected one workload pod per Juju unit"),
+                (
+                    [
+                        create_sample_pod("app-0", uid="uid-0"),
+                        create_sample_pod("app-other", uid="uid-other"),
+                    ],
+                    "Unable to uniquely map Kubernetes pod",
+                ),
+            ],
+        )
+        def test_rejects_pod_sets_that_do_not_map_one_to_one(self, pods: list[V1Pod], message: str) -> None:
+            client = KubernetesClient(backend=MagicMock())
+            with patch.object(client, "wait_for_charm_pods_ready", return_value=pods):
+                with pytest.raises(RuntimeError, match=message):
+                    client.get_ready_charm_pods_by_unit(
+                        "app",
+                        "test-namespace",
+                        ["app/0", "app/1"],
+                        timedelta(seconds=10),
+                    )
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_terminating_pod_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a running, ready pod that is terminating, followed by a live ready pod
+            terminating_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", labels={"app.kubernetes.io/name": "app"}
+            )
+            terminating_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            terminating_pod.metadata.deletion_timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            ready_pod = create_sample_pod("app-hash-pod-2", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            ready_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[terminating_pod]),
+                V1PodListStub(items=[ready_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for the application pod set
+            result = client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
+            # THEN it ignores the terminating pod and returns the live replacement
+            assert result == [ready_pod]
+            assert mock_sleep.call_count == 1
+
+        @patch("kubernetes_client.client.sleep")
+        def test_waits_for_previous_uids_to_be_replaced(self, mock_sleep: MagicMock) -> None:
+            # GIVEN a ready pod set that is replaced by a new ready pod set
+            old_pod = create_sample_pod(
+                "app-hash-pod-1", "test-namespace", uid="old-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            old_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            new_pod = create_sample_pod(
+                "app-hash-pod-2", "test-namespace", uid="new-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            new_pod.status.conditions = [V1PodCondition(type="Ready", status="True")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.side_effect = [
+                V1PodListStub(items=[old_pod]),
+                V1PodListStub(items=[new_pod]),
+            ]
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(seconds=10),
+                default_delay=timedelta(seconds=1),
+            )
+
+            # WHEN waiting for replacement pod identities
+            result = client.wait_for_charm_pods_replaced(
+                "app",
+                "test-namespace",
+                expected_count=1,
+                previous_uids={"old-uid"},
+            )
+
+            # THEN returns only after the original pod UID is gone
+            assert result == [new_pod]
+            assert mock_sleep.call_count == 1
+
+        def test_does_not_accept_unready_replacement_pods(self) -> None:
+            # GIVEN a replacement pod that has not become Ready
+            pod = create_sample_pod(
+                "app-hash-pod-2", "test-namespace", uid="new-uid", labels={"app.kubernetes.io/name": "app"}
+            )
+            pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.return_value = V1PodListStub(items=[pod])
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(microseconds=1),
+                default_delay=timedelta(microseconds=1),
+            )
+
+            # WHEN waiting for replacement pod identities
+            with pytest.raises(TimeoutError, match="ready replacement pods"):
+                client.wait_for_charm_pods_replaced(
+                    "app",
+                    "test-namespace",
+                    expected_count=1,
+                    previous_uids={"old-uid"},
+                )
+
+        def test_waits_when_expected_pod_is_not_ready(self) -> None:
+            # GIVEN the expected number of pods, but one is not Ready
+            pod = create_sample_pod("app-0", "test-namespace", labels={"app.kubernetes.io/name": "app"})
+            pod.status.conditions = [V1PodCondition(type="Ready", status="False")]
+            backend = MagicMock()
+            backend.core_v1_api.list_namespaced_pod.return_value = V1PodListStub(items=[pod])
+            client = KubernetesClient(
+                backend=backend,
+                default_timeout=timedelta(microseconds=1),
+                default_delay=timedelta(0),
+            )
+
+            # WHEN waiting for readiness
+            # THEN it times out instead of treating pod count alone as success
+            with pytest.raises(TimeoutError, match="did not reach 1 Running, Ready pods"):
+                client.wait_for_charm_pods_ready("app", "test-namespace", expected_count=1)
+
     class TestDeletePod:
         """Test suite for delete_pod method."""
 
@@ -849,6 +1156,14 @@ class TestKubernetesClientInit:
             # THEN delete_namespaced_pod is called once
             assert backend_stub.delete_pod_call_count == 1
 
+        def test_uid_precondition(self) -> None:
+            backend_stub = KubernetesBackendStub()
+            client = KubernetesClient(backend=backend_stub)
+
+            client.delete_pod(namespace="test-ns", pod_name="test-pod", uid="expected-uid")
+
+            assert backend_stub.delete_pod_body.preconditions.uid == "expected-uid"
+
         def test_api_exception_propagates(self) -> None:
             # GIVEN a backend stub configured to raise ApiException on delete
             api_error = ApiException(status=500, reason="Internal Server Error")
@@ -861,32 +1176,6 @@ class TestKubernetesClientInit:
                 client.delete_pod(namespace="test-ns", pod_name="test-pod")
 
             assert exc_info.value.status == 500
-
-        def test_calls_post_delete_pod_extensions(self) -> None:
-            # GIVEN a client with a registered extension
-            backend_stub = KubernetesBackendStub()
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN deleting a pod
-            client.delete_pod(namespace="test-ns", pod_name="test-pod")
-
-            # THEN the extension's post_delete_pod hook is invoked with the namespace and pod name
-            assert extension.post_delete_pod_calls == [("test-ns", "test-pod")]
-
-        def test_does_not_call_extensions_when_delete_fails(self) -> None:
-            # GIVEN a client with a registered extension and a backend that fails to delete
-            api_error = ApiException(status=500, reason="Internal Server Error")
-            backend_stub = KubernetesBackendStub(delete_pod_raises=api_error)
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN deleting a pod fails
-            with pytest.raises(ApiException):
-                client.delete_pod(namespace="test-ns", pod_name="test-pod")
-
-            # THEN the extension's post_delete_pod hook is not invoked
-            assert extension.post_delete_pod_calls == []
 
     class TestRestartStatefulset:
         """Test suite for restart_statefulset method."""
@@ -905,32 +1194,6 @@ class TestKubernetesClientInit:
             assert backend_stub.patch_stateful_set_last_body is not None
             annotations = backend_stub.patch_stateful_set_last_body["spec"]["template"]["metadata"]["annotations"]
             assert "kubectl.kubernetes.io/restartedAt" in annotations
-
-        def test_calls_post_restart_statefulset_extensions(self) -> None:
-            # GIVEN a client with a registered extension
-            backend_stub = KubernetesBackendStub()
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN restarting a statefulset
-            client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
-
-            # THEN the extension's post_restart_statefulset hook is invoked with the namespace and name
-            assert extension.post_restart_statefulset_calls == [("test-ns", "my-sts")]
-
-        def test_does_not_call_extensions_when_patch_fails(self) -> None:
-            # GIVEN a client with a registered extension and a backend that fails to patch
-            api_error = ApiException(status=500, reason="Internal Server Error")
-            backend_stub = KubernetesBackendStub(patch_stateful_set_raises=api_error)
-            extension = KubernetesExtensionSpy()
-            client = KubernetesClient(backend=backend_stub, extensions=[extension])
-
-            # WHEN restarting a statefulset fails
-            with pytest.raises(ApiException):
-                client.restart_statefulset(namespace="test-ns", statefulset_name="my-sts")
-
-            # THEN the extension's post_restart_statefulset hook is not invoked
-            assert extension.post_restart_statefulset_calls == []
 
         def test_api_exception_propagates(self) -> None:
             # GIVEN a backend stub configured to raise ApiException on patch

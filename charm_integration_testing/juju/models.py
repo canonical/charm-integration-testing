@@ -53,11 +53,21 @@ class CharmChannel:
 
 @dataclass(frozen=True)
 class JujuApplicationHealth:
-    """Application, unit workload and unit agent status from one snapshot."""
+    """Application message and application, unit workload and agent status from one snapshot."""
 
     status: str
     units: dict[str, str]
     agents: dict[str, str]
+    application_message: str = ""
+
+
+@dataclass(frozen=True)
+class JujuWorkloadInstance:
+    """Stable identity of one workload instance associated with a Juju unit."""
+
+    unit: str
+    name: str
+    identifier: str
 
 
 @dataclass(frozen=True)

@@ -108,6 +108,9 @@ class CrossModelMeshValidator(BaseValidator):
         if error:
             return error
 
+        if not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader("simple")
+
         cmr_data, schema_check = self._parse_local_cmr_data()
         checks.append(schema_check)
         if not schema_check.passed or cmr_data is None:

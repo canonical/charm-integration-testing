@@ -13,7 +13,6 @@ from extensions.metacontroller.extension import (
     MetacontrollerExtension,
 )
 from juju import JujuModelHandle
-from kubernetes_client import KubernetesClient
 
 from ..shared import JujuStub as JujuStubBase
 
@@ -23,11 +22,7 @@ KFP_PROFILE_CONTROLLER_CHARM = "kfp-profile-controller"
 
 @dataclass
 class JujuStub(JujuStubBase):
-    kubernetes_client: KubernetesClient | None = None
     deployed_with_channel: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
-
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
-        return self.kubernetes_client
 
     def deploy_application(
         self,
@@ -43,11 +38,6 @@ class JujuStub(JujuStubBase):
         super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
 
 
-# A stand-in Kubernetes client marker: only ever checked for None-ness (machine controller vs.
-# k8s controller) by this extension, never actually called into.
-A_KUBERNETES_CLIENT = object()
-
-
 class TestMetacontrollerExtension:
     @pytest.fixture
     def logger(self) -> logging.Logger:
@@ -61,7 +51,7 @@ class TestMetacontrollerExtension:
     class TestPostDeploy:
         def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:
             # GIVEN a model with no kfp-profile-controller
-            juju = JujuStub(applications={"other-app": "other-charm"}, kubernetes_client=A_KUBERNETES_CLIENT)  # type: ignore[arg-type]
+            juju = JujuStub(applications={"other-app": "other-charm"})
             extension = MetacontrollerExtension(juju, logger)
 
             # WHEN post_deploy is called
@@ -76,7 +66,6 @@ class TestMetacontrollerExtension:
             # GIVEN kfp-profile-controller is present with no metacontroller-operator of its own
             juju = JujuStub(
                 applications={"dependent": KFP_PROFILE_CONTROLLER_CHARM},
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = MetacontrollerExtension(juju, logger)
 
@@ -99,7 +88,6 @@ class TestMetacontrollerExtension:
                     "dependent": KFP_PROFILE_CONTROLLER_CHARM,
                     METACONTROLLER_CHARM: METACONTROLLER_CHARM,
                 },
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = MetacontrollerExtension(juju, logger)
 
@@ -120,7 +108,6 @@ class TestMetacontrollerExtension:
                     "kfp-profile-controller": KFP_PROFILE_CONTROLLER_CHARM,
                     "my-metacontroller": METACONTROLLER_CHARM,
                 },
-                kubernetes_client=A_KUBERNETES_CLIENT,  # type: ignore[arg-type]
             )
             extension = MetacontrollerExtension(juju, logger)
 
@@ -133,9 +120,7 @@ class TestMetacontrollerExtension:
 
         def test_ignores_models_on_non_k8s_controllers(self, logger: logging.Logger) -> None:
             # GIVEN kfp-profile-controller is present but the controller isn't backed by Kubernetes
-            juju = JujuStub(
-                applications={"kfp-profile-controller": KFP_PROFILE_CONTROLLER_CHARM}, kubernetes_client=None
-            )
+            juju = JujuStub(applications={"kfp-profile-controller": KFP_PROFILE_CONTROLLER_CHARM}, is_k8s=False)
             extension = MetacontrollerExtension(juju, logger)
 
             # WHEN post_deploy is called

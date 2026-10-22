@@ -76,6 +76,11 @@ Set up the k8s cloud
 
 It is also needed to setup the k8s cloud in juju. Do this with the following commands:
 
+Test controllers in the VM should use a 5 GB root disk (``root-disk=5G``) on
+both LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack bootstrap
+constraints in ``static/environments.yaml``. This is a controller bootstrap
+constraint, not a workload storage setting.
+
 .. code:: bash
 
    juju add-k8s ${K8S_CLOUD_NAME} --client
@@ -83,6 +88,20 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
    juju add-model ${MODEL_NAME} \
      --config "logging-config=DEBUG" \
      --config="update-status-hook-interval=2m"
+
+When the test suite bootstraps controllers instead, pass
+``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
+``scripts/run-tests.sh``. For a separate neighbor controller, also pass
+``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
+These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
+When reproducing a specific execution, preserve any other bootstrap constraints
+from that execution's environment.
+
+For a manually bootstrapped LXD test controller, use the same sizing:
+
+.. code:: bash
+
+   juju bootstrap localhost lxd-test-controller --bootstrap-constraints root-disk=5G
 
 Chaos tools
 ~~~~~~~~~~~
@@ -264,6 +283,31 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Moderate CPU pressure
+---------------------
+
+``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
+It stresses one target unit's workload container and skips if CPU stress support
+or passing simple validators for any selected target or neighbor endpoint are
+unavailable. Each selected endpoint must have at least one passing simple result
+before injection.
+
+Defaults are one worker and five minutes, overridden by
+``cpu_moderate_pressure_workers`` and ``cpu_moderate_pressure_duration_seconds``.
+Tune workers for the charm's CPU allocation; one worker is not universally
+moderate pressure.
+
+After initial active/idle and simple validation, the test confirms injection
+and repeatedly checks stress status, workload health and simple validators.
+Error/blocked workloads, disconnected agents, experiment errors and lost
+validation coverage fail. Non-idle states are allowed during stress; sampled
+checks may miss brief failures.
+
+Cleanup runs on failure too. After successful observation and cleanup, target
+and neighbor models must recover to active/idle within fifteen minutes and pass
+simple validation without additional restarts. Cleanup failures fail the test.
+Select ``-k test_live_cpu_stress_moderate`` to run it.
 
 Total memory stress
 -------------------

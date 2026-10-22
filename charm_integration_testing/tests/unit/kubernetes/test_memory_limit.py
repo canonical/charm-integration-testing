@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from kubernetes_client import KubernetesClient
-from kubernetes_client.backend import KubernetesExtension
 from kubernetes_client.memory_limit import temporary_memory_limit
 
 
@@ -17,11 +16,7 @@ def test_restores_memory_after_success_or_failure(saved: dict[str, Any], failure
     # GIVEN a StatefulSet with optional pre-existing memory and CPU resources
     events: list[str] = []
 
-    class Extension(KubernetesExtension):
-        def post_restart_statefulset(self, namespace: str, statefulset_name: str) -> None:
-            raise AssertionError("Memory resource patches must not invoke restart hooks")
-
-    kubernetes = KubernetesClient(backend=MagicMock(), extensions=[Extension()])
+    kubernetes = KubernetesClient(backend=MagicMock())
 
     def wait(*args: Any, **kwargs: Any) -> None:
         events.append("wait")

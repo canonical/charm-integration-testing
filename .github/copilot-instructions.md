@@ -87,6 +87,11 @@ Apply them both when writing code and when reviewing it.
 - Do not add large explanatory comments or docstrings whose value is unclear. Prefer concise comments
   that explain "why", not restatements of "what" the code already makes obvious.
 
+### 10. Avoid scattered or stale caches
+- Before caching derived or state-dependent data, identify its authoritative source, required lifetime, and invalidation events. Prefer looking it up from the owning backend/client at the point of use when practical.
+- Do not maintain the same cache or derived mapping independently across fixtures, extensions, and callers. This spreads invalidation responsibility and makes it unclear which copy is authoritative; let the subsystem that owns the data own any necessary cache.
+- If caching is justified by measured cost or consistency requirements, keep it within the smallest operation that needs it, key it by stable resource identity, and make refresh or invalidation behavior explicit. Do not retain model-, controller-, cluster-, or application-derived values across topology changes such as migration or teardown without a clear refresh mechanism.
+
 ## Review Goal
 
 - Focus first on style consistency, readability, and long-term maintainability.
@@ -141,11 +146,12 @@ After findings, include:
   - Prefer resolving such values on demand from the authoritative source (e.g.
     `JujuBackend`/`juju_client.backend`) at the point of use, rather than precomputing a
     mapping in a fixture and passing the mapping around.
+  - Apply the same rule to derived model metadata such as architecture: a fixture-level value
+    inferred from the initial target/neighbor model can be wrong for another or migrated model.
   - If resolution is expensive enough to need caching, scope the cache to a single
     operation (e.g. one `collect()` call) instead of the whole test session, and cache by
     controller/identity rather than derived values like filesystem paths (which can differ
     for equivalent inputs, e.g. relative vs. absolute vs. `~`-expanded paths).
-  - Example precedent: `KubernetesResourceCollector` resolves Kubernetes clients per
-    controller via `JujuBackend.get_kubernetes_client_for_controller()` inside `collect()`,
-    instead of a `kubernetes_clients_by_controller` fixture that pre-builds and caches
-    clients for the session.
+  - Example precedent: `KubernetesResourceCollector` resolves each model's Kubernetes cloud
+    through the backend and obtains its shared client from `KubernetesClientRegistry` inside
+    `collect()`, instead of a fixture that pre-builds a client mapping for the session.

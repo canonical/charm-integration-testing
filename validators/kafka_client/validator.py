@@ -364,6 +364,9 @@ class KafkaClientValidator(_KafkaConnectionMixin, BaseValidator):
         if error_result:
             return error_result
 
+        if self.role == "provides" and not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader("simple")
+
         # --- 2. Resolve credentials ---
         source = self._connection_databag()
         creds = self._resolve_credentials(source)
@@ -433,6 +436,9 @@ class KafkaClientValidator(_KafkaConnectionMixin, BaseValidator):
         error_result = self._check_relation_exists("deep")
         if error_result:
             return error_result
+
+        if self.role == "provides" and not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader("deep")
 
         # --- 2. Resolve credentials ---
         source = self._connection_databag()

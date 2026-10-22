@@ -3,15 +3,16 @@
 
 from datetime import timedelta
 from time import monotonic, sleep
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 
 from juju import JujuModelHandle
 from kubernetes.client import ApiException, V1DeleteOptions, V1Preconditions  # type: ignore[import-untyped]
 from kubernetes_client import KubernetesBackend
 
-from .backend import ChaosClient
+from .backend import ChaosClient, IoLatencyInjection
 from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
+from .target import unit_pod_name, workload_target
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
@@ -30,15 +31,17 @@ class ChaosMeshChaosClient(ChaosClient):
         startup_timeout: timedelta = timedelta(minutes=1),
         cleanup_timeout: timedelta = timedelta(minutes=2),
         poll_interval: timedelta = timedelta(seconds=1),
+        request_timeout: timedelta = timedelta(seconds=30),
         clock: Callable[[], float] = monotonic,
         pause: Callable[[float], None] = sleep,
     ) -> None:
-        if min(startup_timeout.total_seconds(), cleanup_timeout.total_seconds(), poll_interval.total_seconds()) <= 0:
-            raise ValueError("Startup/cleanup timeouts and poll interval must be positive.")
-        self._cleanup_timeout = cleanup_timeout.total_seconds()
+        if min(startup_timeout, cleanup_timeout, poll_interval, request_timeout) <= timedelta(0):
+            raise ValueError("Startup, cleanup and request timeouts and poll interval must be positive.")
         self._memory_stress: set[str] = set()
         self._startup_timeout = startup_timeout.total_seconds()
+        self._cleanup_timeout = cleanup_timeout.total_seconds()
         self._poll_interval = poll_interval.total_seconds()
+        self._request_timeout = request_timeout.total_seconds()
         self._clock = clock
         self._pause = pause
         missing = missing_chaos_mesh_crds(backend)
@@ -49,6 +52,7 @@ class ChaosMeshChaosClient(ChaosClient):
         self._backend = backend
         self._owner = uuid4().hex
         self._uids: dict[str, str] = {}
+        self._cpu_stress: set[str] = set()
         self._missing_crds = frozenset(missing)
         self._scopes: dict[str, tuple[str, str, str]] = {}
         self._created: list[tuple[str, str, str]] = []  # (plural, namespace, name)
@@ -78,68 +82,35 @@ class ChaosMeshChaosClient(ChaosClient):
         delay: timedelta,
         percent: int,
         duration: timedelta,
-    ) -> None:
+    ) -> IoLatencyInjection:
+        if "iochaos.chaos-mesh.org" in self._missing_crds:
+            raise NotImplementedError("IOChaos experiments require the 'iochaos.chaos-mesh.org' CRD.")
         application = unit.split("/")[0]
+        pod = unit_pod_name(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {
             "action": "latency",
             "mode": "all",
-            "selector": self._selector(model.model, application),
+            "selector": {"pods": {model.model: [pod]}},
             "volumePath": volume_path,
             "delay": f"{int(delay.total_seconds() * 1000)}ms",
             "percent": percent,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        self._create("IOChaos", "iochaos", model, unit, volume_path, self._name("io-latency", application), spec)
-
-    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
-        """Validate tracked stress experiments during observation."""
-        for plural, namespace, name in self._created:
-            if plural != "stresschaos" or self._scopes[name] != (model.uri, unit, ""):
-                continue
-            current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name, _request_timeout=30
-            )
-            metadata = current.get("metadata") or {}
-            annotations = metadata.get("annotations") or {}
-            if (
-                not self._uids.get(name)
-                or metadata.get("uid") != self._uids[name]
-                or annotations.get(_OWNER_ANNOTATION) != self._owner
-            ):
-                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during observation.")
-            status = current.get("status") or {}
-            experiment = status.get("experiment") or {}
-            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
-            records = experiment.get("containerRecords") or []
-            # Controller failures are recorded per container, not as a global Error phase.
-            failures = [
-                event for record in records for event in record.get("events") or [] if event.get("type") == "Failed"
-            ]
-            if failures:
-                raise RuntimeError(f"StressChaos {namespace}/{name} failed during observation: {failures}")
-            if not records:
-                raise RuntimeError(f"StressChaos {namespace}/{name} has no container records during observation.")
-            if (
-                metadata.get("deletionTimestamp")
-                or annotations.get("experiment.chaos-mesh.org/pause") == "true"
-                or conditions.get("Paused") == "True"
-            ):
-                raise RuntimeError(f"StressChaos {namespace}/{name} was interrupted during observation.")
-            if (
-                allow_completed
-                and experiment.get("desiredPhase") == "Stop"
-                and conditions.get("AllRecovered") == "True"
-                and all(record.get("phase") == "Not Injected" for record in records)
-            ):
-                continue
-            if not (
-                experiment.get("desiredPhase") == "Run"
-                and conditions.get("Selected") == "True"
-                and conditions.get("AllInjected") == "True"
-                and conditions.get("AllRecovered") in (None, "False")
-                and all(record.get("phase") == "Injected" for record in records)
-            ):
-                raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active: {status}")
+        name = self._name("io-latency", application)
+        self._create("IOChaos", "iochaos", model, unit, volume_path, name, spec)
+        # Sampled right after the POST returns: Chaos Mesh's controller starts counting down
+        # the duration from the resource's actual creation, so this is the closest available
+        # approximation. Sampling before submitting would miss however long the POST itself
+        # took, making the reported start earlier than the real one and letting callers end
+        # observation (and clean up) before the configured duration has actually elapsed.
+        injected_at = self._clock()
+        self._wait(
+            lambda timeout: self._experiment_injected("iochaos", "IOChaos", model.model, name, timeout),
+            self._clock() + self._startup_timeout,
+            name,
+            "injection",
+        )
+        return IoLatencyInjection(duration=duration, injected_at=injected_at)
 
     def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
         """Clean resources for the model, unit and path. An empty path selects stress."""
@@ -148,72 +119,147 @@ class ChaosMeshChaosClient(ChaosClient):
             if self._scopes[name] != (model.uri, unit, path):
                 continue
             deadline = self._clock() + self._cleanup_timeout
-            request_options = (
-                {"_request_timeout": min(30, self._cleanup_timeout)} if name in self._memory_stress else {}
-            )
+            current = self._read_resource(plural, namespace, name, self._request_budget(deadline))
             try:
-                current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                    group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, name=name, **request_options
-                )
-                metadata = current.get("metadata") or {}
-                if (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner:
-                    raise RuntimeError(f"Cannot verify ownership of {plural} {namespace}/{name}.")
-                uid = metadata.get("uid")
-                if not self._uids.get(name):
-                    raise RuntimeError(
-                        f"Creation UID was not recorded for {plural} {namespace}/{name}; cleanup retained."
+                if current is not None:
+                    self._backend.custom_objects_api.delete_namespaced_custom_object(
+                        group=_GROUP,
+                        version=_VERSION,
+                        namespace=namespace,
+                        plural=plural,
+                        name=name,
+                        body=V1DeleteOptions(preconditions=V1Preconditions(uid=self._uids[name])),
+                        _request_timeout=self._request_budget(deadline),
                     )
-                if not uid or self._uids[name] != uid:
-                    raise RuntimeError(f"Cannot verify UID of {plural} {namespace}/{name}.")
-                if name in self._memory_stress:
-                    remaining = deadline - self._clock()
-                    if remaining <= 0:
-                        raise TimeoutError(f"Timed out removing StressChaos {namespace}/{name}.")
-                    request_options["_request_timeout"] = min(30, remaining)
-                self._backend.custom_objects_api.delete_namespaced_custom_object(
-                    group=_GROUP,
-                    version=_VERSION,
-                    namespace=namespace,
-                    plural=plural,
-                    name=name,
-                    body=V1DeleteOptions(preconditions=V1Preconditions(uid=uid)),
-                    **request_options,
-                )
             except ApiException as error:
                 if error.status != 404:
                     raise
-            if name in self._memory_stress:
-                self._wait_for_memory_removal(namespace, name, deadline)
+            # Wait for deletion to complete regardless of resource type: StressChaos and
+            # IOChaos resources are both tracked here and both must finish being torn down
+            # before cleanup returns, so callers don't observe recovery while a fault is still
+            # being removed.
+            self._wait(
+                lambda timeout: self._read_resource(plural, namespace, name, timeout) is None,
+                deadline,
+                name,
+                "deletion",
+            )
             self._memory_stress.discard(name)
             self._created.remove(resource)
             del self._scopes[name]
             self._uids.pop(name, None)
+            self._cpu_stress.discard(name)
 
-    def _wait_for_memory_removal(self, namespace: str, name: str, deadline: float) -> None:
-        while (remaining := deadline - self._clock()) > 0:
-            try:
-                current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                    group=_GROUP,
-                    version=_VERSION,
-                    namespace=namespace,
-                    plural="stresschaos",
-                    name=name,
-                    _request_timeout=min(30, remaining),
-                )
-            except ApiException as error:
-                if error.status == 404:
-                    return
-                raise
-            metadata = current.get("metadata") or {}
-            if (
-                metadata.get("uid") != self._uids[name]
-                or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
+    def check_stress(self, model: JujuModelHandle, unit: str, *, allow_completed: bool = False) -> None:
+        """Require active injection or explicitly allowed normal completion for tracked stress."""
+        resources = [
+            (namespace, name)
+            for plural, namespace, name in self._created
+            if plural == "stresschaos" and self._scopes[name] == (model.uri, unit, "")
+        ]
+        if not resources:
+            raise RuntimeError(f"No tracked Chaos Mesh stress for {model.uri}/{unit}.")
+        for namespace, name in resources:
+            if not self._experiment_injected(
+                "stresschaos", "StressChaos", namespace, name, self._request_timeout, allow_completed=allow_completed
             ):
-                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during cleanup.")
-            remaining = deadline - self._clock()
-            if remaining > 0:
-                self._pause(min(self._poll_interval, remaining))
-        raise TimeoutError(f"Timed out removing StressChaos {namespace}/{name}.")
+                raise RuntimeError(f"StressChaos {namespace}/{name} is no longer confirmed active.")
+
+    def check_io_latency(
+        self, model: JujuModelHandle, unit: str, volume_path: str, *, allow_completed: bool = False
+    ) -> None:
+        """Require active injection or explicitly allowed normal completion for tracked I/O latency."""
+        resources = [
+            (namespace, name)
+            for plural, namespace, name in self._created
+            if plural == "iochaos" and self._scopes[name] == (model.uri, unit, volume_path)
+        ]
+        if not resources:
+            raise RuntimeError(f"No tracked Chaos Mesh I/O latency for {model.uri}/{unit}:{volume_path}.")
+        for namespace, name in resources:
+            if not self._experiment_injected(
+                "iochaos", "IOChaos", namespace, name, self._request_timeout, allow_completed=allow_completed
+            ):
+                raise RuntimeError(f"IOChaos {namespace}/{name} is no longer confirmed active.")
+
+    def _read_resource(self, plural: str, namespace: str, name: str, timeout: float) -> dict[str, Any] | None:
+        try:
+            current: dict[str, Any] = self._backend.custom_objects_api.get_namespaced_custom_object(
+                group=_GROUP,
+                version=_VERSION,
+                namespace=namespace,
+                plural=plural,
+                name=name,
+                _request_timeout=timeout,
+            )
+        except ApiException as error:
+            if error.status == 404:
+                return None
+            raise
+        metadata = current.get("metadata") or {}
+        if (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner:
+            raise RuntimeError(f"Cannot verify ownership of {plural} {namespace}/{name}.")
+        if not self._uids.get(name):
+            raise RuntimeError(f"Creation UID was not recorded for {plural} {namespace}/{name}; cleanup retained.")
+        if metadata.get("uid") != self._uids[name]:
+            raise RuntimeError(f"Cannot verify UID of {plural} {namespace}/{name}.")
+        return current
+
+    def _experiment_injected(
+        self, plural: str, kind: str, namespace: str, name: str, timeout: float, *, allow_completed: bool = False
+    ) -> bool:
+        current = self._read_resource(plural, namespace, name, timeout)
+        if current is None:
+            raise RuntimeError(f"{kind} {namespace}/{name} disappeared during observation.")
+        metadata = current.get("metadata") or {}
+        status = current.get("status") or {}
+        experiment = status.get("experiment") or {}
+        conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
+        records = experiment.get("containerRecords") or []
+        failures = [
+            event for record in records for event in record.get("events") or [] if event.get("type") == "Failed"
+        ]
+        if failures:
+            raise RuntimeError(f"{kind} {namespace}/{name} failed: {failures}")
+        if (
+            metadata.get("deletionTimestamp")
+            or (metadata.get("annotations") or {}).get("experiment.chaos-mesh.org/pause") == "true"
+            or conditions.get("Paused") == "True"
+        ):
+            raise RuntimeError(f"{kind} {namespace}/{name} stopped or was interrupted during observation.")
+        if experiment.get("desiredPhase") == "Stop":
+            if (
+                allow_completed
+                and conditions.get("AllRecovered") == "True"
+                and records
+                and all(record.get("phase") == "Not Injected" for record in records)
+            ):
+                return True
+            raise RuntimeError(f"{kind} {namespace}/{name} stopped or was interrupted during observation.")
+        return (
+            experiment.get("desiredPhase") == "Run"
+            and conditions.get("Selected") == "True"
+            and conditions.get("AllInjected") == "True"
+            and conditions.get("AllRecovered") in (None, "False")
+            and bool(records)
+            and all(record.get("phase") == "Injected" for record in records)
+        )
+
+    def _request_budget(self, deadline: float) -> float:
+        remaining = deadline - self._clock()
+        if remaining <= 0:
+            raise TimeoutError("Chaos Mesh operation timed out.")
+        return min(self._request_timeout, remaining)
+
+    def _wait(self, check: Callable[[float], bool], deadline: float, name: str, stage: str) -> None:
+        while self._clock() < deadline:
+            complete = check(self._request_budget(deadline))
+            if self._clock() >= deadline:
+                break
+            if complete:
+                return
+            self._pause(min(self._poll_interval, max(0, deadline - self._clock())))
+        raise TimeoutError(f"Chaos Mesh {stage} timed out for {name}.")
 
     def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
         raise NotImplementedError
@@ -234,83 +280,24 @@ class ChaosMeshChaosClient(ChaosClient):
     ) -> None:
         if "stresschaos.chaos-mesh.org" in self._missing_crds:
             raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
-        pods = self._backend.core_v1_api.list_namespaced_pod(
-            namespace=model.model,
-            label_selector=f"app.kubernetes.io/name={unit.split('/')[0]}",
-            _request_timeout=30,
-        )
-        matches = [
-            pod
-            for pod in pods.items
-            if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
-            and pod.metadata.deletion_timestamp is None
-            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(f"Expected one live Pod for {model.model}/{unit}, found {len(matches)}.")
-        application = unit.split("/")[0]
+        pod, container = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {
             "mode": "all",
-            "selector": {"pods": {model.model: [matches[0].metadata.name]}},
+            "selector": {"pods": {model.model: [pod]}},
+            "containerNames": [container],
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }
-        if "memory" in stressors:
-            containers = [
-                item.name
-                for item in (matches[0].spec.containers if matches[0].spec else [])
-                if any(env.name == "JUJU_CONTAINER_NAME" and env.value == item.name for env in item.env or [])
-            ]
-            if len(containers) != 1:
-                raise RuntimeError(f"Memory stress requires one workload container, found {containers}.")
-            spec["containerNames"] = containers
-        name = self._name(label, application)
-        if "memory" in stressors:
-            self._memory_stress.add(name)
+        name = self._name(label, unit.split("/")[0])
+        tracked = self._memory_stress if "memory" in stressors else self._cpu_stress
+        tracked.add(name)
         self._create("StressChaos", "stresschaos", model, unit, "", name, spec)
-        self._wait_for_stress_injection(model.model, name)
-
-    def _wait_for_stress_injection(self, namespace: str, name: str) -> None:
-        """Wait for controller-confirmed injection, retaining failed runs for cleanup."""
-        deadline = self._clock() + self._startup_timeout
-        while (remaining := deadline - self._clock()) > 0:
-            current = self._backend.custom_objects_api.get_namespaced_custom_object(
-                group=_GROUP,
-                version=_VERSION,
-                namespace=namespace,
-                plural="stresschaos",
-                name=name,
-                _request_timeout=min(30, remaining),
-            )
-            metadata = current.get("metadata") or {}
-            if (
-                not self._uids.get(name)
-                or metadata.get("uid") != self._uids[name]
-                or (metadata.get("annotations") or {}).get(_OWNER_ANNOTATION) != self._owner
-            ):
-                raise RuntimeError(f"Cannot verify identity of StressChaos {namespace}/{name} during injection.")
-            status = current.get("status") or {}
-            experiment = status.get("experiment") or {}
-            conditions = {item["type"]: item.get("status") for item in status.get("conditions") or []}
-            if (
-                metadata.get("deletionTimestamp")
-                or experiment.get("desiredPhase") == "Stop"
-                or conditions.get("Paused") == "True"
-            ):
-                raise RuntimeError(f"StressChaos {namespace}/{name} stopped before injection was confirmed.")
-            if (
-                conditions.get("Selected") == "True"
-                and conditions.get("AllInjected") == "True"
-                and experiment.get("desiredPhase") == "Run"
-                and conditions.get("AllRecovered") in (None, "False")
-            ):
-                if self._clock() < deadline:
-                    return
-                break
-            remaining = deadline - self._clock()
-            if remaining > 0:
-                self._pause(min(self._poll_interval, remaining))
-        raise TimeoutError(f"Timed out waiting for StressChaos {namespace}/{name} injection.")
+        self._wait(
+            lambda timeout: self._experiment_injected("stresschaos", "StressChaos", model.model, name, timeout),
+            self._clock() + self._startup_timeout,
+            name,
+            "injection",
+        )
 
     def _create(
         self, kind: str, plural: str, model: JujuModelHandle, unit: str, path: str, name: str, spec: dict[str, object]
@@ -331,7 +318,12 @@ class ChaosMeshChaosClient(ChaosClient):
         self._scopes[name] = (model.uri, unit, path)
         try:
             created = self._backend.custom_objects_api.create_namespaced_custom_object(
-                group=_GROUP, version=_VERSION, namespace=namespace, plural=plural, body=body
+                group=_GROUP,
+                version=_VERSION,
+                namespace=namespace,
+                plural=plural,
+                body=body,
+                _request_timeout=self._request_timeout,
             )
             uid = (created.get("metadata") or {}).get("uid")
             if uid:
@@ -342,14 +334,8 @@ class ChaosMeshChaosClient(ChaosClient):
                 self._memory_stress.discard(name)
                 self._created.remove(resource)
                 del self._scopes[name]
+                self._cpu_stress.discard(name)
             raise
-
-    @staticmethod
-    def _selector(namespace: str, application: str) -> dict[str, object]:
-        return {
-            "namespaces": [namespace],
-            "labelSelectors": {"app.kubernetes.io/name": application},
-        }
 
     @staticmethod
     def _name(label: str, application: str) -> str:

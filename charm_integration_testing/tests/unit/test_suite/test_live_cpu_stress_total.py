@@ -25,9 +25,7 @@ def test_cleanup_and_recovery_order(
 ) -> None:
     # GIVEN a single StatefulSet workload and recorded lifecycle operations
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
-    backend = juju.backend
     kubernetes = MagicMock()
-    backend.get_kubernetes_client_for_model.side_effect = AssertionError("Use the fixture with extensions")
     pod = client.V1Pod(
         metadata=client.V1ObjectMeta(
             name="app-0",
@@ -166,7 +164,6 @@ def test_unsupported_environment_skips_before_mutation(monkeypatch: pytest.Monke
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
     factory = MagicMock()
     target = MagicMock() if kubernetes else None
-    juju.backend.get_kubernetes_client_for_model.return_value = target
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: set())
     with pytest.raises(pytest.skip.Exception):
         module.test_live_cpu_stress_total(

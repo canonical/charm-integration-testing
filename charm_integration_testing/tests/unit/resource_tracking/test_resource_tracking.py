@@ -2,13 +2,14 @@
 # See LICENSE file for licensing details.
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from juju import JujuControllerHandle, JujuModelHandle
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from resource_tracking import (
     CollectedResources,
     DiscrepancyEntry,
@@ -29,6 +30,8 @@ from test_suite.test_resource_consistency_report import (
 )
 
 from ..extensions.shared import NullJujuBackend
+
+pytest_plugins = ["pytester"]
 
 
 def _pvc(name: str, storage: str = "1Gi", application: str = "", namespace: str = "test-model") -> PvcSnapshot:
@@ -120,12 +123,19 @@ class _FakeJujuBackend(NullJujuBackend):
         self._clients_by_controller = clients_by_controller or {}
         self._error = error
 
-    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         if self._error is not None:
             raise self._error
-        # The fake clients stored here only duck-type the methods KubernetesResourceCollector
-        # uses; cast rather than widen the override's return type to keep this a real JujuBackend.
-        return cast(KubernetesClient | None, self._clients_by_controller.get(controller))
+        return f"cloud-{model.controller}" if self._clients_by_controller.get(model.controller) is not None else None
+
+
+def _kubernetes_client_registry(backend: _FakeJujuBackend) -> KubernetesClientRegistry:
+    clients = backend._clients_by_controller
+    kubeconfigs = {f"cloud-{controller}": Path(controller) for controller, client in clients.items() if client}
+    return KubernetesClientRegistry(
+        kubeconfigs,
+        client_factory=lambda kubeconfig: cast(KubernetesClient, clients[kubeconfig.name]),
+    )
 
 
 class _FakeCollector:
@@ -331,12 +341,23 @@ class TestStateResourceTracker:
         collector_b = _FakeCollector([CollectedResources("controller-b", "model-b", frozenset())])
         tracker = StateResourceTracker()
 
-        # WHEN the tracker collects for a state
-        tracker.collect(State.DEPLOYED, [collector_a, collector_b], _LOGGER)
+        # WHEN the tracker collects for a state with a skip for one model
+        tracker.collect(
+            State.DEPLOYED,
+            [collector_a, collector_b],
+            _LOGGER,
+            skips={("controller-a", "model-a", "target"): frozenset({"pvc"})},
+        )
 
         # THEN every collector's resources are recorded under that state
         assert tracker.observations() == (
-            ResourceObservation(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0")})),
+            ResourceObservation(
+                State.DEPLOYED,
+                "controller-a",
+                "model-a",
+                frozenset({_pvc("data-0")}),
+                (("target", frozenset({"pvc"})),),
+            ),
             ResourceObservation(State.DEPLOYED, "controller-b", "model-b", frozenset()),
         )
 
@@ -356,6 +377,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -371,6 +393,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -391,6 +414,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -423,6 +447,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources, resolving a client per controller dynamically
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -455,6 +480,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources with only the target controller resolvable
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -473,6 +499,7 @@ class TestKubernetesResourceCollector:
         # WHEN the collector gathers resources
         collected = KubernetesResourceCollector(
             backend,
+            _kubernetes_client_registry(backend),
             registry,  # type: ignore[arg-type]
         ).collect(_LOGGER)
 
@@ -696,6 +723,7 @@ class TestCalculateDiscrepancies:
             "test-controller",
             "test-model",
             frozenset({_pvc("data-target-0", application="target"), _pvc("data-neighbor-0", application="neighbor")}),
+            {"target": frozenset({"pvc"})},
         )
         tracker.record(
             State.DEPLOYED,
@@ -704,10 +732,8 @@ class TestCalculateDiscrepancies:
             frozenset({_pvc("data-neighbor-0", application="neighbor")}),
         )
 
-        # WHEN discrepancies are calculated with the target application skipping PVCs
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
-        )
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN the skipped application's dropped PVC is excluded, so nothing is reported
         assert discrepancies == []
@@ -715,35 +741,45 @@ class TestCalculateDiscrepancies:
     def test_skips_are_scoped_to_the_owning_model(self) -> None:
         # GIVEN the same application drifting a PVC in two models, skipped in only one
         tracker = StateResourceTracker()
-        tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset({_pvc("data-0", application="target")}))
+        tracker.record(
+            State.DEPLOYED,
+            "controller-a",
+            "model-a",
+            frozenset({_pvc("data-0", application="target")}),
+            {"target": frozenset({"pvc"})},
+        )
         tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset({_pvc("data-0", application="target")}))
         tracker.record(State.DEPLOYED, "controller-a", "model-a", frozenset())
         tracker.record(State.DEPLOYED, "controller-b", "model-b", frozenset())
 
-        # WHEN discrepancies are calculated with the skip scoped to model-a only
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("controller-a", "model-a", "target"): frozenset({"pvc"})}
-        )
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
 
         # THEN only model-b, which does not opt out, reports the dropped PVC
         assert len(discrepancies) == 1
         assert discrepancies[0].model == "model-b"
 
     def test_skip_excludes_kind_uniformly_across_visits(self) -> None:
-        # GIVEN a skipped PVC present on the baseline visit but absent on re-entry
-        # (as a transient collection difference would produce)
+        # GIVEN a skipped PVC observed before the skip was resolved for the model
         tracker = StateResourceTracker()
         tracker.record(
-            State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0", application="target")})
+            State.DEPLOYED,
+            "test-controller",
+            "test-model",
+            frozenset({_pvc("data-0", application="target")}),
         )
-        tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset())
-
-        # WHEN discrepancies are calculated with the owning application skipping PVCs
-        discrepancies = calculate_discrepancies(
-            tracker.observations(), skips={("test-controller", "test-model", "target"): frozenset({"pvc"})}
+        tracker.record(
+            State.DEPLOYED,
+            "test-controller",
+            "test-model",
+            frozenset(),
+            {"target": frozenset({"pvc"})},
         )
 
-        # THEN the skip is applied uniformly to both visits, so no drift is reported
+        # WHEN discrepancies are calculated
+        discrepancies = calculate_discrepancies(tracker.observations())
+
+        # THEN the recorded skip is applied uniformly to both visits, so no drift is reported
         assert discrepancies == []
 
 
@@ -839,7 +875,7 @@ class TestResourceConsistencyReport:
         tracker.record(State.DEPLOYED, "test-controller", "test-model", frozenset({_pvc("data-0")}))
 
         # WHEN the report runs THEN it does not raise
-        run_resource_consistency_report(tracker, {})
+        run_resource_consistency_report(tracker)
 
     def test_raises_with_discrepancies_on_drift(self) -> None:
         # GIVEN a tracker whose revisit dropped a PVC
@@ -849,7 +885,7 @@ class TestResourceConsistencyReport:
 
         # WHEN the report runs THEN it raises carrying the structured discrepancies
         with pytest.raises(ResourceDiscrepancyError) as excinfo:
-            run_resource_consistency_report(tracker, {})
+            run_resource_consistency_report(tracker)
 
         assert excinfo.value.discrepancies == (
             ModelResourceDiscrepancy(
@@ -859,3 +895,138 @@ class TestResourceConsistencyReport:
                 qualified={"missing": (_qs(_pvc("data-1")),)},
             ),
         )
+
+
+class TestTrackStateResources:
+    def test_teardown_does_not_request_another_fixture(self, pytester: pytest.Pytester) -> None:
+        pytester.makeconftest(
+            """
+            import logging
+            from types import SimpleNamespace
+
+            import pytest
+            from juju import JujuModelHandle
+
+            pytest_plugins = ["test_suite.fixtures.resource_tracking"]
+
+            def pytest_addoption(parser):
+                parser.addoption("--charm-overrides", default=None)
+
+            def pytest_configure(config):
+                config.addinivalue_line("markers", "state(requires, provides): test suite environment state")
+
+            @pytest.fixture
+            def session_resource_registry():
+                model = JujuModelHandle(controller="test-controller", model="test-model")
+                return SimpleNamespace(registered_handles=lambda: [model])
+
+            @pytest.fixture(scope="session")
+            def juju_client():
+                backend = SimpleNamespace(kubernetes_cloud_for_model=lambda _: None)
+                return SimpleNamespace(backend=backend)
+
+            @pytest.fixture
+            def kubernetes_client_registry():
+                return object()
+
+            @pytest.fixture
+            def logger():
+                return logging.getLogger("test")
+            """
+        )
+        pytester.makepyfile(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+            def test_state_marked_test(juju_client):
+                pass
+            """
+        )
+
+        result = pytester.runpytest("-q")
+
+        result.assert_outcomes(passed=1)
+
+    def test_resolves_skips_before_teardown_and_keeps_bundle_runs_lazy(self, pytester: pytest.Pytester) -> None:
+        overrides_dir = pytester.path / "overrides"
+        overrides_dir.mkdir()
+        (overrides_dir / "postgresql-k8s.yaml").write_text(
+            "overrides:\n"
+            "  - criteria:\n"
+            "      - track: '14'\n"
+            "    resource_tracking:\n"
+            "      skip:\n"
+            "        - pvc\n",
+            encoding="utf-8",
+        )
+        pytester.makeconftest(
+            """
+            import logging
+            from types import SimpleNamespace
+
+            import pytest
+            from juju import JujuModelHandle
+
+            pytest_plugins = ["test_suite.fixtures.resource_tracking"]
+            client_requests = []
+
+            def pytest_addoption(parser):
+                parser.addoption("--charm-overrides", default=None)
+
+            def pytest_configure(config):
+                config.addinivalue_line("markers", "state(requires, provides): test suite environment state")
+
+            @pytest.fixture
+            def session_resource_registry(request):
+                handles = []
+                if request.node.name == "test_teardown":
+                    handles.append(JujuModelHandle(controller="test-controller", model="test-model"))
+                return SimpleNamespace(registered_handles=lambda: handles, handles=handles)
+
+            @pytest.fixture(scope="session")
+            def juju_client():
+                client_requests.append(True)
+                application = SimpleNamespace(
+                    charm="postgresql-k8s", channel="14/stable", base="ubuntu@22.04"
+                )
+                return SimpleNamespace(
+                    backend=SimpleNamespace(kubernetes_cloud_for_model=lambda _: None),
+                    list_applications=lambda model: {"postgresql": application},
+                )
+
+            @pytest.fixture
+            def kubernetes_client_registry():
+                return object()
+
+            @pytest.fixture
+            def logger():
+                return logging.getLogger("test")
+
+            @pytest.fixture
+            def client_request_log():
+                return client_requests
+            """
+        )
+        pytester.makepyfile(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            def test_bundle_only(resource_tracking_skips_by_application, client_request_log):
+                assert resource_tracking_skips_by_application == {}
+                assert not client_request_log
+
+            @pytest.mark.state(requires=State.DEPLOYED, provides=State.EMPTY_MODEL)
+            def test_teardown(resource_tracking_skips_by_application, session_resource_registry):
+                assert resource_tracking_skips_by_application == {
+                    ("test-controller", "test-model", "postgresql"): frozenset({"pvc"})
+                }
+                session_resource_registry.handles.clear()
+            """
+        )
+
+        result = pytester.runpytest("--charm-overrides", str(overrides_dir), "-q")
+
+        result.assert_outcomes(passed=2)
