@@ -33,6 +33,7 @@ class ProviderStub(StaticS3Provider):
         super().__init__("http://s3.test", name, S3Credentials("access", "secret"))
         self.events = events
         self.fail_cleanup = fail_cleanup
+        self.pending_cleanup_failures = 0
         self.buckets: list[BucketStub] = []
 
     def new_bucket(self) -> S3Bucket:
@@ -45,7 +46,9 @@ class ProviderStub(StaticS3Provider):
 
     def cleanup_pending_resources(self) -> None:
         self.events.append(f"{self.handle.namespace}-pending")
-        if self.fail_cleanup:
+        if self.fail_cleanup or self.pending_cleanup_failures:
+            if not self.fail_cleanup:
+                self.pending_cleanup_failures -= 1
             raise RuntimeError(f"Pending cleanup failed for {self.handle.namespace}")
 
 
@@ -77,7 +80,22 @@ def test_failed_provider_cleanup_does_not_skip_other_provider_scopes() -> None:
     # WHEN session teardown runs, THEN it reports the error and processes both scopes
     with pytest.warns(ResourceTeardownWarning, match="Pending cleanup failed for second"):
         registry.teardown_all()
-    assert events == ["second-0", "second-pending", "first-0", "first-pending"]
+    assert events == ["second-0", "second-pending", "second-pending", "first-0", "first-pending"]
+    assert registry.registered_handles() == []
+
+
+def test_provider_cleanup_is_retried_after_a_transient_failure() -> None:
+    # GIVEN a provider whose first final cleanup attempt fails
+    events: list[str] = []
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    provider = ProviderStub("provider", events)
+    provider.pending_cleanup_failures = 1
+    S3ResourceRegistry(provider, registry, cleanup_buckets=True)
+
+    # WHEN the provider resource is torn down, THEN the final retry completes cleanup
+    registry.teardown_all()
+
+    assert events == ["provider-pending", "provider-pending"]
     assert registry.registered_handles() == []
 
 
