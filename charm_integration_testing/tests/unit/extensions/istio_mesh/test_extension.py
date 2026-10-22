@@ -48,7 +48,17 @@ class JujuStub(JujuStubBase):
     ) -> None:
         self.deployed_with_channel.append((model.uri, charm, application, channel))
         self.deployed_releases.append((revision, base))
-        super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
+        super().deploy_application(
+            model,
+            charm,
+            application=application,
+            config=config,
+            trust=trust,
+            force=force,
+            channel=channel,
+            revision=revision,
+            base=base,
+        )
 
 
 class CharmhubStub:

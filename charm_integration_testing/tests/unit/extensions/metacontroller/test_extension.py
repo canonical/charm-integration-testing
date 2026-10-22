@@ -33,9 +33,22 @@ class JujuStub(JujuStubBase):
         trust: bool = False,
         force: bool = False,
         channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         self.deployed_with_channel.append((model.uri, charm, application, channel))
-        super().deploy_application(model, charm, application=application, config=config, trust=trust, force=force)
+        super().deploy_application(
+            model,
+            charm,
+            application=application,
+            config=config,
+            trust=trust,
+            force=force,
+            channel=channel,
+            revision=revision,
+            base=base,
+        )
 
 
 class TestMetacontrollerExtension:
