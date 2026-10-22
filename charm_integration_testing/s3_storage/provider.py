@@ -35,7 +35,7 @@ class S3Provider(ABC):
     @property
     @abstractmethod
     def handle(self) -> S3StorageHandle:
-        """Parent resource-registry identity for this provider's buckets."""
+        """Provider identity used to namespace bucket handles."""
 
     @abstractmethod
     def new_bucket(self) -> S3Bucket:
@@ -50,7 +50,7 @@ class S3Provider(ABC):
         """Remove old buckets owned by this provider's namespace."""
 
     def cleanup_pending_resources(self) -> None:
-        """Retry provider-owned resource cleanup that failed during child teardown."""
+        """Retry provider-owned resource cleanup left pending by bucket teardown."""
 
 
 class S3Bucket(ABC):

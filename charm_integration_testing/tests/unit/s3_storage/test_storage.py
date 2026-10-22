@@ -231,10 +231,9 @@ def test_cleanup_surfaces_per_object_errors(client: S3Client) -> None:
 def test_registry_tears_down_each_bucket_and_continues_after_failure(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(storage.handle)
     buckets = [storage.new_bucket(), storage.new_bucket()]
     for bucket in buckets:
-        registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+        registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with Stubber(client) as stubber:
         for bucket in buckets:
@@ -355,9 +354,8 @@ def test_static_stale_cleanup_checks_ownership_tag(client: S3Client) -> None:
 def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> None:
     storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
     registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(storage.handle, destroyer=storage.cleanup_pending_resources)
     bucket = storage.new_bucket()
-    registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+    registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
 
     with Stubber(client) as stubber:
         name = bucket.handle.name
@@ -371,10 +369,33 @@ def test_registry_retries_failed_static_bucket_deletion(client: S3Client) -> Non
         )
         empty_bucket(stubber, name)
 
-        with pytest.warns(ResourceTeardownWarning):
-            registry.teardown_all()
+        registry.teardown_all()
 
         assert registry.registered_handles() == []
+        stubber.assert_no_pending_responses()
+
+
+def test_bucket_destroyer_propagates_persistent_client_close_failure(client: S3Client) -> None:
+    storage = S3Storage("https://s3.test", NAMESPACE, StaticCredentialProvider(CREDS), client_factory=lambda _: client)
+    bucket = storage.new_bucket()
+    failure = RuntimeError("Bucket client close failed")
+    with Stubber(client) as stubber:
+        name = bucket.handle.name
+        stubber.add_response("create_bucket", {}, {"Bucket": name})
+        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
+        stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
+        stubber.add_response("head_bucket", {}, {"Bucket": name})
+        bucket.provision()
+        empty_bucket(stubber, name)
+        stubber.add_client_error(
+            "list_multipart_uploads", service_error_code="NoSuchBucket", expected_params={"Bucket": name}
+        )
+
+        with patch.object(client, "close", side_effect=failure), pytest.raises(RuntimeError) as error:
+            storage.bucket_destroyer(bucket)()
+
+        assert str(error.value) == "Failed to clean 1 pending S3 resource(s)"
+        assert error.value.__cause__ is failure
         stubber.assert_no_pending_responses()
 
 
