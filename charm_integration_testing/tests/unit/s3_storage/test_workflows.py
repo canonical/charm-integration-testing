@@ -1,14 +1,19 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 from s3_storage.configuration import parse_s3_config
+from s3_storage_swift.configuration import provider_from_config
 from test_suite.fixtures.s3 import can_cleanup_session_storage
 from test_suite.scheduler.states import State
 
@@ -168,6 +173,317 @@ def test_environment_info_exposes_optional_swift_secret() -> None:
     assert all("yq -r" in line for line in environment_lookups if " -o=json " not in line)
     assert all("strenv(ENVIRONMENT_NAME)" in line for line in environment_lookups)
     assert all("${ENVIRONMENT_NAME}" not in line for line in environment_lookups)
+
+
+def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
+    # GIVEN numbered test environments sharing the same physical substrates
+    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    gate_id = "wait-for-previous-sweep"
+    gate = schedule["jobs"][gate_id]
+    scheduled = [(job_id, job) for job_id, job in schedule["jobs"].items() if job_id != gate_id]
+
+    # WHEN the schedule waits for older sweeps before chaining reusable cleanup jobs
+    assert gate["runs-on"] == "ubuntu-latest"
+    assert gate["permissions"]["actions"] == "read"
+    gate_script = gate["steps"][0]["run"]
+    assert "gh run list" in gate_script
+    assert "GITHUB_RUN_NUMBER" in gate_script
+    assert '.status != "completed"' in gate_script
+    assert scheduled[0][1]["needs"] == gate_id
+    scheduled_environments = [job["with"]["environment"] for _, job in scheduled]
+    scheduled_secret_names = [
+        job["secrets"]["S3_SWIFT_CONFIG"].removeprefix("${{ secrets.").removesuffix(" }}") for _, job in scheduled
+    ]
+    assert len(scheduled_environments) == len(set(scheduled_environments))
+    assert len(scheduled_secret_names) == len(set(scheduled_secret_names))
+
+    scheduled_secrets = dict(zip(scheduled_environments, scheduled_secret_names, strict=True))
+    expected_secrets = {name: str(environment["s3-swift-secret"]) for name, environment in environments.items()}
+    assert len(expected_secrets.values()) == len(set(expected_secrets.values()))
+    assert len(scheduled) == len(environments)
+    assert scheduled_secrets == expected_secrets
+    assert all(job["uses"] == "./.github/workflows/cleanup-environment.yaml" for _, job in scheduled)
+    assert all("strategy" not in job for _, job in scheduled)
+    for (previous_id, _), (_, job) in zip(scheduled, scheduled[1:], strict=False):
+        assert job["needs"] == [gate_id, previous_id]
+        assert job["if"] == "${{ !cancelled() && needs.wait-for-previous-sweep.result == 'success' }}"
+    # Only the first logical environment for each physical substrate runs broad cleanup.
+    seen_substrates: set[tuple[str | None, str | None]] = set()
+    for _, job in scheduled:
+        name = job["with"]["environment"]
+        environment = environments[name]
+        substrate = (environment.get("kubeconfig-secret"), environment.get("novarc-secret"))
+        assert substrate != (None, None)
+        assert job["with"].get("cleanup_substrate", False) is (substrate not in seen_substrates)
+        seen_substrates.add(substrate)
+    assert len(seen_substrates) == 5
+    # THEN every Swift-enabled environment selects its configured secret
+    for name, environment in environments.items():
+        assert environment.get("swift-storage") is True
+        assert environment.get("s3-swift-secret") == expected_secrets[name]
+    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    workflow_events = reusable.get("on", reusable.get(True))
+    reusable_secrets = workflow_events["workflow_call"]["secrets"]
+    cleanup_steps = reusable["jobs"]["cleanup-environment"]["steps"]
+    resolve_credentials = next(step for step in cleanup_steps if step.get("name") == "Resolve credentials")
+    assert reusable_secrets["S3_SWIFT_CONFIG"]["required"] is False
+    assert workflow_events["workflow_call"]["inputs"]["cleanup_substrate"]["default"] is False
+    assert workflow_events["workflow_dispatch"]["inputs"]["cleanup_substrate"]["default"] is True
+    assert resolve_credentials["if"] == "${{ inputs.cleanup_substrate && success() }}"
+
+
+def test_cleanup_workflows_serialize_shared_substrate_cleanup() -> None:
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+
+    assert len(schedule["jobs"]) == 23
+    assert reusable["concurrency"] == {
+        "group": "charm-qa-environment-cleanup",
+        "cancel-in-progress": False,
+    }
+
+
+def test_cleanup_gate_waits_for_older_sweeps_without_a_checkout(tmp_path: Path) -> None:
+    # GIVEN a checkout-free runner with older active/pending and newer pending sweeps
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    gate_script = schedule["jobs"]["wait-for-previous-sweep"]["steps"][0]["run"]
+    calls = tmp_path / "calls"
+    sleeps = tmp_path / "sleeps"
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "assert sys.argv[1:3] == ['run', 'list']\n"
+        "assert '--repo' in sys.argv, 'No checkout: repository must be explicit'\n"
+        "assert sys.argv[sys.argv.index('--repo') + 1] == 'example/test-repository'\n"
+        "path = Path(os.environ['GATE_CALLS'])\n"
+        "count = int(path.read_text()) if path.exists() else 0\n"
+        "path.write_text(str(count + 1))\n"
+        "print(json.dumps([\n"
+        "    {'number': 18, 'status': 'in_progress' if count == 0 else 'completed'},\n"
+        "    {'number': 19, 'status': 'queued' if count == 0 else 'completed'},\n"
+        "    {'number': 20, 'status': 'in_progress'},\n"
+        "    {'number': 21, 'status': 'queued'},\n"
+        "]))\n"
+    )
+    gh.chmod(0o700)
+    sleep = tmp_path / "sleep"
+    sleep.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$GATE_SLEEPS"\n')
+    sleep.chmod(0o700)
+
+    # WHEN the actual gate script runs outside the repository
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", gate_script],
+        capture_output=True,
+        check=False,
+        text=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_REPOSITORY": "example/test-repository",
+            "GITHUB_RUN_NUMBER": "20",
+            "GITHUB_REF_NAME": "main",
+            "GATE_CALLS": str(calls),
+            "GATE_SLEEPS": str(sleeps),
+        },
+    )
+    # THEN it waits for both older sweeps, but not itself or newer pending work
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text() == "2"
+    assert sleeps.read_text() == "30\n"
+    assert "Waiting for 2 earlier scheduled sweep(s)" in result.stdout
+
+
+def test_cleanup_gate_failure_blocks_every_scheduled_child(tmp_path: Path) -> None:
+    # GIVEN a gate whose GitHub lookup fails before confirming older sweeps have completed
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    gate_id = "wait-for-previous-sweep"
+    gate_script = schedule["jobs"][gate_id]["steps"][0]["run"]
+    gh = tmp_path / "gh"
+    gh.write_text("#!/bin/sh\nexit 1\n")
+    gh.chmod(0o700)
+    # WHEN the actual gate script runs under the Actions bash failure settings
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", gate_script],
+        capture_output=True,
+        check=False,
+        text=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "GITHUB_REPOSITORY": "example/test-repository",
+            "GITHUB_RUN_NUMBER": "20",
+            "GITHUB_REF_NAME": "main",
+        },
+    )
+    # THEN no child may bypass the gate, even though cleanup siblings may continue after a failure
+    assert result.returncode == 1
+    for job_id, job in schedule["jobs"].items():
+        if job_id == gate_id:
+            continue
+        dependencies = job["needs"]
+        assert gate_id in ([dependencies] if isinstance(dependencies, str) else dependencies)
+        if dependencies != gate_id:
+            assert job["if"] == "${{ !cancelled() && needs.wait-for-previous-sweep.result == 'success' }}"
+
+
+def test_cleanup_imports_storage_from_checkout() -> None:
+    # GIVEN the reusable cleanup workflow
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+    step = next(step for step in steps if step.get("name") == "Remove stale harness S3 buckets")
+    install_step = next(step for step in steps if step.get("name") == "Install S3 cleanup dependencies")
+    credential_step = next(step for step in steps if step.get("name") == "Check S3 cleanup credentials")
+    # THEN the minimal environment can import storage without installing the full suite
+    assert step["env"]["PYTHONPATH"] == "${{ github.workspace }}/charm_integration_testing"
+    assert "scripts/cleanup-s3.py" in step["run"]
+    assert '--config "${S3_CONFIG_PATH}"' in step["run"]
+    assert step["env"]["S3_CONFIG_PATH"] == "${{ steps.s3_credentials.outputs.config_path }}"
+    assert credential_step["id"] == "s3_credentials"
+    assert set(credential_step["env"]) == {"SWIFT_CONFIG", "SWIFT_SECRET_NAME"}
+    assert credential_step["env"]["SWIFT_CONFIG"] == (
+        "${{ secrets.S3_SWIFT_CONFIG || secrets[steps.env_info.outputs.s3-swift-secret] }}"
+    )
+    assert credential_step["env"]["SWIFT_SECRET_NAME"] == "${{ steps.env_info.outputs.s3-swift-secret }}"
+    assert "scripts/load-swift-config.py" in credential_step["run"]
+    assert "SWIFT_CONFIG" not in step["env"]
+    assert credential_step["if"] == (
+        "${{ !cancelled() && steps.env_info.outcome == 'success' && "
+        "steps.env_info.outputs.swift-storage == 'true' }}"
+    )
+    assert install_step["id"] == "s3_dependencies"
+    assert install_step["if"] == (
+        "${{ !cancelled() && steps.s3_credentials.outcome == 'success' && "
+        "steps.s3_credentials.outputs.available == 'true' }}"
+    )
+    assert step["if"] == "${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}"
+
+
+@pytest.mark.parametrize("missing_variable", ["all", "S3_OS_PASSWORD", None], ids=["absent", "partial", "complete"])
+def test_cleanup_requires_declared_swift_credentials(tmp_path: Path, missing_variable: str | None) -> None:
+    # GIVEN cleanup for an environment declaring Swift storage
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = workflow["jobs"]["cleanup-environment"]["steps"]
+    preflight = next(step for step in steps if step.get("id") == "s3_credentials")
+    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    if missing_variable is not None and missing_variable in values:
+        del values[missing_variable]
+    config = "" if missing_variable == "all" else "\n".join(f"{name}={value}" for name, value in values.items())
+    output = tmp_path / "github-output"
+
+    # WHEN the actual workflow preflight runs, THEN missing credentials fail instead of reporting unavailable
+    result = subprocess.run(
+        ["bash", "-c", preflight["run"]],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "SWIFT_SECRET_NAME": "S3_SWIFT_TEST",
+            "SWIFT_CONFIG": config,
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        text=True,
+        cwd=ROOT,
+    )
+
+    if missing_variable is None:
+        assert result.returncode == 0
+        config_path = tmp_path / "cleanup-s3.conf"
+        assert config_path.stat().st_mode & 0o777 == 0o600
+        assert output.read_text() == f"config_path={config_path}\navailable=true\n"
+    else:
+        assert result.returncode == 1
+        assert "::error::S3_SWIFT_TEST is missing:" in result.stdout
+        assert "configured" not in result.stdout
+        assert not output.exists()
+        assert not (tmp_path / "cleanup-s3.conf").exists()
+
+
+def test_cleanup_entrypoint_passes_config_and_age_to_provider(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spec = importlib.util.spec_from_file_location("cleanup_s3", ROOT / "scripts/cleanup-s3.py")
+    assert spec is not None and spec.loader is not None
+    cleanup_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cleanup_script)
+    assert cleanup_script.provider_from_config is provider_from_config
+
+    class SessionStub:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+    class ProviderStub:
+        def __init__(self) -> None:
+            self.age: timedelta | None = None
+
+        def cleanup_stale(self, age: timedelta) -> list[str]:
+            self.age = age
+            return ["stale-bucket"]
+
+    session = SessionStub()
+    provider = ProviderStub()
+    observed: dict[str, Any] = {}
+
+    def provider_factory(path: Path, used_session: SessionStub) -> ProviderStub:
+        observed["config"] = path
+        observed["session"] = used_session
+        return provider
+
+    monkeypatch.setattr(sys, "argv", ["cleanup-s3.py", "--config", "/test/storage.conf", "--age-minutes", "17.5"])
+    monkeypatch.setattr(cleanup_script.requests, "Session", lambda: session)
+    monkeypatch.setattr(cleanup_script, "provider_from_config", provider_factory)
+
+    cleanup_script.main()
+
+    assert observed == {"config": Path("/test/storage.conf"), "session": session}
+    assert provider.age == timedelta(minutes=17.5)
+    assert capsys.readouterr().out == "Removed S3 bucket stale-bucket\n"
+
+
+def test_cleanup_entrypoint_provider_errors_exit_nonzero() -> None:
+    runner = """
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("cleanup_s3", "scripts/cleanup-s3.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+class SessionStub:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+class FailingProviderStub:
+    def cleanup_stale(self, age):
+        raise RuntimeError("cleanup failed")
+
+module.requests.Session = SessionStub
+module.provider_from_config = lambda path, session: FailingProviderStub()
+sys.argv = ["cleanup-s3.py", "--config", "/test/storage.conf"]
+module.main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", runner],
+        capture_output=True,
+        check=False,
+        cwd=ROOT,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "charm_integration_testing")},
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "cleanup failed" in result.stderr
 
 
 @pytest.mark.parametrize(
