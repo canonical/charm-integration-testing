@@ -193,162 +193,6 @@ def test_environment_info_exposes_optional_swift_secret() -> None:
     assert all("${ENVIRONMENT_NAME}" not in line for line in environment_lookups)
 
 
-def test_cleanup_schedule_covers_every_environment_storage_namespace() -> None:
-    # GIVEN numbered test environments sharing the same physical substrates
-    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
-    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
-    gate_id = "wait-for-previous-sweep"
-    gate = schedule["jobs"][gate_id]
-    scheduled = [(job_id, job) for job_id, job in schedule["jobs"].items() if job_id != gate_id]
-
-    # WHEN the schedule waits for older sweeps before chaining reusable cleanup jobs
-    assert gate["runs-on"] == "ubuntu-latest"
-    assert gate["permissions"]["actions"] == "read"
-    gate_script = gate["steps"][0]["run"]
-    assert "gh run list" in gate_script
-    assert "GITHUB_RUN_NUMBER" in gate_script
-    assert '.status != "completed"' in gate_script
-    assert scheduled[0][1]["needs"] == gate_id
-    scheduled_environments = [job["with"]["environment"] for _, job in scheduled]
-    scheduled_secret_names = [
-        job["secrets"]["S3_SWIFT_CONFIG"].removeprefix("${{ secrets.").removesuffix(" }}") for _, job in scheduled
-    ]
-    assert len(scheduled_environments) == len(set(scheduled_environments))
-    assert len(scheduled_secret_names) == len(set(scheduled_secret_names))
-
-    scheduled_secrets = dict(zip(scheduled_environments, scheduled_secret_names, strict=True))
-    expected_secrets = {name: str(environment["s3-swift-secret"]) for name, environment in environments.items()}
-    assert len(expected_secrets.values()) == len(set(expected_secrets.values()))
-    assert len(scheduled) == len(environments)
-    assert scheduled_secrets == expected_secrets
-    assert all(job["uses"] == "./.github/workflows/cleanup-environment.yaml" for _, job in scheduled)
-    assert all("strategy" not in job for _, job in scheduled)
-    for (previous_id, _), (_, job) in zip(scheduled, scheduled[1:], strict=False):
-        assert job["needs"] == [gate_id, previous_id]
-        assert job["if"] == "${{ !cancelled() && needs.wait-for-previous-sweep.result == 'success' }}"
-    # Only the first logical environment for each physical substrate runs broad cleanup.
-    seen_substrates: set[tuple[str | None, str | None]] = set()
-    for _, job in scheduled:
-        name = job["with"]["environment"]
-        environment = environments[name]
-        substrate = (environment.get("kubeconfig-secret"), environment.get("novarc-secret"))
-        assert substrate != (None, None)
-        assert job["with"].get("cleanup_substrate", False) is (substrate not in seen_substrates)
-        seen_substrates.add(substrate)
-    assert len(seen_substrates) == 5
-    # THEN every Swift-enabled environment selects its configured secret
-    for name, environment in environments.items():
-        assert environment.get("swift-storage") is True
-        assert environment.get("s3-swift-secret") == expected_secrets[name]
-    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
-    workflow_events = reusable.get("on", reusable.get(True))
-    reusable_secrets = workflow_events["workflow_call"]["secrets"]
-    cleanup_steps = reusable["jobs"]["cleanup-environment"]["steps"]
-    resolve_credentials = next(step for step in cleanup_steps if step.get("name") == "Resolve credentials")
-    assert reusable_secrets["S3_SWIFT_CONFIG"]["required"] is False
-    assert workflow_events["workflow_call"]["inputs"]["cleanup_substrate"]["default"] is False
-    assert workflow_events["workflow_dispatch"]["inputs"]["cleanup_substrate"]["default"] is True
-    assert resolve_credentials["if"] == "${{ inputs.cleanup_substrate && success() }}"
-
-
-def test_cleanup_workflows_serialize_shared_substrate_cleanup() -> None:
-    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
-    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
-
-    assert len(schedule["jobs"]) == 23
-    assert reusable["concurrency"] == {
-        "group": "charm-qa-environment-cleanup",
-        "cancel-in-progress": False,
-    }
-
-
-def test_cleanup_gate_waits_for_older_sweeps_without_a_checkout(tmp_path: Path) -> None:
-    # GIVEN a checkout-free runner with older active/pending and newer pending sweeps
-    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
-    gate_script = schedule["jobs"]["wait-for-previous-sweep"]["steps"][0]["run"]
-    calls = tmp_path / "calls"
-    sleeps = tmp_path / "sleeps"
-    gh = tmp_path / "gh"
-    gh.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, sys\n"
-        "from pathlib import Path\n"
-        "assert sys.argv[1:3] == ['run', 'list']\n"
-        "assert '--repo' in sys.argv, 'No checkout: repository must be explicit'\n"
-        "assert sys.argv[sys.argv.index('--repo') + 1] == 'example/test-repository'\n"
-        "path = Path(os.environ['GATE_CALLS'])\n"
-        "count = int(path.read_text()) if path.exists() else 0\n"
-        "path.write_text(str(count + 1))\n"
-        "print(json.dumps([\n"
-        "    {'number': 18, 'status': 'in_progress' if count == 0 else 'completed'},\n"
-        "    {'number': 19, 'status': 'queued' if count == 0 else 'completed'},\n"
-        "    {'number': 20, 'status': 'in_progress'},\n"
-        "    {'number': 21, 'status': 'queued'},\n"
-        "]))\n"
-    )
-    gh.chmod(0o700)
-    sleep = tmp_path / "sleep"
-    sleep.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$GATE_SLEEPS"\n')
-    sleep.chmod(0o700)
-
-    # WHEN the actual gate script runs outside the repository
-    result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", gate_script],
-        capture_output=True,
-        check=False,
-        text=True,
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{tmp_path}:{os.environ['PATH']}",
-            "GITHUB_REPOSITORY": "example/test-repository",
-            "GITHUB_RUN_NUMBER": "20",
-            "GITHUB_REF_NAME": "main",
-            "GATE_CALLS": str(calls),
-            "GATE_SLEEPS": str(sleeps),
-        },
-    )
-    # THEN it waits for both older sweeps, but not itself or newer pending work
-    assert result.returncode == 0, result.stderr
-    assert calls.read_text() == "2"
-    assert sleeps.read_text() == "30\n"
-    assert "Waiting for 2 earlier scheduled sweep(s)" in result.stdout
-
-
-def test_cleanup_gate_failure_blocks_every_scheduled_child(tmp_path: Path) -> None:
-    # GIVEN a gate whose GitHub lookup fails before confirming older sweeps have completed
-    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
-    gate_id = "wait-for-previous-sweep"
-    gate_script = schedule["jobs"][gate_id]["steps"][0]["run"]
-    gh = tmp_path / "gh"
-    gh.write_text("#!/bin/sh\nexit 1\n")
-    gh.chmod(0o700)
-    # WHEN the actual gate script runs under the Actions bash failure settings
-    result = subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", gate_script],
-        capture_output=True,
-        check=False,
-        text=True,
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{tmp_path}:{os.environ['PATH']}",
-            "GITHUB_REPOSITORY": "example/test-repository",
-            "GITHUB_RUN_NUMBER": "20",
-            "GITHUB_REF_NAME": "main",
-        },
-    )
-    # THEN no child may bypass the gate, even though cleanup siblings may continue after a failure
-    assert result.returncode == 1
-    for job_id, job in schedule["jobs"].items():
-        if job_id == gate_id:
-            continue
-        dependencies = job["needs"]
-        assert gate_id in ([dependencies] if isinstance(dependencies, str) else dependencies)
-        if dependencies != gate_id:
-            assert job["if"] == "${{ !cancelled() && needs.wait-for-previous-sweep.result == 'success' }}"
-
-
 def test_cleanup_imports_storage_from_checkout() -> None:
     # GIVEN the reusable cleanup workflow
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
@@ -381,6 +225,51 @@ def test_cleanup_imports_storage_from_checkout() -> None:
         "steps.s3_credentials.outputs.available == 'true' }}"
     )
     assert step["if"] == "${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}"
+
+
+def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> None:
+    # GIVEN the original five scheduled environments rather than every logical alias
+    expected = [
+        "ps6-sqa-stg_charm_qa_kubernetes-1",
+        "ps6-sqa-prod_charm_qa_kubernetes-1",
+        "ps6-sqa-prod_charm_qa_openstack-1",
+        "ps7-sqa-prod_charm_qa_kubernetes-1",
+        "ps7-sqa-prod_charm_qa_openstack-1",
+    ]
+    schedule = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment-schedule.yaml").read_text())
+    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
+    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+
+    # WHEN inspecting the matrix, THEN each substrate is scheduled once with its explicit S3 secret
+    assert set(schedule["jobs"]) == {"cleanup-schedule"}
+    job = schedule["jobs"]["cleanup-schedule"]
+    matrix = job["strategy"]["matrix"]["include"]
+    assert [entry["environment"] for entry in matrix] == expected
+    assert job["strategy"]["fail-fast"] is False
+    assert job["uses"] == "./.github/workflows/cleanup-environment.yaml"
+    assert job["with"] == {"environment": "${{ matrix.environment }}"}
+    assert job["secrets"]["S3_SWIFT_CONFIG"] == "${{ secrets[matrix.s3-swift-secret] }}"
+    substrates = set()
+    for entry in matrix:
+        info = environments[entry["environment"]]
+        assert entry["s3-swift-secret"] == info["s3-swift-secret"]
+        substrates.add((info.get("kubeconfig-secret"), info.get("novarc-secret")))
+    assert len(substrates) == len(expected)
+    events = reusable.get("on", reusable.get(True))
+    assert events["workflow_dispatch"]["inputs"]["environment"]["options"] == expected
+    assert "cleanup_substrate" not in events["workflow_call"]["inputs"]
+    assert "cleanup_substrate" not in events["workflow_dispatch"]["inputs"]
+
+
+def test_cleanup_preserves_per_environment_cancellation() -> None:
+    # GIVEN independent cleanup runs for each representative environment
+    reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+
+    # THEN only an older run for the same workflow/environment is cancelled
+    assert reusable["concurrency"] == {
+        "group": "${{ github.workflow }}-${{ inputs.environment }}",
+        "cancel-in-progress": True,
+    }
 
 
 @pytest.mark.parametrize("missing_variable", ["all", "S3_OS_PASSWORD", None], ids=["absent", "partial", "complete"])

@@ -2,8 +2,8 @@
 name: Clean up environment
 run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
-  group: charm-qa-environment-cleanup
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+  cancel-in-progress: true
 permissions:
   contents: read  # only needed for private repos
 on:
@@ -15,36 +15,14 @@ on:
         default: ps6-sqa-stg_charm_qa_kubernetes-1
         options:
           - ps6-sqa-stg_charm_qa_kubernetes-1
-          - ps6-sqa-stg_charm_qa_kubernetes-2
           - ps6-sqa-prod_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_kubernetes-2
-          - ps6-sqa-prod_charm_qa_kubernetes-3
-          - ps6-sqa-prod_charm_qa_kubernetes-4
-          - ps6-sqa-prod_charm_qa_kubernetes-5
-          - ps6-sqa-prod_charm_qa_kubernetes-6
           - ps6-sqa-prod_charm_qa_openstack-1
-          - ps6-sqa-prod_charm_qa_openstack-2
           - ps7-sqa-prod_charm_qa_kubernetes-1
-          - ps7-sqa-prod_charm_qa_kubernetes-2
-          - ps7-sqa-prod_charm_qa_kubernetes-3
-          - ps7-sqa-prod_charm_qa_kubernetes-4
-          - ps7-sqa-prod_charm_qa_kubernetes-5
-          - ps7-sqa-prod_charm_qa_kubernetes-6
-          - ps7-sqa-prod_charm_qa_kubernetes-7
-          - ps7-sqa-prod_charm_qa_kubernetes-8
-          - ps7-sqa-prod_charm_qa_kubernetes-9
-          - ps7-sqa-prod_charm_qa_kubernetes-10
           - ps7-sqa-prod_charm_qa_openstack-1
-          - ps7-sqa-prod_charm_qa_openstack-2
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
-      cleanup_substrate:
-        description: Also clean up the environment's shared Kubernetes or OpenStack
-          substrate.
-        type: boolean
-        default: true
   workflow_call:
     inputs:
       environment:
@@ -55,11 +33,6 @@ on:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
-      cleanup_substrate:
-        description: Also clean up the environment's shared Kubernetes or OpenStack
-          substrate.
-        type: boolean
-        default: false
     secrets:
       PROD_SQA_KUBECONFIG:
         required: true
@@ -123,7 +96,6 @@ jobs:
           environment_name: ${{ inputs.environment }}
       - name: Resolve credentials
         id: creds
-        if: ${{ inputs.cleanup_substrate && success() }}
         shell: bash
         env:
           KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
