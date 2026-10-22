@@ -4,12 +4,70 @@
 import os
 import subprocess
 import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 SETUP = ROOT / "development-sandbox/bin/setup-s3.sh"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected_attempts", "success"),
+    [
+        pytest.param((503, 503, 200), 3, True, id="wait-for-success"),
+        pytest.param((503, 403), 2, True, id="wait-for-auth-required"),
+        pytest.param((503,), 30, False, id="persistent-server-error"),
+        pytest.param((404,), 30, False, id="wrong-service"),
+    ],
+)
+def test_setup_waits_for_a_healthy_s3_response(
+    tmp_path: Path, statuses: tuple[int, ...], expected_attempts: int, success: bool
+) -> None:
+    # GIVEN an HTTP endpoint that is reachable before it is ready
+    responses: list[int] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            status = statuses[min(len(responses), len(statuses) - 1)]
+            responses.append(status)
+            self.send_response(status)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    sleep = tmp_path / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o700)
+    readiness = "ready=0\n" + SETUP.read_text().split("ready=0\n", 1)[1].split('cd "${project_root}"', 1)[0]
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            # WHEN the actual shell readiness loop uses real curl responses
+            result = subprocess.run(
+                ["bash", "-eu", "-c", readiness],
+                capture_output=True,
+                check=False,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                    "S3_ENDPOINT": f"http://127.0.0.1:{server.server_port}",
+                },
+            )
+        finally:
+            server.shutdown()
+            thread.join()
+
+    # THEN server errors are retried, and only success/auth-required responses proceed
+    assert (result.returncode == 0) is success
+    assert len(responses) == expected_attempts
+    if not success:
+        assert "credentials were not written" in result.stderr
 
 
 def test_setup_restricts_existing_credentials_before_reading_them(tmp_path: Path) -> None:

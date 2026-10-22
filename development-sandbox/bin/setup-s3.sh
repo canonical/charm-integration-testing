@@ -126,14 +126,15 @@ if ! sudo -n systemctl is-active --quiet charmqa-s3.service; then
 fi
 ready=0
 for attempt in $(seq 1 30); do
-    if curl --silent --connect-timeout 1 --max-time 2 --output /dev/null "${S3_ENDPOINT}"; then
+    if status="$(curl --silent --connect-timeout 1 --max-time 2 --output /dev/null \
+        --write-out '%{http_code}' "${S3_ENDPOINT}")" && [[ "${status}" == 200 || "${status}" == 403 ]]; then
         ready=1
         break
     fi
     sleep 1
 done
 if (( ! ready )); then
-    echo "SeaweedFS is not reachable at ${S3_ENDPOINT}; credentials were not written" >&2
+    echo "SeaweedFS is not ready at ${S3_ENDPOINT}; credentials were not written" >&2
     echo "Inspect journalctl -u charmqa-s3 and the service bind address; setup does not rebind an existing service." >&2
     exit 1
 fi
