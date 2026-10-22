@@ -44,7 +44,15 @@ on:
         required: true
       PROD_PS7_NOVARC:
         required: true
-      S3_SWIFT_CONFIG:
+      S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1:
+        required: false
+      S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1:
         required: false
 jobs:
   cleanup-environment:
@@ -134,7 +142,7 @@ jobs:
         shell: bash
         env:
           SWIFT_SECRET_NAME: ${{ steps.env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets.S3_SWIFT_CONFIG || (contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.env_info.outputs.s3-swift-secret) && secrets[steps.env_info.outputs.s3-swift-secret] || '') }}  # zizmor: ignore[overprovisioned-secrets] Fixed workflow allowlist guards the dynamic fallback.
+          SWIFT_CONFIG: ${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.env_info.outputs.s3-swift-secret) && secrets[steps.env_info.outputs.s3-swift-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Fixed workflow allowlist guards the metadata-based lookup.
         run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/cleanup-s3.conf"
       - name: Install S3 cleanup dependencies

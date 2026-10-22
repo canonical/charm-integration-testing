@@ -11,17 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - environment: ps6-sqa-stg_charm_qa_kubernetes-1
-            s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1
-          - environment: ps6-sqa-prod_charm_qa_kubernetes-1
-            s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1
-          - environment: ps6-sqa-prod_charm_qa_openstack-1
-            s3-swift-secret: S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1
-          - environment: ps7-sqa-prod_charm_qa_kubernetes-1
-            s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1
-          - environment: ps7-sqa-prod_charm_qa_openstack-1
-            s3-swift-secret: S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1
+        environment:
+          - ps6-sqa-stg_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_kubernetes-1
+          - ps6-sqa-prod_charm_qa_openstack-1
+          - ps7-sqa-prod_charm_qa_kubernetes-1
+          - ps7-sqa-prod_charm_qa_openstack-1
     uses: ./.github/workflows/cleanup-environment.yaml
     with:
       environment: ${{ matrix.environment }}
@@ -31,4 +26,8 @@ jobs:
       PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
       PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
       PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-      S3_SWIFT_CONFIG: ${{ secrets[matrix.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] The matrix contains only fixed S3 secret names.
+      S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1 }}
+      S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+      S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_SWIFT_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+      S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+      S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_SWIFT_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
