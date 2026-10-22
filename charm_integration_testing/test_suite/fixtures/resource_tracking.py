@@ -31,6 +31,7 @@ from resource_tracking import (
 
 from bundle_builder_x import CharmChannel, OverridesClient
 from test_suite.conftest import failure_message, skipped_message
+from test_suite.fixtures.juju import get_juju_client_for_registered_models
 from test_suite.scheduler.markers import read_state_marker
 
 
@@ -61,37 +62,30 @@ def _resource_tracking_overrides_client(
     return OverridesClient(overrides=overrides_dir, logger=logger)
 
 
-@pytest.fixture(scope="session")
-def _resource_tracking_skip_cache() -> dict[tuple[str, str, str, str, str], frozenset[str]]:
-    """Session-scoped accumulator of resolved skip sets, keyed by
-    ``(controller, model, application, track, ubuntu_version)``.
-
-    Each ``(controller, model, application, track, ubuntu_version)`` is resolved
-    once, the first time it is seen, and cached for the rest of the run.  Keying
-    by controller and model -- not by bare application name -- lets an
-    application that moves between tracks (e.g. an upgrade/downgrade test)
-    contribute every track's skips, keeps a retaining track's opt-out from
-    leaking into an unrelated model that never runs that track, and never
-    conflates two same-named models on different controllers (model names are
-    only unique within a controller). The Ubuntu base is part of the key too,
-    since an override can be scoped to a specific ``ubuntu_version`` and an
-    application observed on the same track but a different base must not reuse
-    a skip set resolved for a different base. Applications whose base has not
-    yet been resolved are skipped entirely (not cached) so a later visit can
-    still resolve and cache them once the base is known. Caching makes the map
-    immune to transient ``list_applications`` failures on later visits and
-    gives the end-of-suite report a stable, fully-accumulated map even after
-    applications are torn down.
-    """
-    return {}
+def _resolve_resource_tracking_skips(
+    overrides_client: OverridesClient | None,
+    juju_client: JujuClient | None,
+    model_handles: list[JujuModelHandle],
+) -> dict[tuple[str, str, str], frozenset[str]]:
+    skips_by_application: dict[tuple[str, str, str], frozenset[str]] = {}
+    if overrides_client is not None and juju_client is not None:
+        for handle in model_handles:
+            applications = juju_client.list_applications(model=handle)
+            for application, info in applications.items():
+                if info.channel is None or info.base is None:
+                    continue
+                channel = CharmChannel.model_validate(str(info.channel))
+                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
+                if resolved:
+                    scope = (handle.controller, handle.model, application)
+                    skips_by_application[scope] = skips_by_application.get(scope, frozenset()) | resolved
+    return skips_by_application
 
 
 @pytest.fixture
 def resource_tracking_skips_by_application(
     request: pytest.FixtureRequest,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
-    _resource_tracking_skip_cache: dict[tuple[str, str, str, str, str], frozenset[str]],
     logger: logging.Logger,
 ) -> dict[tuple[str, str, str], frozenset[str]]:
     """Map each ``(controller, model, application)`` to the kinds it opts out of tracking.
@@ -103,48 +97,27 @@ def resource_tracking_skips_by_application(
     ``juju_client.list_applications`` rather than from hard-coded target/neighbor
     options, so charms pulled in as dependencies are resolved the same way.
 
-    Each application's channel and Ubuntu base are resolved per controller,
-    model, track and base, and cached, so a model that cannot be queried on some
-    later visit does not lose skip coverage already established.  The returned
-    map is scoped to ``(controller, model, application)`` and unions the skips of
-    every track/base combination the application was seen on *within that
-    model*: because all of a model's states share one namespace, a resource kind
+    The returned map is scoped to ``(controller, model, application)`` and
+    unions the skips of every track/base combination observed at this point:
+    because all of a model's states share one namespace, a resource kind
     retained by any track or base exercised there must be opted out for the
-    whole model, while a different model (on the same or another controller)
-    that never runs that track/base keeps tracking the kind.
+    whole model, while a different model keeps tracking the kind.
     """
     overrides_client = _resource_tracking_overrides_client(request, logger)
-    if overrides_client is not None:
-        for handle in session_resource_registry.registered_handles():
-            if not isinstance(handle, JujuModelHandle):
-                continue
-            try:
-                applications = juju_client.list_applications(model=handle)
-            except Exception:
-                logger.warning("Could not list applications for model '%s'.", handle.model, exc_info=True)
-                continue
-            for application, info in applications.items():
-                if info.channel is None or info.base is None:
-                    continue
-                channel = CharmChannel.model_validate(str(info.channel))
-                key = (handle.controller, handle.model, application, channel.explicit_track, info.base)
-                if key in _resource_tracking_skip_cache:
-                    continue
-                resolved = overrides_client.get_charm_resource_tracking_skips(info.charm, channel, info.base)
-                if resolved:
-                    _resource_tracking_skip_cache[key] = resolved
-
-    skips_by_scope: dict[tuple[str, str, str], frozenset[str]] = {}
-    for (controller, model, application, _track, _base), resolved in _resource_tracking_skip_cache.items():
-        scope = (controller, model, application)
-        skips_by_scope[scope] = skips_by_scope.get(scope, frozenset()) | resolved
-    return skips_by_scope
+    client_and_models = (
+        get_juju_client_for_registered_models(request, session_resource_registry)
+        if overrides_client is not None
+        else None
+    )
+    if client_and_models is None:
+        return {}
+    juju_client, model_handles = client_and_models
+    return _resolve_resource_tracking_skips(overrides_client, juju_client, model_handles)
 
 
 @pytest.fixture(autouse=True)
 def track_state_resources(
     request: pytest.FixtureRequest,
-    juju_client: JujuClient,
     kubernetes_client_registry: KubernetesClientRegistry,
     session_resource_registry: ResourceRegistry,
     state_resource_tracker: StateResourceTracker,
@@ -155,10 +128,10 @@ def track_state_resources(
 
     Collection is deliberately best-effort and never fails the test: the
     resulting discrepancies are reported separately at the end of the suite.
-    Snapshots are recorded uniformly; per-charm skips are applied once at diff
-    time.  ``resource_tracking_skips_by_application`` is depended on here only to
-    accumulate each application's resolved skip set into the session cache as the
-    suite progresses, so the end-of-suite report has the full map.
+    Each model observation carries the skips resolved for its applications.
+    Skips are resolved before each test and again after passing state-marked
+    tests, so applications removed by a test and newly deployed applications
+    are both represented.
     """
     yield
 
@@ -170,6 +143,19 @@ def track_state_resources(
     marker = read_state_marker(request.node)
     if marker is None:
         return
+    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+    if client_and_models is None:
+        return
+
+    juju_client, model_handles = client_and_models
+    post_test_skips = _resolve_resource_tracking_skips(
+        _resource_tracking_overrides_client(request, logger),
+        juju_client,
+        model_handles,
+    )
+    skips = dict(resource_tracking_skips_by_application)
+    for scope, resource_types in post_test_skips.items():
+        skips[scope] = skips.get(scope, frozenset()) | resource_types
 
     # Build a collector per supported substrate. Only Kubernetes is supported today; the collector will
     # skip models whose controllers are not Kubernetes-based.
@@ -183,4 +169,4 @@ def track_state_resources(
         )
     ]
 
-    state_resource_tracker.collect(marker.provides, collectors, logger)
+    state_resource_tracker.collect(marker.provides, collectors, logger, skips=skips)

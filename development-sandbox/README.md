@@ -47,6 +47,22 @@ See the [setup-k8s skill](../.agents/skills/setup-k8s/SKILL.md) for installation
 and checks, and [setup-charm-tests](../.agents/skills/setup-charm-tests/SKILL.md)
 for test prerequisites.
 
+## Test controller disks
+
+Test controllers in the sandbox VM should use a 5 GB root disk (`root-disk=5G`),
+whether hosted on LXD or Kubernetes. This matches the sizing used by Kubernetes
+and PS7 OpenStack environments in [`static/environments.yaml`](../static/environments.yaml).
+For suite-managed
+controllers, pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`
+and, for a separate neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
+For manual bootstrap:
+
+```bash
+juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
+juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
+```
+
 ## Token setup
 
 Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).
@@ -95,4 +111,3 @@ convention. The format is the standard Copilot MCP config:
 
 MCP config applies to both `sandbox.sh run 'task'` and `sandbox.sh run --interactive`.
 It has no effect on `up`, `shell`, `down`, or `destroy`.
-
