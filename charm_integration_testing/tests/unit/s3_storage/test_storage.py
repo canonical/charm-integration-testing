@@ -506,6 +506,25 @@ def test_environment_provider_identity_distinguishes_storage_credentials() -> No
     assert "target-secret" not in target.handle.resource_id
 
 
+@pytest.mark.parametrize("prefix", ["", "TARGET_"], ids=["unprefixed", "prefixed"])
+def test_environment_provider_normalizes_endpoint_before_computing_identity(prefix: str) -> None:
+    # GIVEN two configurations differing only in a runtime-normalized endpoint slash
+    environ = {
+        f"{prefix}S3_ENDPOINT": "https://s3.test",
+        f"{prefix}S3_ACCESS_KEY": CREDS.access_key,
+        f"{prefix}S3_SECRET_KEY": CREDS.secret_key,
+    }
+    expected = provider_from_environment(environ, prefix)
+
+    # WHEN constructing both providers, THEN they share resource and ownership identities
+    actual = provider_from_environment({**environ, f"{prefix}S3_ENDPOINT": "https://s3.test/"}, prefix)
+    assert isinstance(expected, StaticS3Provider)
+    assert isinstance(actual, StaticS3Provider)
+    assert actual.endpoint == expected.endpoint
+    assert actual.handle == expected.handle
+    assert actual._bucket_owner == expected._bucket_owner
+
+
 def test_environment_provider_identity_distinguishes_cleanup_credentials() -> None:
     common_credentials = {
         "S3_ENDPOINT": "https://s3.test",

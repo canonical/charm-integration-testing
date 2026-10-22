@@ -36,8 +36,9 @@ def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S
         missing = [f"{prefix}{name}" for name in _S3_VARIABLES if not _get_environment_value(environ, name, prefix)]
         if missing:
             raise ValueError("Missing S3 credential variables: " + ", ".join(missing))
+        endpoint = _require_environment_value(environ, "S3_ENDPOINT", prefix).rstrip("/")
         return StaticS3Provider(
-            _require_environment_value(environ, "S3_ENDPOINT", prefix),
+            endpoint,
             namespace,
             S3Credentials(
                 _require_environment_value(environ, "S3_ACCESS_KEY", prefix),
@@ -46,7 +47,7 @@ def provider_from_environment(environ: Mapping[str, str], prefix: str = "") -> S
             region=region,
             identity=provider_identity(
                 "static",
-                _require_environment_value(environ, "S3_ENDPOINT", prefix),
+                endpoint,
                 namespace,
                 region,
                 _require_environment_value(environ, "S3_ACCESS_KEY", prefix),
