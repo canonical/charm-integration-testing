@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import importlib.util
-import json
 import os
 import subprocess
 import sys
@@ -71,21 +70,14 @@ def test_ci_test_entrypoints_receive_cloud_scoped_config_paths() -> None:
     assert "inputs.same_controller" in cmr["env"]["neighbor_cloud"]
 
 
-def test_cleanup_swift_secret_lookup_uses_the_same_fixed_allowlist() -> None:
+def test_cleanup_swift_secret_lookup_uses_environment_metadata() -> None:
     # GIVEN cleanup's metadata-based lookup for manual and scheduled runs
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     job = workflow["jobs"]["cleanup-environment"]
-    tests = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
-    assert json.loads(job["env"]["S3_SWIFT_SECRET_NAMES"]) == json.loads(
-        tests["jobs"]["execute-charm-test"]["env"]["S3_SWIFT_SECRET_NAMES"]
-    )
-
-    # THEN the lookup cannot select credentials outside the same fixed S3-only set
+    # THEN cleanup uses the exact metadata-selected secret without a second name registry
+    assert "S3_SWIFT_SECRET_NAMES" not in job["env"]
     step = next(step for step in job["steps"] if step.get("id") == "s3_credentials")
-    assert step["env"]["SWIFT_CONFIG"] == (
-        "${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.env_info.outputs.s3-swift-secret) "
-        "&& secrets[steps.env_info.outputs.s3-swift-secret] || '' }}"
-    )
+    assert step["env"]["SWIFT_CONFIG"] == "${{ secrets[steps.env_info.outputs.s3-swift-secret] }}"
 
 
 def test_ci_checks_each_environment_swift_secret_before_test_entrypoints() -> None:
@@ -206,10 +198,7 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert step["env"]["S3_CONFIG_PATH"] == "${{ steps.s3_credentials.outputs.config_path }}"
     assert credential_step["id"] == "s3_credentials"
     assert set(credential_step["env"]) == {"SWIFT_CONFIG", "SWIFT_SECRET_NAME"}
-    assert credential_step["env"]["SWIFT_CONFIG"] == (
-        "${{ contains(fromJSON(env.S3_SWIFT_SECRET_NAMES), steps.env_info.outputs.s3-swift-secret) "
-        "&& secrets[steps.env_info.outputs.s3-swift-secret] || '' }}"
-    )
+    assert credential_step["env"]["SWIFT_CONFIG"] == "${{ secrets[steps.env_info.outputs.s3-swift-secret] }}"
     assert credential_step["env"]["SWIFT_SECRET_NAME"] == "${{ steps.env_info.outputs.s3-swift-secret }}"
     assert "scripts/load-swift-config.py" in credential_step["run"]
     assert "SWIFT_CONFIG" not in step["env"]
@@ -237,7 +226,7 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
 
-    # WHEN inspecting the matrix, THEN each substrate is scheduled once without duplicating secret metadata
+    # WHEN inspecting the matrix, THEN each substrate is scheduled once and secrets are inherited
     assert set(schedule["jobs"]) == {"cleanup-schedule"}
     job = schedule["jobs"]["cleanup-schedule"]
     assert job["strategy"]["matrix"] == {"environment": expected}
@@ -245,13 +234,8 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     assert job["uses"] == "./.github/workflows/cleanup-environment.yaml"
     assert job["with"] == {"environment": "${{ matrix.environment }}"}
     events = reusable.get("on", reusable.get(True))
-    declared_secrets = events["workflow_call"]["secrets"]
-    expected_secrets = {environments[name]["s3-swift-secret"] for name in expected}
-    assert {name for name in declared_secrets if name.startswith("S3_")} == expected_secrets
-    assert {name for name in job["secrets"] if name.startswith("S3_")} == expected_secrets
-    for name in expected_secrets:
-        assert job["secrets"][name] == f"${{{{ secrets.{name} }}}}"
-        assert declared_secrets[name] == {"required": False}
+    assert job["secrets"] == "inherit"
+    assert all(not name.startswith("S3_") for name in events["workflow_call"]["secrets"])
     substrates = set()
     for name in expected:
         info = environments[name]
