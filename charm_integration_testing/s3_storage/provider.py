@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -41,16 +40,9 @@ class S3Provider(ABC):
     def new_bucket(self) -> S3Bucket:
         """Create a bucket resource before provisioning any external state."""
 
-    def bucket_destroyer(self, bucket: S3Bucket) -> Callable[[], None]:
-        """Return a callback to tear down a bucket resource."""
-        return bucket.cleanup
-
     @abstractmethod
     def cleanup_stale(self, age: timedelta, now: datetime | None = None) -> list[str]:
         """Remove old buckets owned by this provider's namespace."""
-
-    def cleanup_pending_resources(self) -> None:
-        """Retry provider-owned resource cleanup left pending by bucket teardown."""
 
 
 class S3Bucket(ABC):
@@ -67,7 +59,7 @@ class S3Bucket(ABC):
 
     @abstractmethod
     def cleanup(self) -> None:
-        """Revoke bucket credentials and delete this bucket."""
+        """Delete this bucket using the provider's cleanup identity."""
 
 
 class CredentialProvider(ABC):
@@ -87,8 +79,8 @@ class CredentialProvider(ABC):
         """Independent identity used to delete buckets after bucket credentials are revoked."""
 
     @abstractmethod
-    def issue(self) -> S3Credentials:
-        """Return credentials for a new bucket."""
+    def issue(self, bucket: S3BucketHandle) -> S3Credentials:
+        """Return credentials, registering any new credential resource under the bucket."""
 
     def provisioning_credentials(self, bucket_credentials: S3Credentials) -> S3Credentials:
         """Return the credentials used to create and initialize a bucket."""
@@ -116,7 +108,7 @@ class StaticCredentialProvider(CredentialProvider):
     def ownership_identity(self) -> tuple[str, ...]:
         return ("static", self.credentials.access_key, self.cleanup_credentials.access_key)
 
-    def issue(self) -> S3Credentials:
+    def issue(self, bucket: S3BucketHandle) -> S3Credentials:
         return self.credentials
 
     def provisioning_credentials(self, bucket_credentials: S3Credentials) -> S3Credentials:
