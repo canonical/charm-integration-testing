@@ -13,18 +13,21 @@ class BucketStub(S3Bucket):
         self._handle = S3BucketHandle("test", name)
         self.events = events
         self.fail_cleanup = False
+        self.provisioned = False
 
     @property
     def handle(self) -> S3BucketHandle:
         return self._handle
 
     def provision(self) -> tuple[str, S3Credentials]:
+        self.provisioned = True
         raise RuntimeError("Provisioning failed after mutation")
 
     def cleanup(self) -> None:
         self.events.append(self.handle.name)
         if self.fail_cleanup:
             raise RuntimeError(f"Cleanup failed for {self.handle.name}")
+        self.provisioned = False
 
 
 class ProviderStub(StaticS3Provider):
@@ -82,9 +85,11 @@ def test_bucket_is_registered_before_provisioning_can_fail() -> None:
     # WHEN provisioning fails after mutation, THEN the session still owns cleanup
     with pytest.raises(RuntimeError, match="Provisioning failed after mutation"):
         bucket.provision()
+    assert provider.buckets[0].provisioned
     assert registry.children_of(provider.handle) == [bucket.handle]
     registry.teardown_all()
     assert events == [bucket.handle.name]
+    assert not provider.buckets[0].provisioned
 
 
 def test_resumed_runs_preserve_buckets() -> None:
