@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Callable
 from contextlib import contextmanager
 from inspect import unwrap
 from pathlib import Path
@@ -97,7 +98,9 @@ def test_session_registry_cleans_up_before_closing_http_session(
                 "https://identity.test/v3", "user", "password", "users", "project", "projects", "https://storage.test"
             )
 
-        def create_credentials(self) -> S3Credentials:
+        def create_credentials(self, *, on_access_key: Callable[[str], None] | None = None) -> S3Credentials:
+            if on_access_key is not None:
+                on_access_key("access")
             return S3Credentials("access", "secret")
 
         def delete_credentials(self, access_key: str) -> None:
@@ -211,7 +214,9 @@ class KeystoneStub:
     def __init__(self, session):
         self.session = session
 
-    def create_credentials(self):
+    def create_credentials(self, *, on_access_key=None):
+        if on_access_key is not None:
+            on_access_key("access")
         return S3Credentials("access", "secret")
 
     def delete_credentials(self, access_key):
