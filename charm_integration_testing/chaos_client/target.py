@@ -42,15 +42,15 @@ def unit_pod_name(
     return str(_resolve_unit_pod(backend, namespace, unit, request_timeout=request_timeout).metadata.name)
 
 
-def workload_target(
+def workload_targets(
     backend: KubernetesBackend,
     namespace: str,
     unit: str,
     *,
     request_timeout: float | tuple[float, float],
     target_container: str | None = None,
-) -> tuple[str, str]:
-    """Resolve one live unit Pod and its workload container for targeted stress."""
+) -> tuple[str, list[str]]:
+    """Resolve one live unit Pod and its Juju workload containers for stress."""
     pod = _resolve_unit_pod(backend, namespace, unit, request_timeout=request_timeout)
     containers = [
         container.name
@@ -59,6 +59,6 @@ def workload_target(
     ]
     if target_container is not None:
         containers = [name for name in containers if name == target_container]
-    if len(containers) != 1:
-        raise RuntimeError(f"Specify one workload container for {namespace}/{unit}; candidates: {containers}.")
-    return str(pod.metadata.name), containers[0]
+    if not containers:
+        raise RuntimeError(f"No matching workload containers for {namespace}/{unit}.")
+    return str(pod.metadata.name), containers

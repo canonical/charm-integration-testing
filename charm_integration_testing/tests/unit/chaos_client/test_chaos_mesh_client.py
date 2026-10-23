@@ -1021,13 +1021,13 @@ class TestStressTargetScope:
             else:
                 client.io_latency(TEST_MODEL, UNIT, "/data", timedelta(seconds=1), 50, timedelta(seconds=30))
 
-        if operation == "io" and problem in {"no-workload", "multiple-workloads"}:
-            # IOChaos targets the whole Pod, so container-count ambiguity does not apply to it.
+        if problem == "multiple-workloads" or (operation == "io" and problem == "no-workload"):
+            # Stress targets all Juju workloads; IOChaos targets the whole Pod.
             invoke()
             assert backend.custom_objects_api.create_calls != []
             return
 
-        with pytest.raises(RuntimeError, match="one live Pod|one workload container"):
+        with pytest.raises(RuntimeError, match="one live Pod|No matching workload containers"):
             invoke()
         assert backend.custom_objects_api.create_calls == []
         assert client._created == []
@@ -1290,15 +1290,26 @@ def test_memory_targets_workload_container_only() -> None:
     assert body["spec"]["selector"] == {"pods": {TEST_MODEL.model: ["postgresql-pod"]}}
 
 
-def test_memory_rejects_ambiguous_workload_containers() -> None:
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_stress_targets_all_workload_containers(operation: str) -> None:
     backend = BackendStub()
     target = backend.core_v1_api.pods[0]
     target.spec.containers.append(
         k8s.V1Container(name="second", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="second")])
     )
-    with pytest.raises(RuntimeError, match="one workload container"):
-        ChaosMeshChaosClient(backend).stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
-    assert not backend.custom_objects_api.create_calls
+    chaos = ChaosMeshChaosClient(backend)
+    # WHEN applying stress, THEN one experiment selects both workloads, but not the charm agent.
+    if operation == "cpu":
+        chaos.stress_cpu(TEST_MODEL, UNIT, 4, timedelta(minutes=10))
+    else:
+        chaos.stress_memory(TEST_MODEL, UNIT, 1, 2048, timedelta(minutes=10))
+    assert len(backend.custom_objects_api.create_calls) == 1
+    body = backend.custom_objects_api.create_calls[0]["body"]
+    assert body["spec"]["containerNames"] == ["postgresql", "second"]
+    assert body["spec"]["selector"] == {"pods": {TEST_MODEL.model: ["postgresql-pod"]}}
+    chaos.check_stress(TEST_MODEL, UNIT)
+    chaos.cleanup(TEST_MODEL, UNIT, "")
+    assert not backend.custom_objects_api.objects
 
 
 class TestMemoryStressObservation:
