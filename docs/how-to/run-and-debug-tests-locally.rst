@@ -110,10 +110,13 @@ the protected ``$HOME/.local/share/charmqa-s3/s3.conf`` file. Load the path-only
 
 ``S3_REGION`` defaults to ``us-east-1``.
 
-Each integrator gets an isolated bucket and an initial ``charmqa/`` directory
-marker for consumers such as Spark History Server. ``S3_BUCKET_NAMESPACE`` defaults to
-``local``; CI uses each environment's ``s3-swift-secret`` value, so numbered
-environments have separate cleanup scopes even when they share a substrate.
+Each integrator gets a randomly named, isolated bucket and an initial ``charmqa/``
+directory marker for consumers such as Spark History Server. The namespace is a
+cleanup scope, not a bucket name: integrators sharing a namespace still get
+different buckets. ``S3_BUCKET_NAMESPACE`` belongs in the protected storage
+configuration alongside its credentials. It defaults to ``local`` outside CI;
+CI requires an explicit, nonblank value and never derives it from the environment
+or secret name.
 ``S3ProviderRegistry`` only resolves and deduplicates providers. Each used provider
 has one ``S3ResourceRegistry`` shared across its clouds and Juju clients. That scope
 registers the provider and its child buckets with the session ``ResourceRegistry``;
@@ -130,10 +133,20 @@ storage may still be in use. Swift-generated bucket keys are revoked before thei
 buckets are deleted; local/static keys are never revoked.
 
 Scheduled cleanup covers the five existing shared-substrate representatives
-using the existing age threshold (240 minutes by default). S3 cleanup is scoped
-to each representative's configured storage namespace; sharing a Kubernetes
-cluster does not extend that sweep to other S3 namespaces. Use the cleanup CLI
-with the relevant configuration to sweep those namespaces. Only strictly named harness
+using the existing age threshold (240 minutes by default). Configure each numbered
+environment's storage secret with the same namespace and effective storage/account
+and cleanup identity as its group's representative:
+
+* PS6 production Kubernetes: ``ps6-prod-kubernetes``
+* PS6 staging Kubernetes: ``ps6-stg-kubernetes``
+* PS6 production OpenStack: ``ps6-prod-openstack``
+* PS7 production Kubernetes: ``ps7-prod-kubernetes``
+* PS7 production OpenStack: ``ps7-prod-openstack``
+
+The representative can then sweep the group's stale buckets. A shared namespace
+alone does not grant cleanup ownership across different endpoints, regions,
+Swift accounts or cleanup access keys. Use the cleanup CLI with the relevant
+configuration for separate storage identities or namespaces. Only strictly named harness
 buckets in the matching namespace and with the matching provider ownership tag
 are eligible; log containers, other providers' buckets, and externally
 configured buckets are not touched. Buckets without ownership tags are retained
@@ -152,6 +165,11 @@ scheduled cleanup. Run the same cleanup manually with:
    poetry run python scripts/cleanup-s3.py \
      --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
 
+When changing an existing namespace, first sweep its stale buckets using the old
+configuration. The new namespace will not discover buckets created under the old
+secret-name-based scope. Retain the old configuration for cleanup of any remaining
+buckets once their runs finish; do not rename or retag active buckets.
+
 Supported test environments opt into Swift storage by setting ``s3-swift-secret``
 to their repository secret's name in ``static/environments.yaml``. An absent or
 empty name skips Swift configuration; a nonempty name requires complete
@@ -159,7 +177,7 @@ credentials. Create one repository secret per enabled
 environment (22 with the current environment table) and store that
 environment's credentials there, using a dedicated test-storage account
 separate from the log-upload account. Each secret contains the seven required
-Swift values and two cleanup values, plus optional ``S3_ENDPOINT`` when a
+Swift values, two cleanup values and ``S3_BUCKET_NAMESPACE``, plus optional ``S3_ENDPOINT`` when a
 non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
 ``KEY=value`` format:
 
@@ -174,6 +192,7 @@ non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
    S3_OS_STORAGE_URL=https://storage.example/swift/v1/AUTH_project
    S3_CLEANUP_ACCESS_KEY=...
    S3_CLEANUP_SECRET_KEY=...
+   S3_BUCKET_NAMESPACE=ps6-prod-kubernetes
    S3_ENDPOINT=https://s3.example
 
 The parser accepts comments and values containing ``=``; do not quote values or
