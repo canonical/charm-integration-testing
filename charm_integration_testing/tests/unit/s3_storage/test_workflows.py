@@ -275,6 +275,10 @@ def test_cleanup_preserves_per_environment_cancellation() -> None:
         pytest.param("-1", 1, id="negative"),
         pytest.param("nan", 1, id="nan"),
         pytest.param("inf", 1, id="infinity"),
+        pytest.param("1e300", 1, id="duration-overflow"),
+        pytest.param("1e-300", 1, id="duration-underflow"),
+        pytest.param("not-a-number", 1, id="invalid-number"),
+        pytest.param("0.00000002", 0, id="microsecond-duration"),
     ],
 )
 def test_cleanup_validates_finite_positive_threshold(tmp_path: Path, threshold: str, expected_status: int) -> None:

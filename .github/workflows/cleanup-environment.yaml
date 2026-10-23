@@ -69,15 +69,15 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import math
           import os
           import sys
+          from datetime import timedelta
           try:
-              threshold = float(os.environ["AGE_THRESHOLD"])
-          except ValueError:
-              threshold = math.nan
-          if not math.isfinite(threshold) or threshold <= 0:
-              print("::error::age_threshold must be a positive finite number")
+              age = timedelta(minutes=float(os.environ["AGE_THRESHOLD"]))
+              if age <= timedelta(0):
+                  raise ValueError
+          except (ValueError, OverflowError):
+              print("::error::age_threshold must be a positive finite number within the supported duration range")
               sys.exit(1)
           PY
       - name: Get environment info
