@@ -8,9 +8,13 @@ umask 077
 version=4.48
 state="${HOME}/.local/share/charmqa-s3"
 project_root="$(cd "$(dirname "$0")/../.." && pwd)"
-for command in curl tar sha256sum openssl jq ip systemd-run poetry; do
+for command in curl tar sha256sum openssl jq ip sudo systemctl systemd-run poetry; do
     command -v "${command}" >/dev/null || { echo "Missing prerequisite: ${command}" >&2; exit 1; }
 done
+if ! sudo -n true; then
+    echo "Local S3 setup requires noninteractive sudo; authorize it before running setup" >&2
+    exit 1
+fi
 case "$(uname -m)" in
     x86_64)
         arch=amd64

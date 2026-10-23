@@ -70,6 +70,33 @@ def test_setup_waits_for_a_healthy_s3_response(
         assert "credentials were not written" in result.stderr
 
 
+def test_setup_checks_noninteractive_sudo_before_mutating_state(tmp_path: Path) -> None:
+    # GIVEN unavailable noninteractive sudo and existing local S3 state
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sudo = bin_dir / "sudo"
+    sudo.write_text("#!/bin/sh\necho 'sudo: authorization unavailable' >&2\nexit 1\n")
+    sudo.chmod(0o700)
+    state = tmp_path / ".local/share/charmqa-s3"
+    (state / "bin").mkdir(parents=True)
+    (state / "bin/weed").touch()
+    state.chmod(0o755)
+
+    # WHEN setup starts, THEN it reports authorization failure without modifying state
+    result = subprocess.run(
+        ["bash", str(SETUP)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+    )
+    assert result.returncode != 0
+    assert "sudo: authorization unavailable" in result.stderr
+    assert "noninteractive sudo" in result.stderr
+    assert state.stat().st_mode & 0o777 == 0o755
+    assert not (state / "data").exists()
+
+
 def test_setup_restricts_existing_credentials_before_reading_them(tmp_path: Path) -> None:
     # GIVEN pre-existing overly permissive credential files and an invalid binary
     state = tmp_path / ".local/share/charmqa-s3"
