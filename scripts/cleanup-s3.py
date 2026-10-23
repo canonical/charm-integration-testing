@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import argparse
+import math
 from datetime import timedelta
 from pathlib import Path
 
@@ -15,9 +16,17 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--age-minutes", type=float, default=240)
     args = parser.parse_args()
+    if not math.isfinite(args.age_minutes) or args.age_minutes <= 0:
+        parser.error("--age-minutes must be a positive finite number")
+    try:
+        age = timedelta(minutes=args.age_minutes)
+    except OverflowError:
+        parser.error("--age-minutes is outside the supported duration range")
+    if age <= timedelta(0):
+        parser.error("--age-minutes must represent at least one microsecond")
     with requests.Session() as session:
         provider = provider_from_config(args.config, session)
-        for bucket in provider.cleanup_stale(timedelta(minutes=args.age_minutes)):
+        for bucket in provider.cleanup_stale(age):
             print(f"Removed S3 bucket {bucket}")
 
 

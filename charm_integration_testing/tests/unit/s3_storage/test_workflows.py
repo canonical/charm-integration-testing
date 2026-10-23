@@ -385,6 +385,41 @@ def test_cleanup_entrypoint_passes_config_and_age_to_provider(
     assert capsys.readouterr().out == "Removed S3 bucket stale-bucket\n"
 
 
+@pytest.mark.parametrize(
+    "age",
+    [
+        pytest.param("0", id="zero"),
+        pytest.param("-1", id="negative"),
+        pytest.param("nan", id="nan"),
+        pytest.param("inf", id="infinity"),
+        pytest.param("-inf", id="negative-infinity"),
+        pytest.param("1e300", id="overflow"),
+        pytest.param("1e-300", id="underflow"),
+    ],
+)
+def test_cleanup_entrypoint_rejects_invalid_age_before_configuration(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], age: str
+) -> None:
+    # GIVEN an invalid age and dependencies that must not be invoked
+    spec = importlib.util.spec_from_file_location("cleanup_s3", ROOT / "scripts/cleanup-s3.py")
+    assert spec is not None and spec.loader is not None
+    cleanup_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cleanup_script)
+
+    def unexpected_dependency(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("Invalid age must be rejected before session or configuration loading")
+
+    monkeypatch.setattr(sys, "argv", ["cleanup-s3.py", "--config", "/test/missing.conf", f"--age-minutes={age}"])
+    monkeypatch.setattr(cleanup_script.requests, "Session", unexpected_dependency)
+    monkeypatch.setattr(cleanup_script, "provider_from_config", unexpected_dependency)
+
+    # WHEN the CLI starts, THEN argparse reports invalid input without creating a provider
+    with pytest.raises(SystemExit) as error:
+        cleanup_script.main()
+    assert error.value.code == 2
+    assert "--age-minutes" in capsys.readouterr().err
+
+
 def test_cleanup_entrypoint_provider_errors_exit_nonzero() -> None:
     runner = """
 import importlib.util
