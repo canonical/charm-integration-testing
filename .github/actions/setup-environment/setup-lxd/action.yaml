@@ -15,7 +15,7 @@ inputs:
     required: true
 outputs:
   cloud-name:
-    description: Name of the cloud created and bootstrapped to.
+    description: Name of the cloud prepared for registration by the test suite.
     value: ${{ inputs.cloud-name }}
   cloud-definition-path:
     description: Path to the cloud definition for controller-side registration.
@@ -26,7 +26,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Add LXD Cloud
+    - name: Prepare LXD cloud files
       id: register
       env:
         LXD_CREDS: ${{ inputs.lxd-creds }}
@@ -74,7 +74,5 @@ runs:
               server-cert: |
         $(echo "${server_cert}" | sed 's/^/        /')
         EOF
-        juju add-cloud "${CLOUD}" "${CREDENTIALS_DIR}/cloud.yaml" --client
-        juju add-credential "${CLOUD}" -f "${CREDENTIALS_DIR}/credentials.yaml" --client
         echo "cloud-definition-path=${CREDENTIALS_DIR}/cloud.yaml" >> "$GITHUB_OUTPUT"
         echo "credentials-path=${CREDENTIALS_DIR}/credentials.yaml" >> "$GITHUB_OUTPUT"

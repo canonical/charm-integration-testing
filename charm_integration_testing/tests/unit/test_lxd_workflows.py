@@ -22,14 +22,12 @@ class SetupParams:
 @pytest.mark.parametrize(
     "params",
     [
-        pytest.param(SetupParams("none", 0), id="successful-registration"),
+        pytest.param(SetupParams("none", 0), id="successful-preparation"),
         pytest.param(SetupParams("parse", 2), id="credential-parsing-fails"),
-        pytest.param(SetupParams("add-cloud", 2), id="cloud-registration-fails"),
-        pytest.param(SetupParams("add-credential", 2), id="credential-registration-fails"),
     ],
 )
-def test_lxd_setup_retains_cloud_files_until_job_cleanup(tmp_path: Path, params: SetupParams) -> None:
-    # GIVEN the actual setup script and controllable external command failures
+def test_lxd_setup_prepares_cloud_files_until_job_cleanup(tmp_path: Path, params: SetupParams) -> None:
+    # GIVEN the actual setup script; Juju registration belongs to the test fixture
     action = yaml.safe_load((ROOT / ".github/actions/setup-environment/setup-lxd/action.yaml").read_text())
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -41,11 +39,7 @@ def test_lxd_setup_retains_cloud_files_until_job_cleanup(tmp_path: Path, params:
         "with open(sys.argv[2]) as source: print(yaml.safe_load(source)[sys.argv[1][1:]])\n"
     )
     juju = tools / "juju"
-    juju.write_text(
-        "#!/bin/bash\n"
-        'test "$(stat -c %a "$CREDENTIALS_DIR")" = 700 || exit 3\n'
-        'if [[ "$FAILURE" == "$1" ]]; then exit 2; fi\n'
-    )
+    juju.write_text("#!/bin/bash\n" "echo 'Unexpected Juju registration in setup action' >&2\n" "exit 3\n")
     for tool in (yq, juju):
         tool.chmod(0o700)
     runtime = tmp_path / "runtime"
@@ -71,7 +65,7 @@ def test_lxd_setup_retains_cloud_files_until_job_cleanup(tmp_path: Path, params:
         ),
     }
 
-    # WHEN registration succeeds or any of its external commands fails
+    # WHEN file preparation succeeds or credential parsing fails
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", action["runs"]["steps"][0]["run"]],
         env=environment,
@@ -79,10 +73,11 @@ def test_lxd_setup_retains_cloud_files_until_job_cleanup(tmp_path: Path, params:
         text=True,
     )
 
-    # THEN failures clean immediately, while successful registration exposes usable private files
+    # THEN failures clean immediately, while successful preparation exposes usable private files
     assert result.returncode == params.exit_code, result.stderr
     assert not (workspace / "creds.yaml").exists()
     if params.exit_code == 0:
+        assert workspace.stat().st_mode & 0o777 == 0o700
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
         cloud_path = Path(outputs["cloud-definition-path"])
         credentials_path = Path(outputs["credentials-path"])
@@ -138,6 +133,20 @@ def test_cloud_dispatch_passes_only_supported_inputs() -> None:
         for name, definition in action["inputs"].items():
             if definition.get("required"):
                 assert name in supplied
+
+
+def test_lxd_cleanup_categories_run_independently() -> None:
+    # GIVEN all LXD cleanup categories in the workflow
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = {step["name"]: step for step in workflow["jobs"]["cleanup-environment"]["steps"]}
+
+    # THEN cancelled() is an explicit status check, avoiding the implicit success() guard
+    for name in (
+        "Find and delete instances older than age threshold",
+        "Find and delete unused Juju networks",
+        "Find and delete unused Juju profiles",
+    ):
+        assert steps[name]["if"] == "${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}"
 
 
 def test_lxd_cloud_paths_reach_same_controller_registration() -> None:
