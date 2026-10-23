@@ -162,10 +162,8 @@ def create_client(access_key: str, secret_key: str):
     )
 
 
-client = create_client(os.environ["S3_ACCESS_KEY"], os.environ["S3_SECRET_KEY"])
-cleanup_client = create_client(
-    os.environ["S3_CLEANUP_ACCESS_KEY"], os.environ["S3_CLEANUP_SECRET_KEY"]
-)
+client = None
+cleanup_client = None
 
 
 def remove_probe_bucket(name: str) -> None:
@@ -192,6 +190,10 @@ bucket_creation_attempted = False
 outside_bucket_creation_attempted = False
 probe_error: Exception | None = None
 try:
+    client = create_client(os.environ["S3_ACCESS_KEY"], os.environ["S3_SECRET_KEY"])
+    cleanup_client = create_client(
+        os.environ["S3_CLEANUP_ACCESS_KEY"], os.environ["S3_CLEANUP_SECRET_KEY"]
+    )
     bucket_creation_attempted = True
     cleanup_client.create_bucket(Bucket=bucket)
     client.put_object(Bucket=bucket, Key="probe", Body=b"local-s3")
@@ -242,7 +244,10 @@ finally:
         cleanup_actions.append(partial(remove_probe_bucket, bucket))
     if outside_bucket_creation_attempted:
         cleanup_actions.append(partial(remove_probe_bucket, outside_bucket))
-    cleanup_actions.extend((client.close, cleanup_client.close))
+    if client is not None:
+        cleanup_actions.append(client.close)
+    if cleanup_client is not None:
+        cleanup_actions.append(cleanup_client.close)
     cleanup_error: Exception | None = None
     for cleanup in cleanup_actions:
         try:

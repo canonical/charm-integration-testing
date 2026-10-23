@@ -258,3 +258,37 @@ def test_setup_cleans_outside_bucket_when_creation_response_is_lost(tmp_path: Pa
     assert len(deleted) == 2
     assert (tmp_path / "created").read_text() in deleted
     assert (tmp_path / "closed").read_text().splitlines() == ["application-close", "cleanup-close"]
+
+
+def test_setup_closes_application_client_when_management_client_initialization_fails(tmp_path: Path) -> None:
+    # GIVEN an application client followed by failing management-client initialization
+    (tmp_path / "boto3.py").write_text(
+        "from pathlib import Path\n"
+        "class Client:\n"
+        "    def close(self): Path('closed').touch()\n"
+        "def client(*args, **kwargs):\n"
+        "    if kwargs['aws_access_key_id'] == 'cleanup-access':\n"
+        "        raise RuntimeError('management client initialization failed')\n"
+        "    return Client()\n"
+    )
+    probe = SETUP.read_text().split("poetry run python - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
+
+    # WHEN the actual setup probe starts, THEN the created client is still closed
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "S3_ENDPOINT": "http://s3.test",
+            "S3_ACCESS_KEY": "test-access",
+            "S3_SECRET_KEY": "test-secret",
+            "S3_CLEANUP_ACCESS_KEY": "cleanup-access",
+            "S3_CLEANUP_SECRET_KEY": "cleanup-secret",
+        },
+    )
+    assert result.returncode != 0
+    assert "management client initialization failed" in result.stderr
+    assert (tmp_path / "closed").exists()
