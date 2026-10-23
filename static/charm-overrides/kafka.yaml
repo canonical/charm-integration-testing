@@ -1,0 +1,55 @@
+---
+# Source: https://github.com/canonical/kafka-operator
+# Track 4 is KRaft-only; track 3 retains the legacy TLS and ZooKeeper relations.
+default_channel: 3/stable
+overrides:
+  - criteria:
+      - track: '4'
+    requires:
+      oauth:
+        features: [tls]
+    configs:
+      roles: ['broker,controller', 'broker', 'controller']
+    constraints:
+      # TLSHandler._on_mtls_client_certificates_available defers without client TLS.
+      - 'bool(endpoint[client-cas]) => bool(endpoint[certificates])'
+      # ClusterState.ready_to_start requires a controller; deploy-anywhere.md documents combined and split roles.
+      - 'bool(endpoint[peer-cluster]) => config[roles] == "controller"'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => config[roles] == "broker"'
+      - 'not bool(endpoint[peer-cluster]) and not bool(endpoint[peer-cluster-orchestrator])
+        => config[roles] == "broker,controller"'
+      # reachable() excludes opaque external peers, even when known peers share the endpoint.
+      - 'charms(endpoint[peer-cluster]) <= reachable(endpoint[peer-cluster])'
+      - 'charms(endpoint[peer-cluster-orchestrator]) <= reachable(endpoint[peer-cluster-orchestrator])'
+      # Require a known matching track and reject incompatible peers.
+      - 'bool(endpoint[peer-cluster]) => tracks(charms(endpoint[peer-cluster])) >=
+        tracks({self}) and tracks(charms(endpoint[peer-cluster])) <= tracks({self})'
+      - 'bool(endpoint[peer-cluster-orchestrator]) => tracks(charms(endpoint[peer-cluster-orchestrator]))
+        >= tracks({self}) and tracks(charms(endpoint[peer-cluster-orchestrator]))
+        <= tracks({self})'
+  - criteria:
+      - track: '3'
+    provides:
+      cos-agent:
+        optional: true  # observability integration; not in src/literals.py Status enum (kafka-operator 3/stable)
+      kafka-client:
+        optional: true  # consumer integration; not in src/literals.py Status enum (kafka-operator 3/stable)
+      peer-cluster-orchestrator:
+        optional: true  # optional peer-cluster integration; not needed for ZooKeeper operation
+    requires:
+      certificates:
+        optional: true  # conditional on oauth/trusted-ca/trusted-certificate/zookeeper TLS constraints below
+      oauth:
+        features: [tls]
+      trusted-ca:
+        optional: true  # legacy CA distribution endpoint; active without it in track 3
+      trusted-certificate:
+        optional: true  # legacy certificate transfer endpoint; active without it in track 3
+      zookeeper:
+        features: [tls]
+    constraints:
+      - 'bool(endpoint[oauth]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[trusted-ca]) or bool(endpoint[trusted-certificate]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[zookeeper]) => bool(endpoint[certificates])'
+      - 'bool(endpoint[certificates]) == ("tls" in features(endpoint[zookeeper]))'
+      - 'bool(endpoint[zookeeper]) => tracks(charms(endpoint[zookeeper])) == tracks({self})'

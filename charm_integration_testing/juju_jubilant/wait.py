@@ -242,6 +242,36 @@ def application_is_on_revision(status: jubilant.Status, application: str, revisi
     )
 
 
+def unit_is_removed(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    removed = unit not in status.apps[application].units
+    return removed, JujuWaitState(message=f"waiting for removal of unit '{unit}'")
+
+
+def unit_is_unavailable(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    unit_info = status.apps[application].units.get(unit)
+    unavailable = unit_info is None or unit_info.juju_status.current in {"down", "lost"}
+    return unavailable, JujuWaitState(message=f"waiting for unit '{unit}' to become unavailable")
+
+
+def unit_is_available(status: jubilant.Status, unit: str, model_uri: str) -> tuple[bool, JujuWaitState]:
+    application = unit.split("/", maxsplit=1)[0]
+    if application not in status.apps:
+        raise KeyError(f"Application '{application}' not found in model '{model_uri}'")
+    unit_info = status.apps[application].units.get(unit)
+    available = (
+        unit_info is not None
+        and unit_info.workload_status.current == "active"
+        and unit_info.juju_status.current == "idle"
+    )
+    return available, JujuWaitState(message=f"waiting for unit '{unit}' to become available")
+
+
 def units_have_message(message: str, status: jubilant.Status, *unit_args: str) -> tuple[bool, JujuWaitState]:
     if unit_args:
         units = set(unit_args)
@@ -280,17 +310,30 @@ def applications_are_removed(status: jubilant.Status, *application_args: str) ->
     )
 
 
+def saas_is_removed(status: jubilant.Status, alias: str) -> tuple[bool, JujuWaitState]:
+    if alias in status.app_endpoints:
+        return False, JujuWaitState(
+            message=f"waiting for removal of SAAS proxy {alias!r}",
+            noncompliant_applications={alias: None},
+        )
+    return True, JujuWaitState(message=f"waiting for removal of SAAS proxy {alias!r}")
+
+
 def integrations_are_removed(
     status: jubilant.Status, *integrations_args: tuple[JujuIntegrationApplication, JujuIntegrationApplication]
 ) -> tuple[bool, JujuWaitState]:
-    existing_integrations = get_integrations(status)
-    integrations = integrations_args if integrations_args else existing_integrations
+    existing_integrations = {frozenset(i) for i in get_integrations(status)}
+    integrations = integrations_args if integrations_args else [tuple(i) for i in existing_integrations]
 
     noncompliant_applications: dict[str, JujuApplicationState | None] = {}
     for integration in integrations:
-        if integration in existing_integrations:
+        if frozenset(integration) in existing_integrations:
             for endpoint in integration:
-                noncompliant_applications[endpoint.application] = get_application_state(status, endpoint.application)
+                # Skip SAAS applications (consumed offers) - they're not local apps in this model
+                if endpoint.application in status.apps:
+                    noncompliant_applications[endpoint.application] = get_application_state(
+                        status, endpoint.application
+                    )
 
     return len(noncompliant_applications) == 0, JujuWaitState(
         message="waiting for integration removal",

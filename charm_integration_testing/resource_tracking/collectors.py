@@ -1,0 +1,114 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Substrate-specific collection of resource snapshots.
+
+A :class:`ResourceCollector` encapsulates *how* to gather resource snapshots
+from one substrate.  :class:`KubernetesResourceCollector` is the only
+implementation today, but the abstraction lets an ``lxd`` or ``openstack``
+collector be added later without touching
+:class:`~resource_tracking.tracker.StateResourceTracker`, which records whatever
+collectors produce and knows nothing about namespaces or Kubernetes clients.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from juju import JujuBackend, JujuModelHandle
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from kubernetes_client import KubernetesClientRegistry
+from resource_registry import ResourceRegistry
+
+from .snapshot import ResourceSnapshot
+from .sources import KubernetesResourceSource, PvcSource
+
+
+@dataclass(frozen=True)
+class CollectedResources:
+    """Snapshots collected for a single tracked scope (a Juju model on a controller).
+
+    ``model`` names are only unique *within* a controller, so a CMR run can hold
+    e.g. ``controller-a:model`` and ``controller-b:model``.  ``controller`` is
+    carried alongside ``model`` so downstream baselines and skip keys never
+    conflate two same-named models on different clusters.
+    """
+
+    controller: str
+    model: str
+    snapshots: frozenset[ResourceSnapshot]
+
+
+class ResourceCollector(Protocol):
+    """Collects resource snapshots from one substrate."""
+
+    def collect(self, logger: logging.Logger) -> list[CollectedResources]:
+        """Return the resources currently present in every tracked scope.
+
+        Collection is best-effort: a scope that cannot be queried is skipped
+        rather than raising, so a partial substrate never fails the suite.
+        """
+
+
+class KubernetesResourceCollector:
+    """Collects resource snapshots for every registered Kubernetes model.
+
+    A CMR run can span multiple Juju controllers, each potentially bootstrapped
+    on a different cloud (e.g. two Kubernetes clusters, or a Kubernetes target
+    with an OpenStack neighbor).  Rather than resolving a client per controller
+    up front, ``collect`` asks ``juju_backend`` for each model's cloud and
+    resolves the shared client from ``KubernetesClientRegistry`` as it goes.
+    Every registered model is queried against the cluster it actually lives on
+    rather than always the target's. A controller that is not Kubernetes-based
+    (or whose client cannot be resolved) simply contributes no snapshots.
+
+    Every observed snapshot is recorded uniformly; per-application opt-outs are
+    not applied here.  Skips are excluded at diff time in
+    :func:`~resource_tracking.discrepancy.calculate_discrepancies`, so a
+    per-visit resolution difference cannot make a skipped kind read as drift.
+    """
+
+    def __init__(
+        self,
+        juju_backend: JujuBackend,
+        kubernetes_client_registry: KubernetesClientRegistry,
+        resource_registry: ResourceRegistry,
+        sources: Sequence[KubernetesResourceSource] | None = None,
+    ) -> None:
+        self._juju_backend = juju_backend
+        self._kubernetes_client_registry = kubernetes_client_registry
+        self._resource_registry = resource_registry
+        self._sources: tuple[KubernetesResourceSource, ...] = tuple(sources) if sources is not None else (PvcSource(),)
+
+    def collect(self, logger: logging.Logger) -> list[CollectedResources]:
+        collected: list[CollectedResources] = []
+        for handle in self._resource_registry.registered_handles():
+            if not isinstance(handle, JujuModelHandle):
+                continue
+            try:
+                cloud = self._juju_backend.kubernetes_cloud_for_model(handle)
+            except Exception:
+                logger.debug("Could not resolve Kubernetes cloud for model '%s'.", handle.uri, exc_info=True)
+                continue
+            if cloud is None:
+                continue
+            try:
+                kubernetes_client = self._kubernetes_client_registry.client_for_cloud(cloud)
+            except Exception:
+                logger.debug("Could not resolve Kubernetes client for cloud '%s'.", cloud, exc_info=True)
+                continue
+            snapshots: set[ResourceSnapshot] = set()
+            for source in self._sources:
+                try:
+                    snapshots.update(source.collect(kubernetes_client, handle.model))
+                except ApiException as exc:
+                    logger.debug("Skipping model '%s' (resource snapshot failed)", handle.model, exc_info=exc)
+                    break
+            else:
+                collected.append(
+                    CollectedResources(controller=handle.controller, model=handle.model, snapshots=frozenset(snapshots))
+                )
+        return collected

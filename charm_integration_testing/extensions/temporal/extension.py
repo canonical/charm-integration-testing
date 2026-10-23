@@ -8,7 +8,7 @@ from abc import ABC
 from datetime import timedelta
 from typing import Any
 
-from juju import JujuBackend, JujuExtension
+from juju import JujuBackend, JujuExtension, JujuModelHandle
 from juju.models import JujuIntegrationApplication
 
 
@@ -45,21 +45,21 @@ class TemporalExtension(JujuExtension, ABC):
         self.juju = juju
         self.logger = logger
 
-    def post_deploy(self, model: str) -> None:
+    def post_deploy(self, model: JujuModelHandle) -> None:
         """Post-deploy hook to deploy temporal if necessary.
 
         :param model: The Juju model to deploy to.
-        :type model: str
+        :type model: JujuModelHandle
         """
         if self.should_deploy_temporal(model):
             self.deploy_temporal_stack(model)
             self.configure_dependent_charms(model)
 
-    def should_deploy_temporal(self, model: str) -> bool:
+    def should_deploy_temporal(self, model: JujuModelHandle) -> bool:
         """Determine if temporal should be deployed in the given model.
 
         :param model: The Juju model to check.
-        :type model: str
+        :type model: JujuModelHandle
         :return: True if temporal should be deployed, False otherwise.
         :rtype: bool
         """
@@ -68,11 +68,11 @@ class TemporalExtension(JujuExtension, ABC):
                 return True
         return False
 
-    def deploy_temporal_stack(self, model: str) -> None:
+    def deploy_temporal_stack(self, model: JujuModelHandle) -> None:
         """Deploy the temporal stack in the given model.
 
         :param model: The Juju model to deploy to.
-        :type model: str
+        :type model: JujuModelHandle
         """
         required_charms_and_config: dict[str, dict[str, Any]] = {
             "temporal-k8s": {"num-history-shards": 4},
@@ -87,7 +87,7 @@ class TemporalExtension(JujuExtension, ABC):
                 deployed_apps[info.charm] = application
         for charm, config in required_charms_and_config.items():
             if charm not in deployed_apps:
-                self._log(f"Deploying {charm} to model {model}")
+                self._log(f"Deploying {charm} to model {model.uri}")
                 self.juju.deploy_application(model, charm, config=config, trust=charm in self.CHARMS_REQUIRING_TRUST)
                 deployed_apps[charm] = charm  # Assume application name is same as charm name
 
@@ -120,7 +120,7 @@ class TemporalExtension(JujuExtension, ABC):
         if not self._is_default_temporal_namespace_bootstrapped(model, temporal_admin_app):
             self._bootstrap_default_temporal_namespace(model, temporal_admin_app)
 
-    def _is_default_temporal_namespace_bootstrapped(self, model: str, temporal_admin_app: str) -> bool:
+    def _is_default_temporal_namespace_bootstrapped(self, model: JujuModelHandle, temporal_admin_app: str) -> bool:
         # NOTE: tctl is apparently deprecated upstream, so this will likely need to change at some point
         # in the future.
         task = self.juju.run_action(
@@ -135,7 +135,7 @@ class TemporalExtension(JujuExtension, ABC):
 
         return False
 
-    def _bootstrap_default_temporal_namespace(self, model: str, temporal_admin_app: str) -> None:
+    def _bootstrap_default_temporal_namespace(self, model: JujuModelHandle, temporal_admin_app: str) -> None:
         def inner_logic() -> None:
             task = self.juju.run_action(
                 model,
@@ -161,11 +161,11 @@ class TemporalExtension(JujuExtension, ABC):
             else:
                 break
 
-    def configure_dependent_charms(self, model: str) -> None:
+    def configure_dependent_charms(self, model: JujuModelHandle) -> None:
         """Configure charms that depend on temporal in the given model.
 
         :param model: The Juju model to configure.
-        :type model: str
+        :type model: JujuModelHandle
         """
         temporal_host = "temporal-k8s:7233"
         for charm in self.CONFIG_MAP:
@@ -173,7 +173,7 @@ class TemporalExtension(JujuExtension, ABC):
                 if info.charm == charm:
                     config_option = self.CONFIG_MAP[charm]
                     if self.juju.get_application_config(model, application).get(config_option) != temporal_host:
-                        self._log(f"Configuring {application} in model {model} to use temporal endpoint")
+                        self._log(f"Configuring {application} in model {model.uri} to use temporal endpoint")
                         self.juju.configure_application(
                             model,
                             application,

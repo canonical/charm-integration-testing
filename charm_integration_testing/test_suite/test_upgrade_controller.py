@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuVersion
+from juju import JujuClient, JujuModelHandle, JujuVersion
 from utils.juju_releases import UpgradeMode, classify_upgrade_mode
 
 from .scheduler.states import State
@@ -16,6 +16,7 @@ def test_upgrade_controller(
     target_controller: str,
     target_upgrade_version: JujuVersion | None,
     model: str,
+    neighbor_model_ref: JujuModelHandle | None,
     request: pytest.FixtureRequest,
 ) -> None:
     """
@@ -33,7 +34,7 @@ def test_upgrade_controller(
         pytest.skip("No Juju upgrade target version is available for this environment.")
 
     target_version_str = str(target_upgrade_version)
-    controller_model = f"{target_controller}:controller"
+    controller_model = JujuModelHandle(controller=target_controller, model="controller")
 
     # GIVEN a healthy deployment
     pre_version = juju_client.version(controller_model)
@@ -53,17 +54,23 @@ def test_upgrade_controller(
         active_controller = temp_controller
 
     # THEN the controller version should have advanced
-    active_controller_model = f"{active_controller}:controller"
+    active_controller_model = JujuModelHandle(controller=active_controller, model="controller")
     post_version = juju_client.version(active_controller_model)
     assert (
         post_version > pre_version
     ), f"Expected controller version to increase after upgrade, but got {post_version} (was {pre_version})."
 
     # And the workload model should still be healthy
-    if active_controller == target_controller:
-        juju_client.validate_model(model=model, level="deep")
-    else:
-        juju_client.validate_model(model=f"{active_controller}:{model}", level="deep")
+    workload_model_ref = JujuModelHandle(controller=active_controller, model=model)
+    models_to_validate = [m for m in (workload_model_ref, neighbor_model_ref) if m is not None]
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
+
+    # On the migration path the model's controller changed; the extension re-keyed its tracked
+    # state on post_migrate_model, so the checkpoint finds it under the new controller.
+    # For a CMR the persistence validator lives on the neighbor's requirer units. The neighbor's
+    # own controller is unaffected by this upgrade, so no rekey is needed.
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="deep")
 
 
 def _upgrade_in_place(
@@ -76,10 +83,14 @@ def _upgrade_in_place(
     juju_client.upgrade_controller(controller=controller, agent_version=target_version)
 
     # Wait for the controller model to settle after the upgrade
-    juju_client.idle_for_period(model=f"{controller}:controller", timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(
+        model=JujuModelHandle(controller=controller, model="controller"), timeout=timedelta(minutes=15)
+    )
 
     # Wait for the workload model to re-stabilise
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(
+        model=JujuModelHandle(controller=controller, model=model), timeout=timedelta(minutes=15)
+    )
 
 
 def _upgrade_via_migration(
@@ -101,9 +112,10 @@ def _upgrade_via_migration(
     juju_client.migrate_model(
         model_name=model, source_controller=source_controller, target_controller=target_controller
     )
-    juju_client.wait_for_model_to_exist(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
-    juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+    new_model_ref = JujuModelHandle(controller=target_controller, model=model)
+    juju_client.wait_for_model_to_exist(model=new_model_ref, timeout=timedelta(minutes=15))
+    juju_client.idle_for_period(model=new_model_ref, timeout=timedelta(minutes=15))
 
     # Upgrade model agents to match the new controller's version
-    juju_client.upgrade_model(model=f"{target_controller}:{model}", agent_version=target_version)
-    juju_client.idle_for_period(model=f"{target_controller}:{model}", timeout=timedelta(minutes=15))
+    juju_client.upgrade_model(model=new_model_ref, agent_version=target_version)
+    juju_client.idle_for_period(model=new_model_ref, timeout=timedelta(minutes=15))

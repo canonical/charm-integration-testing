@@ -8,7 +8,7 @@ on:
 jobs:
   check_issue_fixed:
     name: issue_checker
-    runs-on: [self-hosted, solqa]
+    runs-on: ubuntu-latest
     if: ${{ github.event.issue.pull_request }}
     permissions:
       contents: read

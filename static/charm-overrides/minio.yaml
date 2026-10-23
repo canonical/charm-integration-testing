@@ -1,8 +1,5 @@
 ---
-# Remove after: https://github.com/canonical/charm-integration-testing/issues/282
+# All MinIO tests are obsolete per maintainer; see https://github.com/canonical/charm-integration-testing/issues/489.
+listed: false
 overrides:
-  - provides:
-      metrics-endpoint:
-        optional: true
-      grafana-dashboard:
-        optional: true
+  - assumes: [unsupported-obsolete]

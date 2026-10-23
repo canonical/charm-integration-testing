@@ -1,5 +1,37 @@
 ---
+# Source: https://github.com/canonical/httprequest-lego-provider
+#
+# dns track adds a dns-record requires endpoint (charm/src/charm.py DNSRecordRequires);
+# latest track predates it and still carries the git-repo/git-ssh-key config options.
 overrides:
-  - configs:
+  - criteria:
+      - track: 'dns'
+    requires:
+      postgresql:
+        optional: false  # charmcraft.yaml: optional: false; paas_charm/charm.py _missing_required_database_integrations blocks
+      dns-record:
+        optional: false  # charmcraft.yaml: optional: false; charm's sole purpose is writing DNS records (charm.py _on_pebble_custom_notice)
+      ingress:
+        optional: true  # django-framework extension default; paas_charm/charm.py never gates on it
+      logging:
+        optional: true  # django-framework extension default; paas_charm/charm.py never gates on it
+    provides:
+      grafana-dashboard:
+        optional: true  # COS hook; paas_charm/charm.py never gates on it
+      metrics-endpoint:
+        optional: true  # COS hook; paas_charm/charm.py never gates on it
+  - requires:
+      postgresql:
+        optional: false  # charmcraft.yaml: optional: false; paas_charm/charm.py _missing_required_database_integrations blocks
+      ingress:
+        optional: true  # django-framework extension default; paas_charm/charm.py never gates on it
+      logging:
+        optional: true  # django-framework extension default; paas_charm/charm.py never gates on it
+    provides:
+      grafana-dashboard:
+        optional: true  # COS hook; paas_charm/charm.py never gates on it
+      metrics-endpoint:
+        optional: true  # COS hook; paas_charm/charm.py never gates on it
+    configs:
       git-repo: ['git+ssh://git@github.com/canonical/httprequest-lego-provider.git@main']
       git-ssh-key: ['not_a_key']

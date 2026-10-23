@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import json
 from enum import Enum
@@ -34,6 +22,7 @@ class Assertions(str, Enum):
     CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION = "charm_integration_exists_from_application_integration"
     CHARM_EXISTS_FROM_INTEGRATION = "charm_exists_from_integration"
     ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "endpoint_count_matches_integrations"
+    CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS = "cross_model_endpoint_count_matches_integrations"
     ENDPOINT_INTEGRATED_MATCHES_COUNT = "endpoint_integrated_matches_count"
     ENDPOINT_RESPECTS_LIMIT = "endpoint_respects_limit"
     APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS = "application_integration_apps_map_to_charms"
@@ -43,6 +32,7 @@ class Assertions(str, Enum):
     CHARM_CONFIG_VALUE_MATCHES_INDEX = "charm_config_value_matches_index"
     CHARM_RANK_BOUNDED = "charm_rank_bounded"
     SUBORDINATE_BASE_MISMATCH = "subordinate_base_mismatch"
+    INTEGRATION_FEATURE_MISMATCH = "integration_feature_mismatch"
 
 
 class AssertionTag(BaseModel):
@@ -149,6 +139,16 @@ class EndpointCountMatchesIntegrationsTag(AssertionTag):
     num_terms: int
 
 
+class CrossModelEndpointCountMatchesIntegrationsTag(AssertionTag):
+    """Mirrors EndpointCountMatchesIntegrationsTag, but for endpoint.cross_model_count -- the
+    subset of endpoint.count contributed by cross-model integrations only. Backs the
+    cross_model() DSL filter (see dsl_lowering.py)."""
+
+    kind: Assertions = Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS
+    charm: CharmEndpointPayload
+    num_terms: int
+
+
 class EndpointIntegratedMatchesCountTag(AssertionTag):
     kind: Assertions = Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT
     charm: CharmEndpointPayload
@@ -213,6 +213,15 @@ class SubordinateBaseMismatchTag(AssertionTag):
     principal_base: str
 
 
+class IntegrationFeatureMismatchTag(AssertionTag):
+    """A relation whose two endpoints declared mutually-incompatible feature tags."""
+
+    kind: Assertions = Assertions.INTEGRATION_FEATURE_MISMATCH
+    requires: CharmEndpointPayload
+    provides: CharmEndpointPayload
+    feature: str
+
+
 _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.APPLICATION_EXISTS: ApplicationExistsTag,
     Assertions.APPLICATION_INTEGRATION_EXISTS: ApplicationIntegrationExistsTag,
@@ -224,6 +233,7 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_INTEGRATION_EXISTS_FROM_APPLICATION_INTEGRATION: CharmIntegrationExistsFromApplicationIntegrationTag,
     Assertions.CHARM_EXISTS_FROM_INTEGRATION: CharmExistsFromIntegrationTag,
     Assertions.ENDPOINT_COUNT_MATCHES_INTEGRATIONS: EndpointCountMatchesIntegrationsTag,
+    Assertions.CROSS_MODEL_ENDPOINT_COUNT_MATCHES_INTEGRATIONS: CrossModelEndpointCountMatchesIntegrationsTag,
     Assertions.ENDPOINT_INTEGRATED_MATCHES_COUNT: EndpointIntegratedMatchesCountTag,
     Assertions.ENDPOINT_RESPECTS_LIMIT: EndpointRespectsLimitTag,
     Assertions.APPLICATION_INTEGRATION_APPS_MAP_TO_CHARMS: ApplicationIntegrationAppsMapToCharmsTag,
@@ -233,4 +243,5 @@ _ASSERTION_TYPE_REGISTRY: dict[Assertions, type[AssertionTag]] = {
     Assertions.CHARM_CONFIG_VALUE_MATCHES_INDEX: CharmConfigValueMatchesIndexTag,
     Assertions.CHARM_RANK_BOUNDED: CharmRankBoundedTag,
     Assertions.SUBORDINATE_BASE_MISMATCH: SubordinateBaseMismatchTag,
+    Assertions.INTEGRATION_FEATURE_MISMATCH: IntegrationFeatureMismatchTag,
 }

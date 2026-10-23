@@ -1,0 +1,36 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-ingress-auth"
+version = "0.1.0"
+description = "Validator for the ingress-auth interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+    # pyyaml is mandatory: the serialized-data-interface wire format used by
+    # ingress-auth encodes both the version handshake and the payload as YAML.
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+ingress-auth = "validators.ingress_auth:IngressAuthValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.ingress_auth"]
+
+[tool.setuptools.package-dir]
+"validators.ingress_auth" = "."

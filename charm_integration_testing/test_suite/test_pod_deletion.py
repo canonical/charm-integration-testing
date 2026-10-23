@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 from kubernetes_client import KubernetesClient, PodStatus
 
 from .scheduler.states import State
@@ -14,29 +14,45 @@ def test_pod_deletion(
     juju_client: JujuClient,
     _is_running_on_kubernetes: None,
     kubernetes_client: KubernetesClient | None,
-    model: str,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
 ) -> None:
     if kubernetes_client is None:
         pytest.fail("KubernetesClient was not instantiated correctly. Is KUBECONFIG set?")
 
-    pods = kubernetes_client.get_charm_pods(application_name=target_application, model=model)
-    assert len(pods) > 0, f"No pods found in namespace {model} to delete."
+    namespace = target_model_ref.model
+    pods = kubernetes_client.get_charm_pods(application_name=target_application, model=namespace)
+    assert len(pods) > 0, f"No pods found in namespace {namespace} to delete."
 
+    existing_uids = {pod.metadata.uid for pod in pods}
     pod_to_delete = pods[0]
-    kubernetes_client.delete_pod(namespace=model, pod_name=pod_to_delete.metadata.name)
+    juju_client.delete_pod(model=target_model_ref, pod_name=pod_to_delete.metadata.name)
 
-    # Wait for the pod to be deleted and a new one to be created
-    kubernetes_client.wait_for_pod_recreation(
-        namespace=model,
-        pod_name=pod_to_delete.metadata.name,
-        old_uid=pod_to_delete.metadata.uid,
+    # Wait for a new pod to be created. Passing every pre-existing UID (not just the deleted
+    # pod's) ensures an untouched sibling replica can't be mistaken for the deleted pod's
+    # replacement when the application has multiple replicas.
+    new_pod = kubernetes_client.wait_for_new_pod(
+        namespace=namespace,
+        application_name=target_application,
+        existing_uids=existing_uids,
+        timeout=timedelta(minutes=15),
+    )
+
+    # Then wait for that specific new pod to become ready.
+    kubernetes_client.wait_for_pod_status(
+        pod_name=new_pod.metadata.name,
+        namespace=namespace,
         target_status=PodStatus.RUNNING,
         timeout=timedelta(minutes=15),
     )
 
-    # Wait for return to idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=model, level="simple")
+    # Wait for return to idle
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
+
+    # Validate all applications and relations. For a CMR the persistence validator lives on the
+    # neighbor's requirer units, so validate there too.
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="simple")

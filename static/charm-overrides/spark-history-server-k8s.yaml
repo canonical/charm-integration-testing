@@ -1,6 +1,38 @@
 ---
-# At least one of s3-credentials or azure-storage-credentials must be integrated.
+# Source: https://github.com/canonical/spark-history-server-k8s-operator
+#
+# Tracks 3/* and 4/* additionally expose the oauth2-proxy requires endpoint; 3.4/*
+# and latest/* predate it (confirmed via charmhub refresh metadata-yaml per channel).
+#
+# ingress (requires): REQUIRED if auth-proxy or oauth2-proxy is integrated - see
+#   get_app_status() in src/events/base.py: `if (auth_proxy or oauth2_proxy) and not
+#   ingress: return Status.MISSING_INGRESS_RELATION.value`. oauth2-proxy is handled
+#   identically to auth-proxy (src/events/ingress.py: the oauth2-proxy AuthProxyRequirer
+#   mirrors the Oathkeeper auth-proxy AuthProxyRequirer).
 overrides:
+  # 3/* and 4/*: oauth2-proxy endpoint is present
+  - criteria:
+      - any_of:
+          - track: '3'
+          - track: '4'
+    requires:
+      s3-credentials:
+        optional: true
+      azure-storage-credentials:
+        optional: true
+      ingress:
+        optional: true
+      auth-proxy:
+        optional: true
+      oauth2-proxy:
+        optional: true
+    constraints:
+      # At least one storage backend must be integrated
+      - 'bool(endpoint[s3-credentials]) or bool(endpoint[azure-storage-credentials])'
+      # If auth-proxy or oauth2-proxy is used, ingress is required
+      - 'bool(endpoint[auth-proxy]) => bool(endpoint[ingress])'
+      - 'bool(endpoint[oauth2-proxy]) => bool(endpoint[ingress])'
+  # 3.4/* and latest/*: no oauth2-proxy endpoint
   - requires:
       s3-credentials:
         optional: true

@@ -7,6 +7,12 @@ overrides:
       - any_of:
           - track: '0.15'
           - track: '0.16'
+    # The deprecated `mysql` relation is optional on these tracks: the charm
+    # reaches active via `relational-db` alone. Charmhub metadata marks it
+    # required, which makes the solver include both relations at once.
+    requires:
+      mysql:
+        optional: true
     # Track 0.17 and later have k8s-service-info in provides.
   - provides:
       k8s-service-info:

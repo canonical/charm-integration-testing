@@ -3,33 +3,44 @@
 
 
 import dataclasses
+import json
+import os
 import pathlib
 import re
 import shutil
+import stat
+import subprocess  # nosec B404
 import tempfile
 import time
 import warnings
+from collections.abc import Collection
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, Callable
 
 import jubilant
 import yaml
 from juju import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuModelHandle,
+    JujuRestartNotSupportedError,
     JujuStatusPerformanceWarning,
     JujuTask,
     JujuVersion,
     JujuWaitState,
     JujuWaitTimeoutError,
+    JujuWorkloadInstance,
     warn_performance,
 )
 from juju_cmd import JujuCmdBackend
-from kubernetes_client import KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
@@ -44,40 +55,334 @@ from .wait import (
     applications_have_no_units,
     bundle_applications_integrations_exist,
     integrations_are_removed,
+    saas_is_removed,
+    unit_is_available,
+    unit_is_removed,
+    unit_is_unavailable,
     units_have_message,
 )
+
+_UNIT_REBOOT_COMMAND = "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot"
+
+
+def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
+    """Ignore function for shutil.copytree that skips unreadable or non-regular entries.
+
+    Skips:
+    - entries whose stat() raises (e.g. broken symlinks, EOVERFLOW inodes)
+    - directories that are not readable/executable
+    - regular files that cannot be opened for reading
+    - special filesystem entries (sockets, FIFOs, devices) which must not be opened
+    """
+    skipped: set[str] = set()
+    for name in names:
+        path = pathlib.Path(dir_) / name
+        try:
+            mode = path.stat().st_mode
+        except OSError:
+            skipped.add(name)
+            continue
+        if stat.S_ISDIR(mode):
+            if not os.access(path, os.R_OK | os.X_OK):
+                skipped.add(name)
+        elif stat.S_ISREG(mode):
+            try:
+                with open(path, "rb") as _f:
+                    _f.read(1)
+            except OSError:
+                skipped.add(name)
+        else:
+            # Skip sockets, FIFOs, block/char devices, and any other special entries.
+            skipped.add(name)
+    return skipped
+
+
+class TransientModelUnavailabilityError(jubilant.CLIError):
+    """Raised by ``JubilantBackend.status`` when a model migration makes the model
+    temporarily unreachable.
+
+    A model migration briefly makes ``juju status`` fail even for a model that was
+    reachable moments before - either because the model hasn't finished importing
+    on the destination controller yet, or because it has since migrated away from
+    the controller being queried. Both are expected, transient states while a
+    migration is in flight (or has just completed), not real failures. Callers should
+    treat this as "not ready yet" and retry rather than propagate it as a genuine
+    failure.
+    """
+
+
+def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: JujuModelHandle) -> bool:
+    """Detect CLIErrors that mean "model temporarily unreachable due to migration".
+
+    Juju's wording for this varies by subsystem; new variants are added here as
+    they're discovered (see #874, #931).
+    """
+    err_msg = error.stderr.lower()
+    # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
+    controller_matches = model.controller.lower() in err_msg
+    is_missing = "not found" in err_msg and controller_matches and model.model.lower() in err_msg
+    is_migrating = (
+        "has been migrated to controller" in err_msg
+        or "migration in progress" in err_msg
+        # e.stderr: 'ERROR model cache: model "<uuid>" did not appear in cache timeout\n'
+        or "did not appear in cache timeout" in err_msg
+    )
+    return is_missing or is_migrating
 
 
 class JubilantBackend(JujuCmdBackend):
     client: JubilantClient
-    _kubernetes_client: KubernetesClient | None
 
     default_timeout = timedelta(minutes=5)
     default_successes = 3
     default_delay = timedelta(seconds=1)
 
-    def __init__(self, client: JubilantClient | None = None, kubernetes_client: KubernetesClient | None = None):
+    def __init__(
+        self,
+        client: JubilantClient | None = None,
+        kubernetes_client_registry: KubernetesClientRegistry | None = None,
+        cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] | None = None,
+    ):
         super().__init__()
         self.client = client or JubilantClient()
-        self._kubernetes_client = kubernetes_client
+        self.kubernetes_client_registry = kubernetes_client_registry
+        self._cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] = cloud_definitions or {}
 
-    @property
-    def kubernetes_client(self) -> KubernetesClient:
-        if self._kubernetes_client is None:
-            raise RuntimeError("No valid KubernetesClient was received. Is this a Kubernetes environment?")
-        return self._kubernetes_client
+    def _kubernetes_client_for_cloud(self, cloud: str) -> KubernetesClient:
+        if self.kubernetes_client_registry is None:
+            raise RuntimeError("No KubernetesClientRegistry configured.")
+        if not self.kubernetes_client_registry.has_cloud(cloud):
+            raise RuntimeError(f"No kubeconfig configured for Kubernetes cloud '{cloud}'.")
+        return self.kubernetes_client_registry.client_for_cloud(cloud)
+
+    def _required_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            raise ValueError(f"Model {model.uri} is not Kubernetes-backed.")
+        return self._kubernetes_client_for_cloud(cloud)
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        self._required_kubernetes_client_for_model(model).delete_pod(namespace=model.model, pod_name=instance_name)
+
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        pods = self._required_kubernetes_client_for_model(model).get_ready_charm_pods_by_unit(
+            application, model.model, units, timeout
+        )
+        return {
+            unit: JujuWorkloadInstance(unit=pod.unit, name=pod.name, identifier=pod.uid) for unit, pod in pods.items()
+        }
+
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        return self._required_kubernetes_client_for_model(model).get_charm_pod_uids(application, model.model)
+
+    def wait_for_workload_instances_ready(
+        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_ready(
+            application, model.model, expected_count, timeout
+        )
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        return self._required_kubernetes_client_for_model(model).restart_pod(
+            namespace=model.model,
+            pod_name=instance.name,
+            uid=instance.identifier,
+            timeout=timeout,
+            application=application,
+            unit=instance.unit,
+            existing_uids=existing_ids,
+        )
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        self._required_kubernetes_client_for_model(model).wait_for_charm_pods_replaced(
+            application, model.model, expected_count, previous_ids, timeout
+        )
+
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        status = self.status(model)
+        units = status.apps[application].units
+        if sum(unit.leader for unit in units.values()) != 1:
+            raise RuntimeError(f"Expected exactly one Juju leader for {application}.")
+        followers = sorted(name for name, unit in units.items() if not unit.leader)
+        if not followers:
+            raise JujuRestartNotSupportedError(f"{application} has no follower to restart.")
+        unit_name = followers[0]
+
+        cloud = self.kubernetes_cloud_for_model(model)
+        kubernetes = self._kubernetes_client_for_cloud(cloud) if cloud is not None else None
+        if kubernetes is not None:
+            application_pods = kubernetes.get_charm_pods(application, model.model)
+            pods = [
+                pod for pod in application_pods if (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit_name
+            ]
+            if len(pods) != 1 or not pods[0].metadata.uid or pods[0].metadata.deletion_timestamp is not None:
+                raise RuntimeError(f"Unable to identify a single live Pod for {unit_name}.")
+            pod = pods[0]
+            self._check_follower(self.status(model), application, set(units), unit_name)
+            kubernetes.restart_pod(
+                model.model,
+                pod.metadata.name,
+                pod.metadata.uid,
+                timeout,
+                application=application,
+                unit=unit_name,
+                existing_uids={item.metadata.uid for item in application_pods if item.metadata.uid},
+            )
+        else:
+            machine = units[unit_name].machine
+            if not machine:
+                raise RuntimeError(f"No machine found for {unit_name}.")
+            if "/" in machine:
+                raise JujuRestartNotSupportedError(
+                    "Follower reboot requires a dedicated machine, not a nested container."
+                )
+
+            self._check_follower_placement(status, application, unit_name, machine)
+            deadline = time.monotonic() + timeout.total_seconds()
+            original_boot = self._machine_boot_id(model, machine, deadline, timeout)
+            current = self.status(model)
+            self._check_follower(current, application, set(units), unit_name)
+            self._check_follower_placement(current, application, unit_name, machine)
+            self._ssh_before_deadline(
+                model,
+                machine,
+                "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot",
+                deadline,
+                timeout,
+            )
+            while time.monotonic() < deadline:
+                try:
+                    if self._machine_boot_id(model, machine, deadline, timeout) != original_boot:
+                        break
+                except (jubilant.CLIError, subprocess.TimeoutExpired):
+                    pass  # SSH can be unavailable while the machine reboots.
+                time.sleep(min(5, max(0, deadline - time.monotonic())))
+            else:
+                raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
+        return unit_name
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        cloud = self.kubernetes_cloud_for_model(model)
+        if cloud is None:
+            self.ssh(model, unit, _UNIT_REBOOT_COMMAND)
+            return
+
+        application = unit.split("/", maxsplit=1)[0]
+        kubernetes = self._kubernetes_client_for_cloud(cloud)
+        pods = kubernetes.get_charm_pods(application, model.model)
+        matching_pods = [
+            pod
+            for pod in pods
+            if pod.metadata is not None
+            and (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+            and pod.metadata.deletion_timestamp is None
+            and pod.metadata.uid is not None
+            and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
+        ]
+        if len(matching_pods) != 1 or matching_pods[0].metadata.name is None:
+            raise RuntimeError(f"Unable to identify a single live Pod for {unit}.")
+        kubernetes.delete_pod(
+            namespace=model.model,
+            pod_name=matching_pods[0].metadata.name,
+            uid=matching_pods[0].metadata.uid,
+        )
+
+    @staticmethod
+    def _check_follower(current: jubilant.Status, application: str, expected_units: set[str], unit_name: str) -> None:
+        current_units = current.apps[application].units
+        if (
+            set(current_units) != expected_units
+            or sum(unit.leader for unit in current_units.values()) != 1
+            or current_units[unit_name].leader
+        ):
+            raise RuntimeError(f"Unit membership or leadership changed before restarting {unit_name}.")
+
+    @staticmethod
+    def _check_follower_placement(current: jubilant.Status, application: str, unit_name: str, machine: str) -> None:
+        if current.apps[application].units[unit_name].machine != machine:
+            raise RuntimeError(f"Machine placement changed for {unit_name}.")
+        for app in current.apps.values():
+            for name, unit in app.units.items():
+                if (
+                    name != unit_name
+                    and unit.machine is not None
+                    and (unit.machine == machine or unit.machine.startswith(machine + "/"))
+                ):
+                    raise JujuRestartNotSupportedError(f"Restarting {unit_name} would also restart {name}.")
+
+    def _ssh_before_deadline(
+        self, model: JujuModelHandle, machine: str, command: str, deadline: float, timeout: timedelta
+    ) -> str:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Machine {machine} did not reboot within {timeout}.")
+        output = self.ssh(model, machine, command, timeout=min(30, remaining))
+        if output is None:
+            raise RuntimeError(f"SSH command on machine {machine} did not return output.")
+        return output
+
+    def _machine_boot_id(self, model: JujuModelHandle, machine: str, deadline: float, timeout: timedelta) -> str:
+        value = self._ssh_before_deadline(
+            model, machine, "cat /proc/sys/kernel/random/boot_id", deadline, timeout
+        ).strip()
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value):
+            raise RuntimeError(f"Invalid boot ID from machine {machine}: {value!r}")
+        return value
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        if self.is_k8s_model(model):
+            raise ValueError("Juju does not support removing a specific unit from a Kubernetes model.")
+        self.client.model(model).cli("remove-unit", unit, "--no-prompt")
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
-    def status(self, model: str) -> jubilant.Status:
-        return self.client.model(model).status()
+    def status(self, model: JujuModelHandle) -> jubilant.Status:
+        try:
+            return self.client.model(model).status()
+        except jubilant.CLIError as e:
+            if _is_transient_model_unavailability_error(e, model):
+                raise TransientModelUnavailabilityError(e.returncode, e.cmd, e.output, e.stderr) from e
+            raise
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        status = self.status(model)
+        try:
+            app = status.apps[application]
+        except KeyError as error:
+            raise RuntimeError(f"Application {application!r} is missing from model {model.uri}.") from error
+        return JujuApplicationHealth(
+            status=app.app_status.current,
+            units={name: unit.workload_status.current for name, unit in app.units.items()},
+            agents={name: unit.juju_status.current for name, unit in app.units.items()},
+            application_message=app.app_status.message,
+        )
 
     @warn_performance(category=JujuStatusPerformanceWarning, threshold=timedelta(seconds=5))
-    def juju_status_text(self, model: str) -> str:
+    def juju_status_text(self, model: JujuModelHandle) -> str:
         return self.client.model(model).cli("status", "--integrations", "--format", "tabular")
 
     def wait(
         self,
-        model: str,
+        model: JujuModelHandle,
         ready: Callable[[jubilant.Status], tuple[bool, JujuWaitState]],
         error: Callable[[jubilant.Status], tuple[bool, JujuWaitState]] | None = None,
         timeout: timedelta | None = None,
@@ -108,8 +413,23 @@ class JubilantBackend(JujuCmdBackend):
             if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
-            # Get current status
-            status = self.status(model)
+            # Get current status. A model migration can transiently make status
+            # fail even for a model this loop previously observed successfully -
+            # e.g. while migrating away from, or being imported into, a
+            # controller. Treat that as "not ready yet" rather than aborting the
+            # wait, matching wait_for_model_to_exist's tolerance for the same
+            # condition. See issue #812.
+            try:
+                status = self.status(model)
+            except TransientModelUnavailabilityError as e:
+                noncompliant_wait_state = dataclasses.replace(
+                    last_wait_state,
+                    message=f"Model {model.uri} temporarily unavailable during migration: {e.stderr.strip()}",
+                )
+                success_count = 0
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
+                continue
 
             # Check for error condition
             if error is not None:
@@ -139,9 +459,32 @@ class JubilantBackend(JujuCmdBackend):
             )
         raise JujuWaitTimeoutError(wait_state=noncompliant_wait_state)
 
+    @staticmethod
+    def _combine_wait_states(wait_states: dict[str, JujuWaitState]) -> JujuWaitState:
+        models = ", ".join(sorted(wait_states))
+        return JujuWaitState(
+            message=f"waiting for models: [{models}] to become idle",
+            insufficient_status_checks=any(state.insufficient_status_checks for state in wait_states.values()),
+            noncompliant_applications={
+                f"{model}::{application}": application_state
+                for model, state in wait_states.items()
+                for application, application_state in state.noncompliant_applications.items()
+            },
+            noncompliant_units={
+                f"{model}::{unit}": unit_state
+                for model, state in wait_states.items()
+                for unit, unit_state in state.noncompliant_units.items()
+            },
+            noncompliant_unit_agents={
+                f"{model}::{unit}": unit_agent_state
+                for model, state in wait_states.items()
+                for unit, unit_agent_state in state.noncompliant_unit_agents.items()
+            },
+        )
+
     def wait_idle(
         self,
-        model: str,
+        model: JujuModelHandle,
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
@@ -152,14 +495,83 @@ class JubilantBackend(JujuCmdBackend):
         self.wait(
             model,
             lambda status: all_statuses_are_in(
-                status, *applications, application_statuses={"active"}, unit_statuses={"active"}
+                status,
+                *applications,
+                application_statuses={"active"},
+                unit_statuses={"active"},
+                unit_agent_statuses={"idle"},
             ),
             timeout=timeout,
             successes=count,
             strict_timeout=strict_timeout,
         )
 
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_idle_multi_model(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
+        unique_models = sorted(set(models), key=lambda m: m.uri)
+        if not unique_models:
+            return
+
+        timeout = self.default_timeout if timeout is None else timeout
+        successes = self.default_successes if count is None else count
+        delay = self.default_delay
+        success_count = 0
+        last_wait_states: dict[str, JujuWaitState] = {}
+        start = datetime.now()
+
+        with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
+            while True:
+                iteration_start = datetime.now()
+                timeout_reached = iteration_start - start > timeout
+                if timeout_reached and (strict_timeout or success_count == 0):
+                    break
+
+                futures = {model: executor.submit(self.status, model) for model in unique_models}
+                wait_states: dict[str, JujuWaitState] = {}
+                for model, future in futures.items():
+                    try:
+                        status = future.result()
+                    except TransientModelUnavailabilityError as error:
+                        wait_states[model.uri] = JujuWaitState(
+                            message=(
+                                f"Model {model.uri} temporarily unavailable during migration: {error.stderr.strip()}"
+                            )
+                        )
+                        continue
+
+                    is_ready, wait_state = all_statuses_are_in(
+                        status,
+                        application_statuses={"active"},
+                        unit_statuses={"active"},
+                        unit_agent_statuses={"idle"},
+                    )
+                    if not is_ready:
+                        wait_states[model.uri] = wait_state
+
+                if wait_states:
+                    success_count = 0
+                    last_wait_states = wait_states
+                else:
+                    success_count += 1
+                    last_wait_states = {
+                        model.uri: JujuWaitState(insufficient_status_checks=True) for model in unique_models
+                    }
+                    if success_count >= successes:
+                        return
+
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
+
+        if not last_wait_states:
+            last_wait_states = {model.uri: JujuWaitState(insufficient_status_checks=True) for model in unique_models}
+        raise JujuWaitTimeoutError(wait_state=self._combine_wait_states(last_wait_states))
+
+    def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         self.wait(
             model,
             lambda status: all_statuses_are_in(
@@ -172,28 +584,37 @@ class JubilantBackend(JujuCmdBackend):
             timeout=timeout,
         )
 
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_scaled(status, application), timeout=timeout)
 
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+    def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
         self.wait(model, lambda status: units_have_message(message, status, unit), timeout=timeout)
 
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal(self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None) -> None:
         self.wait(model, lambda status: applications_are_removed(status, *applications), timeout=timeout)
 
     def wait_for_removal_of_integration(
         self,
-        model: str,
+        model: JujuModelHandle,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
     ) -> None:
         self.wait(model, lambda status: integrations_are_removed(status, (endpoint_1, endpoint_2)), timeout=timeout)
 
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        if alias in self.status(model).app_endpoints:
+            self.client.model(model).cli("remove-saas", alias)
+
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        self.wait(model, lambda status: saas_is_removed(status, alias), timeout=timeout)
+
+    def wait_for_removal_of_units(
+        self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
+    ) -> None:
         self.wait(model, lambda status: applications_have_no_units(status, *applications), timeout=timeout)
 
-    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         if timeout is None:
             timeout = self.default_timeout
         delay = self.default_delay
@@ -204,25 +625,15 @@ class JubilantBackend(JujuCmdBackend):
             if iteration_start - start > timeout:
                 raise JujuWaitTimeoutError(
                     wait_state=JujuWaitState(
-                        message=f"Model {model} does not exist",
+                        message=f"Model {model.uri} does not exist",
                         insufficient_status_checks=True,
                     )
                 )
             try:
                 self.status(model)
                 return
-            except jubilant.CLIError as e:
-                # Validate that the error is specifically about the model being missing
-                # e.stderr: 'ERROR model pytest-tmp-controller-n84qeh17:admin/debug-test-1 not found\n'
-                err_msg = e.stderr.lower()
-                is_missing = "not found" in err_msg and all(p in err_msg for p in model.lower().split(":"))
-                is_migrating = "has been migrated to controller" in err_msg or "migration in progress" in err_msg
-
-                if is_missing or is_migrating:
-                    pass
-                else:
-                    # Re-raise if it's a different type of CLI error (e.g., connection lost)
-                    raise
+            except TransientModelUnavailabilityError:
+                pass
 
             elapsed = datetime.now() - iteration_start
             time.sleep(max(0, (delay - elapsed).total_seconds()))
@@ -232,7 +643,7 @@ class JubilantBackend(JujuCmdBackend):
         application: str,
         expected_revision: int,
         timeout: timedelta | None,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.wait(
             model,
@@ -240,7 +651,7 @@ class JubilantBackend(JujuCmdBackend):
             timeout=timeout,
         )
 
-    def run_action(self, model: str, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
+    def run_action(self, model: JujuModelHandle, unit: str, action: str, params: dict[str, Any]) -> JujuTask:
         try:
             task = self.client.model(model).run(
                 unit=unit,
@@ -253,7 +664,7 @@ class JubilantBackend(JujuCmdBackend):
 
         return JujuTask(task.id, task.return_code, task.status, task.message, task.results.get("output", ""))
 
-    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+    def add_secret(self, model: JujuModelHandle, name: str, values: dict[str, str]) -> str:
         return (
             self.client.model(model)
             .add_secret(
@@ -263,7 +674,7 @@ class JubilantBackend(JujuCmdBackend):
             .unique_identifier
         )
 
-    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+    def read_secret(self, model: JujuModelHandle, name_or_id: str) -> dict[str, str]:
         # Call show secret
         show_secret_result = self.client.model(model).cli(
             "show-secret",
@@ -279,7 +690,7 @@ class JubilantBackend(JujuCmdBackend):
             raise TypeError(f"Expected secret content to be dict[str, str], got {type(return_value)}")
         return return_value
 
-    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
+    def grant_secret(self, model: JujuModelHandle, name_or_id: str, application: str) -> None:
         # Call grant secret
         self.client.model(model).cli(
             "grant-secret",
@@ -287,7 +698,7 @@ class JubilantBackend(JujuCmdBackend):
             application,
         )
 
-    def remove_secret(self, model: str, name_or_id: str) -> None:
+    def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
         # Call remove secret
         self.client.model(model).cli(
             "remove-secret",
@@ -296,7 +707,7 @@ class JubilantBackend(JujuCmdBackend):
 
     def deploy_bundle_file(
         self,
-        model: str,
+        model: JujuModelHandle,
         bundle: str,
         timeout: timedelta | None = None,
         trust: bool = False,
@@ -310,12 +721,16 @@ class JubilantBackend(JujuCmdBackend):
 
     def deploy_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         charm: str,
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         self.client.model(model).deploy(
             charm=charm,
@@ -323,20 +738,23 @@ class JubilantBackend(JujuCmdBackend):
             config=config,
             trust=trust,
             force=force,
+            channel=channel,
+            revision=revision,
+            base=base,
         )
 
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+    def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
         self.client.model(model).config(
             app=application,
             values=values,
         )
 
-    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+    def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
         # I'd rather just pass this through, but to follow the return type correctly,
         # we'll convert to a dict.
         return {k: v for k, v in self.client.model(model).config(application).items()}
 
-    def _exec(self, model: str, *args: str) -> dict[str, JujuExecTask]:
+    def _exec(self, model: JujuModelHandle, *args: str) -> dict[str, JujuExecTask]:
         """Run juju exec with the given args and return output parsed and keyed by unit name."""
         try:
             exec_output = self.client.model(model).cli("exec", "--format", "yaml", *args)
@@ -346,7 +764,29 @@ class JubilantBackend(JujuCmdBackend):
             exec_output = e.stdout
         return {unit_name: JujuExecTask(**result) for unit_name, result in yaml.safe_load(exec_output).items()}
 
-    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        status = self.status(model)
+        try:
+            units = status.apps[application].units
+        except KeyError:
+            raise KeyError(f"Application '{application}' not found in model '{model.uri}'") from None
+        leaders = [unit for unit, info in units.items() if info.leader]
+        if len(leaders) != 1:
+            raise RuntimeError(
+                f"Expected one leader for application '{application}' in model '{model.uri}', found {leaders}."
+            )
+        return leaders[0]
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_removed, unit=unit, model_uri=model.uri), timeout=timeout)
+
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_unavailable, unit=unit, model_uri=model.uri), timeout=timeout)
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        self.wait(model, partial(unit_is_available, unit=unit, model_uri=model.uri), timeout=timeout)
+
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         args = ["--unit", unit]
         if operator:
             if self.cli_version() >= JujuVersion(4, 0, 0):
@@ -384,7 +824,7 @@ class JubilantBackend(JujuCmdBackend):
             stderr=task_result.results.stderr,
         )
 
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
         #
@@ -401,7 +841,7 @@ class JubilantBackend(JujuCmdBackend):
             with tempfile.TemporaryDirectory(dir=home) as staging:
                 staged = pathlib.Path(staging) / source_path.name
                 if source_path.is_dir():
-                    shutil.copytree(source_path, staged)
+                    shutil.copytree(source_path, staged, ignore=_skip_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
                 self.client.model(model).cli("scp", *options, str(staged), destination)
@@ -409,34 +849,93 @@ class JubilantBackend(JujuCmdBackend):
 
         self.client.model(model).cli("scp", *options, source, destination)
 
-    def ssh(self, model: str, application: str, command: str) -> None:
-        self.client.model(model).ssh(
-            target=application,
-            command=command,
-        )
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
+        """Run SSH, optionally bounding the entire process and returning its output."""
+        juju = self.client.model(model)
+        if timeout is None:
+            juju.ssh(target=application, command=command)
+            return None
+        args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
+        try:
+            return subprocess.run(  # nosec B603
+                args, check=True, capture_output=True, text=True, timeout=timeout
+            ).stdout
+        except subprocess.CalledProcessError as error:
+            raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
 
-    def unit_ip(self, model: str, unit: str) -> str:
+    def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")
         for possible_unit, unit_status in self.status(model).apps[application].units.items():
             _, possible_unit_id = possible_unit.split("/")
             if possible_unit_id == unit_id or (unit_id == "leader" and unit_status.leader):
-                return unit_status.address
+                return unit_status.address or unit_status.public_address
         raise KeyError(f"Unit '{unit}' not found")
 
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         return {
-            app_name: JujuApplicationInfo(
-                charm=app_info.charm,
-                revision=app_info.charm_rev,
-                channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
-            )
+            app_name: self._application_info_from_status(app_info)
             for app_name, app_info in self.status(model).apps.items()
         }
 
-    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
-        return {offer: JujuConsumedOfferInfo(url=info.url) for offer, info in self.status(model).app_endpoints.items()}
+    @staticmethod
+    def _application_info_from_status(app_info: jubilant.statustypes.AppStatus) -> JujuApplicationInfo:
+        return JujuApplicationInfo(
+            charm=app_info.charm,
+            revision=app_info.charm_rev,
+            channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
+            base=app_info.base.channel if app_info.base else None,
+        )
 
-    def list_integrations(self, model: str) -> set[JujuIntegration]:
+    def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
+        return {
+            offer: JujuConsumedOfferInfo(url=info.url, endpoints=frozenset(info.endpoints.keys()))
+            for offer, info in self.status(model).app_endpoints.items()
+        }
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        parsed_url = offer.parse_url()
+        if parsed_url is None:
+            return None
+        # The offering model may belong to a different owner than the model that consumed the
+        # offer, so address it with the owner parsed from the URL rather than relying on the
+        # currently authenticated user matching.
+        offering_model = parsed_url.model
+
+        try:
+            offering_status = self.status(offering_model)
+        except jubilant.CLIError:
+            # The offering controller/model may not be reachable from here (e.g. a different,
+            # unregistered controller), or may no longer exist.
+            return None
+
+        offer_status = offering_status.offers.get(parsed_url.offer_name)
+        if offer_status is None:
+            return None
+        app_info = offering_status.apps.get(offer_status.app)
+        if app_info is None:
+            return None
+        return self._application_info_from_status(app_info)
+
+    def list_offers(self, model: JujuModelHandle) -> set[str]:
+        result = self.client.model(model).cli("offers", "--format", "json")
+        if not result or not result.strip():
+            return set()
+        return set(json.loads(result).keys())
+
+    def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
+        # On Juju 4+, ``juju offer`` fails if an offer with the same name already exists
+        # ("offer already exists, updating offers is not supported"). Treat that as a no-op
+        # so that deploy_bundles remains idempotent across re-runs.
+        try:
+            self.client.model(model).offer(app, endpoint=endpoints, name=offer_name)
+        except jubilant.CLIError as e:
+            if "updating offers is not supported" in e.stderr.lower():
+                return
+            raise
+
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         # Juju status yaml format doesn't expose provider/requirer information or
         # neighbor endpoint information, meaning the only way to get integrations
         # is by using the tabular format, which gives a complete picture.
@@ -478,15 +977,23 @@ class JubilantBackend(JujuCmdBackend):
         return integrations
 
     def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: JujuModelHandle
     ) -> bool:
         return {
             JujuIntegrationApplication(application=application_1, endpoint=endpoint_1),
             JujuIntegrationApplication(application=application_2, endpoint=endpoint_2),
         } in [{integration.provider, integration.requirer} for integration in self.list_integrations(model)]
 
-    def version(self, model: str) -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         return JujuVersion.parse(str(self.status(model).model.version).strip())
+
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        constraints = self.client.model(model).model_constraints()
+        # Juju defaults to amd64 when no model architecture constraint is set.
+        architecture = constraints.get("arch") or "amd64"
+        if not isinstance(architecture, str):
+            raise ValueError(f"Invalid architecture constraint for model '{model.uri}': {architecture!r}")
+        return architecture
 
     def cli_version(self) -> JujuVersion:
         return JujuVersion.parse(str(self.client.model(None).version()).strip())
@@ -527,15 +1034,86 @@ class JubilantBackend(JujuCmdBackend):
             )
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
-        self.client.model(None).add_model(model=model, controller=controller, config=model_config)
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        self.client.model(None).add_model(model=model, controller=controller, config=model_config, cloud=cloud)
 
-    def switch(self, controller: str, model: str) -> None:
-        self.client.model(model).cli("switch", f"{controller}:{model}", include_model=False)
+    def register_cloud(self, cloud: str) -> None:
+        """Register a cloud with the local Juju client.
+
+        Dispatches to the appropriate registration mechanism based on how the cloud's
+        connection details were supplied: ``juju add-k8s`` for a cloud with a configured
+        kubeconfig (``KUBECONFIG_<cloud>``), or ``juju add-cloud``/``add-credential`` for
+        a cloud with a configured cloud-definition/credentials file pair
+        (``CLOUD_DEFINITION_<cloud>``/``CLOUD_CREDENTIALS_<cloud>``).
+
+        Idempotent: a no-op if the cloud is already registered locally.
+        """
+        if self.kubernetes_client_registry is not None and self.kubernetes_client_registry.has_cloud(cloud):
+            self._register_k8s_cloud(cloud)
+        elif cloud in self._cloud_definitions:
+            self._register_generic_cloud(cloud)
+        else:
+            normalized = cloud.replace("-", "_")
+            raise ValueError(
+                f"No connection details configured for cloud '{cloud}'. Set "
+                f"KUBECONFIG_{normalized} for a Kubernetes cloud, or both "
+                f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} for any other cloud type."
+            )
+
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a cloud on an existing Juju controller."""
+        if self.kubernetes_client_registry is not None and self.kubernetes_client_registry.has_cloud(cloud):
+            self._register_k8s_cloud(cloud, controller=controller)
+        elif cloud in self._cloud_definitions:
+            self._register_generic_cloud(cloud, controller=controller)
+        else:
+            normalized = cloud.replace("-", "_")
+            raise ValueError(
+                f"No connection details configured for cloud '{cloud}'. Set "
+                f"KUBECONFIG_{normalized} for a Kubernetes cloud, or both "
+                f"CLOUD_DEFINITION_{normalized} and CLOUD_CREDENTIALS_{normalized} for any other cloud type."
+            )
+
+    def _register_k8s_cloud(self, cloud: str, controller: str | None = None) -> None:
+        if self.kubernetes_client_registry is None:
+            raise RuntimeError("No KubernetesClientRegistry configured.")
+        kubeconfig = self.kubernetes_client_registry.kubeconfig_for_cloud(cloud)
+        # juju add-k8s reads the kubeconfig from stdin when KUBECONFIG is unset,
+        # so the content is piped in rather than mutating the environment.
+        controller_args = ("--controller", controller) if controller else ("--client",)
+        try:
+            self.client.model(None).cli(
+                "add-k8s", cloud, *controller_args, include_model=False, stdin=kubeconfig.read_text()
+            )
+        except jubilant.CLIError as exc:
+            if "already exists" not in str(exc):
+                raise
+
+    def _register_generic_cloud(self, cloud: str, controller: str | None = None) -> None:
+        cloud_definition, credentials = self._cloud_definitions[cloud]
+        credential_config = yaml.safe_load(credentials.read_text())
+        if not isinstance(credential_config, dict):
+            raise ValueError(f"Credentials file '{credentials}' must contain a YAML mapping.")
+        try:
+            if controller:
+                self.client.model(None).add_cloud(cloud, cloud_definition, controller=controller)
+            else:
+                self.client.model(None).add_cloud(cloud, cloud_definition, client=True)
+        except jubilant.CLIError as exc:
+            if "already exists" not in str(exc):
+                raise
+        try:
+            if controller:
+                self.client.model(None).add_credential(cloud, credential_config, controller=controller)
+            else:
+                self.client.model(None).add_credential(cloud, credential_config, client=True)
+        except jubilant.CLIError as exc:
+            if "already exists" not in str(exc):
+                raise
 
     def refresh_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         application: str,
         revision: int | None = None,
         channel: str | None = None,
@@ -546,28 +1124,79 @@ class JubilantBackend(JujuCmdBackend):
             channel=channel,
         )
 
-    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def validate_application(
+        self, model: JujuModelHandle, application: str, level: str
+    ) -> dict[str, list[ValidationResult]]:
         # Phase 2 endpoint validation will be done here
         return {}
 
-    def is_k8s_model(self, model: str) -> bool:
-        return self.client.model(model).show_model().type == "kubernetes"
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return self.kubernetes_cloud_for_model(model) is not None
 
-    def reboot_model_controller(self, model: str) -> None:
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        info = self.client.model(model).show_model()
+        return info.cloud if info.type == "kubernetes" else None
+
+    def is_k8s_cloud(self, cloud: str) -> bool:
+        clouds = json.loads(self.client.model(None).cli("clouds", "--client", "--format", "json", include_model=False))
+        return self._cloud_is_k8s(cloud, clouds, "the Juju client")
+
+    def is_k8s_cloud_on_controller(self, cloud: str, controller: str) -> bool:
+        clouds = json.loads(
+            self.client.model(None).cli("clouds", "--controller", controller, "--format", "json", include_model=False)
+        )
+        return self._cloud_is_k8s(cloud, clouds, f"controller '{controller}'")
+
+    @staticmethod
+    def _cloud_is_k8s(cloud: str, clouds: dict[str, Any], registry: str) -> bool:
+        try:
+            cloud_type: object = clouds[cloud]["type"]
+        except KeyError as exc:
+            raise ValueError(f"Cloud '{cloud}' is not registered with {registry}.") from exc
+        return cloud_type == "k8s"
+
+    def get_controller_kubeconfig(self, controller: str) -> pathlib.Path | None:
+        """Return the kubeconfig path for a K8s controller's cloud, or None for machine controllers.
+
+        Cloud type is determined by querying Juju (show_model().type), never by
+        whether a kubeconfig was supplied. Returning None unambiguously means the
+        controller is machine-based. Raises if the controller is K8s-based but no
+        kubeconfig is configured for its cloud.
+        """
+        cloud = self.kubernetes_cloud_for_model(JujuModelHandle(controller=controller, model="controller"))
+        if cloud is None:
+            return None
+        if self.kubernetes_client_registry is None or not self.kubernetes_client_registry.has_cloud(cloud):
+            raise ValueError(
+                f"Controller '{controller}' is on K8s cloud '{cloud}' but no kubeconfig is configured for it. "
+                f"Set KUBECONFIG_{cloud.replace('-', '_')} to the kubeconfig path."
+            )
+        return self.kubernetes_client_registry.kubeconfig_for_cloud(cloud)
+
+    def get_kubernetes_client_for_controller(self, controller: str) -> KubernetesClient | None:
+        """Return the Kubernetes client for a controller's cloud, or None for machine controllers."""
+        return self.get_kubernetes_client_for_model(JujuModelHandle(controller=controller, model="controller"))
+
+    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+        """Resolve the Kubernetes client for a model's cloud, or None for machine models."""
+        cloud = self.kubernetes_cloud_for_model(model)
+        return self._kubernetes_client_for_cloud(cloud) if cloud is not None else None
+
+    def reboot_model_controller(self, model: JujuModelHandle) -> None:
         controller_name = self.status(model).model.controller
-        controller_model = f"{controller_name}:controller"
+        controller_model = JujuModelHandle(controller=controller_name, model="controller")
 
-        if not self.is_k8s_model(model=controller_model):
+        cloud = self.kubernetes_cloud_for_model(controller_model)
+        if cloud is None:
             # XXX(mbenzan): In the future, we might want to implement a rolling restart here too.
             # reboot the leader
             self.ssh(model=controller_model, application="controller/leader", command="sudo reboot")
         else:
+            k8s = self._kubernetes_client_for_cloud(cloud)
             controller_k8s_namespace = f"controller-{controller_name}"
-            self.kubernetes_client.restart_statefulset(
-                namespace=controller_k8s_namespace, statefulset_name="controller"
-            )
-            self.kubernetes_client.wait_for_statefulset_restart(
-                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=300
+            k8s.restart_statefulset(namespace=controller_k8s_namespace, statefulset_name="controller")
+            k8s.wait_for_statefulset_restart(
+                namespace=controller_k8s_namespace, statefulset_name="controller", timeout_seconds=600
             )
 
     def kill_controller(self, controller: str) -> None:
@@ -576,7 +1205,7 @@ class JubilantBackend(JujuCmdBackend):
         )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
-        self.client.model(model_name).cli(
+        self.client.model(JujuModelHandle(controller=source_controller, model=model_name)).cli(
             "migrate", f"{source_controller}:{model_name}", target_controller, include_model=False
         )
 
@@ -584,9 +1213,9 @@ class JubilantBackend(JujuCmdBackend):
         extra = ("--agent-version", agent_version) if agent_version else ()
         self.client.model(None).cli("upgrade-controller", "-c", controller, *extra, include_model=False)
 
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
         extra = ("--agent-version", agent_version) if agent_version else ()
         self.client.model(model).cli("upgrade-model", *extra)
 
-    def debug_log(self, model: str) -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
         return self.client.model(model).debug_log()

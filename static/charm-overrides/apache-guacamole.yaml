@@ -1,0 +1,7 @@
+---
+# Source: https://github.com/charmed-osm/apache-guacamole-operator
+#
+# Part of unmaintained charmed-osm; last updated 5 years ago (IQA-3675). Delisted.
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

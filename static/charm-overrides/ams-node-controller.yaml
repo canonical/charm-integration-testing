@@ -1,0 +1,8 @@
+---
+# ams-node-controller: deprecated by Anbox Cloud as of 1.26.0, unsupported as of 1.28.0
+# (superseded by ams-lxd). Charmhub-published charm; no public source repository found
+# (checked canonical/anbox-cloud-charms, canonical/ams-old, canonical/ams-operator - none
+# of which host this subordinate charm's actual source).
+listed: false  # Task to remove filed under https://warthogs.atlassian.net/browse/IQA-3663
+overrides:
+  - assumes: [unsupported-obsolete]

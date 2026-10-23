@@ -1,4 +1,4 @@
-# Copyright 2024-2025 Canonical Ltd.
+# Copyright 2024-2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 
@@ -6,21 +6,37 @@ import json
 import logging
 import os
 import warnings
+from datetime import timedelta
 from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+from chaos_client import ResourceConstraintsClient
 from extensions import (
     ConfigureLivepatchServerExtension,
+    IstioMeshExtension,
+    LegoExtension,
+    MetacontrollerExtension,
+    MysqlDatabaseReplicationExtension,
+    MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
-    S3IntegratorMinIOBackendExtension,
+    RemoteLoggingExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
 )
-from juju import JujuBackend, JujuClient, JujuValidationError, JujuVersion, JujuWaitTimeoutError
+from juju import (
+    JujuApplicationInfo,
+    JujuBackend,
+    JujuClient,
+    JujuConsumedOfferInfo,
+    JujuIntegrationApplication,
+    JujuValidationError,
+    JujuVersion,
+    JujuWaitTimeoutError,
+)
 from juju.resource_registry import (
     JujuControllerHandle,
     JujuCrashdumpCollector,
@@ -28,9 +44,10 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
+from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -39,12 +56,47 @@ from utils.juju_releases import (
     select_upgrade_target,
 )
 
-from bundle_builder_x import UncompletableBundleError
+from bundle_builder_x import (
+    ApplicationReleaseDiagnostic,
+    ArchitectureMismatchError,
+    AssumesMismatchError,
+    BaseMismatchError,
+    BundleBuilder,
+    BundleDiagnostic,
+    Charm,
+    CharmChannel,
+    CharmhubClient,
+    CharmReleaseNotFoundException,
+    FeatureMismatchDiagnostic,
+    OverridesClient,
+    PeerChannelMismatchDiagnostic,
+    PlatformMismatchError,
+    ReleaseUnavailableError,
+    ReleaseUnavailableKind,
+    SubordinateBaseMismatchDiagnostic,
+    UncompletableBundleError,
+    UnfulfilledEndpointDiagnostic,
+    UnresolvedApplicationDiagnostic,
+    UnresolvedIntegrationDiagnostic,
+    leaf_release_errors,
+)
+from bundle_builder_x import (
+    JujuVersion as BundleJujuVersion,
+)
+from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
+from test_suite.fixtures.juju import get_juju_client_for_registered_models
+from test_suite.remote_logging import (
+    build_remote_logging_endpoints_by_controller,
+    remote_logging_existing_state_warning,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
     "test_suite.fixtures.controller_spec",
+    "test_suite.fixtures.integration_spec",
+    "test_suite.fixtures.chaos_tools",
+    "test_suite.fixtures.resource_tracking",
 ]
 
 
@@ -98,9 +150,96 @@ def logger() -> logging.Logger:
     return logging.getLogger()
 
 
+@pytest.fixture(scope="session")
+def cloud_kubeconfigs() -> dict[str, Path]:
+    """Map of Juju cloud name to kubeconfig path, sourced from KUBECONFIG_<cloud> env vars.
+
+    Cloud name conventions: hyphens in Juju cloud names are represented as
+    underscores in env var names (e.g. KUBECONFIG_local_k8s for cloud local-k8s).
+    """
+    result: dict[str, Path] = {}
+    for key, val in os.environ.items():
+        if key.startswith("KUBECONFIG_"):
+            cloud = key[len("KUBECONFIG_") :].lower().replace("_", "-")
+            stripped = val.strip()
+            if stripped:
+                result[cloud] = Path(stripped)
+    return result
+
+
+@pytest.fixture(scope="session")
+def cloud_definitions() -> dict[str, tuple[Path, Path]]:
+    """Map of Juju cloud name to (cloud-definition, credentials) file paths.
+
+    Sourced from paired CLOUD_DEFINITION_<cloud>/CLOUD_CREDENTIALS_<cloud> env vars, for
+    registering non-Kubernetes clouds (e.g. OpenStack) on an existing controller. Same
+    cloud name convention as ``cloud_kubeconfigs``.
+    """
+    definitions: dict[str, Path] = {}
+    credentials: dict[str, Path] = {}
+    for key, val in os.environ.items():
+        stripped = val.strip()
+        if not stripped:
+            continue
+        if key.startswith("CLOUD_DEFINITION_"):
+            definitions[key[len("CLOUD_DEFINITION_") :].lower().replace("_", "-")] = Path(stripped)
+        elif key.startswith("CLOUD_CREDENTIALS_"):
+            credentials[key[len("CLOUD_CREDENTIALS_") :].lower().replace("_", "-")] = Path(stripped)
+    return {cloud: (path, credentials[cloud]) for cloud, path in definitions.items() if cloud in credentials}
+
+
+@pytest.fixture(scope="session")
+def kubernetes_client_registry(cloud_kubeconfigs: dict[str, Path]) -> KubernetesClientRegistry:
+    """Own the shared Kubernetes clients used by Juju, chaos, and resource tracking."""
+    return KubernetesClientRegistry(cloud_kubeconfigs)
+
+
+@pytest.fixture(scope="session")
+def juju_backend(
+    kubernetes_client_registry: KubernetesClientRegistry,
+    cloud_definitions: dict[str, tuple[Path, Path]],
+) -> JujuBackend:
+    return JubilantBackend(
+        kubernetes_client_registry=kubernetes_client_registry,
+        cloud_definitions=cloud_definitions,
+    )
+
+
+@pytest.fixture(scope="session")
+def unseal_vault_k8s_extension(juju_backend: JujuBackend, logger: logging.Logger) -> UnsealVaultK8sJujuExtension:
+    return UnsealVaultK8sJujuExtension(juju_backend, logger)
+
+
+@pytest.fixture(scope="session")
+def register_test_clouds(
+    juju_backend: JujuBackend,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
+    cloud_kubeconfigs: dict[str, Path],
+    cloud_definitions: dict[str, tuple[Path, Path]],
+    target_cloud: str,
+    neighbor_cloud: str | None,
+) -> None:
+    """Register configured test clouds with the local Juju client before Juju operations."""
+    clouds = {target_cloud}
+    if neighbor_cloud is not None:
+        clouds.add(neighbor_cloud)
+    for cloud in clouds:
+        if cloud not in cloud_kubeconfigs and cloud not in cloud_definitions:
+            continue
+        juju_backend.register_cloud(cloud=cloud)
+
+
 @pytest.fixture
-def juju_backend(kubernetes_client: KubernetesClient | None) -> JujuBackend:
-    return JubilantBackend(kubernetes_client=kubernetes_client)
+def kubernetes_client(
+    kubernetes_client_registry: KubernetesClientRegistry,
+    target_model_ref: JujuModelHandle,
+    juju_backend: JujuBackend,
+) -> KubernetesClient | None:
+    """Return the shared KubernetesClient for the target model."""
+    cloud = juju_backend.kubernetes_cloud_for_model(target_model_ref)
+    if cloud is None:
+        return None
+    return kubernetes_client_registry.client_for_cloud(cloud)
 
 
 @pytest.fixture(scope="session")
@@ -120,22 +259,21 @@ def log_dir(request: pytest.FixtureRequest) -> Path | None:
 
 
 @pytest.fixture(scope="session")
-def kubeconfig_path() -> Path | None:
-    raw = os.environ.get("KUBECONFIG")
-    stripped = None if raw is None else raw.strip() or None
-    return Path(stripped) if stripped is not None else None
-
-
-@pytest.fixture(scope="session")
 def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
-    kubeconfig_path: Path | None,
+    juju_backend: JujuBackend,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> Iterator[ResourceRegistry]:
-    """Session-scoped resource registry for the main workflow controller."""
+    """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
-            JujuCrashdumpCollector(logger, output_dir=log_dir, kubeconfig_path=kubeconfig_path),
+            JujuCrashdumpCollector(
+                logger,
+                juju_backend,
+                output_dir=log_dir,
+                kubernetes_client_registry=kubernetes_client_registry,
+            ),
         ],
         logger=logger,
     )
@@ -189,30 +327,145 @@ def register_preexisting_resources(
         )
 
 
-@pytest.fixture
-def juju_client(
+@pytest.fixture(scope="session")
+def persistence_extension(
+    validators_path: Path | None,
     juju_backend: JujuBackend,
     logger: logging.Logger,
-    minio_client_file: Path | None,
-    ubuntu_pro_token: str | None,
     uv_file: Path | None,
-    validators_path: Path | None,
+) -> ValidatorInjectorExtension:
+    """Session-scoped validator injector, and the owner of the canary persistence state.
+
+    One instance is shared by the session-scoped ``juju_client`` fixture,
+    so the state it holds is the single source of truth. The persistence op is auto-decided from
+    that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
+    (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
+    applications or integrations are torn down. It also re-keys itself on model migration, so
+    tests never touch the state directly.
+    """
+    return ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def register_preexisting_neighbor_cloud(
+    request: pytest.FixtureRequest,
+    juju_backend: JujuBackend,
+    is_cmr_test: bool,
+    same_controller: bool,
+    target_cloud: str,
+    target_controller: str,
+    neighbor_cloud: str | None,
+) -> None:
+    """Register the same-controller neighbor cloud when --current-state skips
+    test_bootstrap_controller (the target controller, and any cloud it needs beyond
+    its own, must already exist before test_create_model runs). When the controller
+    is bootstrapped in this session instead, test_bootstrap_controller performs this
+    same registration itself right after bootstrap.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_CONTROLLER:
+        return
+    if needs_same_controller_cloud_registration(
+        is_cmr_test=is_cmr_test,
+        same_controller=same_controller,
+        neighbor_cloud=neighbor_cloud,
+        target_cloud=target_cloud,
+    ):
+        assert neighbor_cloud is not None
+        juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
+
+
+@pytest.fixture(scope="session")
+def juju_client(
+    juju_backend: JujuBackend,
+    istio_mesh_extension: IstioMeshExtension,
+    register_test_clouds: None,
+    target_controller: str,
+    logger: logging.Logger,
+    ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
+    persistence_extension: ValidatorInjectorExtension,
+    remote_logging_endpoints_by_controller: dict[str, str],
+    kubernetes_client_registry: KubernetesClientRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
+            istio_mesh_extension,
+            LegoExtension(juju_backend, logger),
+            MetacontrollerExtension(juju_backend, logger),
+            MysqlDatabaseReplicationExtension(juju_backend, logger),
+            MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
-            S3IntegratorMinIOBackendExtension(juju_backend, logger, minio_client_file),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, logger),
-            ValidatorInjectorExtension(validators_path, juju_backend, logger, uv_file),
+            unseal_vault_k8s_extension,
+            persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
+            RemoteLoggingExtension(
+                juju_backend,
+                kubernetes_client_registry,
+                remote_logging_endpoints_by_controller,
+                session_resource_registry,
+            ),
         ],
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_persistence_state_for_resumed_run(
+    request: pytest.FixtureRequest,
+    target_model_ref: JujuModelHandle,
+    is_cmr_test: bool,
+    neighbor_model_ref: JujuModelHandle | None,
+    register_preexisting_resources: None,
+) -> None:
+    """Seed the persistence state when ``--current-state`` resumes past ``test_deploy``.
+
+    The state is normally populated by ``test_deploy`` calling ``prepare()``. When a run resumes
+    directly at ``State.DEPLOYED`` (the app is already deployed, so ``test_deploy`` never runs this
+    session), it would otherwise stay empty: disruptive tests' "checkpoint" calls would then pass
+    no refs at all, which the runner treats as trivially successful, silently skipping persistence
+    validation for the whole run.
+
+    To avoid that silent gap, re-run "prepare" against the already-deployed target application as
+    soon as the session starts. ``State.NEIGHBOR_ONLY`` needs no seeding because every test that
+    can run from it calls ``prepare()`` itself. Resuming into any other post-deploy state is not
+    handled here (the application topology at those states isn't guaranteed), so persistence
+    validation is skipped for those runs with a loud warning rather than a silent one.
+    """
+    current_state = State(request.config.getoption("--current-state"))
+    if current_state in STATES_WITHOUT_EXISTING_MODEL or current_state == State.EMPTY_MODEL:
+        # test_deploy will run this session (or there's no model yet to seed against).
+        return
+
+    if current_state == State.NEIGHBOR_ONLY:
+        # Handled by whichever test transitions out of this state (see the docstring above) -
+        # no seeding and no warning needed.
+        return
+
+    if current_state != State.DEPLOYED:
+        warnings.warn(
+            f"Resuming at --current-state={current_state.value} does not seed persistence state; "
+            "data persistence validation will be skipped for this run since test_deploy did not "
+            "run and no seeding is implemented for this resume point.",
+            UserWarning,
+        )
+        return
+
+    client: JujuClient = request.getfixturevalue("juju_client")
+    models = [target_model_ref]
+    if is_cmr_test and neighbor_model_ref is not None:
+        models.append(neighbor_model_ref)
+    # prepare() writes through relation credentials, which can race hooks still settling when
+    # resuming with --current-state=deployed. test_deploy always waits for the model(s) to go idle
+    # first - match that here.
+    client.multi_model_idle_for_period(models, timeout=timedelta(minutes=15))
+    for model_ref in models:
+        client.validate_model(model=model_ref, level=None)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -315,10 +568,40 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Platform for the neighbor model in CMR tests: 'kubernetes' or 'machine'. Defaults to --target-platform value.",
     )
     parser.addoption(
+        "--target-arch",
+        type=str,
+        default="amd64",
+        help="Architecture for the target model, e.g. 'amd64' or 'arm64' (default: 'amd64').",
+    )
+    parser.addoption(
+        "--neighbor-arch",
+        type=str,
+        default=None,
+        help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
+        "--target-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the target controller model.",
+    )
+    parser.addoption(
+        "--neighbor-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the neighbor controller model.",
+    )
+    parser.addoption(
         "--charm-overrides",
         type=str,
         default="./static/charm-overrides/",
         help="Path to the unified charm overrides directory used by bundle-builder-x.",
+    )
+    parser.addoption(
+        "--charm-resource-constraints",
+        type=str,
+        default="./static/charm-resource-constraints/",
+        help="Path to the per-charm chaos resource constraints directory (e.g. stress amounts).",
     )
     parser.addoption(
         "--juju-upgrade-target-version",
@@ -403,7 +686,7 @@ def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def validators_path() -> Path | None:
     file_path_env = os.environ.get("VALIDATORS_PATH")
     if not file_path_env:
@@ -456,46 +739,132 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
 
 
 @pytest.fixture
+def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
+    """Canonical charm metadata for the target revision the cycle refreshes back to.
+
+    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
+    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
+    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
+    when the target cannot be resolved on the requested series.
+    """
+    target_charm: str = request.getfixturevalue("target_charm")
+    target_channel: str | None = request.getfixturevalue("target_channel")
+    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_series: str | None = request.getfixturevalue("target_series")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target_platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
+    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
+
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    channel_track = channel.track or None if channel else None
+    channel_risk = channel.risk or None if channel else None
+    channel_branch = channel.branch or None if channel else None
+
+    try:
+        return charmhub_client.charm_from_store(
+            charm_name=target_charm,
+            ubuntu_arch=target_arch,
+            charm_track=channel_track,
+            charm_risk=channel_risk,
+            charm_branch=channel_branch,
+            charm_revision=target_revision,
+            ubuntu_version=target_series,
+            platform=target_platform,
+            juju_version=bundle_juju_version,
+        )
+    except BaseMismatchError:
+        # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
+        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
+        pytest.skip(
+            f"Charm '{target_charm}' target does not support the requested base "
+            f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
+        )
+    except ReleaseUnavailableError as exc:
+        if (
+            target_revision is None
+            and target_channel is None
+            and target_series is not None
+            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
+        ):
+            pytest.skip(
+                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
+                "the downgrade/upgrade refresh cycle is untestable."
+            )
+        raise
+
+
+@pytest.fixture
 def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     """Revision to downgrade to for the charm under test.
 
     When ``--target-downgrade-revision`` is an explicit integer, that value is
-    returned directly. When the value is ``"default"``, Test Observer is queried
-    for a historical revision with a passing deploy for the target charm.
+    used. When the value is ``"default"``, Test Observer is queried for a
+    historical revision with a passing deploy for the target charm. Either way
+    the selected revision is validated against the base the target is deployed
+    on, and the cycle is skipped when the two are incompatible.
     """
-    value = request.config.getoption("--target-downgrade-revision")
-    if value != "default":
-        return int(value)
-
-    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
     target_charm: str = request.getfixturevalue("target_charm")
     target_channel: str | None = request.getfixturevalue("target_channel")
-    target_revision: int | None = request.getfixturevalue("target_revision")
+    target_arch: str = request.getfixturevalue("target_arch")
+    target: Charm = request.getfixturevalue("target_resolved_charm")
+    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
-    if target_revision is None or target_channel is None:
-        pytest.fail(
-            "--target-revision and --target-channel must be provided for this test to select a historical revision."
-        )
+    channel = CharmChannel.model_validate(target_channel) if target_channel else None
+    target_base = target.ubuntu_version
+    resolved_channel = channel or target.channel
 
-    parts = target_channel.split("/", maxsplit=1)
-    track = parts[0]
-    stage = parts[1] if len(parts) > 1 else "stable"
+    def supports_target_base(revision: int) -> bool:
+        try:
+            charmhub_client.charm_from_store(
+                charm_name=target_charm,
+                ubuntu_arch=target_arch,
+                charm_track=resolved_channel.track,
+                charm_risk=resolved_channel.risk,
+                charm_branch=resolved_channel.branch or None,
+                charm_revision=revision,
+                ubuntu_version=target_base,
+            )
+        except BaseMismatchError:
+            return False
+        return True
 
-    try:
-        previous_revision = test_observer_client.choose_historical_revision_with_passing_deploy(
-            charm_name=target_charm,
-            stage=stage,
-            current_revision=target_revision,
-            track=track,
-        )
-        if previous_revision is None:
-            pytest.fail(
-                "Unable to find a historical revision with a passing test_deploy result "
-                f"for charm '{target_charm}' in channel '{target_channel}'."
+    value = request.config.getoption("--target-downgrade-revision")
+    if value != "default":
+        previous_revision = int(value)
+        if not supports_target_base(previous_revision):
+            pytest.skip(
+                f"Charm '{target_charm}' revision {previous_revision} does not support base '{target_base}' "
+                "used by the target; the downgrade/upgrade refresh cycle cannot run without --force-series."
             )
         return previous_revision
+    if resolved_channel.branch:
+        pytest.skip(
+            f"Unable to select a historical revision for branched channel '{resolved_channel}': "
+            "Test Observer history is not branch-specific. Set --target-downgrade-revision explicitly."
+        )
+    test_observer_client: TestObserverAPIClient = request.getfixturevalue("test_observer_client")
+    try:
+        historical_revisions = test_observer_client.iter_historical_revisions_with_passing_deploy(
+            charm_name=target_charm,
+            stage=resolved_channel.risk or "stable",
+            current_revision=target.revision,
+            track=resolved_channel.explicit_track,
+        )
+        for candidate_revision in historical_revisions:
+            if supports_target_base(candidate_revision):
+                return candidate_revision
     except TestObserverClientError as exc:
         raise RuntimeError(f"Test Observer query failed: {exc}") from exc
+
+    # No usable historical revision (e.g. all prior revisions predate a base change and are
+    # unreachable without --force-series). Skip rather than fail so the downgrade/upgrade
+    # cycle is reported as untestable instead of a test failure.
+    pytest.skip(
+        "Unable to find a historical revision with a passing test_deploy result "
+        f"for charm '{target_charm}' in channel '{resolved_channel}'."
+    )
 
 
 @pytest.fixture
@@ -519,15 +888,69 @@ def target_platform(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def target_juju_version(juju_backend: JujuBackend, model: str) -> JujuVersion:
-    return juju_backend.version(model)
+def target_arch(request: pytest.FixtureRequest) -> str:
+    value = request.config.getoption("--target-arch")
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def target_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--target-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def neighbor_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--neighbor-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def remote_logging_endpoints_by_controller(
+    target_controller: str,
+    target_remote_logging_endpoint: str | None,
+    neighbor_controller: str | None,
+    neighbor_remote_logging_endpoint: str | None,
+) -> dict[str, str]:
+    return build_remote_logging_endpoints_by_controller(
+        target_controller,
+        target_remote_logging_endpoint,
+        neighbor_controller,
+        neighbor_remote_logging_endpoint,
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warn_remote_logging_unsupported_for_existing_state(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Warn when the requested starting state bypasses complete remote logging setup."""
+    current_state = State(request.config.getoption("--current-state"))
+    remote_logging_configured = bool(
+        request.config.getoption("--target-remote-logging-endpoint")
+        or request.config.getoption("--neighbor-remote-logging-endpoint")
+    )
+    message = remote_logging_existing_state_warning(
+        remote_logging_configured,
+        controller_already_exists=current_state not in STATES_WITHOUT_EXISTING_CONTROLLER,
+    )
+    if message is not None:
+        warnings.warn(message, UserWarning)
 
 
 @pytest.fixture
-def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model: str | None) -> JujuVersion | None:
-    if neighbor_model is None:
+def target_juju_version(juju_backend: JujuBackend, target_model_ref: JujuModelHandle) -> JujuVersion:
+    return juju_backend.version(target_model_ref)
+
+
+@pytest.fixture
+def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model_ref: JujuModelHandle | None) -> JujuVersion | None:
+    if neighbor_model_ref is None:
         return None
-    return juju_backend.version(neighbor_model)
+    return juju_backend.version(neighbor_model_ref)
 
 
 @pytest.fixture
@@ -536,7 +959,7 @@ def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     return juju_backend.cli_version()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charm_overrides(request: pytest.FixtureRequest) -> Path:
     """Path to the unified charm overrides directory, passed via ``--charm-overrides``."""
     value = request.config.getoption("--charm-overrides")
@@ -549,12 +972,80 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
+@pytest.fixture(scope="session")
+def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
+    """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
+    return OverridesClient(overrides=charm_overrides, logger=logger)
+
+
+@pytest.fixture
+def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.Logger) -> ResourceConstraintsClient:
+    """Client for reading per-charm chaos resource constraints, tolerating a missing directory.
+
+    Unlike ``--charm-overrides``, an absent or unset ``--charm-resource-constraints`` directory is
+    not an error: it simply means no charm has customized its chaos parameters yet.
+    """
+    value = request.config.getoption("--charm-resource-constraints")
+    constraints_dir: Path | None = None
+    if value:
+        assert isinstance(value, str)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = Path(request.config.rootpath) / candidate
+        candidate = candidate.resolve()
+        if candidate.is_dir():
+            constraints_dir = candidate
+    return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
+
+
+@pytest.fixture(scope="session")
+def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
+    """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
+    return CharmhubClient(logger=logger, overrides_client=overrides_client)
+
+
+@pytest.fixture(scope="session")
+def istio_mesh_extension(
+    charmhub_client: CharmhubClient,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+) -> IstioMeshExtension:
+    """Wire the control-plane extension with the backend and store client."""
+    return IstioMeshExtension(juju_backend, logger, charmhub_client)
+
+
+@pytest.fixture
+def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
+    """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
+    return BundleBuilder(charmhub_client=charmhub_client, logger=logger)
+
+
 @pytest.fixture
 def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> str:
     """Platform for the neighbor model in CMR tests. Falls back to --target-platform."""
     value = request.config.getoption("--neighbor-platform")
     if not value:
         return target_platform
+    assert isinstance(value, str)
+    return value
+
+
+@pytest.fixture
+def neighbor_arch(
+    request: pytest.FixtureRequest,
+    target_arch: str,
+    neighbor_model_ref: JujuModelHandle | None,
+) -> str:
+    """Architecture for the neighbor model in CMR tests. Falls back to --target-arch.
+
+    In non-CMR tests there is no neighbor model: the neighbor application is deployed
+    into the target model, so it necessarily uses ``target_arch``.
+    """
+    if neighbor_model_ref is None:
+        return target_arch
+    value = request.config.getoption("--neighbor-arch")
+    if not value:
+        return target_arch
     assert isinstance(value, str)
     return value
 
@@ -572,15 +1063,7 @@ def bundle_mermaid_output(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
-def minio_client_file() -> Path | None:
-    file_path = os.environ.get("MINIO_CLIENT_FILE")
-    if file_path:
-        file_path = file_path.strip()
-    return Path(file_path) if file_path else None
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def uv_file() -> Path | None:
     file_path = os.environ.get("UV_FILE")
     if file_path:
@@ -588,7 +1071,7 @@ def uv_file() -> Path | None:
     return Path(file_path) if file_path else None
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def ubuntu_pro_token() -> str | None:
     token = os.environ.get("UBUNTU_PRO_TOKEN")
     if token:
@@ -638,18 +1121,20 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _print_all_model_statuses() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                try:
-                    juju_client.print_status(model=f"{handle.controller}:{handle.model}")
-                except Exception:
-                    logger.warning(f"Failed to print status for model '{handle.controller}:{handle.model}'")
+        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+        if client_and_models is None:
+            return
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
+            try:
+                juju_client.print_status(model=handle)
+            except Exception:
+                logger.warning(f"Failed to print status for model '{handle.uri}'")
 
     # Print starting state for all registered models
     _print_all_model_statuses()
@@ -731,8 +1216,43 @@ def record_warning_execution_metadata(execution_metadata: Callable[[str, str | i
         )
 
 
+def _integration_endpoint_str(
+    juju_client: JujuClient,
+    side: JujuIntegrationApplication,
+    applications: dict[str, JujuApplicationInfo],
+    consumed_offers: dict[str, JujuConsumedOfferInfo],
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None],
+) -> str:
+    """Render one side of an integration as ``<charm>:<endpoint>``, normalized for matching.
+
+    Local applications are identified by charm name. Remote SAAS entries backed by a consumed
+    offer are resolved to the actual charm behind the offer (via a status check against the
+    offering model), so cross-model integrations are recorded identically to same-model ones.
+    The offer URL itself is never used for this: it embeds the offering controller/model names,
+    which are randomly generated per test run and would make the recorded value useless for
+    matching across runs. If the offering model can't be resolved (e.g. unreachable controller),
+    fall back to the offer's local alias, which -- unlike the URL -- is stable across runs.
+
+    ``resolved_offer_applications`` caches resolutions by offer alias across calls for the same
+    model, so each consumed offer is only resolved (i.e. status-queried) at most once per
+    recording pass, even if it's referenced by multiple integrations or by both integration sides.
+    """
+    if side.application in applications:
+        return f"{applications[side.application].charm}:{side.endpoint}"
+    if side.application in consumed_offers:
+        if side.application not in resolved_offer_applications:
+            resolved_offer_applications[side.application] = juju_client.resolve_consumed_offer_application(
+                consumed_offers[side.application]
+            )
+        offer_application = resolved_offer_applications[side.application]
+        if offer_application is not None:
+            return f"{offer_application.charm}:{side.endpoint}"
+        return f"offer:{side.application}:{side.endpoint}"
+    raise KeyError(f"'{side.application}' is neither a known application nor a consumed offer")
+
+
 def record_charm_info_execution_metadata_instantaneous(
-    juju_client: JujuClient, model: str, execution_metadata: Callable[[str, str], None]
+    juju_client: JujuClient, model: JujuModelHandle, execution_metadata: Callable[[str, str], None]
 ) -> None:
     # Get all charm version information
     applications = juju_client.list_applications(model=model)
@@ -749,45 +1269,37 @@ def record_charm_info_execution_metadata_instantaneous(
             # Risk is always present in a valid channel string
             execution_metadata(f"charm:{application_info.charm}:risk", application_info.channel.risk)
 
-    consumed_offers = juju_client.list_consumed_offers(model=model).keys()
+    consumed_offers = juju_client.list_consumed_offers(model=model)
+    resolved_offer_applications: dict[str, JujuApplicationInfo | None] = {}
 
-    # Get all integrations and record them
+    # Get all integrations (including CMRs) and record them.
+    # Only integrations actually reported by ``list_integrations`` are recorded, so
+    # consumed offers that aren't integrated with anything are naturally excluded.
     for integration in juju_client.list_integrations(model=model):
-        # Skip cross-model integrations where one side is a remote SAAS entry
-        # TODO: record CMRs in a future iteration
-        if integration.provider.application not in applications or integration.requirer.application not in applications:
-            continue
         # Record integration in format: provider:endpoint/interface/requirer:endpoint
-        try:
-            integration_str = (
-                f"{applications[integration.provider.application].charm}:{integration.provider.endpoint}/"
-                f"{integration.interface}/"
-                f"{applications[integration.requirer.application].charm}:{integration.requirer.endpoint}"
-            )
-            execution_metadata("integration", integration_str)
-        except KeyError as err:
-            if consumed_offers.isdisjoint({integration.provider.application, integration.requirer.application}):
-                raise KeyError("neither app nor consumed offer") from err
-
-            # FIXME(@motjuste): not recording execution metadata for consumed offers
-            #   either use the URL which does not have charm info,
-            #   or do a second status-check for offering model to get that info,
-            #   AND, only do it for **actually** integrated offers
+        provider_str = _integration_endpoint_str(
+            juju_client, integration.provider, applications, consumed_offers, resolved_offer_applications
+        )
+        requirer_str = _integration_endpoint_str(
+            juju_client, integration.requirer, applications, consumed_offers, resolved_offer_applications
+        )
+        execution_metadata("integration", f"{provider_str}/{integration.interface}/{requirer_str}")
 
 
 @pytest.fixture
 def record_charm_info_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                record_charm_info_execution_metadata_instantaneous(
-                    juju_client, f"{handle.controller}:{handle.model}", execution_metadata
-                )
+        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+        if client_and_models is None:
+            return
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
+            record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -796,6 +1308,160 @@ def record_charm_info_execution_metadata(
 
     # Save all charms and revisions at end of test
     _record_all()
+
+
+def _format_discrepancy_attributes(entry: DiscrepancyEntry) -> str:
+    """Render a discrepancy entry's descriptive attributes for its metadata value.
+
+    For modification qualifiers (``entry.baseline`` set) only the attributes that
+    actually changed are emitted, as ``key=old->new`` so a report shows what
+    drifted.  For presence qualifiers (``missing``/``extra``) ``entry.snapshot``'s
+    attributes are emitted whole -- for ``extra`` that is the re-entry snapshot,
+    for ``missing`` the first-visit snapshot, since the resource is absent on
+    re-entry.
+    """
+    current = entry.snapshot.report_attributes()
+    if entry.baseline is None:
+        return " ".join(f"{key}={value}" for key, value in sorted(current.items()))
+    baseline = entry.baseline.report_attributes()
+    return " ".join(
+        f"{key}={baseline.get(key, '')}->{value}"
+        for key, value in sorted(current.items())
+        if baseline.get(key) != value
+    )
+
+
+def _release_resolution_metadata(error: CharmReleaseNotFoundException, charm_name: str) -> set[tuple[str, str]]:
+    """Return stable atomic metadata for release failures.
+
+    ``charm_name`` is the caller's authoritative charm name (e.g. from
+    ``ApplicationReleaseDiagnostic.charm_name``), used instead of ``error.request.charm_name``
+    since ``request`` is optional on ``CharmReleaseNotFoundException`` and may be unset.
+    """
+    prefix = "failure:build_bundle:release_resolution"
+    entries: set[tuple[str, str]] = {(f"{prefix}:charm", charm_name)}
+
+    def add(category: str, value: str | int | None) -> None:
+        if value is not None:
+            entries.add((f"{prefix}:{category}", str(value)))
+
+    for leaf in leaf_release_errors(error):
+        request = leaf.request
+        kind = "release_not_found"
+        if isinstance(leaf, PlatformMismatchError):
+            kind = "platform_mismatch"
+            add("requested_platform", leaf.requested_platform)
+            for platform in leaf.supported_platforms:
+                add("supported_platform", platform)
+        elif isinstance(leaf, AssumesMismatchError):
+            kind = "assumes_mismatch"
+            for requirement in leaf.unmet_requirements:
+                add("requirement", requirement)
+            if request is not None:
+                add("juju_version", request.juju_version)
+        elif isinstance(leaf, BaseMismatchError):
+            kind = "base_mismatch"
+            add("requested_base", leaf.requested_base)
+            for base in leaf.supported_bases:
+                add("supported_base", base)
+            if request is not None:
+                add("architecture", request.architecture)
+        elif isinstance(leaf, ArchitectureMismatchError):
+            kind = "architecture_mismatch"
+            if request is not None:
+                add("requested_architecture", request.architecture)
+            for architecture in leaf.supported_architectures:
+                add("supported_architecture", architecture)
+        elif isinstance(leaf, ReleaseUnavailableError):
+            kind = leaf.kind.value
+            add("error_code", leaf.error_code)
+            if request is not None:
+                request_fields_by_kind = {
+                    ReleaseUnavailableKind.MISSING_BASES: ("channel", "revision"),
+                    ReleaseUnavailableKind.CHANNEL_BASE_UNSUPPORTED: (
+                        "architecture",
+                        "base",
+                        "channel",
+                        "revision",
+                    ),
+                    ReleaseUnavailableKind.REVISION_NOT_FOUND: ("revision",),
+                    ReleaseUnavailableKind.NO_SUITABLE_CHANNEL: ("architecture", "base", "revision"),
+                    ReleaseUnavailableKind.CHANNEL_NOT_FOUND: ("architecture", "base", "channel"),
+                    ReleaseUnavailableKind.TRACK_NOT_FOUND: ("architecture", "base", "track", "revision"),
+                    ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND: ("architecture", "base"),
+                    ReleaseUnavailableKind.UNEXPECTED_STORE_RESPONSE: ("architecture",),
+                }
+                for field in request_fields_by_kind[leaf.kind]:
+                    add(field, getattr(request, field))
+
+        entries.add((prefix, kind))
+    return entries
+
+
+def _bundle_diagnostic_metadata(diagnostic: BundleDiagnostic) -> list[tuple[str, str]]:
+    """Translate one bundle diagnostic into execution metadata entries."""
+    if isinstance(diagnostic, ApplicationReleaseDiagnostic):
+        return sorted(_release_resolution_metadata(diagnostic.error, diagnostic.charm_name))
+    if isinstance(diagnostic, UnresolvedApplicationDiagnostic):
+        return [("failure:build_bundle:unresolved_application", diagnostic.charm_name)]
+    if isinstance(diagnostic, UnresolvedIntegrationDiagnostic):
+        return [
+            (
+                "failure:build_bundle:unresolved_integration",
+                "/".join(f"{endpoint.charm_name}:{endpoint.endpoint}" for endpoint in diagnostic.endpoints),
+            )
+        ]
+    if isinstance(diagnostic, UnfulfilledEndpointDiagnostic):
+        entries = [
+            (
+                "failure:build_bundle:unfulfilled_endpoint",
+                f"{diagnostic.endpoint.charm_name}:{diagnostic.endpoint.endpoint}",
+            )
+        ]
+        if diagnostic.interface:
+            entries.append(("failure:build_bundle:unfulfilled_interface", diagnostic.interface))
+        return entries
+    if isinstance(diagnostic, FeatureMismatchDiagnostic):
+        return [
+            (
+                "failure:build_bundle:feature_mismatch",
+                f"{diagnostic.requires.charm_name}:{diagnostic.requires.endpoint}"
+                f"/{diagnostic.provides.charm_name}:{diagnostic.provides.endpoint}",
+            ),
+            ("failure:build_bundle:feature_mismatch:feature", diagnostic.feature),
+        ]
+    if isinstance(diagnostic, PeerChannelMismatchDiagnostic):
+        entries = [
+            (
+                "failure:build_bundle:peer_channel_mismatch",
+                f"{diagnostic.charm_name}:{diagnostic.endpoint}/{diagnostic.peer_charm_name}",
+            )
+        ]
+        if diagnostic.required_track:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_track", diagnostic.required_track))
+        if diagnostic.required_risk:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_risk", diagnostic.required_risk))
+        if diagnostic.required_channel:
+            entries.append(("failure:build_bundle:peer_channel_mismatch:required_channel", diagnostic.required_channel))
+        if diagnostic.required_revision is not None:
+            entries.append(
+                (
+                    "failure:build_bundle:peer_channel_mismatch:required_revision",
+                    str(diagnostic.required_revision),
+                )
+            )
+        return entries
+    if isinstance(diagnostic, SubordinateBaseMismatchDiagnostic):
+        return [
+            (
+                "failure:build_bundle:subordinate_base_mismatch",
+                f"{diagnostic.subordinate_charm_name}:{diagnostic.subordinate_endpoint}"
+                f"/{diagnostic.principal_charm_name}:{diagnostic.principal_endpoint}",
+            ),
+            ("failure:build_bundle:subordinate_base_mismatch:subordinate_base", diagnostic.subordinate_base),
+            ("failure:build_bundle:subordinate_base_mismatch:principal_base", diagnostic.principal_base),
+        ]
+    return []
 
 
 @pytest.fixture
@@ -821,6 +1487,7 @@ def record_failure_execution_metadata(
             for application in exc.wait_state.noncompliant_applications.values():
                 if application is None:
                     continue
+                execution_metadata("failure:charm", application.charm)
                 execution_metadata(
                     f"failure:charm:{application.charm}:status",
                     f"application:{application.status}:{normalize_string(application.message)}",
@@ -828,6 +1495,7 @@ def record_failure_execution_metadata(
             for unit in exc.wait_state.noncompliant_units.values():
                 if unit is None:
                     continue
+                execution_metadata("failure:charm", unit.charm)
                 execution_metadata(
                     f"failure:charm:{unit.charm}:status",
                     f"unit:{unit.status}:{normalize_string(unit.message)}",
@@ -835,6 +1503,7 @@ def record_failure_execution_metadata(
             for unit_agent in exc.wait_state.noncompliant_unit_agents.values():
                 if unit_agent is None:
                     continue
+                execution_metadata("failure:charm", unit_agent.charm)
                 execution_metadata(
                     f"failure:charm:{unit_agent.charm}:status",
                     f"unit_agent:{unit_agent.status}:{normalize_string(unit_agent.message)}",
@@ -865,15 +1534,31 @@ def record_failure_execution_metadata(
                             normalize_string(result.error),
                         )
         elif isinstance(exc, UncompletableBundleError):
-            for info in exc.unfulfilled_endpoints:
-                execution_metadata("failure:build_bundle:unfulfilled_endpoint", f"{info.charm_name}:{info.endpoint}")
-                if info.interface:
-                    execution_metadata("failure:build_bundle:unfulfilled_interface", info.interface)
+            for diagnostic in exc.diagnostics:
+                for category, value in _bundle_diagnostic_metadata(diagnostic):
+                    execution_metadata(category, value)
+        elif isinstance(exc, ResourceDiscrepancyError):
+            # Only the generically-applicable dimensions (resource_type and
+            # qualifier) go in the key so downstream attachment rules can select
+            # on them; run-specific context (state, model, snapshot detail) is
+            # carried in the value.
+            for discrepancy in exc.discrepancies:
+                for entry in discrepancy.entries():
+                    detail = (
+                        f"state={entry.state} controller={entry.controller} model={entry.model} "
+                        f"{entry.resource_type}={entry.snapshot.name}"
+                    )
+                    attributes = _format_discrepancy_attributes(entry)
+                    value = f"{detail} {attributes}" if attributes else detail
+                    execution_metadata(
+                        f"resource_discrepancy:{entry.resource_type}:{entry.qualifier}",
+                        normalize_string(value),
+                    )
 
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
     require_temp_juju_controller_alive: None,
@@ -881,9 +1566,11 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version for each registered model
-    for handle in session_resource_registry.registered_handles():
-        if isinstance(handle, JujuModelHandle):
-            execution_metadata("juju:version", str(juju_client.version(f"{handle.controller}:{handle.model}")))
+    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+    if client_and_models is not None:
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
+            execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
 @pytest.fixture
@@ -929,19 +1616,9 @@ def record_pipeline_version_execution_metadata(
 
 
 @pytest.fixture
-def _is_running_on_kubernetes(juju_backend: JujuBackend, model: str) -> None:
-    if not juju_backend.is_k8s_model(model):
+def _is_running_on_kubernetes(juju_backend: JujuBackend, target_model_ref: JujuModelHandle) -> None:
+    if not juju_backend.is_k8s_model(target_model_ref):
         pytest.skip("Not running on kubernetes.")
-
-
-@pytest.fixture
-def kubernetes_client(
-    logger: logging.Logger,
-    kubeconfig_path: Path | None,
-) -> KubernetesClient | None:
-    if kubeconfig_path:
-        return KubernetesClient(KubernetesBackend.k8s_client(kubeconfig=kubeconfig_path), logger=logger)
-    return None
 
 
 @pytest.fixture(scope="function")
@@ -1031,7 +1708,7 @@ def target_upgrade_version(
     the current controller.
     """
     explicit = request.config.getoption("--juju-upgrade-target-version")
-    controller_model = f"{target_controller}:controller"
+    controller_model = JujuModelHandle(controller=target_controller, model="controller")
     current = juju_client.version(controller_model)
     logger.info(f"Current Juju controller version: {current} (CLI: {juju_cli_version})")
 

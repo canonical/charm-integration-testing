@@ -1,0 +1,14 @@
+title = "gitleaks config for charm-integration-testing"
+
+# Extend gitleaks' default ruleset instead of replacing it.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-sensitive paths"
+paths = [
+  # Dummy juju-jimm-k8s config fixtures (uuid: aaaaaaaa-..., dns-name:
+  # jimm-test.local) used as worked examples for writing charm test
+  # config overrides. Not real credentials.
+  '''static/charm-test-configs.*''',
+]

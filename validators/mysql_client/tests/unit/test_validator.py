@@ -1,0 +1,268 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+from typing import cast
+from unittest.mock import patch
+
+import ops
+import pymysql
+import pytest
+
+from validators.mysql_client.tests.unit.stubs import ConnStub, CursorStub
+from validators.mysql_client.validator import MySQLClientValidator
+from validators.test_utils.helpers import make_charm_from_relation
+from validators.test_utils.stubs import (
+    ApplicationStub,
+    RelationRoleStub,
+    RelationStub,
+)
+
+# ---------------------------------------------------------------------------
+# Stubs
+# ---------------------------------------------------------------------------
+
+
+def _make_validator(
+    databag: dict[str, str], endpoint: str = "database", role: RelationRoleStub = RelationRoleStub.requires
+) -> MySQLClientValidator:
+    app = ApplicationStub()
+    relation = RelationStub(app=app, data={app: databag}, name=endpoint, id=0)
+    charm = make_charm_from_relation(relation, interface_name="mysql_client", role=role)
+    return MySQLClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+VALID_DATABAG: dict[str, str] = {
+    "endpoints": "10.1.2.3:3306",
+    "database": "mydb",
+    "username": "myuser",
+    "password": "mypassword",
+}
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestMySQLClientValidatorSimple:
+    @pytest.mark.parametrize(
+        "role,should_skip",
+        [(RelationRoleStub.requires, False), (RelationRoleStub.provides, True), (RelationRoleStub.peer, True)],
+    )
+    def test_returns_skipped_based_on_role(self, role: RelationRoleStub, should_skip: bool) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, role=role)
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert (result.status == "SKIPPED") == should_skip
+
+    def test_returns_skipped_for_unsupported_level(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG)
+
+        # WHEN
+        result = validator.validate(level="uat")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+        assert "not supported" in result.error
+
+    def test_returns_error_when_no_remote_app(self) -> None:
+        # GIVEN a relation with no data for the remote app (relation.app is None)
+        relation = RelationStub(name="database", id=0, app=None, data={})
+        charm = make_charm_from_relation(relation, interface_name="mysql_client")
+        validator = MySQLClientValidator(cast(ops.CharmBase, charm), cast(ops.Relation, relation))
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "ERROR"
+        assert result.error is not None
+        assert "No remote application" in result.error
+
+    def test_fails_schema_check_when_required_fields_missing(self) -> None:
+        # GIVEN a databag with missing required fields
+        validator = _make_validator({"endpoints": "10.1.2.3:3306"})
+
+        # WHEN
+        result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert not schema_check.passed
+        assert "database" in schema_check.message
+        assert "username" in schema_check.message
+        assert "password" in schema_check.message
+
+    def test_passes_schema_check_with_all_required_fields(self) -> None:
+        # GIVEN a complete databag and a successful DB connection
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[(1,)]))
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "PASS"
+        schema_check = next(c for c in result.checks if c.name == "schema")
+        assert schema_check.passed
+
+    def test_fails_connect_check_when_db_unreachable(self) -> None:
+        # GIVEN a complete databag but a DB that refuses connections
+        validator = _make_validator(VALID_DATABAG)
+
+        with patch(
+            "validators.mysql_client.validator.pymysql.connect",
+            side_effect=pymysql.err.OperationalError("Connection refused"),
+        ):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        connect_check = next(c for c in result.checks if c.name == "connect")
+        assert not connect_check.passed
+        assert "Connection refused" in connect_check.message
+
+    def test_fails_query_check_when_select_raises(self) -> None:
+        # GIVEN a connection that succeeds but the canary query raises
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(execute_error=pymysql.err.OperationalError("query error")))
+
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        query_check = next(c for c in result.checks if c.name == "query")
+        assert not query_check.passed
+
+    def test_version_consistency_check_flags_mismatch(self) -> None:
+        # GIVEN a databag declaring a version that doesn't match the server-reported version
+        databag = {**VALID_DATABAG, "version": "8.0.99"}
+        validator = _make_validator(databag)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[("8.0.45",)]))
+
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.status == "FAIL"
+        version_check = next(c for c in result.checks if c.name == "version_consistency")
+        assert not version_check.passed
+
+    def test_sets_endpoint_and_interface_on_result(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG, endpoint="my-endpoint")
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[(1,)]))
+
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="simple")
+
+        # THEN
+        assert result.endpoint == "my-endpoint"
+        assert result.interface == "mysql_client"
+
+
+class TestMySQLClientValidatorDeep:
+    def test_returns_skipped_for_uat_level(self) -> None:
+        # GIVEN
+        validator = _make_validator(VALID_DATABAG)
+
+        # WHEN
+        result = validator.validate(level="uat")
+
+        # THEN
+        assert result.status == "SKIPPED"
+        assert result.error is not None
+
+    def test_deep_passes_on_successful_write_read_verify(self) -> None:
+        # GIVEN a complete databag and a successful connection with write/read
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[("validator-probe",)]))
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "PASS"
+        assert result.level == "deep"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert write_check.passed
+        cleanup_check = next(c for c in result.checks if c.name == "cleanup")
+        assert cleanup_check.passed
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed
+
+    def test_deep_fails_when_write_fails(self) -> None:
+        # GIVEN a connection that fails on INSERT
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(
+            cursor_stub=CursorStub(
+                fetchone_rows=[(1,)],
+                execute_error=pymysql.err.OperationalError("Write failed"),
+                execute_succeed_count=2,
+            )
+        )
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert not write_check.passed
+
+    def test_deep_fails_when_read_verification_fails(self) -> None:
+        # GIVEN a connection where the read-back row doesn't match the written marker
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[("unexpected-value",)]))
+        with patch("validators.mysql_client.validator.pymysql.connect", return_value=conn):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN
+        assert result.status == "FAIL"
+        write_check = next(c for c in result.checks if c.name == "write_read_verify")
+        assert not write_check.passed
+        assert "Failed to verify" in write_check.message
+
+    def test_deep_latency_excludes_credential_resolution(self) -> None:
+        # GIVEN credential resolution that takes longer than the whole latency budget,
+        # followed by a fast database round-trip
+        validator = _make_validator(VALID_DATABAG)
+        conn = ConnStub(cursor_stub=CursorStub(fetchone_rows=[("validator-probe",)]))
+        clock = [0.0]
+
+        def slow_resolve() -> dict[str, str]:
+            clock[0] += 30.0
+            return dict(VALID_DATABAG)
+
+        def fast_connect(**_kwargs: object) -> ConnStub:
+            clock[0] += 0.3
+            return conn
+
+        with (
+            patch.object(validator, "_resolve_credentials", side_effect=slow_resolve),
+            patch("validators.mysql_client.validator.pymysql.connect", side_effect=fast_connect),
+            patch("validators.mysql_client.validator.time.monotonic", side_effect=lambda: clock[0]),
+        ):
+            # WHEN
+            result = validator.validate(level="deep")
+
+        # THEN latency passes, because only the database round-trip is measured
+        latency_check = next(c for c in result.checks if c.name == "latency")
+        assert latency_check.passed
+        assert "completed in 0.3s" in latency_check.message

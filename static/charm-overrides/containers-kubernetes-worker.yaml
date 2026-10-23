@@ -1,0 +1,6 @@
+---
+# containers-kubernetes-worker: stale duplicate publish of kubernetes-worker (same charmed-k8s
+# source), unpublished since 2021-12-14, single "latest" track, unproven publisher. Delist request pending.
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

@@ -6,18 +6,30 @@
 # (rabbitmq-server is the upstream service; it has no required peer relations).
 #
 # amqp (provides) - REQUIRED: primary purpose; all OpenStack services connect here.
-# dashboards (provides) - OPTIONAL: Grafana dashboard integration.
 # nrpe-external-master (provides) - OPTIONAL: monitoring subordinate; convention.
-# prometheus-rules (provides) - OPTIONAL: Prometheus alerting rules.
-# scrape (provides) - OPTIONAL: Prometheus metrics scraping.
+# dashboards / prometheus-rules / scrape (provides) - OPTIONAL COS endpoints;
+#   absent from metadata on track 3.6 (rev 135). See issue 706.
 #
 # certificates (requires) - OPTIONAL: TLS; not required for functionality.
 # ha (requires) - OPTIONAL: hacluster subordinate for HA deployments.
 overrides:
-  - provides:
-      dashboards:
-        optional: true
+  # track 3.6: pre-COS revision, no dashboards/prometheus-rules/scrape.
+  - criteria:
+      - track: '3.6'
+    provides:
       nrpe-external-master:
+        optional: true
+    requires:
+      certificates:
+        optional: true
+      ha:
+        optional: true
+
+  # all other tracks: COS endpoints present.
+  - provides:
+      nrpe-external-master:
+        optional: true
+      dashboards:
         optional: true
       prometheus-rules:
         optional: true

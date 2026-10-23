@@ -1,0 +1,5 @@
+---
+# Grafana Agent is deprecated in favor of OpenTelemetry Collector.
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

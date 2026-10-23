@@ -4,9 +4,36 @@
 """Test Observer API client for querying charm test results and metadata."""
 
 import logging
+from collections.abc import Iterator
+from types import MappingProxyType
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Every call this client makes is a read-only GET, so retrying on connect/read timeouts and
+# transient 5xx responses is always safe here (unlike write endpoints, there's no risk of
+# duplicating a side effect).
+DEFAULT_RETRY_KWARGS: MappingProxyType[str, Any] = MappingProxyType(
+    {
+        "total": 3,
+        "backoff_factor": 1,
+        "status_forcelist": frozenset([500, 502, 503, 504]),
+        "allowed_methods": frozenset(["GET"]),
+        "raise_on_status": False,
+    }
+)
+
+
+def build_default_retries() -> Retry:
+    """Builds a fresh `Retry` instance from `DEFAULT_RETRY_KWARGS`.
+
+    Returns a new instance on every call, so no two sessions ever share the same mutable
+    `Retry` object.
+    """
+    kwargs: dict[str, Any] = dict(DEFAULT_RETRY_KWARGS)
+    return Retry(**kwargs)
 
 
 class TestObserverClientError(Exception):
@@ -35,13 +62,22 @@ class TestObserverClient:
 
     logger: logging.Logger
 
-    def __init__(self, logger: logging.Logger, api_url: str, token: str) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        api_url: str,
+        token: str,
+        *,
+        retries: Retry | None = None,
+    ) -> None:
         """Initialize the Test Observer client.
 
         Args:
             logger: Logger instance for logging client operations.
             api_url: Test Observer API base URL.
             token: API token for authentication.
+            retries: Retry policy to mount on the underlying HTTP session. Defaults to
+                `build_default_retries()` when not provided.
 
         Raises:
             TestObserverAPINotConfiguredError: If API URL or token is not configured.
@@ -56,6 +92,9 @@ class TestObserverClient:
 
         self._session = requests.Session()
         self._session.headers.update(self._build_headers())
+        adapter = HTTPAdapter(max_retries=retries if retries is not None else build_default_retries())
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
         self.logger = logger
 
     def close(self) -> None:
@@ -110,7 +149,12 @@ class TestObserverClient:
                 )
             return payload
         except requests.RequestException as exc:
-            raise TestObserverQueryError(f"Failed to query {endpoint}: {exc}") from exc
+            # Do not embed str(exc): urllib3 includes the full request context
+            # (connection pool, headers) in its repr, which can expose auth tokens.
+            exc_summary = type(exc).__name__
+            if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                exc_summary += f" (HTTP {exc.response.status_code})"
+            raise TestObserverQueryError(f"Failed to query {endpoint}: {exc_summary}") from exc
 
     @staticmethod
     def _extract_first_list(payload: dict[str, Any] | list[dict[str, Any]], *keys: str) -> list[dict[str, Any]]:
@@ -244,27 +288,10 @@ class TestObserverClient:
 
         raise TestObserverQueryError(f"Unable to query test results for execution {execution_id}; ")
 
-    def choose_historical_revision_with_passing_test(
+    def iter_historical_revisions_with_passing_test(
         self, charm_name: str, stage: str, current_revision: int, track: str, test_name: str = "test_deploy"
-    ) -> int | None:
-        """Find a historical revision with a passing test.
-
-        Queries the Test Observer API to find a previous revision of the charm that has
-        a passing test result for the specified test.
-
-        Args:
-            charm_name: Name of the charm.
-            stage: Release stage (e.g., "stable", "edge").
-            current_revision: Current revision to exclude from results.
-            track: Release track (e.g., "14").
-            test_name: Name of the test to check for passing status (default: "test_deploy").
-
-        Returns:
-            The first historical revision with a passing test, or None if none found.
-
-        Raises:
-            TestObserverQueryError: If API queries fail.
-        """
+    ) -> Iterator[int]:
+        """Yield historical revisions with a passing test in search order."""
         self.logger.debug(
             f"Searching for historical {charm_name} revision in {track}/{stage} "
             f"with passing {test_name} (excluding revision {current_revision})"
@@ -274,6 +301,8 @@ class TestObserverClient:
         artefacts = self._extract_first_list(history_payload, "artefacts", "items", "results", "data")
 
         self.logger.debug(f"Found {len(artefacts)} artefacts in history")
+        any_result_query_failed = False
+        any_result_query_succeeded = False
 
         for artefact in artefacts:
             artefact_id = self._extract_id(artefact, "id", "artefact_id", "artifact_id")
@@ -314,37 +343,64 @@ class TestObserverClient:
                     self.logger.debug(f"Querying test results for execution {execution_id}")
                     try:
                         test_results_payload = self.query_test_results_for_execution(execution_id=execution_id)
+                        any_result_query_succeeded = True
                         if self._has_test_passed(test_results_payload, test_name):
                             self.logger.info(
                                 f"Found historical revision {revision} with passing {test_name} "
                                 f"(execution {execution_id})"
                             )
-                            return revision
+                            yield revision
+                            break
                     except TestObserverQueryError as exc:
+                        any_result_query_failed = True
                         self.logger.warning(f"Failed to query test results for execution {execution_id}: {exc}")
                         continue
 
-        self.logger.info(f"No historical revision found with passing {test_name}")
-        return None
+        if any_result_query_failed and not any_result_query_succeeded:
+            raise TestObserverQueryError(
+                f"Could not determine a historical revision with passing {test_name} for {charm_name}: "
+                "all test result queries failed"
+            )
 
-    def choose_historical_revision_with_passing_deploy(
-        self, charm_name: str, stage: str, current_revision: int, track: str
+        self.logger.info(f"No more historical revisions found with passing {test_name}")
+
+    def choose_historical_revision_with_passing_test(
+        self, charm_name: str, stage: str, current_revision: int, track: str, test_name: str = "test_deploy"
     ) -> int | None:
-        """Convenience method: find a historical revision with a passing test_deploy.
+        """Return the first historical revision with a passing test."""
+        return next(
+            self.iter_historical_revisions_with_passing_test(
+                charm_name=charm_name,
+                stage=stage,
+                current_revision=current_revision,
+                track=track,
+                test_name=test_name,
+            ),
+            None,
+        )
 
-        Args:
-            charm_name: Name of the charm.
-            stage: Release stage (e.g., "stable", "edge").
-            current_revision: Current revision to exclude from results.
-            track: Release track (e.g., "14").
-
-        Returns:
-            The first historical revision with a passing test_deploy, or None if none found.
-        """
-        return self.choose_historical_revision_with_passing_test(
+    def iter_historical_revisions_with_passing_deploy(
+        self, charm_name: str, stage: str, current_revision: int, track: str
+    ) -> Iterator[int]:
+        """Yield historical revisions with a passing test_deploy in search order."""
+        yield from self.iter_historical_revisions_with_passing_test(
             charm_name=charm_name,
             stage=stage,
             current_revision=current_revision,
             track=track,
             test_name="test_deploy",
+        )
+
+    def choose_historical_revision_with_passing_deploy(
+        self, charm_name: str, stage: str, current_revision: int, track: str
+    ) -> int | None:
+        """Return the first historical revision with a passing test_deploy."""
+        return next(
+            self.iter_historical_revisions_with_passing_deploy(
+                charm_name=charm_name,
+                stage=stage,
+                current_revision=current_revision,
+                track=track,
+            ),
+            None,
         )

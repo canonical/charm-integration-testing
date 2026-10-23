@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 import z3  # type: ignore[import-untyped]
 
@@ -31,9 +19,11 @@ from .assertion_tags import (
     CharmMappedToSingleApplicationTag,
     CharmPayload,
     CharmRankBoundedTag,
+    CrossModelEndpointCountMatchesIntegrationsTag,
     EndpointCountMatchesIntegrationsTag,
     EndpointIntegratedMatchesCountTag,
     EndpointRespectsLimitTag,
+    IntegrationFeatureMismatchTag,
     SubordinateBaseMismatchTag,
 )
 from .charm import EndpointScope
@@ -82,14 +72,7 @@ def _charm_endpoints_from_integration(integration: DomainCharmIntegration) -> li
 
 
 def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
-    # Snapshot aggregated mappings once to avoid rebuilding dicts in loops.
-    # Flat (app_name, charm_id) -> BoolRef for cross-model lookups.
-    app_to_charm: dict[tuple[str, int], z3.BoolRef] = {
-        (app, cid): var
-        for mc in domain.models.values()
-        for app, domain_app in mc.applications.items()
-        for cid, var in domain_app.charm_ids.items()
-    }
+    app_to_charm = domain.app_to_charm_map()
 
     # Ensure each application maps to exactly one charm
     for model_ref, model_constraints in domain.models.items():
@@ -120,18 +103,11 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
         )
 
     # Ensure each user-specified integration (local or CMR) maps to exactly one charm integration.
-    # For external CMRs (remote model not in domain), skip: those are handled via cmr_counts.
+    # External CMRs are skipped: those are handled via cmr_counts.
     for model_ref, model_constraints in domain.models.items():
         for app_integration in model_constraints.application_integrations:
-            is_cmr = app_integration.endpoint_1.model != app_integration.endpoint_2.model
-            if is_cmr:
-                remote_model = (
-                    app_integration.endpoint_1.model
-                    if app_integration.endpoint_1.model != ModelRef()
-                    else app_integration.endpoint_2.model
-                )
-                if remote_model not in domain.models:
-                    continue  # external CMR - satisfied via cmr_counts in add_charm_constraints
+            if domain.is_external_cmr(app_integration):
+                continue  # external CMR - satisfied via cmr_counts in add_charm_constraints
             charm_int_dict = app_integration.charm_integration_ids
             solver.assert_and_track(
                 z3.Sum([z3.If(m, 1, 0) for m in charm_int_dict.values()] + [z3.IntVal(0)]) == 1,
@@ -216,12 +192,7 @@ def add_application_constraints(solver: z3.Solver, domain: Domain) -> None:
 
 def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Snapshot aggregated mapping once to avoid rebuilding the dict in nested loops.
-    app_to_charm: dict[tuple[str, int], z3.BoolRef] = {
-        (app, cid): var
-        for mc in domain.models.values()
-        for app, domain_app in mc.applications.items()
-        for cid, var in domain_app.charm_ids.items()
-    }
+    app_to_charm = domain.app_to_charm_map()
 
     # Ensure both charms exist if integration exists (local and cross-model)
     for integration in domain.charm_integrations:
@@ -235,38 +206,31 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 ).encode(),
             )
 
-    # Build a lookup of cross-model integration counts per (application, endpoint).
+    # Build a lookup of cross-model integration counts per (model, application, endpoint).
     # Only covers external CMRs - in-domain CMRs have their endpoint count handled
     # through DomainCharmIntegration.exists (forced True by the user-CMR mapping constraint).
-    cmr_counts: dict[tuple[str, str], int] = {}
-    for mc in domain.models.values():
-        for app_int in mc.application_integrations:
-            # Identify external CMR: one endpoint has a model that is NOT in the domain
-            ep1_model = app_int.endpoint_1.model
-            ep2_model = app_int.endpoint_2.model
-            if ep1_model == ep2_model:
-                continue  # local integration
-            if (ep1_model if ep1_model != ModelRef() else ep2_model) in domain.models:
-                continue  # in-domain CMR - endpoint count flows through integration.exists
-            local_ep = app_int.endpoint_1 if app_int.endpoint_1.model == ModelRef() else app_int.endpoint_2
-            key = (local_ep.application, local_ep.endpoint)
-            cmr_counts[key] = cmr_counts.get(key, 0) + 1
+    cmr_counts: dict[tuple[ModelRef, str, str], int] = {}
+    for model_ref, local_ep, _remote_ep in domain.external_cmr_integrations():
+        key = (model_ref, local_ep.application, local_ep.endpoint)
+        cmr_counts[key] = cmr_counts.get(key, 0) + 1
 
     # Ensure endpoint count equals number of integrations using that endpoint
     for charm_id, charm in enumerate(domain.charms):
         for endpoint_name, endpoint in charm.endpoints.items():
             integrations_using_endpoint: list[z3.BoolRef] = []
+            cross_model_integrations_using_endpoint: list[z3.BoolRef] = []
             for integration in domain.charm_integrations:
                 if (integration.requires_charm_id == charm_id and integration.requires_endpoint == endpoint_name) or (
                     integration.provides_charm_id == charm_id and integration.provides_endpoint == endpoint_name
                 ):
                     integrations_using_endpoint.append(integration.exists)
+                    if domain.is_cross_model(integration):
+                        cross_model_integrations_using_endpoint.append(integration.exists)
 
-            # Add cross-model contributions: for each (app, endpoint) that has CMR
-            # integrations, add +N when the application-to-charm mapping is active.
+            # External CMRs contribute +N to both the plain and cross-model-only counts.
             cmr_terms: list[z3.ArithRef] = []
-            for (app, ep), ext_count in cmr_counts.items():
-                if ep != endpoint_name:
+            for (cmr_model_ref, app, ep), ext_count in cmr_counts.items():
+                if ep != endpoint_name or cmr_model_ref != charm.model:
                     continue
                 mapping_var = app_to_charm.get((app, charm_id))
                 if mapping_var is not None:
@@ -286,6 +250,20 @@ def add_charm_constraints(solver: z3.Solver, domain: Domain) -> None:
                 endpoint.integrated == (endpoint.count >= 1),
                 EndpointIntegratedMatchesCountTag(
                     charm=_charm_endpoint_payload(charm, charm_id, endpoint_name)
+                ).encode(),
+            )
+
+            # Mirror the count constraint above, scoped to cross-model integrations only. Backs
+            # the cross_model() DSL filter (see dsl_lowering.py).
+            cross_model_num_terms = len(cross_model_integrations_using_endpoint) + len(cmr_terms)
+            cross_model_count_expr = z3.Sum(
+                [z3.If(i, 1, 0) for i in cross_model_integrations_using_endpoint] + cmr_terms + [z3.IntVal(0)]
+            )
+            solver.assert_and_track(
+                endpoint.cross_model_count == cross_model_count_expr,
+                CrossModelEndpointCountMatchesIntegrationsTag(
+                    charm=_charm_endpoint_payload(charm, charm_id, endpoint_name),
+                    num_terms=cross_model_num_terms,
                 ).encode(),
             )
 
@@ -322,20 +300,51 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
     # Coherence: when an integration exists, a feature can only be active on one endpoint
     # if the other endpoint also declares that feature.  This prevents endpoints with
     # non-overlapping feature sets from activating mismatched features.
+    # Applied uniformly to local and cross-model integrations: a relation's feature
+    # requirements don't change just because the two charms land in different models
+    # (see SQT-1038 - cross-model integrations previously skipped this check, letting
+    # the solver silently pair charms whose declared features didn't actually match).
     for integration in domain.charm_integrations:
-        if domain.is_cross_model(integration):
-            continue  # feature coherence is only enforced on local integrations
-        req_ep = domain.charms[integration.requires_charm_id].endpoints[integration.requires_endpoint]
-        prov_ep = domain.charms[integration.provides_charm_id].endpoints[integration.provides_endpoint]
+        requires_charm = domain.charms[integration.requires_charm_id]
+        provides_charm = domain.charms[integration.provides_charm_id]
+        req_ep = requires_charm.endpoints[integration.requires_endpoint]
+        prov_ep = provides_charm.endpoints[integration.provides_endpoint]
+        requires_payload = _charm_endpoint_payload(
+            requires_charm, integration.requires_charm_id, integration.requires_endpoint
+        )
+        provides_payload = _charm_endpoint_payload(
+            provides_charm, integration.provides_charm_id, integration.provides_endpoint
+        )
         for f, f_var in req_ep.features.items():
             if f not in prov_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
             else:
                 # Both endpoints declare this feature: they must agree when integrated.
-                solver.add(z3.Implies(integration.exists, f_var == prov_ep.features[f]))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, f_var == prov_ep.features[f]),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
         for f, f_var in prov_ep.features.items():
             if f not in req_ep.features:
-                solver.add(z3.Implies(integration.exists, z3.Not(f_var)))
+                solver.assert_and_track(
+                    z3.Implies(integration.exists, z3.Not(f_var)),
+                    IntegrationFeatureMismatchTag(
+                        requires=requires_payload,
+                        provides=provides_payload,
+                        feature=f,
+                    ).encode(),
+                )
 
     # Config domain constraints: when a charm exists, its config variable must equal
     # one of the declared allowed values.
@@ -347,10 +356,17 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if allowed:
                 value_constraint = z3.Or([config_value_to_z3(cfg.var, v) for v in allowed])
                 if cfg.isset_var is not None:
-                    # Config is optional (None is an allowed value).  The value constraint
-                    # only applies when is_set is True; when is_set is False the value var
-                    # is unconstrained (solver may choose anything, but set() will be False).
+                    # Config is optional (None is an allowed value).
                     solver.add(z3.Implies(z3.And(charm.exists, cfg.isset_var), value_constraint))
+                    # Unset must model what the charm actually gets: its default, or
+                    # (with none) a value outside `allowed`, so constraints can't match
+                    # a key that's never emitted.
+                    unset_constraint = (
+                        config_value_to_z3(cfg.var, cfg.default)
+                        if cfg.default is not None
+                        else z3.Not(value_constraint)
+                    )
+                    solver.add(z3.Implies(z3.And(charm.exists, z3.Not(cfg.isset_var)), unset_constraint))
                 else:
                     # Config is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))
@@ -365,10 +381,12 @@ def add_charm_metadata_constraints(solver: z3.Solver, domain: Domain) -> None:
             if res_allowed:
                 value_constraint = z3.Or([res.var == z3.StringVal(v) for v in res_allowed])
                 if res.isset_var is not None:
-                    # Resource is optional (None is an allowed value).  The value constraint
-                    # only applies when isset_var is True; when isset_var is False the value var
-                    # is unconstrained (solver may choose anything, but set() will be False).
+                    # Resource is optional (None is an allowed value).
                     solver.add(z3.Implies(z3.And(charm.exists, res.isset_var), value_constraint))
+                    # No Charmhub default exists for resources, so unset must fall
+                    # outside `res_allowed` instead; always possible since resources
+                    # are strings (unbounded domain).
+                    solver.add(z3.Implies(z3.And(charm.exists, z3.Not(res.isset_var)), z3.Not(value_constraint)))
                 else:
                     # Resource is always required when the charm exists.
                     solver.add(z3.Implies(charm.exists, value_constraint))

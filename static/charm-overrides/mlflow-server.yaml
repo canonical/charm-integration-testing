@@ -1,18 +1,7 @@
 ---
-# mlflow-server: MLflow model tracking and serving (k8s charm).
+# Source: https://charmhub.io/mlflow-server
 #
-# Endpoint availability by track:
-#   1.13/, 1.13.1/, latest/candidate: db, ingress, object-storage, pod-defaults
-#   2.1/:   dashboard-links, ingress, object-storage, relational-db
-#   2.15/, 2.22/, latest/stable, latest/beta, latest/edge:
-#           dashboard-links, ingress, logging, object-storage, pod-defaults, relational-db, secrets
-#
-# All optional endpoints:
-#   pod-defaults:    admission webhook injecting env vars; provided by mlflow-controller
-#                    which is NOT published on Charmhub. mlflow runs without it.
-#   dashboard-links: kubeflow dashboard integration; kubeflow not required.
-#   logging:         observability log sink; mlflow runs without log forwarding.
-#   secrets:         external secrets backend; mlflow has built-in secrets management.
+# Criteria separate legacy ingress metadata and the Ubuntu 24.04 mesh generations.
 platforms: [kubernetes]
 overrides:
   # 1.13/ and 1.13.1/: only pod-defaults is optional here
@@ -21,25 +10,80 @@ overrides:
           - track: "1.13"
           - track: "1.13.1"
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
-        optional: true
+        optional: true  # Disconnected manifest relation is a no-op (resource_dispatcher/v0/kubernetes_manifests.py).
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # latest/candidate: same endpoint set as 1.13/ (db, ingress, object-storage, pod-defaults)
   - criteria:
       - track: latest
         risk: candidate
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
-        optional: true
+        optional: true  # Disconnected manifest relation is a no-op (resource_dispatcher/v0/kubernetes_manifests.py).
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
   # 2.1/: has dashboard-links but no pod-defaults, logging, or secrets
   - criteria:
       - track: "2.1"
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       dashboard-links:
-        optional: true
+        optional: true  # src/charm.py uses this only to add a Kubeflow dashboard sidebar link.
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
 
-  # 2.15/, 2.22/, latest/stable, latest/beta, latest/edge: full optional set
+  # latest/edge and 3.15/edge use the new 24.04 endpoint generation without ingress.
+  - criteria:
+      - any_of:
+          - all_of:
+              - track: latest
+              - risk: edge
+          - all_of:
+              - track: '3.15'
+              - risk: edge
+      - ubuntu_version: '24.04'
+    requires:
+      pod-defaults:
+        optional: true  # No data is sent if disconnected (resource_dispatcher/v0/kubernetes_manifests.py).
+      dashboard-links:
+        optional: true  # Adds only a dashboard sidebar link (src/charm.py).
+      secrets:
+        optional: true  # No data is sent if disconnected (resource_dispatcher/v0/kubernetes_manifests.py).
+    provides:
+      mlflow-client:
+        optional: true  # Client grants are handled on related requests (src/charm.py::_reconcile_mlflow_client_grants).
+
+  # 3.14 is released on Ubuntu 24.04 and adds required mesh endpoints.
+  - criteria:
+      - track: '3.14'
+      - ubuntu_version: '24.04'
+    requires:
+      ingress:
+        features: [sdi-legacy]
+      pod-defaults:
+        optional: true  # No data is sent if disconnected (resource_dispatcher/v0/kubernetes_manifests.py).
+      dashboard-links:
+        optional: true  # Adds only a dashboard sidebar link (src/charm.py).
+      secrets:
+        optional: true  # No data is sent if disconnected (resource_dispatcher/v0/kubernetes_manifests.py).
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+
+  # 2.15/, 2.22/, latest stable/beta, and older latest/edge bases share these optional hooks.
   - criteria:
       - any_of:
           - track: "2.15"
@@ -51,11 +95,17 @@ overrides:
           - track: latest
             risk: edge
     requires:
+      ingress:
+        # legacy serialized_data_interface (SDI), not modern v2 ingress; see
+        # https://github.com/canonical/charm-integration-testing/issues/976
+        features: [sdi-legacy]
       pod-defaults:
-        optional: true
+        optional: true  # No data is sent if disconnected (resource_dispatcher/v0/kubernetes_manifests.py).
       dashboard-links:
-        optional: true
+        optional: true  # Adds only a dashboard sidebar link (src/charm.py).
       logging:
-        optional: true
+        optional: true  # src/charm.py registers LogForwarder for optional log forwarding.
       secrets:
-        optional: true
+        optional: true  # Disconnected manifest relation is a no-op (resource_dispatcher/v0/kubernetes_manifests.py).
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'

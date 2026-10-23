@@ -3,9 +3,105 @@
 You are reviewing pull requests for this repository.
 Prioritize coding style and maintainability in Python changes.
 
+## Development Workflow
+
+- Before implementing or reviewing repository changes, read this file and any matching files under `.github/instructions/`.
+- After making any significant code change (new functionality, bug fixes, refactors spanning more than a trivial edit), run the repository linter (`scripts/lint.sh`, or the specific `ruff`/`mypy` commands for the affected package) before considering the work done. Fix any issues the linter reports in the changed code.
+- When opening a pull request, follow the structure defined in `.github/pull_request_template.md` (Description, Resolved issues, Documentation, Tests) rather than an ad hoc format.
+
+## Lessons From Past PR Reviews
+
+These principles come from recurring, substantive criticism on past PRs (not routine style nits).
+Apply them both when writing code and when reviewing it.
+
+### 0. Coordinate related work before changing shared surfaces
+- Before adding or changing a shared API, helper, extension hook, or backend operation, check related tickets and active PRs for overlapping work. Compare their diffs, not only their titles or descriptions.
+- If another PR is already changing the same surface, avoid implementing a second version with different semantics. Reuse the existing work, or coordinate a single API, behavior, and ownership boundary across the PRs.
+- Keep independently deliverable test cases separate where possible, but consolidate shared infrastructure rather than duplicating it.
+
+### 1. Fixes must be evidence-based, not speculative
+- Ground implementation and review conclusions in observable evidence: a reproduced failure,
+  focused tests, logs, traces, or other relevant measurements. Explain how the evidence supports
+  the identified cause and why the proposed change addresses it; do not present a plausible theory
+  as a confirmed root-cause fix.
+- Match validation to the behavior and risk. Unit tests are valuable for isolated logic, but for
+  complex changes or behavior involving Juju, charms, controllers, models, or other live
+  infrastructure, prefer a local end-to-end reproduction or integration test when the environment
+  allows it. Such validation complements unit tests; do not require live testing for every change
+  or claim it was done without evidence.
+- When a failure or behavior cannot be reproduced, state what was and was not verified. Prefer
+  gathering diagnostics or adding a way to validate against the relevant infrastructure over
+  speculative changes. Reviewers should distinguish missing evidence from a proven defect and
+  raise validation gaps in proportion to the change's risk.
+- Timeout increases, retries, and relaxed conditions are not acceptable default responses to a
+  flaky or hard-to-reproduce failure. Require evidence that they address the actual cause rather
+  than masking it.
+
+- Treat exceptions from orchestration calls as potentially post-mutation: a backend action may
+  complete before a later lifecycle hook raises, and Juju operations may still be settling.
+  Inspect actual state before cleanup; preserve required capacity until disruptive operations
+  are known to have settled.
+- For infrastructure tests, assert the full success condition, including idle/convergence,
+  workload readiness, and relevant endpoint validation. Confirm validators are enabled before
+  claiming endpoint health; skipped validators do not prove that health.
+- Report live-test outcomes by the phase reached. A failure during bootstrap or deployment is
+  not evidence that the operation under test passed or failed.
+
+### 2. Fix problems at the correct architectural layer
+- Fix the root cause at its source instead of compensating downstream (e.g. a charm-metadata/listing
+  problem belongs in charm overrides or the bundle builder, not as a special case in the test suite).
+- Do not repurpose an existing mechanism to mean something new (e.g. reusing a "delisted" flag to mean
+  "doesn't support our test infra"). Prefer a purpose-built mechanism instead.
+
+### 3. Keep PR scope tight and the description accurate
+- One PR, one concern. Do not bundle unrelated changes (e.g. an unrelated sandbox feature alongside a
+  resource-tracking fix, or validator edits inside a Kubernetes-client PR).
+- Keep the title/description in sync with what the diff actually does; if the approach or file changes
+  mid-review, update the description to match.
+
+### 4. Check for existing mechanisms before adding new ones
+- Before adding new registration, bookkeeping, or logging logic, verify it isn't already handled
+  elsewhere (e.g. via an extension hook). Duplicate registration or re-entrant calls into the same
+  lifecycle hooks is a recurring source of bugs.
+
+### 5. Design APIs for simple, safe caller usage
+- Avoid designs that require callers to track precise state before calling a function (e.g. collecting
+  every prior ID before calling a "wait" helper). Prefer splitting into clearly named, single-purpose
+  functions over one function with implicit preconditions.
+
+### 6. Repo hygiene before requesting review
+- Remove accidental or temporary files (stray duplicates, editor artifacts) and unrelated lockfiles
+  (e.g. `uv.lock` when the repo doesn't use uv) before opening a PR.
+- Run the linter and follow the PR template before requesting review; do not rely on reviewers to
+  catch avoidable lint failures or template omissions.
+
+### 7. Don't unconditionally apply substrate-specific workarounds
+- When a workaround addresses a Kubernetes-only (or otherwise substrate-specific) failure mode, gate it
+  to that substrate rather than applying it unconditionally to all models/backends.
+
+### 8. Keep interface changes backward compatible with existing implementers
+- When adding a new abstract method to a shared ABC (e.g. `JujuBackend`), implement it (or provide a
+  concrete default) in every existing concrete subclass so instantiation doesn't break.
+
+### 9. Avoid low-value verbosity
+- Do not add large explanatory comments or docstrings whose value is unclear. Prefer concise comments
+  that explain "why", not restatements of "what" the code already makes obvious.
+
+### 10. Avoid scattered or stale caches
+- Before caching derived or state-dependent data, identify its authoritative source, required lifetime, and invalidation events. Prefer looking it up from the owning backend/client at the point of use when practical.
+- Do not maintain the same cache or derived mapping independently across fixtures, extensions, and callers. This spreads invalidation responsibility and makes it unclear which copy is authoritative; let the subsystem that owns the data own any necessary cache.
+- If caching is justified by measured cost or consistency requirements, keep it within the smallest operation that needs it, key it by stable resource identity, and make refresh or invalidation behavior explicit. Do not retain model-, controller-, cluster-, or application-derived values across topology changes such as migration or teardown without a clear refresh mechanism.
+
 ## Review Goal
 
 - Focus first on style consistency, readability, and long-term maintainability.
+- Also check every PR against the "Lessons From Past PR Reviews" principles above; these are
+  process/correctness issues, not style, but have caused repeated `CHANGES_REQUESTED` reviews and
+  must be raised as findings alongside style feedback.
+- Assess whether the validation evidence is appropriate to the scope and risk. Unit tests may
+  establish isolated behavior; complex or infrastructure-dependent changes should include a live
+  reproduction or integration evidence when feasible. Do not assume validation from test code
+  alone, and do not overstate what the reported evidence proves.
 - Treat style issues as actionable review feedback, not optional comments.
 - Prefer concrete suggestions that align with established patterns in this repo.
 
@@ -15,11 +111,11 @@ When asked to review a PR or diff:
 
 1. Start with findings, ordered by severity.
 2. For each finding, include:
-	- Why this is a style or maintainability issue.
-	- The repository convention being violated.
-	- A specific fix (or patch-style suggestion when practical).
+    - Why this is a style, maintainability, or process issue (see "Lessons From Past PR Reviews").
+    - The repository convention or principle being violated.
+    - A specific fix (or patch-style suggestion when practical).
 3. Keep summaries brief. Findings are primary.
-4. If no style findings exist, explicitly state that.
+4. If no findings exist, explicitly state that.
 
 ## Output Format
 
@@ -39,3 +135,23 @@ After findings, include:
 
 - Do not block PRs solely for subjective style preferences when code matches local conventions.
 - Do not recommend broad refactors outside the PR scope unless risk is high.
+
+## Known Pitfalls to Flag
+
+- **Avoid pre-computed/cached fixtures for state that can change during a test run.** A
+  session- or fixture-scoped cache (e.g. a `dict` built once from "every controller/cluster
+  registered so far") can silently go stale if new resources (e.g. Kubernetes clusters,
+  controllers, models) are introduced mid-run - especially in CMR-style tests where the
+  topology is discovered dynamically rather than fixed at session start.
+  - Prefer resolving such values on demand from the authoritative source (e.g.
+    `JujuBackend`/`juju_client.backend`) at the point of use, rather than precomputing a
+    mapping in a fixture and passing the mapping around.
+  - Apply the same rule to derived model metadata such as architecture: a fixture-level value
+    inferred from the initial target/neighbor model can be wrong for another or migrated model.
+  - If resolution is expensive enough to need caching, scope the cache to a single
+    operation (e.g. one `collect()` call) instead of the whole test session, and cache by
+    controller/identity rather than derived values like filesystem paths (which can differ
+    for equivalent inputs, e.g. relative vs. absolute vs. `~`-expanded paths).
+  - Example precedent: `KubernetesResourceCollector` resolves each model's Kubernetes cloud
+    through the backend and obtains its shared client from `KubernetesClientRegistry` inside
+    `collect()`, instead of a fixture that pre-builds a client mapping for the session.

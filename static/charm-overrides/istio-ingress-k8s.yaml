@@ -1,0 +1,13 @@
+---
+# Source: https://github.com/canonical/istio-ingress-k8s-operator
+listed: true
+platforms: [kubernetes]
+overrides:
+  # Track 2 on Ubuntu 24.04 publishes this endpoint without its optional flag.
+  - criteria:
+      - all_of:
+          - track: '2'
+          - ubuntu_version: '24.04'
+    provides:
+      gateway-metadata:
+        optional: true  # charmcraft.yaml declares GatewayMetadataProvider as an optional integration

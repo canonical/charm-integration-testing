@@ -128,11 +128,17 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# minio client
-/mc
+# test artifacts
+/junit-*.xml
+/generated-*.mmd
+/generated-*.yaml
+/juju-crashdump-*.tar.gz
+/test-logs-*/
 
 # uv binary
 /uv
 
 # macos specific files
 .DS_Store
+generated-*-bundle.yaml
+

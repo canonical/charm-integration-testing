@@ -6,6 +6,7 @@ from .backend import (
     JujuBackend,
     JujuExecOutput,
     JujuPerformanceWarning,
+    JujuRestartNotSupportedError,
     JujuStatusPerformanceWarning,
     JujuTask,
     JujuUnitAgentState,
@@ -16,27 +17,38 @@ from .backend import (
 )
 from .client import JujuClient, JujuValidationError
 from .extension import JujuExtension
+from .handles import JujuControllerHandle, JujuModelHandle
 from .models import (
     CharmChannel,
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuConsumedOfferInfo,
     JujuIntegration,
     JujuIntegrationApplication,
+    JujuWorkloadInstance,
+    ParsedOfferUrl,
+    PersistenceKey,
+    rekey_persistence_state_controller,
 )
 from .version import JujuVersion
 
 __all__ = [
     "CharmChannel",
+    "JujuApplicationHealth",
     "JujuApplicationInfo",
     "JujuApplicationState",
     "JujuBackend",
     "JujuClient",
     "JujuConsumedOfferInfo",
+    "JujuControllerHandle",
     "JujuExecOutput",
     "JujuExtension",
     "JujuIntegration",
     "JujuIntegrationApplication",
+    "JujuModelHandle",
+    "JujuWorkloadInstance",
     "JujuPerformanceWarning",
+    "JujuRestartNotSupportedError",
     "JujuStatusPerformanceWarning",
     "JujuTask",
     "JujuUnitAgentState",
@@ -45,5 +57,8 @@ __all__ = [
     "JujuVersion",
     "JujuWaitState",
     "JujuWaitTimeoutError",
+    "ParsedOfferUrl",
+    "PersistenceKey",
+    "rekey_persistence_state_controller",
     "warn_performance",
 ]

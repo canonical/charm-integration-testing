@@ -7,12 +7,20 @@ import ssl
 import time
 import uuid
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
 _PUSH_PATH = "/loki/api/v1/push"
+
+
+def _base_url(push_url: str) -> str:
+    """Return the scheme+host(+prefix) portion of *push_url*, with the push path stripped."""
+    parsed = urlparse(push_url)
+    prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
+    return f"{parsed.scheme}://{parsed.netloc}{prefix}"
 
 
 class LokiPushApiValidator(BaseValidator):
@@ -197,13 +205,20 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
 
     Loki may return 503 for up to ~25 s while its ingester warms up, so the
     check retries with back-off before reporting failure (6 attempts, 5 s apart).
+
+    Push-only forwarders (e.g. grafana-agent-k8s, opentelemetry-collector-k8s)
+    don't implement ``/ready`` and 404 immediately. A bare 404 on ``/ready`` is
+    not, by itself, proof that the provider is a working push-only forwarder —
+    it's equally consistent with a fully broken/misconfigured endpoint that
+    404s on every route. So on a 404, ``_probe_push_endpoint`` positively
+    confirms the *actual advertised push route* is live (see its docstring)
+    before this check is allowed to pass.
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
         url: str = info["url"]
         parsed = urlparse(url)
-        prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
-        base = f"{parsed.scheme}://{parsed.netloc}{prefix}"
+        base = _base_url(url)
         ready_url = f"{base}/ready"
         check_name = f"http_ready[{parsed.netloc}]"
         last_msg = ""
@@ -224,10 +239,57 @@ def _http_ready_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationC
                         last_msg = f"Loki ready at {ready_url}."
                         break
                     last_msg = f"Unexpected response {resp.status} from {ready_url}: {body[:200]}"
+            except HTTPError as exc:
+                if exc.code == 404:
+                    passed, last_msg = _probe_push_endpoint(url, ready_url, ssl_ctx)
+                    break
+                last_msg = str(exc)
             except Exception as exc:
                 last_msg = str(exc)
         checks.append(ValidationCheck(name=check_name, passed=passed, message=last_msg))
     return checks
+
+
+def _probe_push_endpoint(url: str, ready_url: str, ssl_ctx: ssl.SSLContext | None = None) -> tuple[bool, str]:
+    """POST an empty-streams no-op payload to *url* to confirm the push route is live.
+
+    Only called when ``ready_url`` (``/ready``) 404s. A 404 there is ambiguous:
+    push-only forwarders (no ``/ready`` route) and fully broken/misconfigured
+    endpoints (404 on *every* route) look identical from that single signal
+    alone. This probe distinguishes them by exercising the actual advertised
+    push route with a harmless payload:
+
+    * ``{"streams": []}`` is empty, so a compliant push receiver accepts it
+      (200/204) without writing any log data — confirmed live against both
+      loki-k8s and opentelemetry-collector-k8s.
+    * Any other 4xx (e.g. 400/405) still proves the route is registered and
+      actively handled by the application, even though it rejected this
+      specific probe.
+    * A 404 here means the advertised push route itself doesn't exist — a
+      real failure, not a push-only forwarder.
+    * 5xx or a network-level error is a genuine backend problem.
+    """
+    payload = json.dumps({"streams": []}).encode()
+    req = Request(url, data=payload, headers={"Content-Type": "application/json"})  # nosec B310
+    try:
+        with urlopen(req, timeout=5, context=ssl_ctx) as resp:  # nosec B310
+            return True, (
+                f"No '/ready' route at {ready_url}, but push endpoint {url} accepted an empty "
+                f"no-op push (HTTP {resp.status}); provider does not expose a Loki-compatible "
+                "readiness endpoint (push-only forwarder)."
+            )
+    except HTTPError as exc:
+        if exc.code == 404:
+            return False, f"Push endpoint {url} also returned 404 (no '/ready' route at {ready_url} either)."
+        if 500 <= exc.code < 600:
+            return False, f"Push endpoint {url} returned server error: {exc}"
+        return True, (
+            f"No '/ready' route at {ready_url}, but push endpoint {url} is registered "
+            f"(HTTP {exc.code} {exc.reason}); provider does not expose a Loki-compatible readiness "
+            "endpoint (push-only forwarder)."
+        )
+    except Exception as exc:
+        return False, f"Error probing push endpoint {url}: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -238,13 +300,23 @@ _CANARY_LABEL_KEY = "__validator_probe__"
 _CANARY_JOB = "validators-loki-push-api"
 # Wait for Loki to flush the ingested stream before querying.
 _INGEST_WAIT_S = 3
+# Bounded lookback window for the read-back query. Kept short (well under
+# typical Loki max-query-length limits) since the canary log was just pushed.
+_QUERY_WINDOW_S = 3600
 
 
 def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck]:
-    """Push a canary log entry to each endpoint then query it back.
+    """Push a canary log entry to each endpoint then, if possible, query it back.
+
+    The loki_push_api interface only guarantees a push endpoint — some
+    providers (e.g. grafana-agent-k8s) act as push-only forwarders and don't
+    expose any query API at all. Read-back verification is therefore
+    best-effort: query capability is detected generically (not by charm name)
+    via ``_supports_query_api`` before attempting the round trip. When no
+    query API is available, the check passes based on the push alone.
 
     Uses a unique per-run label value so concurrent runs don't cross-pollinate.
-    Returns one check per URL covering both the push and the query.
+    Returns one check per URL covering the push, and the query when supported.
     """
     checks: list[ValidationCheck] = []
     for info in endpoint_infos:
@@ -260,6 +332,28 @@ def _canary_checks(endpoint_infos: list[dict[str, Any]]) -> list[ValidationCheck
             _push_canary(url, probe_id, ssl_ctx)
         except Exception as exc:
             checks.append(ValidationCheck(name=check_name, passed=False, message=f"Push failed: {exc}"))
+            continue
+
+        base = _base_url(url)
+        try:
+            query_capable = _supports_query_api(base, ssl_ctx)
+        except Exception as exc:
+            checks.append(
+                ValidationCheck(name=check_name, passed=False, message=f"Query capability probe failed: {exc}")
+            )
+            continue
+
+        if not query_capable:
+            checks.append(
+                ValidationCheck(
+                    name=check_name,
+                    passed=True,
+                    message=(
+                        f"Canary log pushed to {url}. Provider does not expose a Loki query API "
+                        "(push-only forwarder); skipping read-back verification."
+                    ),
+                )
+            )
             continue
 
         time.sleep(_INGEST_WAIT_S)
@@ -306,13 +400,46 @@ def _push_canary(url: str, probe_id: str, ssl_ctx: ssl.SSLContext | None = None)
             raise RuntimeError(f"Unexpected push response: HTTP {resp.status}")
 
 
+def _supports_query_api(base: str, ssl_ctx: ssl.SSLContext | None = None) -> bool:
+    """Return True if *base* exposes a Loki query API.
+
+    Push-only forwarders (e.g. grafana-agent-k8s) return 404 for every
+    ``/loki/api/v1/query*`` route. Probe a lightweight, side-effect-free
+    endpoint (``/loki/api/v1/labels``) rather than assuming which provider
+    implementations do or don't support querying.
+    """
+    labels_url = f"{base}/loki/api/v1/labels"
+    try:
+        with urlopen(labels_url, timeout=10, context=ssl_ctx) as resp:  # nosec B310
+            return bool(resp.status == 200)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+
+
 def _query_canary(push_url: str, probe_id: str, ssl_ctx: ssl.SSLContext | None = None) -> bool:
-    """Query Loki for the canary log line; return True if found."""
-    parsed = urlparse(push_url)
-    prefix = parsed.path[: -len(_PUSH_PATH)] if parsed.path.endswith(_PUSH_PATH) else ""
-    base = f"{parsed.scheme}://{parsed.netloc}{prefix}"
+    """Query Loki for the canary log line; return True if found.
+
+    Uses ``/loki/api/v1/query_range`` (not ``/loki/api/v1/query``): the latter
+    is an *instant query* endpoint that Loki rejects for log selectors ("log
+    queries are not supported as an instant query type"), whereas
+    ``query_range`` is the correct endpoint for retrieving log lines over a
+    bounded time window.
+    """
+    base = _base_url(push_url)
+    now_ns = time.time_ns()
+    start_ns = now_ns - _QUERY_WINDOW_S * 1_000_000_000
     logql = f'{{{_CANARY_LABEL_KEY}="{probe_id}"}}'
-    query_url = f"{base}/loki/api/v1/query?" + urlencode({"query": logql, "limit": "1", "direction": "BACKWARD"})
+    query_url = f"{base}/loki/api/v1/query_range?" + urlencode(
+        {
+            "query": logql,
+            "limit": "1",
+            "direction": "BACKWARD",
+            "start": str(start_ns),
+            "end": str(now_ns),
+        }
+    )
     with urlopen(query_url, timeout=10, context=ssl_ctx) as resp:  # nosec B310
         body = json.loads(resp.read())
     result_type = body.get("data", {}).get("resultType", "")

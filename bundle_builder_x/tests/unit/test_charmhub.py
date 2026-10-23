@@ -6,6 +6,9 @@ from typing import cast
 import pytest
 from pydantic.dataclasses import dataclass
 
+from bundle_builder_x import CharmReleaseNotFoundException
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_diagnostics import ApplicationReleaseDiagnostic
 from bundle_builder_x.charm import CharmChannel, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.charmhub_http import (
@@ -13,7 +16,6 @@ from bundle_builder_x.charmhub_http import (
     CharmhubBase,
     CharmhubHttpClient,
     CharmMetadata,
-    CharmReleaseNotFoundException,
     FindResponse,
     IncompleteCharmInfoException,
     InfoResponse,
@@ -22,6 +24,8 @@ from bundle_builder_x.charmhub_http import (
     UnparsableCharmException,
 )
 from bundle_builder_x.overrides import CharmGlobalOverrides, OverridesClient
+from bundle_builder_x.release_errors import AssumesMismatchError, PlatformMismatchError
+from bundle_builder_x.spec import AppSpec, ModelSpec, SpecFile
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -85,7 +89,14 @@ def _error_response(
 def _info_response_with_channels(*track_risk_pairs: tuple[str, str]) -> InfoResponse:
     """Build an InfoResponse whose channel_map contains the given (track, risk) pairs."""
     entries = [
-        InfoResponse.ChannelMapEntry(channel=InfoResponse.ChannelMapEntry.Channel(name=f"{t}/{r}", track=t, risk=r))
+        InfoResponse.ChannelMapEntry(
+            channel=InfoResponse.ChannelMapEntry.Channel(
+                name=f"{t}/{r}",
+                track=t,
+                risk=r,
+                base=CharmhubBase(name="ubuntu", channel="22.04", architecture="amd64"),
+            )
+        )
         for t, r in track_risk_pairs
     ]
     return InfoResponse(channel_map=entries)
@@ -100,12 +111,651 @@ class _StubHttpClient(CharmhubHttpClient):
 
 
 _CHANNEL = CharmChannel(track="latest", risk="stable", branch="")
+_UBUNTU_VERSION = "22.04"
 _METADATA_REQUIRES = CharmMetadata(requires={"db": CharmMetadata.Endpoint(interface="pgsql")})
 _METADATA_PROVIDES = CharmMetadata(provides={"web": CharmMetadata.Endpoint(interface="http")})
+_METADATA_WITH_CONTAINERS = CharmMetadata(containers={"app": {"resource": "app-image"}})
+_METADATA_WITH_LEGACY_KUBERNETES_SERIES = CharmMetadata(series=["kubernetes"])
+_METADATA_WITH_K8S_API_ASSUMES = CharmMetadata(assumes=["k8s-api"])
+_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES = CharmMetadata(assumes=[{"any-of": ["k8s-api", "juju >= 3.0"]}])
+_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF = CharmMetadata(
+    assumes=[{"any-of": ["k8s-api", {"all-of": ["k8s-api", "juju >= 3.0"]}]}]
+)
 _EMPTY_CONFIG = CharmConfigSchema()
 
 
+def _refresh_response_with_charm(
+    name: str, revision: int, metadata: CharmMetadata, bases: list[CharmhubBase] | None = None
+) -> RefreshResponse:
+    """Build a successful RefreshResponse carrying charm metadata.
+
+    Bypasses the metadata-yaml/config-yaml string parsing (used to decode the real
+    Charmhub API response) via model_construct, since the fields here are already the
+    typed values that parsing would produce.
+    """
+    charm = RefreshResponse.Charm.model_construct(
+        bases=bases, revision=revision, metadata=metadata, config=_EMPTY_CONFIG
+    )
+    return RefreshResponse.model_construct(name=name, charm=charm, effective_channel=None, error=None)
+
+
+def _aodh_client_with_raw_overrides(raw_overrides: dict[str, object]) -> CharmhubClient:
+    """Build a CharmhubClient stubbed to refresh a fixed "aodh" charm with the given overrides."""
+    response = _refresh_response_with_charm("aodh", revision=5, metadata=_METADATA_REQUIRES)
+
+    class _StubClient(_NullHttpClient):
+        def refresh(self, action: RefreshAction) -> RefreshResponse:
+            return response
+
+    return CharmhubClient(
+        http_client=cast(CharmhubHttpClient, _StubClient()),
+        overrides_client=_StubOverridesClient(raw_overrides),
+    )
+
+
 class TestCharmhubClient:
+    class TestBuildCharmHa:
+        def test_build_charm_uses_ha_defaults(self) -> None:
+            client = _client({})
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 3
+            assert charm.scale_down is True
+
+        def test_build_charm_populates_release_specific_ha_overrides(self) -> None:
+            client = _client(
+                {
+                    "overrides": [
+                        {
+                            "criteria": [{"track": "latest", "ubuntu_version": _UBUNTU_VERSION}],
+                            "ha_units": 5,
+                            "scale_down": False,
+                        }
+                    ]
+                }
+            )
+
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version=_UBUNTU_VERSION,
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            assert charm.ha_units == 5
+            assert charm.scale_down is False
+
+    # ---------------------------------------------------------------------------
+    # TestBuildCharmPlatforms
+    # ---------------------------------------------------------------------------
+
+    class TestBuildCharmPlatforms:
+        """Charm.platforms is sourced from overrides at build time when present, and
+        otherwise falls back to the charm's own metadata (mirrors _get_charm_assumes),
+        rather than each call site re-querying the overrides client.
+        """
+
+        def test_build_charm_populates_platforms_from_overrides(self) -> None:
+            # GIVEN an overrides client that restricts a charm to specific platforms
+            client = _client({"platforms": ["kubernetes"]})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm carries the overridden platforms, not the metadata-derived ones
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_machine_without_overrides_or_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block (a machine charm)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_falls_back_to_kubernetes_when_metadata_has_containers(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with a `containers` block (a Kubernetes sidecar charm)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_CONTAINERS,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_unconditional_k8s_api_assumes(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # with no `containers` block but an unconditional `assumes: [k8s-api]` (e.g.
+            # nginx-ingress-integrator, which only talks to the Kubernetes API and hosts no
+            # workload container of its own)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_uses_assumes_overrides_for_platform_inference(self) -> None:
+            # GIVEN metadata with no kubernetes hints, plus a channel-scoped override that
+            # requires k8s-api unconditionally
+            client = _client(
+                {"overrides": [{"criteria": [{"track": "latest", "risk": "stable"}], "assumes": ["k8s-api"]}]}
+            )
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the override-aware assumes also drive the inferred platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_ignores_k8s_api_named_only_in_an_any_of_assumes_branch(self) -> None:
+            # GIVEN metadata whose assumes only mentions k8s-api as one alternative inside an
+            # any-of branch (so it is not unconditionally required)
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_IN_ANY_OF_ASSUMES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the machine platform
+            assert charm.platforms == ["machine"]
+
+        def test_build_charm_treats_any_of_as_unconditional_when_every_branch_requires_k8s_api(self) -> None:
+            # GIVEN metadata whose any-of alternatives all still require k8s-api
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="nginx-ingress-integrator",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_K8S_API_REQUIRED_BY_ANY_OF,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+        def test_build_charm_falls_back_to_kubernetes_for_legacy_series_metadata(self) -> None:
+            # GIVEN an overrides client with no platform override for the charm, and metadata
+            # from a legacy (pre-Charmcraft) charm that predates the `containers` block and
+            # instead marks itself as Kubernetes via `series: [kubernetes]`
+            client = _client({})
+
+            # WHEN building a Charm from store metadata
+            charm = client._build_charm(
+                charm_name="minio",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_WITH_LEGACY_KUBERNETES_SERIES,
+                config_schema=_EMPTY_CONFIG,
+            )
+
+            # THEN the charm falls back to the kubernetes platform
+            assert charm.platforms == ["kubernetes"]
+
+    # ---------------------------------------------------------------------------
+    # TestEnsureCompatibility
+    # ---------------------------------------------------------------------------
+
+    class TestEnsureCompatibility:
+        """CharmhubClient._ensure_compatibility checks the requested platform against
+        charm.platforms directly - it does not re-query the overrides client.
+        """
+
+        def test_raises_when_platform_not_in_charm_platforms(self) -> None:
+            # GIVEN a built charm restricted to the kubernetes platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["kubernetes"]})
+
+            # WHEN checking compatibility against the machine platform
+            # THEN it is rejected
+            with pytest.raises(CharmReleaseNotFoundException):
+                client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+        def test_passes_when_platform_in_charm_platforms(self) -> None:
+            # GIVEN a built charm that supports the machine platform
+            client = _client({})
+            charm = client._build_charm(
+                charm_name="ceph-mon",
+                channel=_CHANNEL,
+                revision=1,
+                ubuntu_version="22.04",
+                ubuntu_arch="amd64",
+                metadata=_METADATA_REQUIRES,
+                config_schema=_EMPTY_CONFIG,
+            ).model_copy(update={"platforms": ["machine"]})
+
+            # WHEN checking compatibility against the machine platform
+            result = client._ensure_compatibility(charm, juju_version=None, platform="machine")
+
+            # THEN the same charm is returned unchanged
+            assert result is charm
+
+    # ---------------------------------------------------------------------------
+    # TestCharmFromStoreDefaultChannelOverride
+    # ---------------------------------------------------------------------------
+
+    class TestCharmFromStoreDefaultChannelOverride:
+        def test_uses_default_channel_when_no_channel_is_requested(self) -> None:
+            # GIVEN a default channel override and a stub that captures refresh actions
+            captured: list[RefreshAction] = []
+            response = _refresh_response_with_charm("istio-ingress-k8s", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    captured.append(action)
+                    return response
+
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient({"default_channel": "2.5/stable"}),
+            )
+
+            # WHEN fetching without an explicit track, risk, or revision
+            charm = client.charm_from_store(
+                charm_name="istio-ingress-k8s",
+                ubuntu_arch="amd64",
+                ubuntu_version="24.04",
+            )
+
+            # THEN Charmhub is queried using and returns the configured default channel
+            assert len(captured) == 1
+            assert captured[0].charm_channel == "2.5/stable"
+            assert charm.channel == CharmChannel(track="2.5", risk="stable", branch="")
+
+        def test_explicit_channel_takes_precedence_over_default_channel(self) -> None:
+            # GIVEN a charm with a 2.5/stable default-channel override
+            captured: list[RefreshAction] = []
+            response = _refresh_response_with_charm("istio-ingress-k8s", revision=5, metadata=_METADATA_REQUIRES)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    captured.append(action)
+                    return response
+
+            client = CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient({"default_channel": "2.5/stable"}),
+            )
+
+            # WHEN fetching the charm with an explicit channel
+            charm = client.charm_from_store(
+                charm_name="istio-ingress-k8s",
+                ubuntu_arch="amd64",
+                ubuntu_version="24.04",
+                charm_track="2.16",
+                charm_risk="stable",
+            )
+
+            # THEN the explicitly requested channel is used
+            assert len(captured) == 1
+            assert captured[0].charm_channel == "2.16/stable"
+            assert charm.channel == CharmChannel(track="2.16", risk="stable", branch="")
+
+    # ---------------------------------------------------------------------------
+    # TestCharmFromStorePlatformOverrides
+    # ---------------------------------------------------------------------------
+
+    class TestCharmFromStorePlatformOverrides:
+        """Platform-override enforcement in _ensure_compatibility() is exercised through
+        charm_from_store() end-to-end, not just by calling _ensure_compatibility directly
+        with a hand-built Charm (see TestEnsureCompatibility above).
+        """
+
+        def _client_and_stub(
+            self, raw_overrides: dict[str, object], bases: list[CharmhubBase] | None = None
+        ) -> CharmhubClient:
+            response = _refresh_response_with_charm("ceph-mon", revision=5, metadata=_METADATA_REQUIRES, bases=bases)
+
+            class _StubClient(_NullHttpClient):
+                def refresh(self, action: RefreshAction) -> RefreshResponse:
+                    return response
+
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubClient()),
+                overrides_client=_StubOverridesClient(raw_overrides),
+            )
+
+        def test_raises_when_overrides_disallow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client restricting the charm to kubernetes only
+            client = self._client_and_stub({"platforms": ["kubernetes"]})
+
+            # WHEN fetching the charm for the machine platform, which the overrides disallow
+            # THEN CharmReleaseNotFoundException is raised
+            with pytest.raises(CharmReleaseNotFoundException):
+                client.charm_from_store(
+                    charm_name="ceph-mon",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform="machine",
+                )
+
+        def test_passes_when_overrides_allow_the_requested_platform(self) -> None:
+            # GIVEN an overrides client that allows the machine platform
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds and carries the overridden platform
+            assert charm.platforms == ["machine"]
+
+        def test_preserves_existing_positional_arguments(self) -> None:
+            # GIVEN a client called with the original positional argument order
+            client = self._client_and_stub(
+                {"platforms": ["machine"]},
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            )
+
+            # WHEN resolving a charm with positional revision and base arguments
+            charm = client.charm_from_store("ceph-mon", "amd64", None, "machine", "latest", "stable", 5, "22.04")
+
+            # THEN those arguments still select the requested revision and base
+            assert charm.revision == 5
+            assert charm.ubuntu_version == "22.04"
+
+        def test_passes_when_no_platform_overrides_exist(self) -> None:
+            # GIVEN an overrides client with no platform override, and metadata for a
+            # machine charm (no `containers` block)
+            client = self._client_and_stub({})
+
+            # WHEN fetching the charm for the machine platform, which the metadata-derived
+            # platform satisfies
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds
+            assert charm.platforms == ["machine"]
+
+        def test_preserves_requested_channel_branch(self) -> None:
+            # GIVEN a charm requested from a channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with the branch included
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                charm_branch="candidate-build",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains that branch
+            assert charm.channel.branch == "candidate-build"
+
+        def test_preserves_branch_on_trackless_channel(self) -> None:
+            # GIVEN a charm requested from a trackless channel branch
+            client = self._client_and_stub({"platforms": ["machine"]})
+
+            # WHEN fetching the charm with only risk and branch
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_risk="stable",
+                charm_branch="feature",
+                platform="machine",
+            )
+
+            # THEN the resolved charm retains the trackless channel branch
+            assert str(charm.channel) == "stable/feature"
+
+        def test_preserves_trackless_channel_during_revision_compatibility_lookup(self) -> None:
+            # GIVEN a revision pinned to a trackless channel branch
+            client = self._client_and_stub(
+                {"platforms": ["machine"]},
+                bases=[CharmhubBase(channel="22.04", architecture="amd64")],
+            )
+
+            # WHEN validating the revision against that exact channel and base
+            charm = client.charm_from_store(
+                charm_name="ceph-mon",
+                ubuntu_arch="amd64",
+                charm_track=None,
+                charm_risk="stable",
+                charm_branch="feature",
+                charm_revision=5,
+                ubuntu_version="22.04",
+                platform="machine",
+            )
+
+            # THEN the trackless channel remains unqualified by a synthetic latest track
+            assert charm.channel.track == ""
+            assert str(charm.channel) == "stable/feature"
+
+    # ---------------------------------------------------------------------------
+    # TestBundleBuilderPlatformMismatch
+    # ---------------------------------------------------------------------------
+
+    class TestBundleBuilderPlatformMismatch:
+        """End-to-end check that ``BundleBuilder.build()`` reports a charm/model platform
+        mismatch (see TestCharmFromStorePlatformOverrides above) through the canonical bundle
+        error with its typed release rejection.
+        """
+
+        def test_bundle_builder_reports_platform_mismatch_as_application_release_diagnostic(self) -> None:
+            # GIVEN a charm restricted to Kubernetes placed on a machine model
+            charmhub_client = _aodh_client_with_raw_overrides({"platforms": ["kubernetes"]})
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",
+                        applications={"neighbor": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN the canonical bundle error retains the precise release rejection
+            with pytest.raises(UncompletableBundleError, match="supports platform") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            failure = exc_info.value.diagnostics[0]
+            assert isinstance(failure, ApplicationReleaseDiagnostic)
+            assert failure.application == "neighbor"
+            assert isinstance(failure.error, PlatformMismatchError)
+            assert failure.error.requested_platform == "machine"
+            assert failure.error.supported_platforms == ("kubernetes",)
+
+    # ---------------------------------------------------------------------------
+    # TestAssumesUnsupportedFeatureOverride
+    # ---------------------------------------------------------------------------
+
+    class TestAssumesUnsupportedFeatureOverride:
+        """A charm can be marked as unsupported by our testing infrastructure by adding an
+        ``unsupported-*`` sentinel feature (e.g. ``unsupported-openstack``,
+        ``unsupported-obsolete``) to its ``assumes`` override. Since
+        ``_ensure_compatibility()`` only ever supplies the real ``juju``/``k8s-api`` features
+        (see ``_PLATFORM_FEATURES``), such a charm can never satisfy that assumes entry and
+        ``charm_from_store()`` always raises ``CharmReleaseNotFoundException`` for it -
+        immediately and clearly when it's requested directly, and silently (caught by
+        callers such as ``BundleBuilder._get_charms_for_endpoint``) when only considered as
+        a candidate neighbor. This replaces ad hoc delisting-filter exemptions (see #813).
+        Every charm untestable by our infrastructure declares such a sentinel in each of
+        its criteria blocks, whether or not it is also delisted (``listed: false``).
+        """
+
+        def _client_with_assumes_override(self, feature: str) -> CharmhubClient:
+            return _aodh_client_with_raw_overrides(
+                {"listed": False, "platforms": ["machine", "kubernetes"], "overrides": [{"assumes": [feature]}]}
+            )
+
+        @pytest.mark.parametrize("platform", ["machine", "kubernetes"])
+        def test_charm_from_store_raises_for_sentinel_unsupported_feature(self, platform: str) -> None:
+            # GIVEN a charm whose assumes override declares a sentinel feature (e.g.
+            # unsupported-openstack, unsupported-obsolete) that is never provided by our
+            # testing infrastructure
+            client = self._client_with_assumes_override("unsupported-openstack")
+
+            # WHEN fetching the charm directly (as a bundle-builder spec would for its own
+            # test target), for either platform
+            # THEN CharmReleaseNotFoundException is raised with a message identifying the
+            # unmet assumes constraint, rather than the charm silently building and later
+            # failing deep inside relation resolution
+            with pytest.raises(AssumesMismatchError, match="assumes constraints") as exc_info:
+                client.charm_from_store(
+                    charm_name="aodh",
+                    ubuntu_arch="amd64",
+                    ubuntu_version="22.04",
+                    charm_track="latest",
+                    charm_risk="stable",
+                    platform=platform,
+                )
+            assert exc_info.value.unmet_requirements == ("feature=unsupported-openstack",)
+
+        def test_charm_from_store_succeeds_without_the_sentinel_feature(self) -> None:
+            # GIVEN a charm with no assumes override at all
+            client = _aodh_client_with_raw_overrides({})
+
+            # WHEN fetching the charm for the machine platform
+            charm = client.charm_from_store(
+                charm_name="aodh",
+                ubuntu_arch="amd64",
+                ubuntu_version="22.04",
+                charm_track="latest",
+                charm_risk="stable",
+                platform="machine",
+            )
+
+            # THEN it succeeds normally
+            assert charm.name == "aodh"
+
+        def test_bundle_builder_fails_for_charm_with_unsupported_sentinel_requested_directly(self) -> None:
+            """End-to-end check that ``BundleBuilder.build()`` fails with a clear
+            ``UncompletableBundleError`` when a spec directly requests an application
+            backed by a charm marked unsupported via a sentinel ``assumes`` feature.
+
+            The application-charm lookup in ``BundleBuilder._get_charm_for_application()``
+            can raise ``CharmReleaseNotFoundException`` (e.g. no release satisfies the
+            sentinel feature). ``_handle_failed_assertion`` catches that and attaches the
+            typed rejection to the canonical ``UncompletableBundleError`` while retaining
+            the unresolved application diagnostic.
+            """
+            # GIVEN a real CharmhubClient (stubbed HTTP/overrides) where "aodh" is marked
+            # unsupported via a sentinel feature, wired into a real BundleBuilder
+            charmhub_client = self._client_with_assumes_override("unsupported-openstack")
+            builder = BundleBuilder(charmhub_client=charmhub_client)
+
+            # AND a spec that requests "aodh" directly as an application
+            spec = SpecFile(
+                models=[
+                    ModelSpec(
+                        name="m",
+                        platform="machine",
+                        juju="3.6.0",  # explicit version avoids a live Snapstore lookup
+                        applications={"aodh": AppSpec(charm="aodh", base="22.04", channel="latest/stable")},
+                    )
+                ]
+            )
+
+            # WHEN building the bundle
+            # THEN UncompletableBundleError propagates out of build(), identifying the
+            # precise release rejection instead of a raw CharmReleaseNotFoundException
+            with pytest.raises(UncompletableBundleError, match="aodh") as exc_info:
+                builder.build(spec)
+            assert len(exc_info.value.diagnostics) == 1
+            diagnostic = exc_info.value.diagnostics[0]
+            assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
+            assert diagnostic.charm_name == "aodh"
+            assert isinstance(diagnostic.error, AssumesMismatchError)
+
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion
     # ---------------------------------------------------------------------------
@@ -493,13 +1143,13 @@ class TestCharmhubClient:
             # WHEN building endpoints
             # THEN UnparsableCharmException is raised mentioning "requires"
             with pytest.raises(UnparsableCharmException, match="requires"):
-                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+                client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
 
         def test_valid_requires_key_passes(self) -> None:
             # GIVEN an override for a requires endpoint that exists in metadata
             client = _client({"overrides": [{"requires": {"db": {"optional": True}}}]})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             # THEN the endpoint is present
             assert "db" in endpoints
 
@@ -509,13 +1159,13 @@ class TestCharmhubClient:
             # WHEN building endpoints
             # THEN UnparsableCharmException is raised mentioning "provides"
             with pytest.raises(UnparsableCharmException, match="provides"):
-                client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL)
+                client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL, _UBUNTU_VERSION)
 
         def test_valid_provides_key_passes(self) -> None:
             # GIVEN an override for a provides endpoint that exists in metadata
             client = _client({"overrides": [{"provides": {"web": {"optional": True}}}]})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_PROVIDES, _CHANNEL, _UBUNTU_VERSION)
             # THEN the endpoint is present
             assert "web" in endpoints
 
@@ -523,13 +1173,29 @@ class TestCharmhubClient:
             # GIVEN no overrides
             client = _client({})
             # WHEN building endpoints
-            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             # THEN all metadata endpoints are returned
             assert "db" in endpoints
 
+        def test_no_override_defaults_removable_true(self) -> None:
+            # GIVEN no overrides
+            client = _client({})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+            # THEN removable defaults to True
+            assert endpoints["db"].removable is True
+
+        def test_override_removable_false_is_applied(self) -> None:
+            # GIVEN an override marking a requires endpoint non-removable
+            client = _client({"overrides": [{"requires": {"db": {"removable": False}}}]})
+            # WHEN building endpoints
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
+            # THEN removable reflects the override
+            assert endpoints["db"].removable is False
+
         def test_injects_juju_info_when_absent(self) -> None:
             client = _client({})
-            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             assert "juju-info" in endpoints
             ep = endpoints["juju-info"]
             assert ep.type == EndpointType.PROVIDES
@@ -545,13 +1211,13 @@ class TestCharmhubClient:
                 requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")},
             )
             client = _client({})
-            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL, _UBUNTU_VERSION)
             assert "juju-info" not in endpoints
 
         def test_does_not_overwrite_explicit_juju_info(self) -> None:
             metadata = CharmMetadata(provides={"juju-info": CharmMetadata.Endpoint(interface="juju-info", limit=5)})
             client = _client({})
-            endpoints = client._get_charm_endpoints("special", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("special", metadata, _CHANNEL, _UBUNTU_VERSION)
             # Explicit declaration wins; the injected one would have limit=None
             assert endpoints["juju-info"].limit == 5
 
@@ -560,13 +1226,44 @@ class TestCharmhubClient:
                 requires={"general-info": CharmMetadata.Endpoint(interface="juju-info", scope="container")}
             )
             client = _client({})
-            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL)
+            endpoints = client._get_charm_endpoints("nrpe", metadata, _CHANNEL, _UBUNTU_VERSION)
             assert endpoints["general-info"].scope == EndpointScope.CONTAINER
 
         def test_scope_none_when_metadata_has_no_scope(self) -> None:
             client = _client({})
-            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL)
+            endpoints = client._get_charm_endpoints("myapp", _METADATA_REQUIRES, _CHANNEL, _UBUNTU_VERSION)
             assert endpoints["db"].scope is None
+
+        def test_ubuntu_version_scoped_block_takes_priority_over_catch_all(self) -> None:
+            # GIVEN a base-specific override block (matching ubuntu_version) listed before a
+            # catch-all block with no criteria at all, mirroring kubernetes-worker's structure.
+            client = _client(
+                {
+                    "overrides": [
+                        {"criteria": [{"ubuntu_version": "16.04"}], "requires": {"db": {"optional": True}}},
+                        {"requires": {"db": {}}},
+                    ]
+                }
+            )
+            # WHEN the resolved base matches the scoped block
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, "16.04")
+            # THEN the scoped block's override (optional=True) wins, not the catch-all (optional defaults False)
+            assert endpoints["db"].optional is True
+
+        def test_ubuntu_version_scoped_block_does_not_match_other_bases(self) -> None:
+            # GIVEN the same criteria as above
+            client = _client(
+                {
+                    "overrides": [
+                        {"criteria": [{"ubuntu_version": "16.04"}], "requires": {"db": {"optional": True}}},
+                        {"requires": {"db": {}}},
+                    ]
+                }
+            )
+            # WHEN the resolved base does NOT match the scoped block
+            endpoints = client._get_charm_endpoints("mycharm", _METADATA_REQUIRES, _CHANNEL, "22.04")
+            # THEN the catch-all block is used instead (optional defaults to False)
+            assert endpoints["db"].optional is False
 
     class TestCharmMetadataSubordinateFields:
         """CharmMetadata.subordinate and CharmMetadata.Endpoint.scope fields."""
@@ -595,14 +1292,14 @@ class TestCharmhubClient:
             # WHEN building configs
             # THEN UnparsableCharmException is raised mentioning "config"
             with pytest.raises(UnparsableCharmException, match="config"):
-                client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG)
+                client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG, _UBUNTU_VERSION)
 
         def test_valid_config_key_passes(self) -> None:
             # GIVEN an override for a config key that exists in the schema
             schema = CharmConfigSchema(options={"my-option": CharmConfigSchema.Option(type="string")})
             client = _client({"overrides": [{"configs": {"my-option": ["v1"]}}]})
             # WHEN building configs
-            result = client._get_charm_configs("mycharm", _CHANNEL, schema)
+            result = client._get_charm_configs("mycharm", _CHANNEL, schema, _UBUNTU_VERSION)
             # THEN the override value is returned
             assert result == {"my-option": ["v1"]}
 
@@ -611,7 +1308,7 @@ class TestCharmhubClient:
             client = _client({})
             # WHEN building configs
             # THEN an empty dict is returned
-            assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG) == {}
+            assert client._get_charm_configs("mycharm", _CHANNEL, _EMPTY_CONFIG, _UBUNTU_VERSION) == {}
 
     class TestGetCharmResources:
         def test_stale_resource_key_raises(self) -> None:
@@ -620,14 +1317,14 @@ class TestCharmhubClient:
             # WHEN building resources
             # THEN UnparsableCharmException is raised mentioning "resource"
             with pytest.raises(UnparsableCharmException, match="resource"):
-                client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata())
+                client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata(), _UBUNTU_VERSION)
 
         def test_valid_resource_key_passes(self) -> None:
             # GIVEN an override for a resource key that exists in the metadata
             metadata = CharmMetadata(resources={"my-image": CharmMetadata.Resource(type="oci-image")})
             client = _client({"overrides": [{"resources": {"my-image": ["ghcr.io/foo:v1"]}}]})
             # WHEN building resources
-            result = client._get_charm_resources("mycharm", _CHANNEL, metadata)
+            result = client._get_charm_resources("mycharm", _CHANNEL, metadata, _UBUNTU_VERSION)
             # THEN the override value is returned
             assert result == {"my-image": ["ghcr.io/foo:v1"]}
 
@@ -636,4 +1333,88 @@ class TestCharmhubClient:
             client = _client({})
             # WHEN building resources
             # THEN an empty dict is returned
-            assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata()) == {}
+            assert client._get_charm_resources("mycharm", _CHANNEL, CharmMetadata(), _UBUNTU_VERSION) == {}
+
+    # ---------------------------------------------------------------------------
+    # TestFindCharms
+    # ---------------------------------------------------------------------------
+
+    class TestFindCharms:
+        class _MultiOverridesClient(OverridesClient):
+            """OverridesClient with per-charm listed overrides."""
+
+            def __init__(self, listed_by_charm: dict[str, bool | None]) -> None:
+                super().__init__()
+                self._listed_by_charm = listed_by_charm
+
+            def _get_all_charm_global_overrides(self) -> dict[str, CharmGlobalOverrides]:  # type: ignore[override]
+                return {charm: CharmGlobalOverrides(listed=val) for charm, val in self._listed_by_charm.items()}
+
+        def _find_client(
+            self, find_names: list[str], listed_by_charm: dict[str, bool | None] | None = None
+        ) -> CharmhubClient:
+            class _StubFindClient(_NullHttpClient):
+                def find(self, provides: str | None = None, requires: str | None = None) -> list[FindResponse]:
+                    return [
+                        FindResponse(name=name, result=FindResponse.Result(**{"deployable-on": {"machine"}}))
+                        for name in find_names
+                    ]
+
+                def info(self, charm: str, include_channel_map: bool = False) -> InfoResponse:
+                    return InfoResponse(result=InfoResponse.Result(**{"deployable-on": frozenset({"machine"})}))
+
+            overrides = self._MultiOverridesClient(listed_by_charm or {})
+            return CharmhubClient(
+                http_client=cast(CharmhubHttpClient, _StubFindClient()),
+                overrides_client=overrides,
+            )
+
+        def test_delisted_charm_excluded_from_api_results(self) -> None:
+            # GIVEN the API returns two charms and one has listed: false
+            client = self._find_client(
+                find_names=["charm-a", "charm-b"],
+                listed_by_charm={"charm-b": False},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN the delisted charm is excluded
+            assert "charm-a" in result
+            assert "charm-b" not in result
+
+        def test_delisted_charm_not_added_when_absent_from_api(self) -> None:
+            # GIVEN the API returns one charm and a different charm has listed: false
+            client = self._find_client(
+                find_names=["charm-a"],
+                listed_by_charm={"charm-c": False},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN charm-a is returned and charm-c is not present
+            assert result == {"charm-a"}
+
+        def test_no_delisting_override_returns_all_api_results(self) -> None:
+            # GIVEN the API returns two charms with no listing overrides
+            client = self._find_client(find_names=["charm-a", "charm-b"])
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN both charms are returned
+            assert result == {"charm-a", "charm-b"}
+
+        def test_listed_true_does_not_exclude_charm(self) -> None:
+            # GIVEN the API returns a charm that also has listed: true
+            client = self._find_client(
+                find_names=["charm-a"],
+                listed_by_charm={"charm-a": True},
+            )
+
+            # WHEN finding charms
+            result = client.find_charms()
+
+            # THEN the charm is still present
+            assert "charm-a" in result

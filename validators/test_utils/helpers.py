@@ -1,19 +1,16 @@
-# Copyright (C) 2026 Canonical Ltd
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-from .stubs import CharmBaseStub, CharmMetaStub, ModelStub, RelationMetaStub, RelationRoleStub, RelationStub
+from .stubs import (
+    ApplicationStub,
+    CharmBaseStub,
+    CharmMetaStub,
+    ModelStub,
+    RelationMetaStub,
+    RelationRoleStub,
+    RelationStub,
+    UnitStub,
+)
 
 
 def make_charm_from_relation(
@@ -21,6 +18,10 @@ def make_charm_from_relation(
     role: RelationRoleStub = RelationRoleStub.requires,
     interface_name: str | None = None,
     integrations_count: int = 1,
+    local_app_name: str = "app",
+    local_model_name: str = "test-model",
+    local_model_uuid: str = "11111111-1111-1111-1111-111111111111",
+    local_unit_name: str = "app/0",
 ) -> CharmBaseStub:
     if integrations_count == 1:
         relations_list = [relation]
@@ -30,7 +31,12 @@ def make_charm_from_relation(
             for idx in range(integrations_count)
         ]
 
-    model = ModelStub(relations={relation.name: relations_list})
+    model = ModelStub(
+        relations={relation.name: relations_list},
+        name=local_model_name,
+        uuid=local_model_uuid,
+        unit=UnitStub(local_unit_name),
+    )
     return CharmBaseStub(
         meta=CharmMetaStub(
             relations={
@@ -42,6 +48,8 @@ def make_charm_from_relation(
             }
         ),
         model=model,
+        app=ApplicationStub(name=local_app_name),
+        unit=UnitStub(local_unit_name),
     )
 
 

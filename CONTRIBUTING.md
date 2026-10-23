@@ -13,7 +13,7 @@ and download dependencies.
 ## Linting and Formatting
 
 Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
-[mdformat](https://mdformat.readthedocs.io) as a GitHub Action that runs
+[markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
 automatically on Pull Requests to this repository. To format, run:
 
 ```bash
@@ -22,7 +22,29 @@ automatically on Pull Requests to this repository. To format, run:
 
 ## Tooling and Continuous Integration
 
-...
+### Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/format.sh` | Auto-fix: ruff, yamlfix, markdownlint |
+| `scripts/lint.sh` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
+| `scripts/charm-integration-testing-unit-tests.sh` | Run `charm_integration_testing` unit tests |
+| `scripts/validators-unit-tests.sh` | Run validator unit tests |
+| `scripts/bundle-builder-x-tests.sh` | Run bundle builder tests |
+
+### CI gates (all must pass on every PR)
+
+1. **lint** — `scripts/lint.sh`
+2. **charm-integration-testing-unit-tests**
+3. **validators-unit-tests**
+4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
+5. **charm-testing-integration-tests** — full Juju integration suite
+
+### Juju / environment notes
+
+- `juju status > file` exits 1 with an empty file — always pipe: `juju status | cat > file`
+- `kubectl` is accessed as `sudo k8s kubectl` (Canonical k8s snap)
+- After editing validator source code, pass `--reinstall` to `dev-validate.py` to force re-injection on units
 
 ## Documentation
 
@@ -46,9 +68,20 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-...
+Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective scripts above before submitting a PR.
+
+Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `scripts/run-tests.sh` (with the required Juju environment configured).
 
 ## Pull requests
+
+### Branch naming
+
+| Situation | Pattern |
+|---|---|
+| Jira ticket | `SQT-<number>/short-description` |
+| Bug fix | `fix/short-description` |
+| New addition | `add/short-description` |
+| Other | `<type>/short-description` |
 
 ### Code review criteria & workflow
 

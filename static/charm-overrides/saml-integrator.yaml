@@ -1,0 +1,27 @@
+---
+# Source: https://github.com/canonical/saml-integrator-operator
+# Ubuntu 20.04 latest/edge predates the inline metadata config option.
+overrides:
+  - criteria:
+      - ubuntu_version: '20.04'
+    configs:
+      entity_id: ['https://saml.canonical.test/metadata']
+      metadata_url:
+        - 'https://raw.githubusercontent.com/canonical/saml-integrator-operator/5eacedca342b048acd4fa4570a158e502895b995/tests/unit/files/metadata_default_namespaces.xml'
+    constraints:
+      - 'set(config[entity_id])'
+      - 'set(config[metadata_url])'
+  - configs:
+      entity_id: ['https://saml-test.example.com']
+      metadata:
+        - |-
+          <?xml version="1.0"?>
+          <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://saml-test.example.com">
+            <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+              <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://saml-test.example.com/sso"/>
+              <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://saml-test.example.com/slo"/>
+            </md:IDPSSODescriptor>
+          </md:EntityDescriptor>
+    constraints:
+      - 'set(config[entity_id])'
+      - 'set(config[metadata])'

@@ -1,0 +1,33 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-azure-storage"
+version = "0.1.0"
+description = "Validator for azure_storage interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+]
+
+[project.entry-points."endpoint_validators"]
+azure_storage = "validators.azure_storage:AzureStorageValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.azure_storage"]
+
+[tool.setuptools.package-dir]
+"validators.azure_storage" = "."

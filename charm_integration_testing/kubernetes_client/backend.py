@@ -3,13 +3,46 @@
 
 
 from pathlib import Path
+from types import MappingProxyType
+from typing import Callable
 
 from kubernetes import client, config  # type: ignore[import-untyped]
+from kubernetes.client import ApiException  # type: ignore[import-untyped]
+from urllib3.util import Retry
+
+# Template retry policy for a single ApiClient's Configuration (see k8s_client). Every request
+# made through any API group (including ad-hoc ones instantiated directly against `api_client`)
+# gets the same retry behaviour without each call site needing its own retry/backoff logic.
+DEFAULT_RETRY_KWARGS: MappingProxyType[str, object] = MappingProxyType(
+    {
+        "total": 5,
+        "backoff_factor": 1,
+        "status_forcelist": frozenset([500, 502, 503, 504]),
+        # POST is excluded: it's not idempotent, and retrying it risks duplicate side effects if
+        # the server actually processed the original request before the client saw a disconnect.
+        "allowed_methods": frozenset(["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"]),
+        # Let the Kubernetes client see the final 5xx response (and raise its usual ApiException)
+        # once retries are exhausted, instead of urllib3 raising MaxRetryError.
+        "raise_on_status": False,
+    }
+)
+
+
+def build_default_retries() -> Retry:
+    """Builds a fresh `Retry` instance from `DEFAULT_RETRY_KWARGS`.
+
+    Returns a new instance on every call, so no two clients (or anything else in the process)
+    ever share the same mutable `Retry` object.
+    """
+    return Retry(**DEFAULT_RETRY_KWARGS)  # type: ignore[arg-type]
 
 
 class KubernetesBackend:
     core_v1_api: client.CoreV1Api
     apps_v1_api: client.AppsV1Api
+    networking_v1_api: client.NetworkingV1Api
+    apiextensions_v1_api: client.ApiextensionsV1Api
+    custom_objects_api: client.CustomObjectsApi
     api_client: client.ApiClient
 
     def __init__(self, api_client: client.ApiClient):
@@ -18,12 +51,62 @@ class KubernetesBackend:
         # Instantiate the used API groups
         self.core_v1_api = client.CoreV1Api(api_client)
         self.apps_v1_api = client.AppsV1Api(api_client)
+        self.networking_v1_api = client.NetworkingV1Api(api_client)
+        self.apiextensions_v1_api = client.ApiextensionsV1Api(api_client)
+        self.custom_objects_api = client.CustomObjectsApi(api_client)
+
+    def crd_exists(self, name: str) -> bool:
+        """Return True if a CustomResourceDefinition named *name* is registered on the cluster."""
+        try:
+            self.apiextensions_v1_api.read_custom_resource_definition(name)
+        except ApiException as error:
+            if error.status == 404:
+                return False
+            raise
+        return True
+
+    def deployment_is_ready(self, namespace: str, name: str) -> bool:
+        """Return True when updated, ready and available replicas meet the nonzero desired count.
+
+        Allows surge replicas; does not wait for old pods to terminate. API errors other than 404 propagate.
+        """
+        try:
+            deployment = self.apps_v1_api.read_namespaced_deployment(name=name, namespace=namespace)
+        except ApiException as error:
+            if error.status == 404:
+                return False
+            raise
+
+        metadata = deployment.metadata
+        spec = deployment.spec
+        status = deployment.status
+        if metadata is None or spec is None or status is None:
+            return False
+        if metadata.deletion_timestamp is not None or metadata.generation is None:
+            return False
+        if (status.observed_generation or 0) < metadata.generation:
+            return False
+
+        replicas = spec.replicas if spec.replicas is not None else 1
+        return bool(
+            replicas > 0
+            and (status.updated_replicas or 0) >= replicas
+            and (status.ready_replicas or 0) >= replicas
+            and (status.available_replicas or 0) >= replicas
+        )
 
     @classmethod
-    def k8s_client(cls, kubeconfig: Path | None = None) -> "KubernetesBackend":
+    def k8s_client(
+        cls,
+        kubeconfig: Path | None = None,
+        *,
+        load_kube_config: Callable[..., None] = config.load_kube_config,
+    ) -> "KubernetesBackend":
         if kubeconfig:
-            config.load_kube_config(config_file=str(kubeconfig.resolve()))
+            load_kube_config(config_file=str(kubeconfig.resolve()))
         else:
-            config.load_kube_config()
+            load_kube_config()
 
-        return cls(client.ApiClient())
+        configuration = client.Configuration.get_default_copy()
+        configuration.retries = build_default_retries()
+        return cls(client.ApiClient(configuration))

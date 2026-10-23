@@ -18,6 +18,9 @@ dependencies = [
 [project.entry-points."endpoint_validators"]
 opensearch_client = "validators.opensearch_client:OpenSearchClientValidator"
 
+[project.entry-points."endpoint_persistence_validators"]
+opensearch_client = "validators.opensearch_client:OpenSearchClientPersistenceValidator"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

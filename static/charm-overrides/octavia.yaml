@@ -1,5 +1,8 @@
 ---
+# octavia: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
+# nrpe-external-master (provides): optional - monitoring only.
 overrides:
   - provides:
       nrpe-external-master:
         optional: true
+    assumes: [unsupported-openstack]

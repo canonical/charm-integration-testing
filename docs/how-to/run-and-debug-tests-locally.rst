@@ -40,8 +40,6 @@ Optional environment variables
 
 The following environment variables are optional and only needed when testing specific charms that require them:
 
-``MINIO_CLIENT_FILE``:
-  Path to the MinIO client configuration file. Will be downloaded automatically by the test scripts if not provided. Used when deploying the `minio-k8s` charm with `s3-integrator`.
 ``UV_FILE``:
   Path to a pre-downloaded ``uv`` binary. Will be downloaded automatically if not provided. Used when injecting validators onto units to create the Python virtualenv.
 ``UBUNTU_PRO_TOKEN``:
@@ -78,6 +76,11 @@ Set up the k8s cloud
 
 It is also needed to setup the k8s cloud in juju. Do this with the following commands:
 
+Test controllers in the VM should use a 5 GB root disk (``root-disk=5G``) on
+both LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack bootstrap
+constraints in ``static/environments.yaml``. This is a controller bootstrap
+constraint, not a workload storage setting.
+
 .. code:: bash
 
    juju add-k8s ${K8S_CLOUD_NAME} --client
@@ -85,6 +88,101 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
    juju add-model ${MODEL_NAME} \
      --config "logging-config=DEBUG" \
      --config="update-status-hook-interval=2m"
+
+When the test suite bootstraps controllers instead, pass
+``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
+``scripts/run-tests.sh``. For a separate neighbor controller, also pass
+``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
+These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
+When reproducing a specific execution, preserve any other bootstrap constraints
+from that execution's environment.
+
+For a manually bootstrapped LXD test controller, use the same sizing:
+
+.. code:: bash
+
+   juju bootstrap localhost lxd-test-controller --bootstrap-constraints root-disk=5G
+
+Chaos tools
+~~~~~~~~~~~
+
+Install Litmus or Chaos Mesh on the Kubernetes cluster for CPU and memory
+pressure. Disk I/O latency requires Chaos Mesh. On PS6 staging and PS7, the
+infrastructure repositories manage the shared ``litmus-core`` Helm release.
+See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
+and chart versions.
+
+Set ``KUBECONFIG_<cloud_name>`` to the kubeconfig path for each Kubernetes
+cloud, replacing hyphens in the cloud name with underscores. For example:
+
+.. code:: bash
+
+   export KUBECONFIG_local_k8s=/path/to/kubeconfig
+
+The combined tool report runs once per session, when a test first requests
+``require_chaos_tool`` or ``chaos_tool_for_model``. Before models exist,
+the report checks each configured Kubernetes cloud once. Detection does not
+run automatically for unrelated tests. Installation checks run again for
+each client request. Litmus requires its three CRDs and a ready ``litmus``
+Deployment in ``litmus-system``.
+
+For Litmus experiments, the Kubernetes credentials must allow creation and
+cleanup of experiment resources, ServiceAccounts, Roles and RoleBindings in
+the test model namespace, including granting the runner's required permissions.
+
+Tests select a supporting tool automatically for each experiment. When both
+tools are available, Litmus handles CPU and memory pressure and Chaos Mesh
+handles Disk I/O latency. Chaos Mesh also handles CPU and memory pressure
+when Litmus is unavailable. Disk fill and Kubernetes network isolation do
+not require either tool. Native disk fill supports machine and Kubernetes models.
+Native CPU and memory commands are not used as fallback for external pressure.
+
+Chaos Mesh support is checked per experiment. CPU and memory pressure require
+the ``stresschaos.chaos-mesh.org`` CRD, while Disk I/O latency requires
+``iochaos.chaos-mesh.org``. Either CRD enables its corresponding experiments.
+The former ``require_chaos_mesh`` fixture is replaced by ``require_chaos_tool``.
+
+Only unsupported operations permit fallback. Tests skip when no available
+implementation supports the requested experiment. Each test uses separate
+clients with cleanup at teardown, including after failure or skip.
+API, execution and cleanup errors fail the test. Cleanup retains resources for manual
+investigation when their recorded creation identifier cannot be verified.
+
+Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Cleanup allows graceful termination and requires reversion evidence for observed
+injections before deleting results and permissions; otherwise, it reports an
+error and retains them for investigation.
+
+Shared resources remain managed by the infrastructure repositories. Use
+approved disposable workloads for experiments; the shared operator and
+privileged helpers do not provide isolation between tenants.
+
+Moderate memory stress
+~~~~~~~~~~~~~~~~~~~~~~
+
+``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
+Mesh with ``StressChaos``. It skips without memory stress support or passing
+simple validators for every selected target and neighbor endpoint. If any selected
+endpoint has no passing simple validator, the test skips before injecting stress.
+
+Defaults are one worker, 128 MB and five minutes. Per-charm settings
+``memory_moderate_pressure_workers``, ``memory_moderate_pressure_size_mb`` and
+``memory_moderate_pressure_duration_seconds`` override them. Tune these values
+for the workload; container memory limits are unchanged.
+
+After confirmed injection, the test repeatedly checks experiment status,
+workload health and simple validators. Error/blocked workloads, disconnected
+agents, lost validation coverage, experiment errors and early completion fail.
+Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
+Startup and the last validation round under stress share a two-minute allowance;
+calls exceeding the stress execution budget fail when they return.
+
+Cleanup runs on failure too; failed cleanup remains registered for retry.
+Chaos Mesh memory cleanup waits for resource deletion. After successful
+observation and cleanup, a separate fifteen-minute timeout applies to the
+active/idle wait, followed by simple validation without additional restarts.
+These post-cleanup checks are outside the stress execution budget.
+Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Install the repository dependencies
 -----------------------------------
@@ -185,3 +283,178 @@ expensive setup transitions.
 The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
+
+Moderate CPU pressure
+---------------------
+
+``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
+It stresses one target unit's workload container and skips if CPU stress support
+or passing simple validators for any selected target or neighbor endpoint are
+unavailable. Each selected endpoint must have at least one passing simple result
+before injection.
+
+Defaults are one worker and five minutes, overridden by
+``cpu_moderate_pressure_workers`` and ``cpu_moderate_pressure_duration_seconds``.
+Tune workers for the charm's CPU allocation; one worker is not universally
+moderate pressure.
+
+After initial active/idle and simple validation, the test confirms injection
+and repeatedly checks stress status, workload health and simple validators.
+Error/blocked workloads, disconnected agents, experiment errors and lost
+validation coverage fail. Non-idle states are allowed during stress; sampled
+checks may miss brief failures.
+
+Cleanup runs on failure too. After successful observation and cleanup, target
+and neighbor models must recover to active/idle within fifteen minutes and pass
+simple validation without additional restarts. Cleanup failures fail the test.
+Select ``-k test_live_cpu_stress_moderate`` to run it.
+
+Total memory stress
+-------------------
+
+``test_live_memory_stress_total`` supports StatefulSet-backed Kubernetes workloads
+and skips when no memory stress tool is available. It applies a temporary ``1Gi``
+workload limit and stresses one unit using Litmus or Chaos Mesh.
+
+Defaults are one worker, ``2048`` MB and ``600`` seconds of observation after
+confirmed injection. Per-charm ``memory_exhaustion_workers``,
+``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` override
+these values. The experiment receives an additional two minutes after settings
+are resolved. Set ``memory_exhaustion_limit`` to a positive Kubernetes memory
+quantity (for example, ``2Gi``) to override the ``1Gi`` default; stress size must
+cover the configured limit.
+
+A new out-of-memory termination in the target container after confirmed injection
+ends observation early, even before restart. Neither termination nor a status
+change is required. Experiment errors, early completion without this evidence
+and cleanup failures fail the test.
+
+After cleanup, all bundle models must reach active/idle within fifteen minutes
+and pass available deep validators while the limit remains applied. Missing or
+skipped validators provide no functional coverage. Original memory settings are
+restored on success or failure, with a final idle check on success.
+
+Total CPU stress
+----------------
+
+``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
+one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+
+It temporarily limits the workload container to one CPU, waits for all bundle
+units to become active/idle, then starts four stress workers. Stress is held for
+``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
+required. Chaos Mesh waits up to one minute for the controller to confirm target
+selection and injection before the hold period starts. A startup timeout fails
+the test and still triggers cleanup. The requested experiment duration includes
+two extra minutes to allow for startup and polling.
+After cleanup, all bundle units, including a cross-model neighbor,
+must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
+default). Available deep interface validators run for the target application and
+its test neighbor, including validators implemented on the consumer side,
+before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+When no validator applies, logs report the missing validation coverage; only
+status recovery is checked. Deployment validation supplies the initial baseline.
+Original CPU requests and limits are restored even after failure or skip.
+A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
+
+For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
+``data-integrator:postgresql``. The ``postgresql_client`` validator runs on
+data-integrator and checks database connectivity, a query, and a write/read cycle
+at the deep level. The integration-test workflow includes this combination with
+PostgreSQL revision 495, channel ``14/stable``, and base ``22.04``. For manual
+workflow runs, use those same values and the branch containing your changes.
+The existing ``certificates`` combination does not exercise this DB validator.
+Confirm validation results for the neighbor in the live logs; an empty or skipped
+validation result is not evidence of successful database recovery.
+
+Network isolation recovery
+--------------------------
+
+``test_live_network_isolation`` requires Kubernetes and applies an ingress-only
+``NetworkPolicy`` to all Pods of the target application. It leaves egress unrestricted
+and retains the policy for ten minutes after the API accepts it. This interval
+does not prove when the network plugin started enforcing the policy.
+
+All bundle models must be active/idle before isolation. Remaining active/idle
+during isolation is valid. After policy removal, all bundle models must return
+to active/idle within fifteen minutes, without a test-driven restart. Deep
+validators then run for every application in the target and neighbor models,
+including consumer-side validators. Missing or skipped validators provide no
+functional coverage; the status check alone only verifies Juju state recovery.
+Policy creation, cleanup, recovery and validation errors fail the test.
+
+The temporary connection probes have been removed. This test does not independently
+measure packet blocking or continuously verify agent connectivity during the
+observation interval. Network enforcement must be supported by the cluster.
+
+Disk fill recovery
+------------------
+
+``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
+and machine models. It allocates 98 percent of the available space reported by
+``df`` in the execution working directory, using a unique file per test. This
+is not a guarantee of 98 percent total file system usage or of filling the
+application's data volume. Per-charm resource settings are not consumed yet.
+
+All bundle models must be active/idle before allocation. The file remains for
+ten minutes; no unhealthy status transition is required. Cleanup removes the
+file, then all bundle models must recover to active/idle within fifteen minutes
+without a test-driven restart. Available deep validators run on all applications
+in both target and neighbor models. Missing validators leave functional coverage
+unverified. Allocation, file checks, cleanup, recovery and validation errors fail
+the test.
+
+Cross-model relations
+---------------------
+
+By default the target and neighbor applications are deployed into a single model. To
+exercise a cross-model relation (CMR) instead, pass ``--neighbor-cloud``: the neighbor
+application is deployed into a second model on that cloud. ``--neighbor-cloud`` is
+required for any CMR variant; the same-platform case simply passes the same cloud as
+``--target-cloud``.
+
+``--same-controller`` is a modifier on top of ``--neighbor-cloud`` — it does not enable
+CMR by itself and is rejected if passed without ``--neighbor-cloud``. There are two ways
+to place the neighbor model:
+
+- **Same controller** — pass ``--same-controller --neighbor-cloud <cloud>``. The
+  neighbor model is created on the target controller (registering ``<cloud>`` there
+  first if it differs from ``--target-cloud``), so only one controller is bootstrapped.
+  This is the cheapest CMR variant and is what the same-platform/same-controller and
+  multi-cloud-controller test matrix cells use.
+
+  .. code:: bash
+
+     ./scripts/run-tests.sh \
+       --target-cloud "${CLOUD_NAME}" \
+       --target-charm "mysql" \
+       --target-endpoint "database" \
+       --neighbor-charm "mysql-router" \
+       --neighbor-endpoint "backend-database" \
+       --same-controller \
+       --neighbor-cloud "${CLOUD_NAME}" \
+       --current-state "no_bundle" \
+       --charm-overrides "./static/charm-overrides/" \
+       --log-dir "./test-logs"
+
+- **Cross controller** — pass ``--neighbor-cloud`` without ``--same-controller``. A
+  second controller is bootstrapped on that cloud and the neighbor model is created
+  there.
+
+When a same-controller run names a different ``--neighbor-cloud`` than
+``--target-cloud``, the suite registers that cloud on the target controller before
+creating the neighbor model:
+
+- For a Kubernetes ``--neighbor-cloud``, export its kubeconfig via
+  ``KUBECONFIG_<cloud>`` (hyphens replaced with underscores, e.g.
+  ``KUBECONFIG_local_k8s``); it is piped to ``juju add-k8s --controller`` so no
+  client-only registration is needed.
+- For any other ``--neighbor-cloud`` (e.g. OpenStack, LXD, manual), export the cloud
+  definition and credentials YAML file paths via ``CLOUD_DEFINITION_<cloud>`` and
+  ``CLOUD_CREDENTIALS_<cloud>``; they are passed to ``juju add-cloud --controller`` and
+  ``juju add-credential --controller`` respectively.
+
+In same-controller mode the neighbor model name is still generated separately, so the
+two models remain distinct. ``--neighbor-controller`` must not be passed alongside
+``--same-controller``.

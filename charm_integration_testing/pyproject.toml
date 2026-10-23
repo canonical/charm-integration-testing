@@ -17,7 +17,7 @@ dependencies = [
     "pytest-timeout==2.3.1",
     "requests (>=2.32.3,<2.35.0)",
     "tenacity (>=9.0.0,<10.0.0)",
-    "jubilant (>=1.6.0,<2.0.0)",
+    "jubilant (>=1.9.0,<2.0.0)",
     "bundle-builder-x",
     "validators-base",
     "validators-runner",
@@ -26,12 +26,14 @@ dependencies = [
 
 [tool.poetry]
 packages = [
+    { include = "chaos_client" },
     { include = "extensions" },
     { include = "juju" },
     { include = "juju_cmd" },
     { include = "juju_jubilant" },
     { include = "kubernetes_client" },
     { include = "resource_registry" },
+    { include = "resource_tracking" },
     { include = "serializeable_dataclass" },
     { include = "test_suite" },
     { include = "utils" },

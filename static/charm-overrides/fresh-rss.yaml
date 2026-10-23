@@ -1,0 +1,5 @@
+---
+# fresh-rss supports no base newer than 18.04 and its associated repo no longer exists.
+listed: false
+overrides:
+  - assumes: [unsupported-obsolete]

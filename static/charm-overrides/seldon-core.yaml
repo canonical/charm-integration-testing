@@ -1,0 +1,15 @@
+---
+# Source: https://github.com/canonical/seldon-core-operator
+overrides:
+  - requires:
+      ambassador:
+        optional: true  # charm.py::_get_env_vars toggles AMBASSADOR_ENABLED from relation presence
+      gateway-info:
+        optional: true  # charm.py::_get_istio_gateway returns None when relation data is unavailable
+      keda:
+        optional: true  # charm.py::_get_env_vars toggles KEDA_ENABLED from relation presence
+    provides:
+      grafana-dashboard:
+        optional: true  # observability integration; not Seldon Core's primary purpose
+      metrics-endpoint:
+        optional: true  # observability integration; not Seldon Core's primary purpose

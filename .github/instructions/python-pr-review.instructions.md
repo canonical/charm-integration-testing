@@ -24,6 +24,13 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 
 **`JujuClient`** is the single place for high-level orchestration and all logging. It delegates raw operations to the backend and calls extensions in sequence. Logging in a backend or extension is a style violation — it belongs in `JujuClient`.
 
+Keep facade APIs in domain terms. `JujuClient` callers should work with Juju concepts and
+operations, not backend implementation details such as Kubernetes workload instances. Keep
+single-workflow implementation helpers private unless they represent a useful caller-facing
+operation. Tests should verify public behavior without making higher-level test code depend on
+those implementation details. Internal helpers may delegate to the backend when they centralize
+client-level logging or lifecycle behavior; avoid pass-through wrappers without such a responsibility.
+
 **Extensions (`JujuExtension` subclasses)** are wired exclusively through `JujuClient`. They must never be invoked directly from a backend or from test code. Flag any direct extension call that bypasses `JujuClient`.
 
 **`JubilantBackend`** is the active `JujuBackend` implementation. It inherits `JujuCmdBackend` but `JujuCmdBackend` is deprecated. When a new or changed behaviour is needed:

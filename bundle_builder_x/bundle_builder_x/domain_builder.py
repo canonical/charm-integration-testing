@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Converts a SpecFile into a Z3 Domain.
 
@@ -65,11 +53,14 @@ def classify_integrations(
             )
             continue
 
-        remote_model = integration.remote_model
-        if remote_model is None:
+        remote_model_name = integration.remote_model
+        if remote_model_name is None:
             raise ValueError("cross-model integration must have a remote_model")
-        remote_model_key = integration.remote_model_key or remote_model
-        offer_name = integration.resolved_offer_name()
+        remote_model = ModelRef(name=remote_model_name, controller=integration.remote_controller)
+        remote_model_key = remote_model.key
+        # Keep offer_name None if not user-supplied (not resolved_offer_name()'s default),
+        # so domain.py can distinguish a user-declared name from a later-synthesized one.
+        offer_name = integration.offer_name
 
         # Keep the user-supplied URL if provided; otherwise leave as None.
         # extract.py synthesizes the correct URL once it knows the endpoint role
@@ -79,7 +70,7 @@ def classify_integrations(
         # domain is keyed by model_spec.key (which may be controller/name).
         # Fall back to remote_model_key when remote_spec.name is None (unit tests that
         # construct ModelSpec directly without going through SpecFile validation).
-        remote_ref = ModelRef(name=remote_model_key)
+        remote_ref = remote_model
         if remote_model_key in all_models:
             remote_spec = all_models[remote_model_key]
             if remote_spec.name is not None:

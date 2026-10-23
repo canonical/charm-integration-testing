@@ -10,10 +10,8 @@ from juju import JujuVersion
 from bundle_builder_x import (
     AppSpec,
     BundleBuilder,
-    CharmhubClient,
     IntegrationSpec,
     ModelSpec,
-    OverridesClient,
     SpecFile,
 )
 
@@ -22,8 +20,8 @@ from .scheduler.states import State
 
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
+    bundle_builder: BundleBuilder,
     bundle_mermaid_output: Path,
-    charm_overrides: Path,
     logger: logging.Logger,
     juju_cli_version: JujuVersion,
     target_application: str,
@@ -34,6 +32,7 @@ def test_build_bundle(
     target_endpoint: str,
     model: str,
     target_platform: str,
+    target_arch: str,
     target_revision: int | None,
     target_series: str | None,
     neighbor_application: str,
@@ -43,10 +42,8 @@ def test_build_bundle(
     neighbor_endpoint: str,
     neighbor_model: str | None,
     neighbor_platform: str,
+    neighbor_arch: str,
 ) -> None:
-    overrides_client = OverridesClient(overrides=charm_overrides, logger=logger)
-    charmhub_client = CharmhubClient(logger=logger, overrides_client=overrides_client)
-
     target_app_spec = AppSpec(
         charm=target_charm,
         channel=target_channel,
@@ -62,7 +59,7 @@ def test_build_bundle(
                 ModelSpec(
                     name=model,
                     platform=target_platform,
-                    arch="amd64",
+                    arch=target_arch,
                     # TODO: Juju model isn't bootstrapped until later in the test setup,
                     # so we can't resolve the Juju version here. We should refactor to
                     # support the user passing in the juju version for target and neighbor.
@@ -92,7 +89,7 @@ def test_build_bundle(
                 ModelSpec(
                     name=model,
                     platform=target_platform,
-                    arch="amd64",
+                    arch=target_arch,
                     juju=str(juju_cli_version),
                     controller=target_controller,
                     applications={target_application: target_app_spec},
@@ -110,7 +107,7 @@ def test_build_bundle(
                 ModelSpec(
                     name=neighbor_model,
                     platform=neighbor_platform,
-                    arch="amd64",
+                    arch=neighbor_arch,
                     juju=str(juju_cli_version),
                     controller=neighbor_controller,
                     applications={neighbor_application: neighbor_app_spec},
@@ -118,7 +115,6 @@ def test_build_bundle(
             ]
         )
 
-    bundle_builder = BundleBuilder(charmhub_client=charmhub_client, logger=logger)
     solution = bundle_builder.build(spec)
 
     separator = "-" * 80

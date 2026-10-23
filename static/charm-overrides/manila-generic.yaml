@@ -1,3 +1,4 @@
 ---
-# nrpe-external-master does not exist in any published channel of manila-generic
-overrides: []
+# manila-generic: listed on Charmhub, but not currently covered by Charm QA (SQT-1081).
+overrides:
+  - assumes: [unsupported-openstack]

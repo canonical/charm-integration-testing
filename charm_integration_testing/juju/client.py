@@ -2,14 +2,23 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Collection
 from datetime import timedelta
 from pathlib import Path
 
 from validators.base import ValidationResult
 
 from .backend import JujuBackend
+from .bundle_utils import parse_offers_from_bundle, strip_offers_from_bundle, strip_saas_from_bundle
 from .extension import JujuExtension
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .handles import JujuModelHandle
+from .models import (
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuWorkloadInstance,
+)
 from .version import JujuVersion
 
 
@@ -26,17 +35,33 @@ class JujuValidationError(Exception):
         super().__init__(f"Model validation failed with {num_failed_validations} failed validations (units: {units}).")
 
 
+class _JujuCleanupError(RuntimeError):
+    def __init__(self, errors: Collection[Exception]) -> None:
+        self.errors = tuple(errors)
+        details = "; ".join(f"{type(error).__name__}: {error}" for error in self.errors)
+        super().__init__(f"Multiple cleanup operations failed: {details}")
+
+
 class JujuClient:
     backend: JujuBackend
     logger: logging.Logger
     extensions: list[JujuExtension]
 
-    def __init__(self, backend: JujuBackend, logger: logging.Logger, extensions: list[JujuExtension] | None = None):
+    def __init__(
+        self,
+        backend: JujuBackend,
+        logger: logging.Logger,
+        extensions: list[JujuExtension] | None = None,
+    ):
         self.backend = backend
         self.logger = logger
         self.extensions = extensions or []
 
-    def scale_application(self, application: str, num: int, model: str = "default") -> None:
+    def _post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        for extension in self.extensions:
+            extension.post_restart_unit(model, unit)
+
+    def scale_application(self, application: str, num: int, model: JujuModelHandle) -> None:
         self.logger.info(f"Scaling application {application} to {num} units.")
         self.backend.scale_application(model, application, num)
 
@@ -44,9 +69,309 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_scale(model)
 
-    def num_units(self, application: str, model: str = "default") -> int:
+    def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
+        self.logger.info(f"Restarting a follower of {application}.")
+        unit = self.backend.restart_follower(model, application, timeout)
+        self._post_restart_unit(model, unit)
+        self.logger.info(f"Restarted follower {unit}.")
+        return unit
+
+    def reboot_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Rebooting unit {unit}.")
+        self.backend.reboot_unit(model, unit)
+        self.logger.info(f"Reboot request for unit {unit} accepted.")
+
+    def delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        """Delete a workload pod and dispatch its Juju lifecycle hooks."""
+        if not self.backend.is_k8s_model(model):
+            raise ValueError(f"Cannot delete a Kubernetes pod in non-Kubernetes model {model.uri}.")
+        self.backend.delete_workload_instance(model, pod_name)
+        for extension in self.extensions:
+            extension.post_delete_pod(model, pod_name)
+
+    def remove_unit(self, unit: str, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing unit {unit}.")
+        self.backend.remove_unit(model, unit)
+
+        # Call extensions
+        for extension in self.extensions:
+            extension.post_scale(model)
+
+    def num_units(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting the number of units for {application}.")
         return self.backend.num_units(model, application)
+
+    def application_units(self, application: str, model: JujuModelHandle) -> list[str]:
+        self.logger.info(f"Getting the units for {application}.")
+        return self.backend.application_units(model, application)
+
+    def _restart_workload_instance(
+        self,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        model: JujuModelHandle,
+        timeout: timedelta,
+    ) -> str:
+        replacement = self.backend.restart_workload_instance(model, application, instance, existing_ids, timeout)
+        self._post_restart_unit(model, instance.unit)
+        return replacement
+
+    def rotate_application_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        *,
+        related_models: list[JujuModelHandle] | None = None,
+        timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        """Rotate every application unit while preserving capacity across cloud types.
+
+        Kubernetes workloads use one surge replica while all original pods are replaced,
+        because scale-down may select any pod for Deployment-backed workloads.
+        """
+        self.logger.info(f"Rotating all units for {application}.")
+        units = self.application_units(application, model=model)
+        if not units:
+            raise ValueError(f"Cannot rotate units for application {application}: it has no units.")
+        models = list(dict.fromkeys([model, *(related_models or [])]))
+        if self.backend.is_k8s_model(model):
+            self._rotate_kubernetes_units(application, model, units, models, timeout)
+        else:
+            self._rotate_machine_units(application, model, units, models, timeout)
+
+        current_units = self.application_units(application, model=model)
+        if len(current_units) != len(units):
+            raise RuntimeError(f"Expected {len(units)} units after rotation, found {len(current_units)}.")
+        for model_ref in models:
+            self.validate_model(model=model_ref, level="deep")
+
+    def _rotate_kubernetes_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        instances_by_unit = self.backend.ready_workload_instances_by_unit(model, application, units, timeout)
+        original_ids = {instance.identifier for instance in instances_by_unit.values()}
+
+        try:
+            self.scale_application(application, len(units) + 1, model=model)
+            self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
+            self.multi_model_idle_for_period(models, timeout=timeout)
+            for unit in units:
+                instance = instances_by_unit[unit]
+                existing_ids = self.backend.workload_instance_ids(model, application)
+                if instance.identifier not in existing_ids:
+                    raise RuntimeError(f"Workload instance for unit {unit} disappeared before its rotation.")
+
+                self._restart_workload_instance(application, instance, existing_ids, model, timeout)
+                self.backend.wait_for_workload_instances_ready(model, application, len(units) + 1, timeout)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+        except Exception as rotation_error:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) > len(units):
+                    self._restore_kubernetes_unit_count(application, model, len(units), original_ids, models, timeout)
+                elif len(current_units) < len(units):
+                    raise RuntimeError(
+                        f"Expected at least {len(units)} units while recovering from rotation, found "
+                        f"{len(current_units)}."
+                    )
+            except Exception as cleanup_error:
+                raise rotation_error from cleanup_error
+            raise
+        else:
+            self._restore_kubernetes_unit_count(application, model, len(units), original_ids, models, timeout)
+
+        self.backend.wait_for_workload_instances_replaced(model, application, len(units), original_ids, timeout)
+
+    def _restore_kubernetes_unit_count(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        unit_count: int,
+        previous_ids: Collection[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        current_units = self.application_units(application, model=model)
+        if len(current_units) > unit_count:
+            self.backend.wait_for_workload_instances_replaced(
+                model, application, len(current_units), previous_ids, timeout
+            )
+            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
+
+        cleanup_errors: list[Exception] = []
+        try:
+            self.scale_application(application, unit_count, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            self.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+        try:
+            self.backend.wait_for_workload_instances_ready(model, application, unit_count, timeout)
+        except Exception as convergence_error:
+            cleanup_errors.append(convergence_error)
+        try:
+            current_units = self.application_units(application, model=model)
+            if len(current_units) != unit_count:
+                raise RuntimeError(
+                    f"Expected {unit_count} units after restoring Kubernetes capacity, found {len(current_units)}."
+                )
+            self.backend.ready_workload_instances_by_unit(model, application, current_units, timeout)
+        except Exception as mapping_error:
+            cleanup_errors.append(mapping_error)
+
+        self._raise_cleanup_errors(cleanup_errors)
+
+    def _rotate_machine_units(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        units: list[str],
+        models: list[JujuModelHandle],
+        timeout: timedelta,
+    ) -> None:
+        for unit in units:
+            original_units = set(self.application_units(application, model=model))
+            unit_removal_attempted = False
+            try:
+                self.scale_application(application, len(units) + 1, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                unit_removal_attempted = True
+                self.remove_unit(unit, model=model)
+                self.multi_model_idle_for_period(models, timeout=timeout)
+                current_units = self.application_units(application, model=model)
+                if len(current_units) != len(units):
+                    raise RuntimeError(
+                        f"Expected {len(units)} units after rotating {unit}, found {len(current_units)}."
+                    )
+                if unit in current_units:
+                    raise RuntimeError(f"Unit {unit} was not removed after rotation.")
+                for model_ref in models:
+                    self.validate_model(model=model_ref, level="simple")
+            except Exception as rotation_error:
+                try:
+                    self._cleanup_machine_surge(
+                        application,
+                        model,
+                        original_units,
+                        len(units),
+                        models,
+                        unit,
+                        timeout,
+                        unit_removal_attempted,
+                    )
+                except Exception as cleanup_error:
+                    raise rotation_error from cleanup_error
+                raise
+
+    def _cleanup_machine_surge(
+        self,
+        application: str,
+        model: JujuModelHandle,
+        original_units: set[str],
+        unit_count: int,
+        models: list[JujuModelHandle],
+        rotated_unit: str,
+        timeout: timedelta,
+        unit_removal_attempted: bool,
+    ) -> None:
+        cleanup_errors: list[Exception] = []
+        settling_wait_succeeded = True
+        try:
+            self.multi_model_idle_for_period(models, timeout=timeout)
+        except Exception as error:
+            cleanup_errors.append(error)
+            settling_wait_succeeded = False
+        try:
+            current_units = self.application_units(application, model=model)
+        except Exception as error:
+            cleanup_errors.append(error)
+            self._raise_cleanup_errors(cleanup_errors)
+
+        if not settling_wait_succeeded and unit_removal_attempted and rotated_unit in current_units:
+            self._raise_cleanup_errors(cleanup_errors)
+
+        surge_units = [current_unit for current_unit in current_units if current_unit not in original_units]
+        cleanup_changed_state = False
+        if len(current_units) < unit_count:
+            cleanup_changed_state = True
+            try:
+                self.scale_application(application, unit_count, model=model)
+            except Exception as error:
+                cleanup_errors.append(error)
+        elif len(current_units) > unit_count and not surge_units:
+            cleanup_errors.append(
+                RuntimeError(f"Unable to identify a surge unit to remove after rotating {rotated_unit}.")
+            )
+        elif surge_units:
+            surge_unit_count = max(0, len(current_units) - unit_count)
+            for surge_unit in surge_units[:surge_unit_count]:
+                cleanup_changed_state = True
+                try:
+                    self.remove_unit(surge_unit, model=model)
+                except Exception as error:
+                    cleanup_errors.append(error)
+        if cleanup_changed_state or set(current_units) != original_units:
+            try:
+                self.multi_model_idle_for_period(models, timeout=timeout)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_changed_state:
+            try:
+                current_units = self.application_units(application, model=model)
+                if len(current_units) != unit_count:
+                    raise RuntimeError(
+                        f"Expected {unit_count} units after machine cleanup, found {len(current_units)}."
+                    )
+            except Exception as error:
+                cleanup_errors.append(error)
+        self._raise_cleanup_errors(cleanup_errors)
+
+    @staticmethod
+    def _raise_cleanup_errors(errors: list[Exception]) -> None:
+        if errors:
+            if len(errors) > 1:
+                raise _JujuCleanupError(errors) from errors[0]
+            raise errors[0]
+
+    def application_leader(self, application: str, model: JujuModelHandle) -> str:
+        self.logger.info(f"Getting the leader unit for {application}.")
+        return self.backend.application_leader(model, application)
+
+    def wait_for_unit_removal(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of unit {unit}.")
+        self.backend.wait_for_unit_removal(model, unit, timeout)
+
+    def wait_for_unit_unavailable(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become unavailable.")
+        self.backend.wait_for_unit_unavailable(model, unit, timeout)
+
+    def wait_for_unit_available(self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for unit {unit} to become available.")
+        self.backend.wait_for_unit_available(model, unit, timeout)
+
+    def wait_for_unit_restart_completion(
+        self, unit: str, model: JujuModelHandle, timeout: timedelta | None = None
+    ) -> None:
+        """Dispatch the restart hook, then wait for the unit to become available."""
+        self._post_restart_unit(model, unit)
+        self.wait_for_unit_available(unit, model, timeout)
+
+    def ssh(self, unit: str, command: str, model: JujuModelHandle, *, timeout: float | None = None) -> str | None:
+        self.logger.info(f"Running command on unit {unit}: {command}")
+        if timeout is None:
+            return self.backend.ssh(model, unit, command)
+        return self.backend.ssh(model, unit, command, timeout=timeout)
 
     @staticmethod
     def _waiting_timeout_log(timeout: timedelta | None) -> str:
@@ -58,81 +383,177 @@ class JujuClient:
     # Wait for the Juju model to become idle
     def idle_for_period(
         self,
-        model: str = "default",
+        model: JujuModelHandle,
         timeout: timedelta | None = None,
-        count: int = 30,
+        count: int = 10,
         strict_timeout: bool = False,
     ) -> None:
         self.logger.info(f"{self._waiting_timeout_log(timeout)} to be idle.")
         self.backend.wait_idle(model=model, timeout=timeout, count=count, strict_timeout=strict_timeout)
 
-    def print_status(self, model: str = "default") -> None:
+    def multi_model_idle_for_period(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None = None,
+        count: int = 10,
+        strict_timeout: bool = False,
+    ) -> None:
+        if not models:
+            return
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for models {models} to be idle.")
+        self.backend.wait_idle_multi_model(
+            models=models,
+            timeout=timeout,
+            count=count,
+            strict_timeout=strict_timeout,
+        )
+
+    def print_status(self, model: JujuModelHandle) -> None:
         separator = "-" * 80
-        info = f"Juju status for model '{model}'" if model != "default" else "Juju status"
+        info = f"Juju status for model '{model.uri}'"
         self.logger.info(f"{info}:\n{separator}\n{self.backend.juju_status_text(model)}{separator}")
 
-    def debug_log(self, model: str = "default") -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
         """Retrieve the Juju debug log for the model.
 
         Args:
-            model: Juju model name
+            model: Juju model reference
 
         Returns:
             Debug log content as a string
         """
-        self.logger.info(f"Collecting debug log from model {model}")
+        self.logger.info(f"Collecting debug log from model {model.uri}")
         return self.backend.debug_log(model)
 
     def integrate(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
-        model: str = "default",
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        model: JujuModelHandle,
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
-
-        # Integrate
-        self.logger.info(f"Integrating {target_1} with {target_2}.")
-        self.backend.integrate(model, target_1, target_2)
+        self.logger.info(f"Integrating {endpoint_1} with {endpoint_2}.")
+        self.backend.integrate(model, endpoint_1, endpoint_2)
 
     def remove_integration(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
-        model: str = "default",
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        model: JujuModelHandle,
     ) -> None:
-        # Get targets
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
+        # Call extensions
+        for extension in self.extensions:
+            extension.pre_remove_integration(model, endpoint_1, endpoint_2)
 
-        # Remove integration
-        self.logger.info(f"Removing integration between {target_1} and {target_2}.")
-        self.backend.remove_integration(model, target_1, target_2)
+        self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
+        self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
     def deploy_bundle_file(
         self,
         bundle: str,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
-        self.logger.info(f"Deploying bundle file: '{bundle}'")
-        self.backend.deploy_bundle_file(model, bundle, trust=True, force=True)
+        self._deploy_bundle_phase(model, Path(bundle))
 
         # Call extensions
         for extension in self.extensions:
             extension.post_deploy(model)
 
+    def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
+        """Deploy a bundle file directly via the backend, without invoking extensions.
+
+        Used by ``deploy_bundle_file()`` (which invokes extensions itself afterwards) and by
+        ``deploy_bundles()`` (which invokes extensions itself, once per model, after all phases).
+        """
+        self.logger.info(f"Deploying bundle file: '{path}'")
+        self.backend.deploy_bundle_file(model, str(path), trust=True, force=True)
+
+    def deploy_bundles(
+        self,
+        bundles: list[tuple[Path, JujuModelHandle]],
+        tmp_dir: Path,
+    ) -> None:
+        """Deploy one or more bundles using a two-phase strategy that handles CMR and Juju 4+.
+
+        Phase 1 strips the ``saas`` section and any cross-model relations from each bundle so
+        that all applications are deployed before any model tries to consume a remote offer.
+        This avoids the deadlock that arises in bidirectional CMR where both models need the
+        other's offer to already exist.  On Juju 4+, offers are also stripped from phase 1
+        because ``juju offer`` is not idempotent — re-creating an existing offer fails.
+
+        Between the phases (Juju 4+ only), any offers defined in the bundles are created
+        explicitly.  Offers that already exist are logged and skipped, making this step safe
+        for re-runs (idempotent redeploy).
+
+        Phase 2 re-deploys with the ``saas`` sections so that cross-model relations are
+        established against the offers created between the phases.  On Juju 4+, the offer
+        definitions are stripped from the phase-2 bundles because the offers are already
+        present from the between-phase step and re-declaring them would fail.
+
+        Extensions are only invoked once per model, after phase 2, so they never see the
+        deliberately incomplete phase-1 topology.
+
+        Args:
+            bundles: List of ``(bundle_path, model)`` pairs.
+            tmp_dir: Directory in which to write the transformed phase bundle files.
+        """
+        juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Phase 1: deploy apps without any offers or saas consumption.
+        for i, (bundle_path, model) in enumerate(bundles):
+            bundle_yaml = bundle_path.read_text(encoding="utf-8")
+            if juju4:
+                # On Juju 4, also strip offers so that phase 1 is idempotent when offers
+                # already exist from a previous deploy run.
+                phase1_yaml = strip_offers_from_bundle(strip_saas_from_bundle(bundle_yaml))
+            else:
+                phase1_yaml = strip_saas_from_bundle(bundle_yaml)
+            phase1_path = tmp_dir / f"apps-only-bundle-{i}.yaml"
+            phase1_path.write_text(phase1_yaml, encoding="utf-8")
+            self._deploy_bundle_phase(model, phase1_path)
+
+        # Between phases (Juju 4+ only): create offers that do not yet exist.
+        # juju offer fails if the offer already exists, so we check first and skip any that
+        # are already in place from a prior deploy run.
+        if juju4:
+            for bundle_path, model in bundles:
+                bundle_yaml = bundle_path.read_text(encoding="utf-8")
+                offers = parse_offers_from_bundle(bundle_yaml)
+                if not offers:
+                    continue
+                existing_offers = self.backend.list_offers(model)
+                for offer_name, offer_info in offers.items():
+                    if offer_name in existing_offers:
+                        self.logger.info(f"Offer {offer_name} already exists in {model.uri}, skipping creation.")
+                    else:
+                        self.logger.info(f"Creating offer {offer_name} ({offer_info.app}) in {model.uri}.")
+                        self.backend.create_offer(model, offer_info.app, offer_info.endpoints, offer_name)
+
+        # Phase 2: re-deploy to establish cross-model relations via the saas sections.
+        # On Juju 4+, strip offers from the bundles — the offers already exist from the
+        # between-phase step and re-declaring them would fail.
+        for i, (bundle_path, model) in enumerate(bundles):
+            if juju4:
+                bundle_yaml = bundle_path.read_text(encoding="utf-8")
+                phase2_yaml = strip_offers_from_bundle(bundle_yaml)
+                phase2_path = tmp_dir / f"phase2-bundle-{i}.yaml"
+                phase2_path.write_text(phase2_yaml, encoding="utf-8")
+                self._deploy_bundle_phase(model, phase2_path)
+            else:
+                self._deploy_bundle_phase(model, bundle_path)
+
+        # Call extensions once per model, now that every model reflects its final, fully-related
+        # topology (dict.fromkeys preserves first-seen order while de-duplicating models).
+        for model in dict.fromkeys(model for _, model in bundles):
+            for extension in self.extensions:
+                extension.post_deploy(model)
+
     def refresh_application(
         self,
         application: str,
+        model: JujuModelHandle,
         revision: int | None = None,
         channel: str | None = None,
-        model: str = "default",
     ) -> None:
         options: list[str] = []
         if revision is not None:
@@ -143,7 +564,7 @@ class JujuClient:
         self.logger.info(f"Refreshing application {application}{options_suffix}.")
         self.backend.refresh_application(model, application, revision=revision, channel=channel)
 
-    def remove_applications(self, *applications: str, model: str = "default") -> None:
+    def remove_applications(self, *applications: str, model: JujuModelHandle) -> None:
         # Call extensions
         for extension in self.extensions:
             extension.pre_remove(model, *applications)
@@ -151,7 +572,7 @@ class JujuClient:
         self.logger.info(f"Removing applications: {', '.join(applications)}.")
         self.backend.remove_applications(model, *applications)
 
-    def wait_for_removal(self, *applications: str, model: str = "default", timeout: timedelta | None = None) -> None:
+    def wait_for_removal(self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of application(s) {', '.join(applications)}."
         )
@@ -159,57 +580,68 @@ class JujuClient:
 
     def wait_for_removal_of_integration(
         self,
-        application_1: str,
-        application_2: str,
-        endpoint_1: str,
-        endpoint_2: str,
-        model: str = "default",
+        endpoint_1: JujuIntegrationApplication,
+        endpoint_2: JujuIntegrationApplication,
+        model: JujuModelHandle,
         timeout: timedelta | None = None,
     ) -> None:
-        target_1 = JujuIntegrationApplication(application_1, endpoint_1)
-        target_2 = JujuIntegrationApplication(application_2, endpoint_2)
         self.logger.info(
-            f"{self._waiting_timeout_log(timeout)} for removal of integration between {target_1} and {target_2}."
+            f"{self._waiting_timeout_log(timeout)} for removal of integration between "
+            f"{endpoint_1} and {endpoint_2}."
         )
-        self.backend.wait_for_removal_of_integration(model, target_1, target_2, timeout)
+        self.backend.wait_for_removal_of_integration(model, endpoint_1, endpoint_2, timeout)
+
+    def remove_saas(self, alias: str, *, model: JujuModelHandle) -> None:
+        self.logger.info(f"Removing SAAS proxy (if any) named {alias!r}.")
+        self.backend.remove_saas(model, alias)
+
+    def wait_for_removal_of_saas(self, alias: str, *, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(f"{self._waiting_timeout_log(timeout)} for removal of SAAS proxy {alias!r}.")
+        self.backend.wait_for_removal_of_saas(model, alias, timeout)
 
     def wait_for_removal_of_units(
-        self, *applications: str, model: str = "default", timeout: timedelta | None = None
+        self, *applications: str, model: JujuModelHandle, timeout: timedelta | None = None
     ) -> None:
         self.logger.info(
             f"{self._waiting_timeout_log(timeout)} for removal of all units of application(s) {', '.join(applications)}."
         )
         self.backend.wait_for_removal_of_units(model, list(applications), timeout)
 
-    def wait_for_model_to_exist(self, model: str = "default", timeout: timedelta | None = None) -> None:
-        self.logger.info(f"Waiting {self._waiting_timeout_log(timeout)} for model {model} to exist before continuing.")
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None = None) -> None:
+        self.logger.info(
+            f"Waiting {self._waiting_timeout_log(timeout)} for model {model.uri} to exist before continuing."
+        )
         self.backend.wait_for_model_to_exist(model=model, timeout=timeout)
 
-    def application_exists(self, application: str, model: str = "default") -> bool:
+    def application_exists(self, application: str, model: JujuModelHandle) -> bool:
         self.logger.info(f"Checking that application exists: {application}.")
         return application in self.backend.list_applications(model)
 
     def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str = "default"
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: JujuModelHandle
     ) -> bool:
         self.logger.info(
             f"Checking that integration exists: {application_1}:{endpoint_1}/{application_2}:{endpoint_2}."
         )
         return self.backend.integration_exists(application_1, endpoint_1, application_2, endpoint_2, model)
 
-    def list_applications(self, model: str = "default") -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         self.logger.info("Getting list of applications.")
         return self.backend.list_applications(model)
 
-    def list_consumed_offers(self, model: str = "default") -> dict[str, JujuConsumedOfferInfo]:
+    def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
         self.logger.info("Getting list of consumed offers.")
         return self.backend.list_consumed_offers(model)
 
-    def application_revision(self, application: str, model: str = "default") -> int:
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        self.logger.info(f"Resolving application behind consumed offer '{offer.url}'.")
+        return self.backend.resolve_consumed_offer_application(offer)
+
+    def application_revision(self, application: str, model: JujuModelHandle) -> int:
         self.logger.info(f"Getting charm revision for application '{application}'.")
         applications = self.backend.list_applications(model)
         if application not in applications:
-            raise KeyError(f"Application '{application}' not found in model '{model}'")
+            raise KeyError(f"Application '{application}' not found in model '{model.uri}'")
         return applications[application].revision
 
     def wait_for_application_revision(
@@ -217,22 +649,22 @@ class JujuClient:
         application: str,
         expected_revision: int,
         timeout: timedelta | None,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         self.logger.info(
             f"Waiting {timeout} for application '{application}' to reach charm revision {expected_revision}."
         )
         self.backend.wait_for_application_revision(application, expected_revision, timeout, model)
 
-    def list_integrations(self, model: str = "default") -> set[JujuIntegration]:
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         self.logger.info("Getting list of integrations.")
         return self.backend.list_integrations(model)
 
-    def reboot_model_controller(self, model: str = "default") -> None:
+    def reboot_model_controller(self, model: JujuModelHandle) -> None:
         self.logger.info("Restarting model controller.")
         return self.backend.reboot_model_controller(model)
 
-    def version(self, model: str = "default") -> JujuVersion:
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         self.logger.info("Collecting Juju model version.")
         return self.backend.version(model)
 
@@ -240,41 +672,100 @@ class JujuClient:
         self.logger.info("Collecting Juju CLI version.")
         return self.backend.cli_version()
 
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
         version_suffix = f" to agent version '{agent_version}'" if agent_version else ""
-        self.logger.info(f"Upgrading model '{model}'{version_suffix}.")
+        self.logger.info(f"Upgrading model '{model.uri}'{version_suffix}.")
         self.backend.upgrade_model(model=model, agent_version=agent_version)
 
-    def validate_model(self, model: str = "default", level: str = "simple") -> None:
-        """Validate all applications in the model.
+    def check_application_health(self, model: JujuModelHandle, application: str) -> None:
+        """Reject errored, blocked, terminated or unknown workloads and disconnected, errored or unknown agents."""
+        self.logger.info("Checking application health for %s/%s.", model.uri, application)
+        health = self.backend.application_health(model, application)
+        if not health.units or set(health.units) != set(health.agents):
+            raise RuntimeError(f"Incomplete unit health for {model.uri}/{application}.")
+        if (
+            health.status in {"", "error", "blocked", "terminated", "unknown"}
+            or any(status in {"", "error", "blocked", "terminated", "unknown"} for status in health.units.values())
+            or any(status in {"", "error", "lost", "down", "unknown"} for status in health.agents.values())
+        ):
+            raise RuntimeError(f"Unhealthy application {model.uri}/{application}: {health}")
+
+    def validate_model(
+        self,
+        model: JujuModelHandle,
+        level: str | None = "simple",
+        *,
+        applications: list[str] | None = None,
+        endpoints: set[tuple[str, str]] | None = None,
+        excluded_units: set[str] | None = None,
+    ) -> dict[str, list[ValidationResult]]:
+        """Validate selected or all applications, and run the persistence lifecycle.
 
         In Phase 2, this will trigger the Ops framework's native validation.
         In Phase 1, this calls the backend (no-op) then extensions (actual work).
 
         Args:
-            model: Juju model name
-            level: Validation level ("simple" or "deep", default: "simple")
+            model: Juju model reference
+            level: Validation level ("simple" or "deep"), or None to skip functional validation
+                entirely (e.g. when only running a persistence op).
+            applications: Application names to validate; None selects all applications.
+            endpoints: (application, endpoint) pairs whose functional results count toward validation.
+                None includes all endpoints.
+            excluded_units: Units to skip during functional and persistence validation.
+
+        Returns:
+            Functional validation results by unit, excluding persistence results.
 
         Raises:
-            JujuValidationError: If any validation checks fail.
+            JujuValidationError: If any validation or persistence checks fail.
         """
         # Collect applications for validators
-        applications = self.backend.list_applications(model)
+        if applications is None:
+            applications = list(self.backend.list_applications(model))
         self.logger.info(f"Running validators on {len(applications)} applications (level={level})")
 
         # Run validators on each application
         failed_validations: dict[str, list[ValidationResult]] = {}
+        functional_results: dict[str, list[ValidationResult]] = {}
+        persistence_operations = [(extension, extension.persistence_operation(model)) for extension in self.extensions]
         for application in applications:
             results: dict[str, list[ValidationResult]] = {}
 
-            # Phase 2: This will trigger Ops framework validation
-            # Phase 1: This is a no-op, just a placeholder
-            for unit, unit_results in self.backend.validate_application(model, application, level).items():
-                results.setdefault(unit, []).extend(unit_results)
+            if level is not None:
+                # Phase 2: This will trigger Ops framework validation
+                # Phase 1: This is a no-op, just a placeholder
+                for unit, unit_results in self.backend.validate_application(model, application, level).items():
+                    if excluded_units is None or unit not in excluded_units:
+                        results.setdefault(unit, []).extend(unit_results)
 
-            # Call extensions (Phase 1 validation happens here)
-            for extension in self.extensions:
-                for unit, unit_results in extension.post_validate(model, application, level).items():
+                # Call extensions (Phase 1 validation happens here)
+                for extension in self.extensions:
+                    if excluded_units is None:
+                        extension_results = extension.post_validate(model, application, level)
+                    else:
+                        extension_results = extension.post_validate_excluding_units(
+                            model, application, level, excluded_units
+                        )
+                    for unit, unit_results in extension_results.items():
+                        results.setdefault(unit, []).extend(unit_results)
+
+            if endpoints is not None:
+                results = {
+                    unit: [result for result in unit_results if (application, result.endpoint) in endpoints]
+                    for unit, unit_results in results.items()
+                }
+
+            for unit, unit_results in results.items():
+                functional_results.setdefault(unit, []).extend(unit_results)
+
+            for extension, persistence_operation in persistence_operations:
+                if excluded_units is None:
+                    persistence_results = extension.post_persistence(model, application, persistence_operation)
+                else:
+                    persistence_results = extension.post_persistence_excluding_units(
+                        model, application, persistence_operation, excluded_units
+                    )
+                for unit, unit_results in persistence_results.items():
                     results.setdefault(unit, []).extend(unit_results)
 
             if not results:
@@ -315,6 +806,7 @@ class JujuClient:
         # Raise exception for any failed validation results
         if sum(len(results) for results in failed_validations.values()) > 0:
             raise JujuValidationError(failed_validations)
+        return functional_results
 
     def bootstrap_controller(
         self,
@@ -325,6 +817,8 @@ class JujuClient:
         agent_version: str | None = None,
         metadata_source: Path | None = None,
     ) -> None:
+        for extension in self.extensions:
+            bootstrap_configuration = extension.pre_bootstrap_controller(cloud, controller, bootstrap_configuration)
         version_suffix = f" at agent version '{agent_version}'" if agent_version else ""
         self.logger.info(
             f"Bootstrapping Juju controller in cloud '{cloud}' with name '{controller}'{version_suffix}, "
@@ -343,16 +837,26 @@ class JujuClient:
         for extension in self.extensions:
             extension.post_bootstrap_controller(controller)
 
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
+        for extension in self.extensions:
+            model_config = extension.pre_add_model(controller, model, model_config, cloud)
+        cloud_suffix = f" on cloud '{cloud}'" if cloud else ""
         self.logger.info(
-            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}' and switching to it."
+            f"Creating model '{model}' with configuration '{model_config}' on controller '{controller}'{cloud_suffix}."
         )
-        self.backend.add_model(controller=controller, model=model, model_config=model_config)
-        self.backend.switch(controller=controller, model=model)
+        self.backend.add_model(controller=controller, model=model, model_config=model_config, cloud=cloud)
 
         # Call extensions
         for extension in self.extensions:
-            extension.post_add_model(controller, model)
+            extension.post_add_model_with_cloud(controller, model, cloud)
+
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' on controller '{controller}'.")
+        self.backend.add_cloud(cloud=cloud, controller=controller)
+
+    def register_cloud(self, cloud: str) -> None:
+        self.logger.info(f"Registering cloud '{cloud}' with the Juju client.")
+        self.backend.register_cloud(cloud=cloud)
 
     def kill_controller(self, controller: str) -> None:
         self.logger.info(f"Killing controller '{controller}'.")

@@ -6,7 +6,8 @@
 # grpc (provides): REQUIRED - primary purpose of the charm.
 # mysql (requires): optional - revision 66 src/charm.py falls back to a local sqlite config when no mysql relation is present (lines 71-80).
 # logging (requires): optional - modern tracks only instantiate LogForwarder.
-# velero-backup-config (provides): optional - backup integration hook; no Charmhub velero consumer; charm reaches active without it.
+# velero-backup-config (provides): not declared here - only present on ckf-1.10's 24.04 base (rev 425), not
+#   its 20.04 base (rev 316); overrides can't discriminate by base, so it's left to fall to the no-criteria block.
 overrides:
   - criteria:
       - any_of:
@@ -25,8 +26,6 @@ overrides:
     provides:
       grpc:
         features: [mlmd-grpc]
-      velero-backup-config:
-        optional: true
     constraints:
       - '"mlmd-grpc" in features(endpoint[grpc])'
   - provides:

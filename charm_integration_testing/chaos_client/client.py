@@ -1,0 +1,51 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+import shlex
+from datetime import timedelta
+
+from juju import JujuBackend, JujuModelHandle
+
+from .backend import ChaosClient, IoLatencyInjection
+
+
+class NativeChaosClient(ChaosClient):
+    _SUPPORTED_OPERATIONS = frozenset({"fill_disk", "stress_cpu", "stress_memory"})
+
+    def __init__(self, juju_backend: JujuBackend):
+        self._juju = juju_backend
+
+    def supports(self, operation: str) -> bool:
+        return operation in self._SUPPORTED_OPERATIONS
+
+    def fill_disk(self, model: JujuModelHandle, unit: str, path: str, size_mb: int) -> None:
+        self._juju.exec_unit(model, unit, f"fallocate -l {size_mb}M -- {shlex.quote(path)}")
+
+    def stress_cpu(self, model: JujuModelHandle, unit: str, workers: int, duration: timedelta) -> None:
+        seconds = int(duration.total_seconds())
+        self._juju.exec_unit(model, unit, f"stress-ng --cpu {workers} --timeout {seconds}s")
+
+    def stress_memory(self, model: JujuModelHandle, unit: str, workers: int, size_mb: int, duration: timedelta) -> None:
+        seconds = int(duration.total_seconds())
+        self._juju.exec_unit(model, unit, f"stress-ng --vm {workers} --vm-bytes {size_mb}M --timeout {seconds}s")
+
+    def io_latency(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        volume_path: str,
+        delay: timedelta,
+        percent: int,
+        duration: timedelta,
+    ) -> IoLatencyInjection:
+        raise NotImplementedError
+
+    def cleanup(self, model: JujuModelHandle, unit: str, path: str) -> None:
+        self._juju.exec_unit(model, unit, f"rm -f -- {shlex.quote(path)}")
+        self._juju.exec_unit(model, unit, "pkill -f stress-ng || true")
+
+    def isolate_network(self, model: str, unit: str) -> None:
+        raise NotImplementedError
+
+    def remove_network_isolation(self, model: str, unit: str) -> None:
+        raise NotImplementedError

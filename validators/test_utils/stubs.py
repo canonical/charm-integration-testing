@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -22,13 +10,21 @@ class SecretStub:
     """Stub for ops.Secret"""
 
     _content: dict[str, str]
+    refresh_calls: list[bool] = field(default_factory=list, init=False)
 
-    def get_content(self) -> dict[str, str]:
+    def get_content(self, *, refresh: bool = False) -> dict[str, str]:
+        self.refresh_calls.append(refresh)
         return self._content
 
 
 class ApplicationStub:
-    """Stub for ops.Application"""
+    """Stub for ops.Application.
+
+    A plain class (not dataclass) so that instances are hashable by identity,
+    matching the behaviour of real ops.Application objects used as relation.data keys."""
+
+    def __init__(self, name: str = "app") -> None:
+        self.name = name
 
 
 class UnitStub:
@@ -37,8 +33,12 @@ class UnitStub:
     A plain class (not dataclass) so that instances are hashable by identity,
     matching the behaviour of real ops.Unit objects used as relation.data keys."""
 
-    def __init__(self, name: str = "unit/0") -> None:
+    def __init__(self, name: str = "unit/0", *, leader: bool = True) -> None:
         self.name = name
+        self._leader = leader
+
+    def is_leader(self) -> bool:
+        return self._leader
 
 
 @dataclass
@@ -65,6 +65,9 @@ class ModelStub:
     _secrets: dict[str, dict[str, str]] = field(default_factory=dict)
     requested_ids: list[str] = field(default_factory=list)
     relations: dict[str, list[RelationStub]] = field(default_factory=dict)
+    name: str = "test-model"
+    uuid: str = "11111111-1111-1111-1111-111111111111"
+    unit: UnitStub = field(default_factory=lambda: UnitStub("app/0"))
 
     def get_secret(self, id: str) -> SecretStub:  # noqa: A002
         self.requested_ids.append(id)
@@ -89,6 +92,7 @@ class RelationMetaStub:
     relation_name: str
     interface_name: str | None = None
     role: RelationRoleStub = field(default_factory=lambda: RelationRoleStub.requires)
+    optional: bool = False
 
 
 @dataclass
@@ -104,6 +108,8 @@ class CharmBaseStub:
 
     meta: CharmMetaStub = field(default_factory=CharmMetaStub)
     model: ModelStub = field(default_factory=ModelStub)
+    unit: UnitStub = field(default_factory=lambda: UnitStub("app/0"))
+    app: ApplicationStub = field(default_factory=ApplicationStub)
 
     @property
     def requested_ids(self) -> list[str]:

@@ -2,8 +2,8 @@
 # Source: https://github.com/canonical/catalogue-k8s-operator
 #
 # No endpoints have optional: true set upstream in any track.
-# Tracks 2 and dev additionally add service-mesh, require-cmr-mesh (requires)
-# and provide-cmr-mesh (provides).
+# Tracks 2, 3.0 and dev additionally add service-mesh, require-cmr-mesh
+# (requires) and provide-cmr-mesh (provides).
 #
 # ingress (requires): optional - charm falls back to internal FQDN when absent (charm.py: _ingress.url or _internal_url)
 # certificates (requires): optional - TLS gated by _tls_available, charm reaches active without it
@@ -17,6 +17,7 @@ overrides:
   - criteria:
       - any_of:
           - track: '2'
+          - track: '3.0'
           - track: dev
     requires:
       catalogue-item:

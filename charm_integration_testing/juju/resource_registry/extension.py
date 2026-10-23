@@ -1,12 +1,18 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from resource_registry import ResourceRegistry
 
-from juju.backend import JujuBackend
 from juju.extension import JujuExtension
 
-from .handles import JujuControllerHandle, JujuModelHandle
+from ..handles import JujuControllerHandle, JujuModelHandle
+
+if TYPE_CHECKING:
+    from juju.backend import JujuBackend
 
 
 class JujuResourceRegistryExtension(JujuExtension):
@@ -28,7 +34,7 @@ class JujuResourceRegistryExtension(JujuExtension):
             destroyer=lambda: self._backend.kill_controller(controller=controller),
         )
 
-    def post_add_model(self, controller: str, model: str) -> None:
+    def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
         controller_handle = JujuControllerHandle(controller=controller)
         if not self._registry.is_registered(controller_handle):
             # Controller pre-existed this session: register it with no destroyer so logs

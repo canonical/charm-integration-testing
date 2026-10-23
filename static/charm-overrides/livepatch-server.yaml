@@ -1,0 +1,8 @@
+---
+# Source: https://github.com/canonical/livepatch-server
+#
+# nrpe-external-master (provides): optional - no Charmhub nrpe consumer; monitoring hook, not primary purpose.
+overrides:
+  - provides:
+      nrpe-external-master:
+        optional: true

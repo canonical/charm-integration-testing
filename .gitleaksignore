@@ -1,0 +1,4 @@
+# Historical false positive: this commit added `private_key=key_bytes` without
+# an inline allow directive. The current source line is annotated, so future
+# edits or moves of that line should not require another fingerprint update.
+e1fb6e8f87c78d1711a07c271ce35680e8944078:validators/etcd_client/validator.py:generic-api-key:1410

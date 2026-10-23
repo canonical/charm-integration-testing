@@ -1,0 +1,10 @@
+---
+# Source: https://github.com/canonical/oauth2-proxy-k8s-operator
+#
+# oauth (requires): src/integrations.py:OAuthIntegrationData always consumes
+# the provider's issuer_url as HTTPS, so this endpoint must match providers
+# (e.g. hydra) that declare `features: [tls]`. See issue 599.
+overrides:
+  - requires:
+      oauth:
+        features: [tls]

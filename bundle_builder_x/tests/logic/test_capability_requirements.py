@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Logic tests for capability requirements (feature-based endpoint selection).
 
@@ -32,10 +20,11 @@ is integrated.
 import pytest
 
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import CharmEndpoint, EndpointType
-from bundle_builder_x.spec import AppSpec
+from bundle_builder_x.bundle_diagnostics import FeatureMismatchDiagnostic
+from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointType
+from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
-from .conftest import CharmhubClientStub, build_single_model, make_charm
+from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
 
 
 class TestCapabilityRequirements:
@@ -192,3 +181,289 @@ class TestCapabilityRequirements:
         charm_names = {a.charm.name for a in bundle.applications.values()}
         providers_added = charm_names & {"postgresql-a", "postgresql-b"}
         assert len(providers_added) >= 1
+
+
+class TestFeatureCoherenceCrossModelConsistency:
+    """SQT-1038 regression: feature coherence must be enforced the same way
+    regardless of whether an integration is local or cross-model.
+
+    Two charms that each unconditionally self-tag their own endpoint with a
+    feature the *other* endpoint doesn't declare (e.g. katib-db-manager's
+    "katib-service" tag vs. kfp-persistence's "kfp-api" tag) have mismatched,
+    mutually-exclusive feature requirements. That mismatch is a real modeling
+    conflict and must be rejected consistently in both topologies - it must
+    not silently succeed only because the integration happens to be cross-model.
+    """
+
+    @staticmethod
+    def _make_mismatched_charms() -> tuple[Charm, Charm]:
+        # Provider self-tags its endpoint with "provider-tag", unconditionally required.
+        provider = make_charm(
+            "provider-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="generic",
+                    optional=True,
+                    features=frozenset({"provider-tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "provider-tag" in features(endpoint[svc])'],
+        )
+        # Requirer self-tags its endpoint with a different, mutually exclusive tag.
+        requirer = make_charm(
+            "requirer-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="generic",
+                    optional=False,
+                    features=frozenset({"requirer-tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "requirer-tag" in features(endpoint[svc])'],
+        )
+        return provider, requirer
+
+    def test_mismatched_self_tags_fail_in_single_model(self) -> None:
+        # GIVEN two charms whose unconditional self-tag assertions conflict
+        provider, requirer = self._make_mismatched_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building both applications into the same model
+        # THEN the solver correctly rejects the mismatch
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(
+                builder,
+                applications={
+                    "requirer": AppSpec(charm="requirer-app"),
+                    "provider": AppSpec(charm="provider-app"),
+                },
+                integrations=[
+                    IntegrationSpec(
+                        application="requirer",
+                        endpoint="svc",
+                        remote_application="provider",
+                        remote_endpoint="svc",
+                    ),
+                ],
+            )
+
+    def test_mismatched_self_tags_fail_across_models(self) -> None:
+        # GIVEN the same mismatched charms, but integrated across two separate models (CMR)
+        provider, requirer = self._make_mismatched_charms()
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building with the integration expressed as a cross-model relation
+        # THEN the solver must reject the mismatch just as it does in the single-model case -
+        # this must NOT silently succeed just because the integration is cross-model.
+        with pytest.raises(UncompletableBundleError):
+            build_multi_model(
+                builder,
+                [
+                    ModelSpec(
+                        name="target",
+                        controller="k8s",
+                        platform="kubernetes",
+                        juju=JUJU_VERSION,
+                        applications={"requirer": AppSpec(charm="requirer-app")},
+                        integrations=[
+                            IntegrationSpec(
+                                application="requirer",
+                                endpoint="svc",
+                                remote_model="neighbor",
+                                remote_controller="k8s",
+                                remote_application="provider",
+                                remote_endpoint="svc",
+                                offer_name="provider-offer",
+                            ),
+                        ],
+                    ),
+                    ModelSpec(
+                        name="neighbor",
+                        controller="k8s",
+                        platform="kubernetes",
+                        juju=JUJU_VERSION,
+                        applications={"provider": AppSpec(charm="provider-app")},
+                    ),
+                ],
+            )
+
+
+class TestFeatureMismatchDiagnostics:
+    """FeatureMismatchDiagnostic must surface all three ways the
+    feature-coherence check (SQT-1038) can fail, so the failure is diagnosable instead of
+    falling back to the generic "Cannot expand domain..." message:
+
+    1. requires-only: the requires endpoint declares a feature the provides endpoint doesn't.
+    2. provides-only: the provides endpoint declares a feature the requires endpoint doesn't.
+    3. value-conflict: both endpoints declare the *same* feature name, but other constraints
+       force their booleans to disagree.
+    """
+
+    def test_requires_only_mismatch_is_reported(self) -> None:
+        # GIVEN a requires endpoint that needs feature "admin"...
+        temporal = make_charm(
+            "temporal-k8s",
+            endpoints={
+                "admin": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="temporal",
+                    optional=False,
+                    features=frozenset({"admin"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[admin]) => features(endpoint[admin]) == {"admin"}'],
+        )
+        # ...and the only available provider declares a different feature ("ui"), not "admin".
+        temporal_ui = make_charm(
+            "temporal-ui-k8s",
+            endpoints={
+                "temporal": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="temporal",
+                    optional=True,
+                    features=frozenset({"ui"}),
+                ),
+            },
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(temporal, temporal_ui))
+
+        # WHEN building fails because of the mismatch
+        with pytest.raises(UncompletableBundleError) as exc_info:
+            build_single_model(
+                builder,
+                applications={"temporal": AppSpec(charm="temporal-k8s")},
+            )
+
+        # THEN the error reports the requires/provides endpoints and the missing feature
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
+        assert any(
+            m.requires.charm_name == "temporal-k8s"
+            and m.requires.endpoint == "admin"
+            and m.provides.charm_name == "temporal-ui-k8s"
+            and m.provides.endpoint == "temporal"
+            and m.feature == "admin"
+            for m in mismatches
+        )
+
+    def test_provides_only_mismatch_is_reported(self) -> None:
+        # GIVEN a provider that unconditionally self-tags its endpoint with "provider-tag"...
+        provider = make_charm(
+            "provider-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="generic",
+                    optional=True,
+                    features=frozenset({"provider-tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "provider-tag" in features(endpoint[svc])'],
+        )
+        # ...and the only requirer declares no feature requirement at all on that endpoint.
+        requirer = make_charm(
+            "requirer-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="generic",
+                    optional=False,
+                ),
+            },
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building fails because of the mismatch
+        with pytest.raises(UncompletableBundleError) as exc_info:
+            build_single_model(
+                builder,
+                applications={
+                    "requirer": AppSpec(charm="requirer-app"),
+                    "provider": AppSpec(charm="provider-app"),
+                },
+                integrations=[
+                    IntegrationSpec(
+                        application="requirer",
+                        endpoint="svc",
+                        remote_application="provider",
+                        remote_endpoint="svc",
+                    ),
+                ],
+            )
+
+        # THEN the error reports the requires/provides endpoints and the unmatched feature
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
+        assert any(
+            m.requires.charm_name == "requirer-app"
+            and m.requires.endpoint == "svc"
+            and m.provides.charm_name == "provider-app"
+            and m.provides.endpoint == "svc"
+            and m.feature == "provider-tag"
+            for m in mismatches
+        )
+
+    def test_value_conflict_mismatch_is_reported(self) -> None:
+        # GIVEN both endpoints declare the SAME feature name ("tag"), but their own
+        # constraints force it to different truth values when the integration exists:
+        # the provider requires it active, the requirer requires it inactive.
+        provider = make_charm(
+            "provider-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.PROVIDES,
+                    interface="generic",
+                    optional=True,
+                    features=frozenset({"tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => "tag" in features(endpoint[svc])'],
+        )
+        requirer = make_charm(
+            "requirer-app",
+            endpoints={
+                "svc": CharmEndpoint(
+                    type=EndpointType.REQUIRES,
+                    interface="generic",
+                    optional=False,
+                    features=frozenset({"tag"}),
+                ),
+            },
+            constraint_strs=['bool(endpoint[svc]) => not ("tag" in features(endpoint[svc]))'],
+        )
+        builder = BundleBuilder(charmhub_client=CharmhubClientStub(provider, requirer))
+
+        # WHEN building fails because the two endpoints' shared feature is forced to conflict
+        with pytest.raises(UncompletableBundleError) as exc_info:
+            build_single_model(
+                builder,
+                applications={
+                    "requirer": AppSpec(charm="requirer-app"),
+                    "provider": AppSpec(charm="provider-app"),
+                },
+                integrations=[
+                    IntegrationSpec(
+                        application="requirer",
+                        endpoint="svc",
+                        remote_application="provider",
+                        remote_endpoint="svc",
+                    ),
+                ],
+            )
+
+        # THEN the error reports the requires/provides endpoints and the conflicting feature
+        mismatches = [
+            diagnostic for diagnostic in exc_info.value.diagnostics if isinstance(diagnostic, FeatureMismatchDiagnostic)
+        ]
+        assert any(
+            m.requires.charm_name == "requirer-app"
+            and m.requires.endpoint == "svc"
+            and m.provides.charm_name == "provider-app"
+            and m.provides.endpoint == "svc"
+            and m.feature == "tag"
+            for m in mismatches
+        )

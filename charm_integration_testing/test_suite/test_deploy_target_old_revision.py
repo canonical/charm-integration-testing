@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from juju import JujuClient
+from juju import JujuClient, JujuModelHandle
 
 from .scheduler.states import State
 
@@ -41,7 +41,8 @@ def _create_bundle_with_revision_override(
 def test_deploy_target_old_revision(
     juju_client: JujuClient,
     target_downgrade_revision: int,
-    model: str,
+    target_model_ref: JujuModelHandle,
+    neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_charm: str,
     tmp_path: Path,
@@ -61,18 +62,22 @@ def test_deploy_target_old_revision(
     )
 
     # Deploy the original bundle with only the target app revision overridden
-    juju_client.deploy_bundle_file(str(overridden_bundle), model=model)
+    juju_client.deploy_bundle_file(str(overridden_bundle), model=target_model_ref)
 
-    # Wait until idle
-    juju_client.idle_for_period(model=model, timeout=timedelta(minutes=15))
+    models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
+
+    # Wait for return to idle
+    juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
 
     # Verify the application is deployed at the target revision and the model is healthy
-    deployed_revision = juju_client.application_revision(application=target_application, model=model)
+    deployed_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
     if deployed_revision != target_downgrade_revision:
         pytest.fail(
             f"Expected '{target_application}' to be deployed at revision {target_downgrade_revision}, "
             f"got {deployed_revision}."
         )
 
-    # Validate all applications and relations
-    juju_client.validate_model(model=model, level="simple")
+    # Validate all applications and relations, seeding canary data for later persistence checks.
+    # For a CMR the persistence validator lives on the neighbor's requirer units, so validate there too.
+    for model_ref in models_to_validate:
+        juju_client.validate_model(model=model_ref, level="simple")

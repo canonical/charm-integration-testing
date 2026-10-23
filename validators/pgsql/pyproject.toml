@@ -1,0 +1,35 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-pgsql"
+version = "0.1.0"
+description = "Validator for pgsql interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg2-binary>=2.9.0",
+    "validators-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "validators-test-utils",
+    "types-psycopg2>=2.9.21.20260422,<3",
+]
+
+[project.entry-points."endpoint_validators"]
+pgsql = "validators.pgsql:PgsqlValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.pgsql"]
+
+[tool.setuptools.package-dir]
+"validators.pgsql" = "."

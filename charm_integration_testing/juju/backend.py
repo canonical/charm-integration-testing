@@ -3,7 +3,7 @@
 
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
@@ -14,11 +14,23 @@ from pydantic.dataclasses import dataclass
 
 from validators.base.validator import ValidationResult
 
-from .models import JujuApplicationInfo, JujuConsumedOfferInfo, JujuIntegration, JujuIntegrationApplication
+from .handles import JujuModelHandle
+from .models import (
+    JujuApplicationHealth,
+    JujuApplicationInfo,
+    JujuConsumedOfferInfo,
+    JujuIntegration,
+    JujuIntegrationApplication,
+    JujuWorkloadInstance,
+)
 from .version import JujuVersion
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+class JujuRestartNotSupportedError(NotImplementedError):
+    """The backend or placement does not support restarting a follower; no restart was attempted."""
 
 
 class JujuPerformanceWarning(UserWarning):
@@ -140,44 +152,94 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def model_architecture(self, model: JujuModelHandle) -> str:
+        """Return the default architecture for new applications in the model."""
+        raise NotImplementedError
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Reboot a unit without waiting for it to recover."""
+        raise NotImplementedError("This backend does not support rebooting units.")
+
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        """Restart one Juju non-leader without changing the application unit count."""
+        raise JujuRestartNotSupportedError("This backend does not support restarting a follower.")
+
     @abstractmethod
-    def scale_application(self, model: str, application: str, num: int) -> None:
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        raise NotImplementedError
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        """Remove a specific unit when the backend supports targeted unit removal."""
         raise NotImplementedError
 
     @abstractmethod
-    def num_units(self, model: str, application: str) -> int:
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    def list_applications(self, model: str) -> dict[str, JujuApplicationInfo]:
+    def list_applications(self, model: JujuModelHandle) -> dict[str, JujuApplicationInfo]:
         raise NotImplementedError
 
     @abstractmethod
-    def list_consumed_offers(self, model: str) -> dict[str, JujuConsumedOfferInfo]:
+    def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
+        raise NotImplementedError
+
+    def resolve_consumed_offer_application(self, offer: JujuConsumedOfferInfo) -> JujuApplicationInfo | None:
+        """Resolve the application backing a consumed offer.
+
+        Returns None if the offer's URL can't be parsed, or if the offering application can no
+        longer be resolved (e.g. unreachable controller, removed offer). Backends that can't
+        cheaply resolve this may leave this unimplemented and rely on the default.
+        """
+        return None
+
+    @abstractmethod
+    def list_offers(self, model: JujuModelHandle) -> set[str]:
+        """Return the names of all offers defined in *model*."""
         raise NotImplementedError
 
     @abstractmethod
-    def list_integrations(self, model: str) -> set[JujuIntegration]:
+    def create_offer(self, model: JujuModelHandle, app: str, endpoints: list[str], offer_name: str) -> None:
+        """Create an offer exposing *endpoints* of *app* in *model* under *offer_name*."""
         raise NotImplementedError
 
     @abstractmethod
-    def reboot_model_controller(self, model: str) -> None:
+    def list_integrations(self, model: JujuModelHandle) -> set[JujuIntegration]:
         raise NotImplementedError
 
     @abstractmethod
-    def is_k8s_model(self, model: str) -> bool:
+    def reboot_model_controller(self, model: JujuModelHandle) -> None:
         raise NotImplementedError
+
+    @abstractmethod
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        raise NotImplementedError
+
+    def is_k8s_cloud(self, cloud: str) -> bool:
+        """Return True if *cloud*, as known to the Juju client, is a Kubernetes cloud."""
+        raise NotImplementedError
+
+    def is_k8s_cloud_on_controller(self, cloud: str, controller: str) -> bool:
+        """Return True if *cloud* is a Kubernetes cloud registered on *controller*.
+
+        Backends that only support client-side cloud registration use ``is_k8s_cloud``.
+        """
+        return self.is_k8s_cloud(cloud)
+
+    def is_k8s_controller(self, controller: str) -> bool:
+        """Return True if the controller is Kubernetes-based."""
+        return self.is_k8s_model(JujuModelHandle(controller=controller, model="controller"))
 
     @abstractmethod
     def integration_exists(
-        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: str
+        self, application_1: str, endpoint_1: str, application_2: str, endpoint_2: str, model: JujuModelHandle
     ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
     def wait_idle(
         self,
-        model: str,
+        model: JujuModelHandle,
         timeout: timedelta | None,
         count: int | None,
         strict_timeout: bool = False,
@@ -186,41 +248,62 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_settled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_idle_multi_model(
+        self,
+        models: list[JujuModelHandle],
+        timeout: timedelta | None,
+        count: int | None,
+        strict_timeout: bool = False,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_application_scaled(self, model: str, application: str, timeout: timedelta | None) -> None:
+    def wait_application_settled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_unit_message(self, model: str, unit: str, message: str, timeout: timedelta | None) -> None:
+    def wait_application_scaled(self, model: JujuModelHandle, application: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def juju_status_text(self, model: str) -> str:
+    def wait_for_unit_message(self, model: JujuModelHandle, unit: str, message: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        """Read application and unit health from a single status snapshot."""
         raise NotImplementedError
 
     @abstractmethod
-    def integrate(self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication) -> None:
+    def juju_status_text(self, model: JujuModelHandle) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def integrate(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def remove_integration(
-        self, model: str, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def deploy_bundle_file(
-        self, model: str, bundle: str, timeout: timedelta | None = None, trust: bool = False, force: bool = False
+        self,
+        model: JujuModelHandle,
+        bundle: str,
+        timeout: timedelta | None = None,
+        trust: bool = False,
+        force: bool = False,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def refresh_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         application: str,
         revision: int | None = None,
         channel: str | None = None,
@@ -228,17 +311,17 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def remove_applications(self, model: str, *applications: str) -> None:
+    def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def wait_for_removal(self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def wait_for_removal_of_integration(
         self,
-        model: str,
+        model: JujuModelHandle,
         endpoint_1: JujuIntegrationApplication,
         endpoint_2: JujuIntegrationApplication,
         timeout: timedelta | None,
@@ -246,63 +329,105 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_removal_of_units(self, model: str, applications: list[str], timeout: timedelta | None) -> None:
+    def remove_saas(self, model: JujuModelHandle, alias: str) -> None:
+        """Actively remove the SAAS proxy named *alias* from *model*, if present.
+
+        Once a CMR offer's underlying application is destroyed, Juju doesn't automatically clean
+        up the consuming model's SAAS proxy for it: ``juju status`` keeps listing it (eventually as
+        "dead"/"terminated") indefinitely, which blocks re-consuming the same offer alias with
+        "exists but is terminating". Explicitly removing the proxy (``juju remove-saas``) frees the
+        alias immediately, rather than waiting on a status change that may never happen on its own.
+        A no-op if *alias* isn't a SAAS proxy in this model.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def wait_for_model_to_exist(self, model: str, timeout: timedelta | None) -> None:
+    def wait_for_removal_of_saas(self, model: JujuModelHandle, alias: str, timeout: timedelta | None) -> None:
+        """Wait until the SAAS proxy named *alias* no longer appears in ``model``.
+
+        ``remove_saas`` only issues the removal command; the controller's teardown of the underlying
+        remote entity is asynchronous. Without waiting for it to converge, a later re-consumption of
+        the same alias can race with the still-in-progress removal.
+        See https://github.com/canonical/charm-integration-testing/issues/1045.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def application_charm(self, model: str, application: str) -> str | None:
+    def wait_for_removal_of_units(
+        self, model: JujuModelHandle, applications: list[str], timeout: timedelta | None
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def application_units(self, model: str, application: str) -> list[str]:
+    def wait_for_model_to_exist(self, model: JujuModelHandle, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def exec_unit(self, model: str, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
+    def application_charm(self, model: JujuModelHandle, application: str) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
-    def run_action(self, model: str, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        raise NotImplementedError
+
+    def application_leader(self, model: JujuModelHandle, application: str) -> str:
+        raise NotImplementedError
+
+    def wait_for_unit_removal(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_unavailable(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
+        raise NotImplementedError
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def add_secret(self, model: str, name: str, values: dict[str, str]) -> str:
+    def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         raise NotImplementedError
 
     @abstractmethod
-    def read_secret(self, model: str, name_or_id: str) -> dict[str, str]:
+    def run_action(self, model: JujuModelHandle, unit: str, action: str, arguments: dict[str, Any]) -> JujuTask:
         raise NotImplementedError
 
     @abstractmethod
-    def grant_secret(self, model: str, name_or_id: str, application: str) -> None:
+    def add_secret(self, model: JujuModelHandle, name: str, values: dict[str, str]) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def remove_secret(self, model: str, name_or_id: str) -> None:
+    def read_secret(self, model: JujuModelHandle, name_or_id: str) -> dict[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def grant_secret(self, model: JujuModelHandle, name_or_id: str, application: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def deploy_application(
         self,
-        model: str,
+        model: JujuModelHandle,
         charm: str,
         application: str | None = None,
         config: dict[str, Any] | None = None,
         trust: bool = False,
         force: bool = False,
+        channel: str | None = None,
+        *,
+        revision: int | None = None,
+        base: str | None = None,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def configure_application(self, model: str, application: str, values: dict[str, str]) -> None:
+    def configure_application(self, model: JujuModelHandle, application: str, values: dict[str, str]) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def get_application_config(self, model: str, application: str) -> dict[str, Any]:
+    def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -318,27 +443,35 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def add_model(self, controller: str, model: str, model_config: dict[str, str]) -> None:
+    def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def switch(self, controller: str, model: str) -> None:
+    def register_cloud(self, cloud: str) -> None:
+        """Register a cloud with the local Juju client."""
         raise NotImplementedError
 
     @abstractmethod
-    def scp(self, model: str, source: str, destination: str) -> None:
+    def add_cloud(self, cloud: str, controller: str) -> None:
+        """Register a cloud (Kubernetes, OpenStack, LXD, manual, etc.) on an existing controller."""
         raise NotImplementedError
 
     @abstractmethod
-    def ssh(self, model: str, application: str, command: str) -> None:
+    def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def unit_ip(self, model: str, unit: str) -> str:
+    def ssh(
+        self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
+    ) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
-    def version(self, model: str) -> JujuVersion:
+    def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def version(self, model: JujuModelHandle) -> JujuVersion:
         raise NotImplementedError
 
     @abstractmethod
@@ -346,7 +479,9 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def validate_application(self, model: str, application: str, level: str) -> dict[str, list[ValidationResult]]:
+    def validate_application(
+        self, model: JujuModelHandle, application: str, level: str
+    ) -> dict[str, list[ValidationResult]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -362,7 +497,7 @@ class JujuBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def upgrade_model(self, model: str, agent_version: str | None = None) -> None:
+    def upgrade_model(self, model: JujuModelHandle, agent_version: str | None = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -371,10 +506,60 @@ class JujuBackend(ABC):
         application: str,
         expected_revision: int,
         timeout: timedelta | None,
-        model: str = "default",
+        model: JujuModelHandle,
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def debug_log(self, model: str) -> str:
+    def debug_log(self, model: JujuModelHandle) -> str:
+        raise NotImplementedError
+
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
+        """Return the model's Kubernetes cloud, or None when it is not Kubernetes-backed."""
+        return None
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        """Delete one workload instance by name."""
+        raise NotImplementedError
+
+    def ready_workload_instances_by_unit(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        units: Collection[str],
+        timeout: timedelta,
+    ) -> dict[str, JujuWorkloadInstance]:
+        """Return ready workload instances associated with the requested Juju units."""
+        raise NotImplementedError
+
+    def workload_instance_ids(self, model: JujuModelHandle, application: str) -> set[str]:
+        """Return stable identifiers for the application's currently observed workload instances."""
+        raise NotImplementedError
+
+    def wait_for_workload_instances_ready(
+        self, model: JujuModelHandle, application: str, expected_count: int, timeout: timedelta
+    ) -> None:
+        """Wait until the application's workload instances are ready at the requested count."""
+        raise NotImplementedError
+
+    def restart_workload_instance(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        instance: JujuWorkloadInstance,
+        existing_ids: Collection[str],
+        timeout: timedelta,
+    ) -> str:
+        """Replace a workload instance and return the replacement instance's name."""
+        raise NotImplementedError
+
+    def wait_for_workload_instances_replaced(
+        self,
+        model: JujuModelHandle,
+        application: str,
+        expected_count: int,
+        previous_ids: Collection[str],
+        timeout: timedelta,
+    ) -> None:
+        """Wait until the requested number of ready instances no longer includes prior identities."""
         raise NotImplementedError

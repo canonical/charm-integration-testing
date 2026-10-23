@@ -1,17 +1,5 @@
-# Copyright (C) 2026 Canonical Ltd
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 
 """Logic tests for multi-controller deployments with same-name models.
 
@@ -184,10 +172,11 @@ class TestSpecFileCMRWithFullKey:
                         IntegrationSpec(
                             application="lxd-app",
                             endpoint="metrics",
-                            remote_model="prod",
+                            remote_model="prod",  # full key disambiguates
                             remote_controller="k8s",
                             remote_application="k8s-app",
                             remote_endpoint="scrape",
+                            offer_name="k8s-app-offer",
                             url="k8s:admin/prod.k8s-app-offer",
                         ),
                     ],
@@ -211,8 +200,10 @@ class TestSpecFileCMRWithFullKey:
                             application="my-app",
                             endpoint="metrics",
                             remote_model="db-model",  # plain alias works when unambiguous
+                            remote_controller="lxd",
                             remote_application="pg",
                             remote_endpoint="scrape",
+                            offer_name="pg-offer",
                             url="lxd:admin/db-model.pg-offer",
                         ),
                     ],
@@ -311,7 +302,7 @@ class TestMultiControllerSolver:
                         IntegrationSpec(
                             application="app",
                             endpoint="db",
-                            remote_model="prod",
+                            remote_model="prod",  # full key disambiguates
                             remote_controller="lxd",
                             remote_application="pg",
                             remote_endpoint="database",

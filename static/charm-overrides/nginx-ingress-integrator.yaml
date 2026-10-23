@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/nginx-ingress-integrator-operator
+overrides:
+  - requires:
+      certificates:
+        optional: true  # charm.py::_get_tls_relation supports operation without a TLS relation
+    provides:
+      ingress:
+        optional: true  # charm.py::_check_precondition permits exactly one ingress API
+      nginx-route:
+        optional: true  # charm.py::_check_precondition permits exactly one ingress API
+    configs:
+      service-hostname: ['nginx-ingress-integrator.test', null]
+    constraints:
+      - 'len(endpoint[ingress]) + len(endpoint[nginx-route]) == 1'
+      - 'bool(endpoint[ingress]) => set(config[service-hostname])'

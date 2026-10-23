@@ -1,0 +1,8 @@
+---
+# Source: https://github.com/canonical/loki-worker-k8s-operator (uses
+# coordinated_workers.Worker from https://github.com/canonical/cos-coordinated-workers)
+#
+# Single generation across tracks 1, 2, 3.7: config option set is stable, no criteria blocks needed.
+overrides:
+  - configs:
+      role-all: [true]  # worker.py blocks "no role assigned" without at least one role-* config

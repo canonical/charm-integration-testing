@@ -14,6 +14,12 @@ dependencies = [
     "validators-base",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "cryptography>=42.0.0",
+    "validators-test-utils",
+]
+
 [project.entry-points."endpoint_validators"]
 prometheus_scrape = "validators.prometheus_scrape:PrometheusScrapeValidator"
 

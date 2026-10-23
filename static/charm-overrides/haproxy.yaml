@@ -14,6 +14,14 @@
 # certificates (requires) - OPTIONAL locally: TLS recommended but charm reaches active without it
 # receive-ca-certs, spoe-auth, ddos-protection, haproxy-route-policy (requires) - OPTIONAL: additive features
 # cos-agent, website (provides) - OPTIONAL: secondary/additive
+#
+# external-hostname config (issue 708):
+# When the certificates endpoint is connected, haproxy validates in TLSInformation.validate()
+# that at least one certificate request exists (populated from the external-hostname config).
+# With the default value of "" no CSR is generated and haproxy blocks with:
+#   "No hostname configured or requested. See juju debug-log for details."
+# Source: haproxy-operator/src/state/tls.py TLSInformation.validate()
+# Fix: set external-hostname to a test value whenever certificates is connected.
 overrides:
   # latest/stable: classic reactive charm - only reverseproxy (requires) and website (provides) matter
   - criteria:
@@ -62,6 +70,9 @@ overrides:
         optional: true
       haproxy-route-tcp:
         optional: true
+    configs:
+      external-hostname: ['haproxy.internal', null]
     constraints:
       - 'bool(endpoint[ingress]) or bool(endpoint[ingress-per-unit]) or bool(endpoint[reverseproxy])
         or bool(endpoint[haproxy-route]) or bool(endpoint[haproxy-route-tcp])'
+      - 'bool(endpoint[certificates]) => set(config[external-hostname])'

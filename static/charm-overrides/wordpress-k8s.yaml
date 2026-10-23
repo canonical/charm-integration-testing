@@ -11,3 +11,8 @@ overrides:
         optional: true
       logging:
         optional: true
+      # Remove after: https://github.com/canonical/wordpress-k8s-operator/issues/336
+      # wordpress-k8s accepts at most one database; without this limit the solver
+      # may connect multiple mysql providers and trigger a storage-attached hook failure.
+      database:
+        limit: 1

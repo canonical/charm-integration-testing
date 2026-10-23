@@ -1,0 +1,28 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+[project]
+name = "validators-livepatch-pro-airgapped-server"
+version = "0.1.0"
+description = "Validator for livepatch-pro-airgapped-server interface"
+authors = [
+    {name = "SQA Team", email = "solutionsqa@canonical.com"}
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "validators-base",
+]
+
+[project.entry-points."endpoint_validators"]
+livepatch-pro-airgapped-server = "validators.livepatch_pro_airgapped_server:LivepatchProAirgappedServerValidator"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["validators.livepatch_pro_airgapped_server"]
+
+[tool.setuptools.package-dir]
+"validators.livepatch_pro_airgapped_server" = "."
