@@ -47,6 +47,169 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+S3 storage
+~~~~~~~~~~
+
+Bundles containing an ``unconfigured`` ``s3-integrator`` require external object
+storage. The post-deploy extension configures it; no MinIO charm is deployed.
+An integrator with an explicit endpoint is left untouched.
+The extension looks up the model's current Juju cloud through the backend, then
+obtains its provider from ``S3ProviderRegistry``. Pass configuration paths using
+``S3_CONFIG_<cloud>``, just as Kubernetes configuration files use
+``KUBECONFIG_<cloud>``. Variable suffixes are converted to lowercase, and
+underscores become hyphens; for example,
+``S3_CONFIG_target_cloud=/protected/target-s3.conf`` configures ``target-cloud``.
+The suite does not read ambient S3 credential variables.
+
+Each logical Juju cloud has one S3 configuration per run. Register distinct cloud
+aliases when models on the same physical substrate need different credentials.
+Models on the same cloud share a provider, including models created later in a
+cross-model run. Equivalent configurations reuse the same provider even when
+their file paths differ. Conflicting paths for the same normalized alias fail
+explicitly.
+
+Configuration files contain unquoted, single-line ``KEY=value`` entries, with
+optional comments. They are parsed, never sourced or evaluated. Keep credential
+files outside the checkout and restrict permissions with ``chmod 600``.
+``SwiftS3Provider`` and ``StaticS3Provider`` share the bucket lifecycle while
+supplying different credential strategies.
+
+The generic ``s3_storage`` package contains contracts, the shared lifecycle,
+static configuration, and registries. Swift support lives in the sibling
+``s3_storage_swift`` package, which depends on the generic package, never the
+reverse. The suite fixture and cleanup CLI explicitly select its static/Swift
+configuration loader; the registry accepts that loader without knowing about
+Keystone credentials or HTTP sessions.
+
+For Swift, supply ``S3_OS_AUTH_URL``, ``S3_OS_PASSWORD``,
+``S3_OS_PROJECT_DOMAIN_NAME``, ``S3_OS_PROJECT_NAME``, ``S3_OS_STORAGE_URL``,
+``S3_OS_USERNAME`` and ``S3_OS_USER_DOMAIN_NAME`` in the configuration file. Also supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for a persistent cleanup
+identity. The test-storage account must be able to create and revoke its own
+Keystone EC2 credentials and create/delete buckets and objects.
+The RADOS Gateway must enable ``rgw_s3_auth_use_keystone``. Its S3 endpoint is
+the origin of the ``/swift/v1/AUTH_*`` storage URL. For deployments that do not
+use the RADOS Gateway or have a nonstandard endpoint, set the optional
+``S3_ENDPOINT`` explicitly rather than treating a native Swift URL as an S3 URL.
+
+For a local S3-compatible server, supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY`` and
+``S3_SECRET_KEY`` instead, omitting all ``S3_OS_*`` values from the file. Static and
+Swift application credentials cannot be mixed. Optionally supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
+identity; the provider uses it for bucket creation and cleanup but sends only the
+``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development
+sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions the service with
+that separate identity and a test identity restricted to harness buckets. It writes
+the protected ``$HOME/.local/share/charmqa-s3/s3.conf`` file. Load the path-only
+``s3.env`` in the same directory to export ``S3_CONFIG_localhost`` in the test shell:
+
+.. code:: bash
+
+   bash development-sandbox/bin/setup-s3.sh
+   source "$HOME/.local/share/charmqa-s3/s3.env"
+
+``S3_REGION`` defaults to ``us-east-1``.
+
+Each integrator gets a randomly named, isolated bucket and an initial ``charmqa/``
+directory marker for consumers such as Spark History Server. The namespace is a
+cleanup scope, not a bucket name: integrators sharing a namespace still get
+different buckets. ``S3_BUCKET_NAMESPACE`` belongs in the protected storage
+configuration alongside its credentials. It defaults to ``local`` outside CI;
+CI requires an explicit, nonblank value and never derives it from the environment
+or secret name.
+``S3ProviderRegistry`` only resolves and deduplicates providers. Each used provider
+has one ``S3ResourceRegistry`` shared across its clouds and Juju clients. That scope
+registers the provider and its child buckets with the session ``ResourceRegistry``;
+it does not implement another teardown loop. ``KeystoneResourceRegistry`` registers
+each issued EC2 credential as a child of its bucket in that same session registry.
+The session registry attempts credential revocation before bucket deletion and
+continues after individual failures, without storage-specific cleanup retries.
+Provider scopes are independent of controller resources, and HTTP sessions remain
+open until resource teardown finishes.
+
+Runs that create their controller attempt to delete their buckets; runs reusing an
+existing controller preserve both buckets and their credentials because
+storage may still be in use. Swift-generated bucket keys are revoked before their
+buckets are deleted; local/static keys are never revoked.
+
+Scheduled cleanup covers the five existing shared-substrate representatives
+using the existing age threshold (240 minutes by default). Configure each numbered
+environment's storage secret with the same namespace and effective storage/account
+and cleanup identity as its group's representative:
+
+* PS6 production Kubernetes: ``ps6-prod-kubernetes``
+* PS6 staging Kubernetes: ``ps6-stg-kubernetes``
+* PS6 production OpenStack: ``ps6-prod-openstack``
+* PS7 production Kubernetes: ``ps7-prod-kubernetes``
+* PS7 production OpenStack: ``ps7-prod-openstack``
+
+The representative can then sweep the group's stale buckets. A shared namespace
+alone does not grant cleanup ownership across different endpoints, regions,
+Swift accounts or cleanup access keys. Use the cleanup CLI with the relevant
+configuration for separate storage identities or namespaces. Only strictly named harness
+buckets in the matching namespace and with the matching provider ownership tag
+are eligible; log containers, other providers' buckets, and externally
+configured buckets are not touched. Buckets without ownership tags are retained
+and reported for manual inspection. The four-hour threshold is longer than any
+supported test run. Swift-backed cleanup uses the
+pre-provisioned ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for S3
+operations, so it does not create temporary cleanup keys. If a process is
+terminated between creating a bucket EC2 key and tagging the bucket, the sweep
+cannot identify that key, so manual revocation may be required. A failure to
+create the bucket client leaves the issued key registered for session teardown.
+Failed teardown is reported; stale buckets and their tagged keys are left for
+scheduled cleanup. Run the same cleanup manually with:
+
+.. code:: bash
+
+   poetry run python scripts/cleanup-s3.py \
+     --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
+
+When changing an existing namespace, first sweep its stale buckets using the old
+configuration. The new namespace will not discover buckets created under the old
+secret-name-based scope. Retain the old configuration for cleanup of any remaining
+buckets once their runs finish; do not rename or retag active buckets.
+
+Supported test environments opt into Swift storage by setting ``s3-swift-secret``
+to their repository secret's name in ``static/environments.yaml``. An absent or
+empty name skips Swift configuration; a nonempty name requires complete
+credentials. Create one repository secret per enabled
+environment (22 with the current environment table) and store that
+environment's credentials there, using a dedicated test-storage account
+separate from the log-upload account. Each secret contains the seven required
+Swift values, two cleanup values and ``S3_BUCKET_NAMESPACE``, plus optional ``S3_ENDPOINT`` when a
+non-RADOS Gateway or nonstandard endpoint is needed. Use unquoted, single-line
+``KEY=value`` format:
+
+.. code:: text
+
+   S3_OS_AUTH_URL=https://identity.example/v3
+   S3_OS_USERNAME=test-storage
+   S3_OS_PASSWORD=...
+   S3_OS_USER_DOMAIN_NAME=users
+   S3_OS_PROJECT_NAME=charm-qa
+   S3_OS_PROJECT_DOMAIN_NAME=projects
+   S3_OS_STORAGE_URL=https://storage.example/swift/v1/AUTH_project
+   S3_CLEANUP_ACCESS_KEY=...
+   S3_CLEANUP_SECRET_KEY=...
+   S3_BUCKET_NAMESPACE=ps6-prod-kubernetes
+   S3_ENDPOINT=https://s3.example
+
+The parser accepts comments and values containing ``=``; do not quote values or
+put them on multiple lines. Optional ``S3_ENDPOINT`` and ``S3_REGION`` values
+select a nonstandard endpoint or region. In cross-model runs, each integrator uses the
+provider selected by its model's cloud, so both environment secrets must be
+configured. The cleanup identity must be able to list buckets, read harness
+bucket tags, and remove buckets, object versions, and incomplete uploads. The
+test-storage account must also allow its generated bucket key to create buckets,
+write bucket tags, and upload the marker object. Scheduled cleanup uses the
+same environment secret and namespace as test provisioning. CI validates each
+Swift-enabled environment's configuration before its test step starts and
+reports missing variable names; non-Swift environments skip this check. CI writes
+mode-0600 files under the runner's temporary directory and passes
+``S3_CONFIG_target_cloud`` and ``S3_CONFIG_neighbor_cloud`` alongside the matching
+kubeconfig paths. Credentials themselves are not exported through ``GITHUB_ENV``.
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
