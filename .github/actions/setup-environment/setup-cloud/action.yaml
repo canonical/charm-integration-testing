@@ -25,13 +25,13 @@ outputs:
       for o7k/lxd).
     value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
   cloud-definition-path:
-    description: Path to the cloud definition YAML file written to disk (o7k only;
+    description: Path to the cloud definition YAML file written to disk (o7k/lxd;
       empty string for k8s).
-    value: ${{ steps.setup-o7k.outputs.cloud-definition-path }}
+    value: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
   credentials-path:
-    description: Path to the credentials YAML file written to disk (o7k only; empty
+    description: Path to the credentials YAML file written to disk (o7k/lxd; empty
       string for k8s).
-    value: ${{ steps.setup-o7k.outputs.credentials-path }}
+    value: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
   metadata-source:
     description: Path to image metadata (o7k only; empty string for k8s).
     value: ${{ steps.setup-o7k.outputs.metadata-source }}
@@ -67,3 +67,4 @@ runs:
       with:
         lxd-creds: ${{ inputs.cloud-credentials }}
         cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}

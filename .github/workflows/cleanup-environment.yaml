@@ -454,7 +454,7 @@ jobs:
           lxc list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .[] |
             select(.name | test("^juju-")) |
-            select((now - (.created_at | fromdateiso8601)) > ($age * 60)) |
+            select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
             .name
           ' | while read -r name; do
             echo "Deleting instance: $name"

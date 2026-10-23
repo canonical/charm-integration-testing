@@ -10,25 +10,40 @@ inputs:
   cloud-name:
     description: Name to register the Juju cloud under.
     required: true
+  workspace:
+    description: Per-cloud temporary workspace retained until job cleanup.
+    required: true
 outputs:
   cloud-name:
     description: Name of the cloud created and bootstrapped to.
     value: ${{ inputs.cloud-name }}
+  cloud-definition-path:
+    description: Path to the cloud definition for controller-side registration.
+    value: ${{ steps.register.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to the credentials for controller-side registration.
+    value: ${{ steps.register.outputs.credentials-path }}
 runs:
   using: composite
   steps:
     - name: Add LXD Cloud
+      id: register
       env:
         LXD_CREDS: ${{ inputs.lxd-creds }}
         CLOUD: ${{ inputs.cloud-name }}
+        CREDENTIALS_DIR: ${{ inputs.workspace }}
       shell: bash
       run: |-
         set -euo pipefail
         umask 077
-        CREDENTIALS_DIR="$(mktemp -d "${RUNNER_TEMP}/lxd.XXXXXX")"
         cleanup() {
-          rm -f "${CREDENTIALS_DIR}/creds.yaml" "${CREDENTIALS_DIR}/cloud.yaml" "${CREDENTIALS_DIR}/credentials.yaml"
-          rmdir "${CREDENTIALS_DIR}"
+          result=$?
+          rm -f "${CREDENTIALS_DIR}/creds.yaml"
+          if (( result != 0 )); then
+            rm -f "${CREDENTIALS_DIR}/cloud.yaml" "${CREDENTIALS_DIR}/credentials.yaml"
+            rmdir "${CREDENTIALS_DIR}"
+          fi
+          exit "$result"
         }
         trap cleanup EXIT
         printf '%s\n' "${LXD_CREDS}" > "${CREDENTIALS_DIR}/creds.yaml"
@@ -58,3 +73,5 @@ runs:
         EOF
         juju add-cloud "${CLOUD}" "${CREDENTIALS_DIR}/cloud.yaml" --client
         juju add-credential "${CLOUD}" -f "${CREDENTIALS_DIR}/credentials.yaml" --client
+        echo "cloud-definition-path=${CREDENTIALS_DIR}/cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${CREDENTIALS_DIR}/credentials.yaml" >> "$GITHUB_OUTPUT"
