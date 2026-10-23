@@ -14,18 +14,18 @@ jobs:
       max-parallel: 1
       matrix:
         params:
-          - target_environment: ps7-sqa-prod_charm_qa_lxd-1
-            neighbor_environment: ps7-sqa-prod_charm_qa_kubernetes-1
+          - target_environment: ps7-sqa-prod_charm_qa_kubernetes-1
+            neighbor_environment: ps7-sqa-prod_charm_qa_lxd-1
             same_controller: true
             juju_channel: 3.6/stable
-            target_charm: data-integrator
-            target_endpoint: postgresql
-            target_revision: 418
-            target_track: latest
+            target_charm: postgresql-k8s
+            target_endpoint: database
+            target_revision: 960
+            target_track: 14
             target_risk: stable
-            target_base: '24.04'
-            neighbor_charm: pgbouncer-k8s
-            neighbor_endpoint: database
+            target_base: '22.04'
+            neighbor_charm: data-integrator
+            neighbor_endpoint: postgresql
     uses: ./.github/workflows/charm-testing-integration-test-assert-pass.yaml
     permissions:
       contents: read
