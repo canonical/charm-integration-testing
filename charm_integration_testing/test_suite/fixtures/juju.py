@@ -5,16 +5,24 @@
 
 from __future__ import annotations
 
-import pytest
-from juju import JujuModelHandle
+from juju import JujuClient, JujuModelHandle
 from resource_registry import ResourceRegistry
+
+
+class JujuClientRegistry:
+    """Expose the session Juju client to test-lifecycle observers."""
+
+    def __init__(self) -> None:
+        self._client: JujuClient | None = None
+
+    def register(self, client: JujuClient) -> None:
+        self._client = client
+
+    @property
+    def client(self) -> JujuClient | None:
+        return self._client
 
 
 def get_registered_model_handles(session_resource_registry: ResourceRegistry) -> list[JujuModelHandle]:
     """Return the currently registered Juju model handles."""
     return [handle for handle in session_resource_registry.registered_handles() if isinstance(handle, JujuModelHandle)]
-
-
-def needs_juju_client(request: pytest.FixtureRequest, session_resource_registry: ResourceRegistry) -> bool:
-    """Whether this test already has models or needs Juju during its test body."""
-    return bool(get_registered_model_handles(session_resource_registry)) or "juju_client" in request.fixturenames

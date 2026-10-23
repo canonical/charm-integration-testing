@@ -906,7 +906,7 @@ class TestTrackStateResources:
 
             import pytest
             from juju import JujuModelHandle
-            from test_suite.fixtures.juju import needs_juju_client
+            from test_suite.fixtures.juju import JujuClientRegistry
 
             pytest_plugins = ["test_suite.fixtures.resource_tracking"]
 
@@ -921,16 +921,16 @@ class TestTrackStateResources:
                 model = JujuModelHandle(controller="test-controller", model="test-model")
                 return SimpleNamespace(registered_handles=lambda: [model])
 
-            @pytest.fixture
-            def juju_client_if_needed(request, session_resource_registry):
-                if not needs_juju_client(request, session_resource_registry):
-                    return None
-                return request.getfixturevalue("juju_client")
+            @pytest.fixture(scope="session")
+            def juju_client_registry():
+                return JujuClientRegistry()
 
             @pytest.fixture(scope="session")
-            def juju_client():
+            def juju_client(juju_client_registry):
                 backend = SimpleNamespace(kubernetes_cloud_for_model=lambda _: None)
-                return SimpleNamespace(backend=backend)
+                client = SimpleNamespace(backend=backend)
+                juju_client_registry.register(client)
+                return client
 
             @pytest.fixture
             def kubernetes_client_registry():
@@ -975,7 +975,7 @@ class TestTrackStateResources:
 
             import pytest
             from juju import JujuModelHandle
-            from test_suite.fixtures.juju import needs_juju_client
+            from test_suite.fixtures.juju import JujuClientRegistry
 
             pytest_plugins = ["test_suite.fixtures.resource_tracking"]
             client_requests = []
@@ -991,24 +991,25 @@ class TestTrackStateResources:
                 handles = []
                 if request.node.name == "test_teardown":
                     handles.append(JujuModelHandle(controller="test-controller", model="test-model"))
+                    request.getfixturevalue("juju_client")
                 return SimpleNamespace(registered_handles=lambda: handles, handles=handles)
 
-            @pytest.fixture
-            def juju_client_if_needed(request, session_resource_registry):
-                if not needs_juju_client(request, session_resource_registry):
-                    return None
-                return request.getfixturevalue("juju_client")
+            @pytest.fixture(scope="session")
+            def juju_client_registry():
+                return JujuClientRegistry()
 
             @pytest.fixture(scope="session")
-            def juju_client():
+            def juju_client(juju_client_registry):
                 client_requests.append(True)
                 application = SimpleNamespace(
                     charm="postgresql-k8s", channel="14/stable", base="ubuntu@22.04"
                 )
-                return SimpleNamespace(
+                client = SimpleNamespace(
                     backend=SimpleNamespace(kubernetes_cloud_for_model=lambda _: None),
                     list_applications=lambda model: {"postgresql": application},
                 )
+                juju_client_registry.register(client)
+                return client
 
             @pytest.fixture
             def kubernetes_client_registry():
