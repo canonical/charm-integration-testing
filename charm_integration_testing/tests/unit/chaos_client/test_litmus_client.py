@@ -382,6 +382,7 @@ def test_engine_submissions_share_startup_deadline(context: ClientContext, stage
     # WHEN starting stress, THEN late startup fails without losing cleanup ownership
     with pytest.raises(TimeoutError, match="startup"):
         chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert reads == {"submission": 0, "startup-check": 1, "active-check": 2}[stage]
     chaos.cleanup(MODEL, UNIT, "")
     assert not context.engines
     assert not context.results

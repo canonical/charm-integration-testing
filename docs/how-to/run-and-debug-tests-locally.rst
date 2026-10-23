@@ -153,6 +153,9 @@ Its configured startup timeout covers all workload Engine submissions and
 injection checks together (five minutes by default). Each Engine receives that
 allowance in addition to the requested stress duration so early workloads remain
 active throughout startup of the others. Cleanup stops any remaining injection.
+An in-flight synchronous API call can return after the deadline; its late result
+fails startup before the next poll or final active-stress check. The startup
+deadline does not cancel in-flight requests, which have separate network timeouts.
 Cleanup allows graceful termination and requires reversion evidence for observed
 injections before deleting results and permissions; otherwise, it reports an
 error and retains them for investigation.

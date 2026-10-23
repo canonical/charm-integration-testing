@@ -199,6 +199,7 @@ class LitmusChaosClient(ChaosClient):
             self._check_startup_deadline(deadline, unit)
         for engine in engines:
             self._wait(partial(self._started, engine), deadline, engine.name, "startup")
+            self._check_startup_deadline(deadline, engine.name)
         self.check_stress(model, unit)
         self._check_startup_deadline(deadline, unit)
 
