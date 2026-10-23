@@ -9,8 +9,9 @@ Run only inside the disposable development sandbox VM, never on shared CI runner
 This installs SeaweedFS 4.48 from a SHA-256-verified binary and starts a single-node
 systemd service. No charm, Docker daemon, or shared Swift access is needed.
 
-1. Check that `curl`, `tar`, `sha256sum`, `openssl`, `jq`, `ip`, Poetry and
-   passwordless sudo are available. Install missing OS prerequisites with apt.
+1. Check that `curl`, `tar`, `sha256sum`, `openssl`, `jq`, `ip`, `sudo`,
+   `systemctl`, `systemd-run` and Poetry are available, and that `sudo -n true`
+   succeeds. Install missing OS prerequisites with apt.
    The project Poetry environment must already be installed.
 2. Run:
 
