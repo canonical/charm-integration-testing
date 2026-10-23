@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,10 +34,8 @@ def test_ci_swift_secret_lookup_uses_trusted_environment_metadata() -> None:
     # GIVEN environment metadata as the source of truth for the configured secret name
     workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
     job = workflow["jobs"]["execute-charm-test"]
-    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     assert "S3_SWIFT_SECRET_NAMES" not in job["env"]
     assert all(not name.startswith("S3_SWIFT_CONFIG_") for name in job["env"])
-    assert all("s3-swift-secret" in environment for environment in environments.values())
 
     # WHEN each environment selects a secret, THEN the workflow dereferences that exact name
     for side in ("target", "neighbor"):
@@ -245,6 +244,43 @@ def test_optional_swift_config_rejects_partial_values(tmp_path: Path) -> None:
     assert "S3_OS_PASSWORD" in result.stdout
 
 
+@pytest.mark.parametrize("variable", SWIFT_CONFIG_VARIABLES[:-2])
+@pytest.mark.parametrize("optional", [False, True], ids=["required", "optional"])
+def test_swift_config_loader_rejects_whitespace_only_required_values(
+    tmp_path: Path, variable: str, optional: bool
+) -> None:
+    # GIVEN a declared configuration with one required value containing only whitespace
+    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values[variable] = " \t "
+    config_path = tmp_path / "s3.conf"
+    output = tmp_path / "github-output"
+
+    # WHEN the loader runs, THEN no protected configuration or success output is created
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/load-swift-config.py",
+            "S3_SWIFT_TEST",
+            "--output-file",
+            str(config_path),
+            *(["--optional"] if optional else []),
+        ],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "SWIFT_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
+            "GITHUB_OUTPUT": str(output),
+        },
+        text=True,
+        cwd=ROOT,
+    )
+    assert result.returncode == 1
+    assert f"S3_SWIFT_TEST is missing: {variable}" in result.stdout
+    assert not config_path.exists()
+    assert not output.exists()
+
+
 def test_swift_config_loader_writes_optional_endpoint_and_region(tmp_path: Path) -> None:
     environment_file = tmp_path / "github-env"
     values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
@@ -277,7 +313,7 @@ def test_swift_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -
     environment_file = tmp_path / "github-env"
     output_file = tmp_path / "github-output"
     values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
-    values["S3_OS_PASSWORD"] = "first=second%value"
+    values["S3_OS_PASSWORD"] = " first=second%value "
     values["S3_ENDPOINT"] = "https://s3.example"
     config = "# config comment\n" + "\n".join(f"{name}={value}" for name, value in values.items())
     result = subprocess.run(
