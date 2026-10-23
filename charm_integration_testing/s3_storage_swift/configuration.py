@@ -11,6 +11,7 @@ from s3_storage.environment import provider_from_environment as static_provider_
 
 from .credentials import KeystoneClient, SwiftCredentials
 from .provider import SwiftS3Provider
+from .resource_registry import KeystoneResourceRegistry
 
 SWIFT_CONFIG_VARIABLES = (
     "S3_OS_AUTH_URL",
@@ -25,7 +26,11 @@ _CLEANUP_VARIABLES = ("S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
 
 
 def provider_from_environment(
-    environ: Mapping[str, str], session: requests.Session, prefix: str = ""
+    environ: Mapping[str, str],
+    session: requests.Session,
+    prefix: str = "",
+    *,
+    resources: KeystoneResourceRegistry | None = None,
 ) -> S3Provider | None:
     """Compose static and Swift providers from explicit, optionally prefixed values."""
     values = {
@@ -63,15 +68,18 @@ def provider_from_environment(
         KeystoneClient(credentials, session),
         S3Credentials(values["S3_CLEANUP_ACCESS_KEY"], values["S3_CLEANUP_SECRET_KEY"]),
         region=region,
+        resources=resources,
     )
 
 
-def provider_from_config(path: Path, session: requests.Session) -> S3Provider:
+def provider_from_config(
+    path: Path, session: requests.Session, *, resources: KeystoneResourceRegistry | None = None
+) -> S3Provider:
     """Load either supported provider using the shared literal file format."""
     values = parse_s3_config(
         path.expanduser().read_text(encoding="utf-8"), (*S3_CONFIG_VARIABLES, *SWIFT_CONFIG_VARIABLES)
     )
-    provider = provider_from_environment(values, session)
+    provider = provider_from_environment(values, session, resources=resources)
     if provider is None:
         raise ValueError(f"No S3 provider configured in '{path}'")
     return provider

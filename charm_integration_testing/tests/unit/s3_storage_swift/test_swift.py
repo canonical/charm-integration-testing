@@ -15,8 +15,14 @@ import requests
 from botocore.stub import ANY, Stubber  # type: ignore[import-untyped]
 from mypy_boto3_s3 import S3Client
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from s3_storage import S3Credentials, S3Provider, S3Storage
-from s3_storage_swift import KeystoneClient, SwiftCredentialProvider, SwiftCredentials, SwiftS3Provider
+from s3_storage import S3Bucket, S3Credentials, S3Provider, S3Storage
+from s3_storage_swift import (
+    KeystoneClient,
+    KeystoneResourceRegistry,
+    SwiftCredentialProvider,
+    SwiftCredentials,
+    SwiftS3Provider,
+)
 from s3_storage_swift.configuration import provider_from_environment
 
 CREDS = S3Credentials("test-access", "test-secret")
@@ -34,6 +40,18 @@ def client() -> Iterator[S3Client]:
     )
     yield result
     result.close()
+
+
+@pytest.fixture
+def registry() -> ResourceRegistry:
+    return ResourceRegistry([], logging.getLogger(__name__))
+
+
+def registered_bucket(storage: S3Storage, registry: ResourceRegistry) -> S3Bucket:
+    registry.register(storage.handle)
+    bucket = storage.new_bucket()
+    registry.register(bucket.handle, destroyer=bucket.cleanup, parent=storage.handle)
+    return bucket
 
 
 def empty_bucket(stubber: Stubber, name: str = ANY) -> None:
@@ -67,7 +85,6 @@ class KeystoneStub(KeystoneClient):
         self.deleted: list[str] = []
         self.delete_attempts: list[str] = []
         self.fail_delete: set[str] = set()
-        self.fail_delete_attempts: dict[str, int] = {}
 
     def create_credentials(self) -> S3Credentials:
         self.created += 1
@@ -75,10 +92,7 @@ class KeystoneStub(KeystoneClient):
 
     def delete_credentials(self, access_key: str) -> None:
         self.delete_attempts.append(access_key)
-        failures_remaining = self.fail_delete_attempts.get(access_key, 0)
-        if access_key in self.fail_delete or failures_remaining:
-            if failures_remaining:
-                self.fail_delete_attempts[access_key] = failures_remaining - 1
+        if access_key in self.fail_delete:
             raise RuntimeError("Credential revocation failed")
         self.deleted.append(access_key)
 
@@ -130,19 +144,24 @@ def response(status: int, body: dict[str, Any], headers: dict[str, str] | None =
     return result
 
 
-def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
+def test_provision_reuses_bucket_and_registers_key(client: S3Client, registry: ResourceRegistry) -> None:
     # GIVEN Keystone-backed storage and an empty S3 bucket
     keystone = KeystoneStub()
     client_credentials: list[S3Credentials] = []
 
     def client_factory(credentials: S3Credentials) -> S3Client:
         client_credentials.append(credentials)
+        if credentials == CLEANUP_CREDS:
+            assert keystone.deleted == ["test-access-1"]
         return client
 
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=client_factory
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=client_factory,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         stubber.add_response("create_bucket", {}, {"Bucket": ANY})
         stubber.add_response(
@@ -164,40 +183,47 @@ def test_provision_reuses_bucket_and_revokes_key(client: S3Client) -> None:
         # WHEN the same integrator is deployed twice then torn down
         bucket, creds = bucket_resource.provision()
         assert bucket_resource.provision() == (bucket, creds)
-        bucket_resource.cleanup()
+        assert len(registry.children_of(bucket_resource.handle)) == 1
+        registry.teardown_all()
         # THEN the bucket key is revoked while the dedicated cleanup key remains reusable
         assert bucket.startswith(PREFIX)
         assert keystone.created == 1
         assert keystone.deleted == ["test-access-1"]
-        assert client_credentials == [creds, CLEANUP_CREDS]
+        assert client_credentials == [creds, creds, CLEANUP_CREDS]
         stubber.assert_no_pending_responses()
 
 
-def test_partial_provision_is_cleaned(client: S3Client) -> None:
+def test_partial_provision_is_cleaned(client: S3Client, registry: ResourceRegistry) -> None:
     # GIVEN an S3 create call that reports failure after creating a bucket
     keystone = KeystoneStub()
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=lambda _: client,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         stubber.add_client_error("create_bucket", service_error_code="InternalError", expected_params={"Bucket": ANY})
         empty_bucket(stubber)
         # WHEN provisioning fails and session teardown runs
         with pytest.raises(Exception, match="InternalError"):
             bucket_resource.provision()
-        bucket_resource.cleanup()
+        registry.teardown_all()
         # THEN the bucket credential is revoked before bucket deletion using the cleanup identity
         assert keystone.deleted == ["test-access-1"]
         stubber.assert_no_pending_responses()
 
 
-def test_incomplete_bucket_provisioning_retries_tagging(client: S3Client) -> None:
+def test_incomplete_bucket_provisioning_retries_tagging(client: S3Client, registry: ResourceRegistry) -> None:
     keystone = KeystoneStub()
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=lambda _: client,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         stubber.add_response("create_bucket", {}, {"Bucket": ANY})
         stubber.add_client_error(
@@ -220,17 +246,20 @@ def test_incomplete_bucket_provisioning_retries_tagging(client: S3Client) -> Non
         )
 
         empty_bucket(stubber)
-        bucket_resource.cleanup()
+        registry.teardown_all()
         assert keystone.deleted == ["test-access-1"]
         stubber.assert_no_pending_responses()
 
 
-def test_nonexistent_partial_bucket_revokes_key(client: S3Client) -> None:
+def test_nonexistent_partial_bucket_revokes_key(client: S3Client, registry: ResourceRegistry) -> None:
     keystone = KeystoneStub()
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=lambda _: client,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         stubber.add_client_error("create_bucket", service_error_code="AccessDenied", expected_params={"Bucket": ANY})
         stubber.add_client_error(
@@ -238,12 +267,12 @@ def test_nonexistent_partial_bucket_revokes_key(client: S3Client) -> None:
         )
         with pytest.raises(Exception, match="AccessDenied"):
             bucket_resource.provision()
-        bucket_resource.cleanup()
+        registry.teardown_all()
         assert keystone.deleted == ["test-access-1"]
         stubber.assert_no_pending_responses()
 
 
-def test_client_initialization_failure_revokes_bucket_key() -> None:
+def test_client_initialization_failure_leaves_key_registered_for_teardown(registry: ResourceRegistry) -> None:
     keystone = KeystoneStub()
     client_credentials: list[S3Credentials] = []
 
@@ -252,33 +281,42 @@ def test_client_initialization_failure_revokes_bucket_key() -> None:
         raise RuntimeError("Client initialization failed")
 
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=fail
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=fail,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with pytest.raises(RuntimeError, match="Client initialization failed"):
         bucket_resource.provision()
-    assert keystone.deleted == ["test-access-1"]
-    bucket_resource.cleanup()
+    assert keystone.deleted == []
+    assert len(registry.children_of(bucket_resource.handle)) == 1
+    registry.teardown_all()
     assert keystone.created == 1
     assert client_credentials == [S3Credentials("test-access-1", "test-secret-1")]
     assert keystone.deleted == ["test-access-1"]
     assert keystone.delete_attempts == ["test-access-1"]
 
 
-def test_client_initialization_retry_issues_fresh_bucket_key(client: S3Client) -> None:
+def test_client_initialization_retry_reuses_registered_credentials(
+    client: S3Client, registry: ResourceRegistry
+) -> None:
     keystone = KeystoneStub()
     client_credentials: list[S3Credentials] = []
 
     def client_factory(credentials: S3Credentials) -> S3Client:
         client_credentials.append(credentials)
-        if credentials.access_key == "test-access-1":
+        if len(client_credentials) == 1:
             raise RuntimeError("Client initialization failed")
         return client
 
     storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=client_factory
+        "https://s3.test",
+        NAMESPACE,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=client_factory,
     )
-    bucket_resource = storage.new_bucket()
+    bucket_resource = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         with pytest.raises(RuntimeError, match="Client initialization failed"):
             bucket_resource.provision()
@@ -287,136 +325,36 @@ def test_client_initialization_retry_issues_fresh_bucket_key(client: S3Client) -
         stubber.add_response(
             "put_bucket_tagging",
             {},
-            {"Bucket": ANY, "Tagging": expected_tagging("test-access-2")},
+            {"Bucket": ANY, "Tagging": expected_tagging("test-access-1")},
         )
         stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": ANY})
         bucket_resource.provision()
 
         empty_bucket(stubber)
-        bucket_resource.cleanup()
+        registry.teardown_all()
 
-    assert keystone.created == 2
-    assert keystone.deleted == ["test-access-1", "test-access-2"]
+    assert keystone.created == 1
+    assert keystone.deleted == ["test-access-1"]
     assert client_credentials == [
         S3Credentials("test-access-1", "test-secret-1"),
-        S3Credentials("test-access-2", "test-secret-2"),
+        S3Credentials("test-access-1", "test-secret-1"),
         CLEANUP_CREDS,
     ]
     stubber.assert_no_pending_responses()
 
 
-def test_client_and_revocation_failure_remains_recoverable() -> None:
+@pytest.mark.parametrize("failure", ["credential-revocation", "bucket-deletion"])
+def test_teardown_continues_after_resource_failure(client: S3Client, registry: ResourceRegistry, failure: str) -> None:
+    # GIVEN a registered bucket and credential, one of which cannot be destroyed
     keystone = KeystoneStub()
-    keystone.fail_delete.add("test-access-1")
-    client_credentials: list[S3Credentials] = []
-
-    def fail(credentials: S3Credentials) -> S3Client:
-        client_credentials.append(credentials)
-        raise RuntimeError("Client initialization failed")
-
-    storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=fail
-    )
-    bucket_resource = storage.new_bucket()
-    with pytest.raises(RuntimeError, match="could not be revoked"):
-        bucket_resource.provision()
-
-    with pytest.raises(RuntimeError, match="Failed to clean 1 pending S3 resource"):
-        storage.cleanup_pending_resources()
-
-    # WHEN session teardown retries revocation after the initial cleanup failure
-    keystone.fail_delete.clear()
-    storage.cleanup_pending_resources()
-
-    # THEN the issued key was retained until Keystone confirmed revocation
-    assert keystone.created == 1
-    assert keystone.delete_attempts == ["test-access-1", "test-access-1", "test-access-1"]
-    assert keystone.deleted == ["test-access-1"]
-    assert client_credentials == [S3Credentials("test-access-1", "test-secret-1")]
-
-
-def test_client_initialization_retry_uses_fresh_credentials(client: S3Client) -> None:
-    keystone = KeystoneStub()
-    keystone.fail_delete_attempts["test-access-1"] = 1
-    client_credentials: list[S3Credentials] = []
-    stubber = Stubber(client)
-
-    def create_client(credentials: S3Credentials) -> S3Client:
-        client_credentials.append(credentials)
-        if credentials.access_key == "test-access-1":
-            raise RuntimeError("Client initialization failed")
-        return client
-
     storage = S3Storage(
         "https://s3.test",
         NAMESPACE,
-        SwiftCredentialProvider(keystone, CLEANUP_CREDS),
-        client_factory=create_client,
+        SwiftCredentialProvider(keystone, CLEANUP_CREDS, KeystoneResourceRegistry(registry, True)),
+        client_factory=lambda _: client,
     )
-    bucket_resource = storage.new_bucket()
-    with pytest.raises(RuntimeError, match="could not be revoked"):
-        bucket_resource.provision()
-
-    stubber.add_response("create_bucket", {}, {"Bucket": ANY})
-    stubber.add_response(
-        "put_bucket_tagging",
-        {},
-        {"Bucket": ANY, "Tagging": expected_tagging("test-access-2")},
-    )
-    stubber.add_response("put_object", {}, {"Bucket": ANY, "Key": "charmqa/", "Body": b""})
-    stubber.add_response("head_bucket", {}, {"Bucket": ANY})
-    empty_bucket(stubber)
-    with stubber:
-        _, credentials = bucket_resource.provision()
-        storage.cleanup_pending_resources()
-        bucket_resource.cleanup()
-
-    assert credentials == S3Credentials("test-access-2", "test-secret-2")
-    assert keystone.created == 2
-    assert keystone.delete_attempts == ["test-access-1", "test-access-1", "test-access-2"]
-    assert keystone.deleted == ["test-access-1", "test-access-2"]
-    assert client_credentials == [
-        S3Credentials("test-access-1", "test-secret-1"),
-        S3Credentials("test-access-2", "test-secret-2"),
-        CLEANUP_CREDS,
-    ]
-    stubber.assert_no_pending_responses()
-
-
-def test_registry_retries_pending_credential_revocation() -> None:
-    keystone = KeystoneStub()
-    keystone.fail_delete_attempts["test-access-1"] = 2
-
-    def fail(_: S3Credentials) -> S3Client:
-        raise RuntimeError("Client initialization failed")
-
-    storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=fail
-    )
-    bucket = storage.new_bucket()
-    registry = ResourceRegistry([], logging.getLogger(__name__))
-    registry.register(bucket.handle, destroyer=storage.bucket_destroyer(bucket))
-
-    with pytest.raises(RuntimeError, match="could not be revoked"):
-        bucket.provision()
-    with pytest.warns(ResourceTeardownWarning):
-        registry.teardown_all()
-
-    # The bucket destroyer retries once, then provider cleanup retries after registry teardown.
-    assert keystone.delete_attempts == ["test-access-1"] * 2
-    assert keystone.deleted == []
-    storage.cleanup_pending_resources()
-    assert keystone.delete_attempts == ["test-access-1"] * 3
-    assert keystone.deleted == ["test-access-1"]
-
-
-def test_cleanup_retries_bucket_when_credential_revocation_fails(client: S3Client) -> None:
-    keystone = KeystoneStub()
-    storage = S3Storage(
-        "https://s3.test", NAMESPACE, SwiftCredentialProvider(keystone, CLEANUP_CREDS), client_factory=lambda _: client
-    )
-    bucket = storage.new_bucket()
+    bucket = registered_bucket(storage, registry)
     with Stubber(client) as stubber:
         name = bucket.handle.name
         stubber.add_response("create_bucket", {}, {"Bucket": name})
@@ -424,68 +362,45 @@ def test_cleanup_retries_bucket_when_credential_revocation_fails(client: S3Clien
         stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": name})
         bucket.provision()
-        keystone.fail_delete.add("test-access-1")
+        if failure == "credential-revocation":
+            keystone.fail_delete.add("test-access-1")
+            empty_bucket(stubber, name)
+        else:
+            stubber.add_client_error(
+                "list_multipart_uploads", service_error_code="AccessDenied", expected_params={"Bucket": name}
+            )
 
-        with pytest.raises(RuntimeError, match="Credential revocation failed"):
-            bucket.cleanup()
-
+        # WHEN teardown runs, THEN both destroyers are attempted exactly once
+        with pytest.warns(ResourceTeardownWarning):
+            registry.teardown_all()
         assert keystone.delete_attempts == ["test-access-1"]
-        assert keystone.deleted == []
-        empty_bucket(stubber, name)
-        keystone.fail_delete.clear()
-        bucket.cleanup()
-        assert keystone.deleted == ["test-access-1"]
+        assert keystone.deleted == ([] if failure == "credential-revocation" else ["test-access-1"])
+        assert registry.registered_handles() == []
         stubber.assert_no_pending_responses()
 
 
-def test_cleanup_revokes_key_when_cleanup_client_initialization_fails(client: S3Client) -> None:
+def test_swift_provisioning_requires_resource_registration(registry: ResourceRegistry) -> None:
+    # GIVEN a provider with a shared registry but no registered bucket
     keystone = KeystoneStub()
-    cleanup_client: S3Client = boto3.client(
-        "s3",
-        aws_access_key_id=CLEANUP_CREDS.access_key,
-        aws_secret_access_key=CLEANUP_CREDS.secret_key,
-        region_name="us-east-1",
+    storage = SwiftS3Provider(
+        "https://s3.test", NAMESPACE, keystone, CLEANUP_CREDS, resources=KeystoneResourceRegistry(registry, True)
     )
-    cleanup_client_attempts = 0
 
-    def client_factory(credentials: S3Credentials) -> S3Client:
-        nonlocal cleanup_client_attempts
-        if credentials == CLEANUP_CREDS:
-            cleanup_client_attempts += 1
-            if cleanup_client_attempts == 1:
-                raise RuntimeError("Cleanup client initialization failed")
-            return cleanup_client
-        return client
+    # WHEN provisioning is attempted directly, THEN credentials cannot escape tracking
+    with pytest.raises(ValueError, match="Parent .* is not registered"):
+        storage.new_bucket().provision()
+    assert keystone.created == 0
 
-    storage = S3Storage(
-        "https://s3.test",
-        NAMESPACE,
-        SwiftCredentialProvider(keystone, CLEANUP_CREDS),
-        client_factory=client_factory,
-    )
-    bucket = storage.new_bucket()
-    with (
-        patch.object(client, "close", wraps=client.close) as close,
-        Stubber(client) as bucket_stubber,
-        Stubber(cleanup_client) as cleanup_stubber,
-    ):
-        name = bucket.handle.name
-        bucket_stubber.add_response("create_bucket", {}, {"Bucket": name})
-        bucket_stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": ANY})
-        bucket_stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
-        bucket_stubber.add_response("head_bucket", {}, {"Bucket": name})
-        bucket.provision()
 
-        with pytest.raises(RuntimeError, match="Cleanup client initialization failed"):
-            bucket.cleanup()
+def test_cleanup_only_swift_provider_cannot_issue_untracked_credentials() -> None:
+    # GIVEN a provider loaded without a session resource registry for stale cleanup
+    keystone = KeystoneStub()
+    storage = SwiftS3Provider("https://s3.test", NAMESPACE, keystone, CLEANUP_CREDS)
 
-        assert keystone.deleted == ["test-access-1"]
-        close.assert_called_once()
-
-        empty_bucket(cleanup_stubber, name)
-        bucket.cleanup()
-        cleanup_stubber.assert_no_pending_responses()
-    cleanup_client.close()
+    # WHEN provisioning is attempted, THEN it fails before issuing a credential
+    with pytest.raises(RuntimeError, match="requires a KeystoneResourceRegistry"):
+        storage.new_bucket().provision()
+    assert keystone.created == 0
 
 
 def test_stale_cleanup_is_scoped_and_revokes_owned_keys(client: S3Client) -> None:

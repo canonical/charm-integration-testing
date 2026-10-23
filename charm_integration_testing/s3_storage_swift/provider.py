@@ -1,10 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from s3_storage import CredentialProvider, S3Credentials, S3Storage
+from s3_storage import CredentialProvider, S3BucketHandle, S3Credentials, S3Storage
 from s3_storage.identity import bucket_owner_identity, provider_identity
 
 from .credentials import KeystoneClient
+from .resource_registry import KeystoneResourceRegistry
 
 
 class SwiftCredentialProvider(CredentialProvider):
@@ -12,9 +13,15 @@ class SwiftCredentialProvider(CredentialProvider):
 
     per_bucket_credentials = True
 
-    def __init__(self, keystone: KeystoneClient, cleanup_credentials: S3Credentials) -> None:
+    def __init__(
+        self,
+        keystone: KeystoneClient,
+        cleanup_credentials: S3Credentials,
+        resources: KeystoneResourceRegistry | None = None,
+    ) -> None:
         self.keystone = keystone
         self._cleanup_credentials = cleanup_credentials
+        self._resources = resources
 
     @property
     def cleanup_credentials(self) -> S3Credentials:
@@ -34,8 +41,10 @@ class SwiftCredentialProvider(CredentialProvider):
             self.cleanup_credentials.access_key,
         )
 
-    def issue(self) -> S3Credentials:
-        return self.keystone.create_credentials()
+    def issue(self, bucket: S3BucketHandle) -> S3Credentials:
+        if self._resources is None:
+            raise RuntimeError("Swift bucket provisioning requires a KeystoneResourceRegistry")
+        return self._resources.create_credentials(self.keystone, parent=bucket)
 
     def revoke(self, access_key: str) -> None:
         self.keystone.delete_credentials(access_key)
@@ -52,6 +61,8 @@ class SwiftS3Provider(S3Storage):
         cleanup_credentials: S3Credentials,
         region: str = "us-east-1",
         identity: str | None = None,
+        *,
+        resources: KeystoneResourceRegistry | None = None,
     ) -> None:
         self.keystone = keystone
         if identity is None:
@@ -74,7 +85,7 @@ class SwiftS3Provider(S3Storage):
         super().__init__(
             endpoint,
             namespace,
-            SwiftCredentialProvider(keystone, cleanup_credentials),
+            SwiftCredentialProvider(keystone, cleanup_credentials, resources),
             region=region,
             identity=identity,
             bucket_owner_identity=bucket_owner_identity(
