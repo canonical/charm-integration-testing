@@ -197,11 +197,18 @@ class LitmusChaosClient(ChaosClient):
                 )
             )
             self._check_startup_deadline(deadline, unit)
+
+        self._wait(partial(self._all_started, engines, deadline), deadline, unit, "startup")
+
+    def _all_started(self, engines: list[_ExperimentRun], deadline: float) -> bool:
+        # Recheck every Engine each round, including those that were active in earlier rounds.
+        all_started = True
         for engine in engines:
-            self._wait(partial(self._started, engine), deadline, engine.name, "startup")
             self._check_startup_deadline(deadline, engine.name)
-        self.check_stress(model, unit)
-        self._check_startup_deadline(deadline, unit)
+            started = self._started(engine)
+            self._check_startup_deadline(deadline, engine.name)
+            all_started = all_started and started
+        return all_started
 
     def _check_startup_deadline(self, deadline: float, name: str) -> None:
         if self._clock() >= deadline:

@@ -357,7 +357,7 @@ def test_slow_multi_container_startup_preserves_requested_duration(context: Clie
     assert not context.results
 
 
-@pytest.mark.parametrize("stage", ["submission", "startup-check", "active-check"])
+@pytest.mark.parametrize("stage", ["submission", "startup-check"])
 def test_engine_submissions_share_startup_deadline(context: ClientContext, stage: str) -> None:
     # GIVEN an API call that consumes the entire startup budget
     def create(**kwargs: Any) -> dict[str, Any]:
@@ -371,7 +371,7 @@ def test_engine_submissions_share_startup_deadline(context: ClientContext, stage
     def read(**kwargs: Any) -> dict[str, Any]:
         nonlocal reads
         reads += 1
-        if (stage == "startup-check" and reads == 1) or (stage == "active-check" and reads == 2):
+        if stage == "startup-check" and reads == 1:
             context.now += 3
         return context.read(**kwargs)
 
@@ -382,7 +382,84 @@ def test_engine_submissions_share_startup_deadline(context: ClientContext, stage
     # WHEN starting stress, THEN late startup fails without losing cleanup ownership
     with pytest.raises(TimeoutError, match="startup"):
         chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
-    assert reads == {"submission": 0, "startup-check": 1, "active-check": 2}[stage]
+    assert reads == {"submission": 0, "startup-check": 1}[stage]
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_group_startup_stops_between_engines_at_deadline(context: ClientContext, operation: str) -> None:
+    # GIVEN two workloads whose first startup check exhausts the budget
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    reads: list[str] = []
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        reads.append(name)
+        if len(reads) == 1:
+            context.now += 3
+        return context.read(name=name, **kwargs)
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN startup fails, THEN the second Engine is not read
+    with pytest.raises(TimeoutError, match="startup"):
+        if operation == "cpu":
+            chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+        else:
+            chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    first, second = [engine["metadata"]["name"] for engine in context.created]
+    assert reads == [first]
+    assert context.backend.custom_objects_api.list_namespaced_custom_object.call_count == 1
+
+    # THEN normal observation remains independent of the expired startup deadline
+    chaos.check_stress(MODEL, UNIT)
+    assert reads == [first, first, second]
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    for setup in context.setups:
+        setup.cleanup.assert_called_once()
+
+
+@pytest.mark.parametrize("first_ends", [False, True], ids=["all-start", "earlier-engine-ends"])
+def test_group_startup_rechecks_all_engines_each_round(context: ClientContext, first_ends: bool) -> None:
+    # GIVEN a second workload that is pending in the first polling round
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    reads: list[str] = []
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        reads.append(name)
+        resource = context.read(name=name, **kwargs)
+        if first_ends and context.now >= 1 and name == context.created[0]["metadata"]["name"]:
+            resource["status"]["engineStatus"] = "completed"
+        return resource
+
+    def list_results(**kwargs: Any) -> dict[str, Any]:
+        response = context.list_results(**kwargs)
+        second = context.created[1]["metadata"]["name"]
+        if context.now < 1 and kwargs["label_selector"] == f"chaosUID=uid-{second}":
+            return {"items": []}
+        return response
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    context.backend.custom_objects_api.list_namespaced_custom_object.side_effect = list_results
+    chaos = context.chaos_client()
+
+    # WHEN polling again, THEN an earlier success is rechecked rather than cached
+    if first_ends:
+        with pytest.raises(RuntimeError, match="ended before stress could be observed"):
+            chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    first, second = [engine["metadata"]["name"] for engine in context.created]
+    assert reads == ([first, second, first] if first_ends else [first, second, first, second])
+    assert context.now == 1
     chaos.cleanup(MODEL, UNIT, "")
     assert not context.engines
     assert not context.results
