@@ -20,7 +20,7 @@ jobs:
             juju_channel: 3.6/stable
             target_charm: postgresql-k8s
             target_endpoint: database
-            target_revision: default
+            target_revision: 960
             target_track: 14
             target_risk: stable
             target_base: '22.04'
