@@ -117,14 +117,15 @@ environments have separate cleanup scopes even when they share a substrate.
 ``S3ProviderRegistry`` only resolves and deduplicates providers. Each used provider
 has one ``S3ResourceRegistry`` shared across its clouds and Juju clients. That scope
 registers the provider and its child buckets with the session ``ResourceRegistry``;
-it does not implement another teardown loop. The session registry destroys buckets
-before invoking the provider's final pending cleanup, continuing after individual
-failures. Provider scopes are independent of controller resources, and HTTP sessions
-remain open until resource teardown finishes. The provider fixture only owns the
-HTTP session's lifetime; it does not invoke storage cleanup.
+it does not implement another teardown loop. ``KeystoneResourceRegistry`` registers
+each issued EC2 credential as a child of its bucket in that same session registry.
+The session registry attempts credential revocation before bucket deletion and
+continues after individual failures, without storage-specific cleanup retries.
+Provider scopes are independent of controller resources, and HTTP sessions remain
+open until resource teardown finishes.
 
 Runs that create their controller attempt to delete their buckets; runs reusing an
-existing controller preserve both buckets and provider-pending resources because
+existing controller preserve both buckets and their credentials because
 storage may still be in use. Swift-generated bucket keys are revoked before their
 buckets are deleted; local/static keys are never revoked.
 
@@ -142,9 +143,9 @@ pre-provisioned ``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` for S3
 operations, so it does not create temporary cleanup keys. If a process is
 terminated between creating a bucket EC2 key and tagging the bucket, the sweep
 cannot identify that key, so manual revocation may be required. A failure to
-create the bucket client triggers immediate revocation; if that fails, session
-teardown retains the key identifier and retries revocation. Run the same cleanup
-manually with:
+create the bucket client leaves the issued key registered for session teardown.
+Failed teardown is reported; stale buckets and their tagged keys are left for
+scheduled cleanup. Run the same cleanup manually with:
 
 .. code:: bash
 
