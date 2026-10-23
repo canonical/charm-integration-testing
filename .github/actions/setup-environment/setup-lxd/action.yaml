@@ -57,6 +57,9 @@ runs:
             type: lxd
             auth-types: [certificate]
             endpoint: ${endpoint}
+            regions:
+              default:
+                endpoint: ${endpoint}
         EOF
         cat > "${CREDENTIALS_DIR}/credentials.yaml" << EOF
         credentials:

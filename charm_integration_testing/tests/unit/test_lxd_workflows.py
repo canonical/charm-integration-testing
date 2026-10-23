@@ -86,7 +86,12 @@ def test_lxd_setup_retains_cloud_files_until_job_cleanup(tmp_path: Path, params:
         outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
         cloud_path = Path(outputs["cloud-definition-path"])
         credentials_path = Path(outputs["credentials-path"])
-        assert yaml.safe_load(cloud_path.read_text())["clouds"]["test-lxd"]["type"] == "lxd"
+        assert yaml.safe_load(cloud_path.read_text())["clouds"]["test-lxd"] == {
+            "type": "lxd",
+            "auth-types": ["certificate"],
+            "endpoint": "https://example.invalid:8443",
+            "regions": {"default": {"endpoint": "https://example.invalid:8443"}},
+        }
         assert yaml.safe_load(credentials_path.read_text())["credentials"]["test-lxd"]["test-lxd-cert"] == {
             "auth-type": "certificate",
             "server-cert": "server\n",
