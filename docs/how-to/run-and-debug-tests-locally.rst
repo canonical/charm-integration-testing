@@ -288,7 +288,7 @@ Moderate CPU pressure
 ---------------------
 
 ``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
-It stresses one target unit's workload container and skips if CPU stress support
+It stresses one target unit's workload containers and skips if CPU stress support
 or passing simple validators for any selected target or neighbor endpoint are
 unavailable. Each selected endpoint must have at least one passing simple result
 before injection.
@@ -334,29 +334,31 @@ and pass available deep validators while the limit remains applied. Missing or
 skipped validators provide no functional coverage. Original memory settings are
 restored on success or failure, with a final idle check on success.
 
-Total CPU stress
-----------------
+Sustained CPU stress
+--------------------
 
 ``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
-``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
-one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The historical
+test name is retained for existing test selections.
 
-It temporarily limits the workload container to one CPU, waits for all bundle
-units to become active/idle, then starts four stress workers. Stress is held for
+It waits for all bundle units to become active/idle, then starts four stress
+workers in each Juju workload container of one target unit, concurrently.
+The charm-agent container is excluded. It does not change charm configuration,
+CPU requests, or CPU limits, and does not trigger a rollout. Without an existing
+CPU limit, this generates load rather than guaranteeing CPU saturation; it does
+not increase the worker count to exhaust the entire node. Stress is held for
 ``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
 required. Chaos Mesh waits up to one minute for the controller to confirm target
 selection and injection before the hold period starts. A startup timeout fails
 the test and still triggers cleanup. The requested experiment duration includes
-two extra minutes to allow for startup and polling.
+two extra minutes to allow for startup and polling. Injection must still be active
+at the end of the observation period.
 After cleanup, all bundle units, including a cross-model neighbor,
 must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
 default). Available deep interface validators run for the target application and
-its test neighbor, including validators implemented on the consumer side,
-before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+its test neighbor, including validators implemented on the consumer side.
 When no validator applies, logs report the missing validation coverage; only
 status recovery is checked. Deployment validation supplies the initial baseline.
-Original CPU requests and limits are restored even after failure or skip.
-A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
 
 For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
 ``data-integrator:postgresql``. The ``postgresql_client`` validator runs on

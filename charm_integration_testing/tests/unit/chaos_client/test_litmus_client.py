@@ -264,20 +264,73 @@ def test_invalid_target_does_not_prepare_resources(context: ClientContext, pods:
     assert context.created == []
 
 
-def test_multiple_workload_containers_require_explicit_selection(context: ClientContext) -> None:
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_multiple_workload_containers_are_stressed_together(context: ClientContext, operation: str) -> None:
     # GIVEN two workload containers
     context.pods[0].spec.containers.append(
         client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
     )
 
-    # WHEN no container is selected, THEN nothing is created
-    with pytest.raises(RuntimeError, match="Specify one workload container"):
-        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
-    assert context.created == []
+    # WHEN requesting unit stress, THEN both Engines remain active together, excluding the charm agent.
+    chaos = context.chaos_client()
+    if operation == "cpu":
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    assert len(context.engines) == 2
+    assert {
+        entry["value"]
+        for engine in context.created
+        for entry in engine["spec"]["experiments"][0]["spec"]["components"]["env"]
+        if entry["name"] == "TARGET_CONTAINER"
+    } == {"postgresql", "exporter"}
+    chaos.check_stress(MODEL, UNIT)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
 
     # WHEN explicitly selecting the workload, THEN stress can be requested
+    context.created.clear()
     context.chaos_client("postgresql").stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
     assert len(context.created) == 1
+
+
+@pytest.mark.parametrize("container", [None, "charm", "missing"])
+def test_no_matching_workload_fails_before_creation(context: ClientContext, container: str | None) -> None:
+    # GIVEN no Juju workload, or a selection that does not identify one
+    if container is None:
+        context.pods[0].spec.containers = [client.V1Container(name="charm")]
+    # WHEN requesting stress, THEN fail before preparing any resources.
+    with pytest.raises(RuntimeError, match="No matching workload containers"):
+        context.chaos_client(container).stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert not context.created
+    assert not context.setups
+
+
+def test_second_container_setup_failure_cleans_both_experiments(context: ClientContext) -> None:
+    # GIVEN two workloads and a setup error after the first Engine starts
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        context.prepare_error = RuntimeError("second container setup failed")
+        return resource
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
+
+    # WHEN the second setup fails, THEN teardown stops the first fault and cleans both setups.
+    with pytest.raises(RuntimeError, match="second container setup failed"):
+        meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    meta.cleanup_all()
+    assert len(context.created) == 1
+    assert len(context.setups) == 2
+    assert not context.engines
+    assert not context.results
+    for setup in context.setups:
+        setup.cleanup.assert_called_once()
 
 
 @pytest.mark.parametrize("duration", [timedelta(0), timedelta(seconds=-1), timedelta(milliseconds=1500)])
