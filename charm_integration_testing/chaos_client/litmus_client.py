@@ -188,15 +188,23 @@ class LitmusChaosClient(ChaosClient):
         deadline = self._clock() + self._startup_timeout
         # Early workloads must outlive startup of the remaining Engines.
         injection_seconds = int(seconds) + ceil(self._startup_timeout)
-        engines = [
-            self._create_for_container(model, unit, pod, container, experiment, settings, injection_seconds)
-            for container in containers
-        ]
+        engines = []
+        for container in containers:
+            self._check_startup_deadline(deadline, unit)
+            engines.append(
+                self._create_for_container(
+                    model, unit, pod, container, experiment, settings, injection_seconds, deadline=deadline
+                )
+            )
+            self._check_startup_deadline(deadline, unit)
         for engine in engines:
             self._wait(partial(self._started, engine), deadline, engine.name, "startup")
         self.check_stress(model, unit)
+        self._check_startup_deadline(deadline, unit)
+
+    def _check_startup_deadline(self, deadline: float, name: str) -> None:
         if self._clock() >= deadline:
-            raise TimeoutError(f"Litmus startup timed out for {model.uri}/{unit}.")
+            raise TimeoutError(f"Litmus startup timed out for {name}.")
 
     def _create_for_container(
         self,
@@ -207,6 +215,8 @@ class LitmusChaosClient(ChaosClient):
         experiment: LitmusExperiment,
         settings: dict[str, str],
         seconds: int,
+        *,
+        deadline: float,
     ) -> _ExperimentRun:
         settings = {
             **settings,
@@ -245,6 +255,7 @@ class LitmusChaosClient(ChaosClient):
         # Preparation can fail after creating some resources, before an Engine exists.
         self._created.append(engine)
         setup.prepare(experiment)
+        self._check_startup_deadline(deadline, engine.name)
         engine.engine_requested = True
         try:
             created = self._backend.custom_objects_api.create_namespaced_custom_object(

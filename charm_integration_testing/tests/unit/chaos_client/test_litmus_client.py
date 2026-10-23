@@ -408,6 +408,42 @@ def test_fractional_startup_allowance_rounds_up(context: ClientContext, startup_
     assert not context.engines
 
 
+@pytest.mark.parametrize("stage", ["setup", "submission"])
+def test_expired_startup_stops_remaining_submissions(
+    context: ClientContext, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    # GIVEN two workloads and the first setup or submission exhausting the startup budget
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+
+    def make_setup(backend: KubernetesBackend, namespace: str, name: str, owner: str) -> LitmusSetup:
+        setup = context.make_setup(backend, namespace, name, owner)
+        if stage == "setup":
+            context.setups[-1].prepare.side_effect = lambda _: context.pause(3)
+        return setup
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        if stage == "submission":
+            context.now += 3
+        return resource
+
+    monkeypatch.setattr(module, "LitmusSetup", make_setup)
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    chaos = context.chaos_client()
+
+    # WHEN startup times out, THEN no further Engine is submitted and partial resources remain owned
+    with pytest.raises(TimeoutError, match="startup"):
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert len(context.setups) == 1
+    assert len(context.created) == (1 if stage == "submission" else 0)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+
+
 def test_second_container_setup_failure_cleans_both_experiments(context: ClientContext) -> None:
     # GIVEN two workloads and a setup error after the first Engine starts
     context.pods[0].spec.containers.append(
