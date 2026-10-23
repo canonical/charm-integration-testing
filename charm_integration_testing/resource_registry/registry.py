@@ -102,11 +102,17 @@ class ResourceRegistry:
         if entry is None:
             return
 
-        # Collect and destroy children first (depth-first)
+        # Collect and destroy children first (depth-first), continuing after failures.
+        child_exc: Exception | None = None
         for child_id in list(self._children.get(handle.resource_id, [])):
             child_entry = self._entries.get(child_id)
             if child_entry is not None:
-                self.teardown(child_entry.handle)
+                try:
+                    self.teardown(child_entry.handle)
+                except Exception as exc:
+                    self._logger.warning(f"Teardown failed for child '{child_id}': {exc}")
+                    if child_exc is None:
+                        child_exc = exc
 
         # Collect logs for self; save any exception so destroy still runs
         log_exc: BaseException | None = None
@@ -131,9 +137,15 @@ class ResourceRegistry:
         if destroy_exc is not None:
             if log_exc is not None:
                 raise destroy_exc from log_exc
+            if child_exc is not None:
+                raise destroy_exc from child_exc
             raise destroy_exc
         if log_exc is not None:
+            if child_exc is not None:
+                raise log_exc from child_exc
             raise log_exc
+        if child_exc is not None:
+            raise child_exc
 
     def teardown_all(self) -> None:
         """Tear down all root resources in reverse registration order."""
