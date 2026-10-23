@@ -18,6 +18,7 @@ SWIFT_CONFIG_REQUIRED_VARIABLES = (
     "S3_OS_STORAGE_URL",
     "S3_CLEANUP_ACCESS_KEY",
     "S3_CLEANUP_SECRET_KEY",
+    "S3_BUCKET_NAMESPACE",
 )
 SWIFT_CONFIG_OPTIONAL_VARIABLES = ("S3_ENDPOINT", "S3_REGION")
 SWIFT_CONFIG_VARIABLES = (*SWIFT_CONFIG_REQUIRED_VARIABLES, *SWIFT_CONFIG_OPTIONAL_VARIABLES)
@@ -42,7 +43,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Write an environment's Swift credentials to a protected S3 configuration file."
     )
-    parser.add_argument("secret_name", help="GitHub Actions secret name used as the storage namespace")
+    parser.add_argument("secret_name", help="GitHub Actions secret name used in diagnostics")
     parser.add_argument("--output-file", type=Path, required=True, help="new mode-600 configuration file")
     parser.add_argument(
         "--optional",
@@ -76,7 +77,6 @@ def main() -> int:
     with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
         for name, value in values.items():
             config_file.write(f"{name}={value}\n")
-        config_file.write(f"S3_BUCKET_NAMESPACE={args.secret_name}\n")
     with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
         output.write(f"config_path={args.output_file.resolve()}\navailable=true\n")
     return 0
