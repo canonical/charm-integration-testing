@@ -360,14 +360,10 @@ def test_cleanup_entrypoint_passes_config_and_age_to_provider(
     class ProviderStub:
         def __init__(self) -> None:
             self.age: timedelta | None = None
-            self.pending_cleanup_calls = 0
 
         def cleanup_stale(self, age: timedelta) -> list[str]:
             self.age = age
             return ["stale-bucket"]
-
-        def cleanup_pending_resources(self) -> None:
-            self.pending_cleanup_calls += 1
 
     session = SessionStub()
     provider = ProviderStub()
@@ -386,7 +382,6 @@ def test_cleanup_entrypoint_passes_config_and_age_to_provider(
 
     assert observed == {"config": Path("/test/storage.conf"), "session": session}
     assert provider.age == timedelta(minutes=17.5)
-    assert provider.pending_cleanup_calls == 1
     assert capsys.readouterr().out == "Removed S3 bucket stale-bucket\n"
 
 
@@ -409,9 +404,6 @@ class SessionStub:
 class FailingProviderStub:
     def cleanup_stale(self, age):
         raise RuntimeError("cleanup failed")
-    def cleanup_pending_resources(self):
-        pass
-
 module.requests.Session = SessionStub
 module.provider_from_config = lambda path, session: FailingProviderStub()
 sys.argv = ["cleanup-s3.py", "--config", "/test/storage.conf"]
