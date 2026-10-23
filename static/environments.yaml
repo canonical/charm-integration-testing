@@ -55,12 +55,12 @@ environments:
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
     arch: amd64
-    bootstrap-config:
+    bootstrap-config: &ps7-bootstrap-config
       apt-http-proxy: "http://egress.ps7.internal:3128"
       apt-https-proxy: "http://egress.ps7.internal:3128"
       http-proxy: "http://egress.ps7.internal:3128"
       https-proxy: "http://egress.ps7.internal:3128"
-      no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
+      no-proxy: &ps7-no-proxy "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc,.svc.cluster.local"
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
     bootstrap-constraints: &ps7-model-constraints
@@ -70,7 +70,7 @@ environments:
       update-status-hook-interval: "2m"
       juju-http-proxy: "http://egress.ps7.internal:3128"
       juju-https-proxy: "http://egress.ps7.internal:3128"
-      juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc,.svc.cluster.local"
+      juju-no-proxy: *ps7-no-proxy
       snap-http-proxy: "http://egress.ps7.internal:3128"
       snap-https-proxy: "http://egress.ps7.internal:3128"
   ps7-sqa-prod_charm_qa_kubernetes-2: *ps7-sqa-prod_charm_qa_kubernetes
@@ -91,14 +91,7 @@ environments:
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     novarc-secret: PROD_PS7_NOVARC
     arch: amd64
-    bootstrap-config: &ps7-bootstrap-config
-      apt-http-proxy: "http://egress.ps7.internal:3128"
-      apt-https-proxy: "http://egress.ps7.internal:3128"
-      http-proxy: "http://egress.ps7.internal:3128"
-      https-proxy: "http://egress.ps7.internal:3128"
-      no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
-      snap-http-proxy: "http://egress.ps7.internal:3128"
-      snap-https-proxy: "http://egress.ps7.internal:3128"
+    bootstrap-config: *ps7-bootstrap-config
     bootstrap-constraints: *ps7-model-constraints
     model-config: *ps7-model-config
   ps7-sqa-prod_charm_qa_openstack-2: *ps7-sqa-prod_charm_qa_openstack

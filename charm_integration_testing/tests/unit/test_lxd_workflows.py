@@ -223,20 +223,22 @@ def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) 
     assert deleted.exists() == params.deleted
 
 
-def test_existing_ps7_proxy_settings_are_preserved() -> None:
-    # GIVEN the environment catalog before this PR
-    machine_bypass = "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
-    k8s_bypass = (
-        "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,"
-        ".canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
-    )
+def test_ps7_proxy_bypasses_only_private_destinations() -> None:
+    # GIVEN the shared PS7 proxy policy
+    bypass = "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc,.svc.cluster.local"
+    proxy = "http://egress.ps7.internal:3128"
     current = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
 
-    # THEN Kubernetes and OpenStack retain their distinct bootstrap bypass lists
+    # THEN public endpoints such as streams.canonical.com use the proxy on every PS7 substrate
     for name, environment in current.items():
         if name.startswith("ps7-"):
-            expected = k8s_bypass if environment["cloud-type"] == "k8s" else machine_bypass
-            assert environment["bootstrap-config"]["no-proxy"] == expected
+            bootstrap = environment["bootstrap-config"]
+            model = environment["model-config"]
+            assert bootstrap["no-proxy"] == model["juju-no-proxy"] == bypass
+            for key in ("http-proxy", "https-proxy", "apt-http-proxy", "apt-https-proxy"):
+                assert bootstrap[key] == proxy
+            for key in ("juju-http-proxy", "juju-https-proxy", "snap-http-proxy", "snap-https-proxy"):
+                assert model[key] == proxy
 
 
 def test_lxd_runner_matches_workflow_placement() -> None:
