@@ -247,7 +247,7 @@ class TestStress:
         assert env["TARGET_PODS"] == "postgresql-random-pod"
         assert spec["selectors"]["pods"][0]["names"] == env["TARGET_PODS"]
         assert env["TARGET_CONTAINER"] == "postgresql"
-        assert env["TOTAL_CHAOS_DURATION"] == "30"
+        assert env["TOTAL_CHAOS_DURATION"] == "33"
         assert len(f"{name}-{name}") <= 63
         context.setups[0].prepare.assert_called_once_with(params.experiment)
 
@@ -312,6 +312,100 @@ def test_no_matching_workload_fails_before_creation(context: ClientContext, cont
         context.chaos_client(container).stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
     assert not context.created
     assert not context.setups
+
+
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_slow_multi_container_startup_preserves_requested_duration(context: ClientContext, operation: str) -> None:
+    # GIVEN the first workload starts while the second Engine submission is delayed
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    expires: dict[str, float] = {}
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        if context.created:
+            context.now += 2.5
+        resource = context.create(**kwargs)
+        settings = {
+            entry["name"]: entry["value"] for entry in resource["spec"]["experiments"][0]["spec"]["components"]["env"]
+        }
+        expires[resource["metadata"]["name"]] = context.now + int(settings["TOTAL_CHAOS_DURATION"])
+        return resource
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        resource = context.read(name=name, **kwargs)
+        if context.now >= expires[name]:
+            resource["status"]["engineStatus"] = "completed"
+        return resource
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN observing for the full requested duration after both workloads are active
+    if operation == "cpu":
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    context.now += 10
+
+    # THEN neither workload has expired, and cleanup still stops both experiments
+    chaos.check_stress(MODEL, UNIT)
+    assert len(expires) == 2
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("stage", ["submission", "startup-check", "active-check"])
+def test_engine_submissions_share_startup_deadline(context: ClientContext, stage: str) -> None:
+    # GIVEN an API call that consumes the entire startup budget
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        if stage == "submission":
+            context.now += 3
+        return resource
+
+    reads = 0
+
+    def read(**kwargs: Any) -> dict[str, Any]:
+        nonlocal reads
+        reads += 1
+        if (stage == "startup-check" and reads == 1) or (stage == "active-check" and reads == 2):
+            context.now += 3
+        return context.read(**kwargs)
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN starting stress, THEN late startup fails without losing cleanup ownership
+    with pytest.raises(TimeoutError, match="startup"):
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("startup_seconds", [0.5, 3.2])
+def test_fractional_startup_allowance_rounds_up(context: ClientContext, startup_seconds: float) -> None:
+    # GIVEN a sub-second startup allowance or a fractional number of seconds
+    chaos = LitmusChaosClient(
+        context.backend,
+        startup_timeout=timedelta(seconds=startup_seconds),
+        clock=lambda: context.now,
+        pause=context.pause,
+    )
+
+    # WHEN requesting stress, THEN whole-second Litmus durations cover the entire allowance
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    settings = {
+        entry["name"]: entry["value"]
+        for entry in context.created[0]["spec"]["experiments"][0]["spec"]["components"]["env"]
+    }
+    assert 10 + startup_seconds <= int(settings["TOTAL_CHAOS_DURATION"]) < 11 + startup_seconds
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
 
 
 def test_second_container_setup_failure_cleans_both_experiments(context: ClientContext) -> None:

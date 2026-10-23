@@ -545,15 +545,15 @@ def test_validator_overrun_fails(harness: Harness, overrun: int) -> None:
     assert harness.events[-1] == "cleanup"
 
 
-def test_startup_consumes_margin(harness: Harness) -> None:
-    # GIVEN startup uses the entire conservative stress budget
+def test_observation_budget_starts_after_injection(harness: Harness) -> None:
+    # GIVEN slow startup with the tool still reporting active stress
     harness.tool.startup_seconds = 140
 
-    # WHEN injection returns, THEN observation cannot pretend it has a fresh budget
-    with pytest.raises(TimeoutError, match="execution budget"):
-        harness.run()
-    assert harness.tool.check_times == []
-    assert harness.events[-1] == "cleanup"
+    # WHEN injection returns, THEN the full configured duration is observed
+    harness.run()
+    assert harness.tool.check_times == [140, 140, 150, 150, 160, 160]
+    assert harness.events.count("cleanup") == 1
+    assert len(harness.backend.idle_calls) == 2
 
 
 def test_final_round_can_use_margin(harness: Harness) -> None:

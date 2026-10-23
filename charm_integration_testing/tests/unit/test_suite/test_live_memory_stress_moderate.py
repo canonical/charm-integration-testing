@@ -73,11 +73,12 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     return arguments, client, chaos, clock
 
 
-def test_lifecycle_and_injection_time(scenario: Scenario) -> None:
+@pytest.mark.parametrize("startup", [50, 130], ids=["fast-startup", "startup-exceeds-margin"])
+def test_lifecycle_and_injection_time(scenario: Scenario, startup: float) -> None:
     arguments, client, chaos, clock = scenario
-    chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, 50), timedelta(minutes=5))[1]
+    chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, startup), timedelta(minutes=5))[1]
     live.test_live_memory_stress_moderate(**arguments)
-    assert clock[0] == 350
+    assert clock[0] == startup + 300
     chaos.stress_memory.assert_called_once_with(
         MODEL,
         "target/0",
@@ -314,35 +315,25 @@ def test_missing_target_unit_fails_before_injection(scenario: Scenario) -> None:
     chaos.stress_memory.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("phase", "elapsed", "expected_clock"),
-    [("injection", 421, 421), ("injection", 130, 420), ("validation", 421, 421)],
-    ids=["startup-exceeds-budget", "startup-consumes-margin", "slow-validator"],
-)
-def test_execution_budget_overrun_fails_and_cleans_up(
-    scenario: Scenario, phase: str, elapsed: float, expected_clock: float
-) -> None:
+@pytest.mark.parametrize("startup", [0, 130], ids=["immediate-startup", "startup-exceeds-margin"])
+def test_execution_budget_overrun_fails_and_cleans_up(scenario: Scenario, startup: float) -> None:
     arguments, client, chaos, clock = scenario
-    if phase == "injection":
-        chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, elapsed), timedelta(minutes=5))[
-            1
-        ]
-    else:
-        calls = 0
+    chaos.stress_memory.side_effect = lambda *args, **kwargs: (clock.__setitem__(0, startup), timedelta(minutes=5))[1]
+    calls = 0
 
-        def validate(**kwargs: Any) -> dict[str, list[ValidationResult]]:
-            nonlocal calls
-            calls += 1
-            if calls > 1:
-                clock[0] += elapsed
-            return {"target/0": [result(endpoint="database")], "neighbor/0": [result()]}
+    def validate(**kwargs: Any) -> dict[str, list[ValidationResult]]:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            clock[0] += 421
+        return {"target/0": [result(endpoint="database")], "neighbor/0": [result()]}
 
-        client.validate_model.side_effect = validate
+    client.validate_model.side_effect = validate
     with pytest.raises(TimeoutError, match="execution budget"):
         live.test_live_memory_stress_moderate(**arguments)
     chaos.cleanup_all.assert_called_once()
     assert client.multi_model_idle_for_period.call_count == 1
-    assert clock[0] == expected_clock
+    assert clock[0] == startup + 421
 
 
 @pytest.mark.parametrize("neighbor_model", [None, NEIGHBOR], ids=["same-model", "cross-model"])

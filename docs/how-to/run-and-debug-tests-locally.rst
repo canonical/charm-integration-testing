@@ -149,6 +149,10 @@ API, execution and cleanup errors fail the test. Cleanup retains resources for m
 investigation when their recorded creation identifier cannot be verified.
 
 Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Its configured startup timeout covers all workload Engine submissions and
+injection checks together (five minutes by default). Each Engine receives that
+allowance in addition to the requested stress duration so early workloads remain
+active throughout startup of the others. Cleanup stops any remaining injection.
 Cleanup allows graceful termination and requires reversion evidence for observed
 injections before deleting results and permissions; otherwise, it reports an
 error and retains them for investigation.
@@ -174,8 +178,10 @@ After confirmed injection, the test repeatedly checks experiment status,
 workload health and simple validators. Error/blocked workloads, disconnected
 agents, lost validation coverage, experiment errors and early completion fail.
 Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
-Startup and the last validation round under stress share a two-minute allowance;
-calls exceeding the stress execution budget fail when they return.
+The observation budget starts after injection is confirmed, with a two-minute
+allowance for the last validation round. Backend startup limits are separate;
+early completion still fails the active-stress checks. Calls exceeding the
+observation execution budget fail when they return.
 
 Cleanup runs on failure too; failed cleanup remains registered for retry.
 Chaos Mesh memory cleanup waits for resource deletion. After successful
@@ -300,6 +306,8 @@ moderate pressure.
 
 After initial active/idle and simple validation, the test confirms injection
 and repeatedly checks stress status, workload health and simple validators.
+The full observation period and its two-minute final-round allowance start
+after injection is confirmed; Litmus startup has its own bounded allowance.
 Error/blocked workloads, disconnected agents, experiment errors and lost
 validation coverage fail. Non-idle states are allowed during stress; sampled
 checks may miss brief failures.

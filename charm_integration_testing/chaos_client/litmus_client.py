@@ -4,6 +4,7 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
+from math import ceil
 from time import monotonic, sleep
 from typing import Any, Callable, Literal
 from uuid import uuid4
@@ -184,14 +185,18 @@ class LitmusChaosClient(ChaosClient):
         if seconds < 1 or not seconds.is_integer():
             raise ValueError("Chaos duration must be a positive whole number of seconds.")
         pod, containers = self._target(model.model, unit)
+        deadline = self._clock() + self._startup_timeout
+        # Early workloads must outlive startup of the remaining Engines.
+        injection_seconds = int(seconds) + ceil(self._startup_timeout)
         engines = [
-            self._create_for_container(model, unit, pod, container, experiment, settings, int(seconds))
+            self._create_for_container(model, unit, pod, container, experiment, settings, injection_seconds)
             for container in containers
         ]
-        deadline = self._clock() + self._startup_timeout
         for engine in engines:
             self._wait(partial(self._started, engine), deadline, engine.name, "startup")
         self.check_stress(model, unit)
+        if self._clock() >= deadline:
+            raise TimeoutError(f"Litmus startup timed out for {model.uri}/{unit}.")
 
     def _create_for_container(
         self,
