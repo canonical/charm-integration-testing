@@ -631,21 +631,3 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-      - name: Remove temporary LXD cloud files
-        if: ${{ always() }}
-        shell: bash
-        env:
-          TARGET_LXD_DEFINITION: ${{ steps.target_env_info.outputs.cloud-type == 'lxd' && steps.setup_target.outputs.cloud-definition-path || '' }}
-          NEIGHBOR_LXD_DEFINITION: ${{ steps.neighbor_env_info.outputs.cloud-type == 'lxd' && steps.setup_neighbor.outputs.cloud-definition-path || '' }}
-        run: |-
-          set -euo pipefail
-          for definition in "$TARGET_LXD_DEFINITION" "$NEIGHBOR_LXD_DEFINITION"; do
-            [[ -n "$definition" ]] || continue
-            workspace=$(dirname "$definition")
-            if [[ "$definition" != "$RUNNER_TEMP"/juju-cloud.*/cloud.yaml ]]; then
-              echo "::error::Refusing to clean an unexpected LXD workspace path"
-              exit 1
-            fi
-            rm -f "$workspace/cloud.yaml" "$workspace/credentials.yaml" "$workspace/creds.yaml"
-            rmdir "$workspace"
-          done

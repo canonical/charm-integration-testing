@@ -11,7 +11,7 @@ inputs:
     description: Name to register the Juju cloud under.
     required: true
   workspace:
-    description: Per-cloud temporary workspace retained until job cleanup.
+    description: Per-cloud temporary workspace retained for the ephemeral job lifetime.
     required: true
 outputs:
   cloud-name:

@@ -26,7 +26,7 @@ class SetupParams:
         pytest.param(SetupParams("parse", 2), id="credential-parsing-fails"),
     ],
 )
-def test_lxd_setup_prepares_cloud_files_until_job_cleanup(tmp_path: Path, params: SetupParams) -> None:
+def test_lxd_setup_prepares_cloud_files_for_job_lifetime(tmp_path: Path, params: SetupParams) -> None:
     # GIVEN the actual setup script; Juju registration belongs to the test fixture
     action = yaml.safe_load((ROOT / ".github/actions/setup-environment/setup-lxd/action.yaml").read_text())
     tools = tmp_path / "bin"
@@ -96,25 +96,9 @@ def test_lxd_setup_prepares_cloud_files_until_job_cleanup(tmp_path: Path, params
         for path in (cloud_path, credentials_path):
             assert path.stat().st_mode & 0o777 == 0o600
 
-        # WHEN the final job cleanup runs, even after a failed or cancelled test
-        workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
-        cleanup = next(
-            step
-            for job in workflow["jobs"].values()
-            for step in job["steps"]
-            if step["name"] == "Remove temporary LXD cloud files"
-        )
-        assert cleanup["if"] == "${{ always() }}"
-        cleaned = subprocess.run(
-            ["bash", "-e", "-o", "pipefail", "-c", cleanup["run"]],
-            env={**environment, "TARGET_LXD_DEFINITION": str(cloud_path), "NEIGHBOR_LXD_DEFINITION": ""},
-            capture_output=True,
-            text=True,
-        )
-        assert cleaned.returncode == 0, cleaned.stderr
-
-    # THEN no temporary credential files survive job completion or setup failure
-    assert list(runtime.iterdir()) == []
+        assert set(workspace.iterdir()) == {cloud_path, credentials_path}
+    else:
+        assert list(runtime.iterdir()) == []
 
 
 def test_cloud_dispatch_passes_only_supported_inputs() -> None:
