@@ -300,13 +300,18 @@ def test_cleanup_validates_finite_positive_threshold(tmp_path: Path, threshold: 
         assert "age_threshold must be a positive finite number" in result.stdout
 
 
-@pytest.mark.parametrize("missing_variable", ["all", "S3_OS_PASSWORD", None], ids=["absent", "partial", "complete"])
+@pytest.mark.parametrize(
+    "missing_variable",
+    ["all", "S3_OS_PASSWORD", "S3_BUCKET_NAMESPACE", None],
+    ids=["absent", "partial", "missing-namespace", "complete"],
+)
 def test_cleanup_requires_declared_swift_credentials(tmp_path: Path, missing_variable: str | None) -> None:
     # GIVEN cleanup for an environment declaring Swift storage
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     steps = workflow["jobs"]["cleanup-environment"]["steps"]
     preflight = next(step for step in steps if step.get("id") == "s3_credentials")
     values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values["S3_BUCKET_NAMESPACE"] = "shared-storage"
     if missing_variable is not None and missing_variable in values:
         del values[missing_variable]
     config = "" if missing_variable == "all" else "\n".join(f"{name}={value}" for name, value in values.items())
@@ -332,6 +337,7 @@ def test_cleanup_requires_declared_swift_credentials(tmp_path: Path, missing_var
         assert result.returncode == 0
         config_path = tmp_path / "cleanup-s3.conf"
         assert config_path.stat().st_mode & 0o777 == 0o600
+        assert parse_s3_config(config_path.read_text(), SWIFT_CONFIG_VARIABLES) == values
         assert output.read_text() == f"config_path={config_path}\navailable=true\n"
     else:
         assert result.returncode == 1
