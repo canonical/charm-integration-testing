@@ -354,6 +354,11 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
+      - name: Configure external PgBouncer access for PS7 CMR diagnostic
+        if: ${{ inputs.target_environment == 'ps7-sqa-prod_charm_qa_lxd-1' && inputs.neighbor_environment == 'ps7-sqa-prod_charm_qa_kubernetes-1' && inputs.charm_under_test == 'data-integrator' && inputs.neighbor == 'pgbouncer-k8s' }}
+        shell: bash
+        run: |
+          yq -i '.overrides[0].configs."expose-external" = ["nodeport"]' static/charm-overrides/pgbouncer-k8s.yaml
       - name: Run charm CMR tests
         id: run_tests_cmr
         if: ${{ inputs.neighbor_environment != '' }}
