@@ -1,11 +1,15 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import replace
+from unittest.mock import patch
 
 import pytest
+import requests
+from pydantic import ValidationError
 from resource_registry import LogCollector, ResourceHandle, ResourceRegistry, ResourceTeardownWarning
 from s3_storage import S3BucketHandle, S3Credentials
 from s3_storage_swift import KeystoneClient, KeystoneCredentialHandle, KeystoneResourceRegistry, SwiftCredentials
@@ -20,9 +24,12 @@ class KeystoneStub(KeystoneClient):
         self.deleted: list[str] = []
         self.fail_delete = False
 
-    def create_credentials(self) -> S3Credentials:
+    def create_credentials(self, *, on_access_key: Callable[[str], None] | None = None) -> S3Credentials:
         self.created += 1
-        return S3Credentials(f"access-{self.created}", f"secret-{self.created}")
+        credentials = S3Credentials(f"access-{self.created}", f"secret-{self.created}")
+        if on_access_key is not None:
+            on_access_key(credentials.access_key)
+        return credentials
 
     def delete_credentials(self, access_key: str) -> None:
         self.deleted.append(access_key)
@@ -94,7 +101,7 @@ def test_credential_is_registered_before_issuance_and_retained_after_issuance_fa
     registry.register(parent)
 
     class FailingKeystone(KeystoneStub):
-        def create_credentials(self) -> S3Credentials:
+        def create_credentials(self, *, on_access_key: Callable[[str], None] | None = None) -> S3Credentials:
             assert len(registry.children_of(parent)) == 1
             raise RuntimeError("Issuance failed")
 
@@ -124,6 +131,42 @@ def test_failed_revocation_does_not_skip_bucket_destruction() -> None:
         registry.teardown_all()
     assert keystone.deleted == [credentials.access_key]
     assert events == ["bucket-deleted"]
+    assert registry.registered_handles() == []
+
+
+@pytest.mark.parametrize("secret", [{}, {"secret": None}], ids=["missing-secret", "invalid-secret"])
+def test_returned_access_key_is_cleaned_when_credential_response_validation_fails(secret: dict[str, None]) -> None:
+    # GIVEN an issued access key whose response cannot construct complete credentials
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    parent = S3BucketHandle("test", "bucket")
+    registry.register(parent)
+    auth = requests.Response()
+    auth.status_code = 201
+    auth.headers["X-Subject-Token"] = "token"
+    auth._content = json.dumps({"token": {"user": {"id": "user-id"}, "project": {"id": "project-id"}}}).encode()
+    issued = requests.Response()
+    issued.status_code = 201
+    issued._content = json.dumps({"credential": {"access": "issued-key", **secret}}).encode()
+    deleted = requests.Response()
+    deleted.status_code = 204
+    with (
+        requests.Session() as session,
+        patch.object(session, "post", side_effect=[auth, issued, auth]),
+        patch.object(session, "delete", return_value=deleted) as delete,
+    ):
+        keystone = KeystoneClient(KeystoneStub().credentials, session)
+
+        # WHEN response validation fails, THEN teardown still knows the returned key
+        with pytest.raises(ValidationError):
+            KeystoneResourceRegistry(registry, True).create_credentials(keystone, parent)
+        delete.assert_not_called()
+        assert len(registry.children_of(parent)) == 1
+        registry.teardown_all()
+        delete.assert_called_once_with(
+            "https://identity.test/v3/users/user-id/credentials/OS-EC2/issued-key",
+            headers={"X-Auth-Token": "token"},
+            timeout=30,
+        )
     assert registry.registered_handles() == []
 
 

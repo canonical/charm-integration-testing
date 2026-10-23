@@ -4,6 +4,7 @@
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
@@ -86,9 +87,12 @@ class KeystoneStub(KeystoneClient):
         self.delete_attempts: list[str] = []
         self.fail_delete: set[str] = set()
 
-    def create_credentials(self) -> S3Credentials:
+    def create_credentials(self, *, on_access_key: Callable[[str], None] | None = None) -> S3Credentials:
         self.created += 1
-        return S3Credentials(f"test-access-{self.created}", f"test-secret-{self.created}")
+        credentials = S3Credentials(f"test-access-{self.created}", f"test-secret-{self.created}")
+        if on_access_key is not None:
+            on_access_key(credentials.access_key)
+        return credentials
 
     def delete_credentials(self, access_key: str) -> None:
         self.delete_attempts.append(access_key)
@@ -728,6 +732,16 @@ def test_keystone_deletion_encodes_access_key_path_segment(access_key: str, path
             headers={"X-Auth-Token": "token"},
             timeout=30,
         )
+
+
+@pytest.mark.parametrize("access_key", ["", ".", ".."], ids=["empty", "current-directory", "parent-directory"])
+def test_keystone_deletion_rejects_relative_or_empty_access_key(access_key: str) -> None:
+    # GIVEN a tag that cannot identify a single credential endpoint
+    with requests.Session() as session, patch.object(session, "request") as request:
+        # WHEN deletion is requested, THEN URL normalization cannot redirect it
+        with pytest.raises(ValueError, match="empty or a relative path segment"):
+            KeystoneClient(SWIFT, session).delete_credentials(access_key)
+        request.assert_not_called()
 
 
 def test_environment_rejects_swift_config_without_storage_url() -> None:

@@ -50,12 +50,14 @@ class _KeystoneCredential:
     def __init__(self, keystone: KeystoneClient) -> None:
         self.handle = KeystoneCredentialHandle(uuid4().hex)
         self._keystone = keystone
-        self._credentials: S3Credentials | None = None
+        self._access_key: str | None = None
 
     def provision(self) -> S3Credentials:
-        self._credentials = self._keystone.create_credentials()
-        return self._credentials
+        return self._keystone.create_credentials(on_access_key=self._record_access_key)
+
+    def _record_access_key(self, access_key: str) -> None:
+        self._access_key = access_key
 
     def cleanup(self) -> None:
-        if self._credentials is not None:
-            self._keystone.delete_credentials(self._credentials.access_key)
+        if self._access_key is not None:
+            self._keystone.delete_credentials(self._access_key)

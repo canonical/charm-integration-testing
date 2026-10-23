@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
@@ -55,13 +56,20 @@ class _TokenResponse(BaseModel):
     token: _Token
 
 
-class _Credential(BaseModel):
+class _CredentialAccess(BaseModel):
     access: SecretStr
+
+
+class _Credential(_CredentialAccess):
     secret: SecretStr
 
 
-class _CredentialResponse(BaseModel):
+class _CredentialAccessResponse(BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
+    credential: _CredentialAccess
+
+
+class _CredentialResponse(_CredentialAccessResponse):
     credential: _Credential
 
 
@@ -109,7 +117,8 @@ class KeystoneClient:
             # Do not include response bodies or request payloads containing credentials.
             raise RuntimeError(f"Keystone failed to {operation} (HTTP {response.status_code})")
 
-    def create_credentials(self) -> S3Credentials:
+    def create_credentials(self, *, on_access_key: Callable[[str], None] | None = None) -> S3Credentials:
+        """Issue credentials, recording their key before validating the remaining response."""
         token, identity = self._authenticate()
         response = self.session.post(
             f"{self._url}/users/{identity.user.id}/credentials/OS-EC2",
@@ -118,10 +127,16 @@ class KeystoneClient:
             timeout=self.timeout,
         )
         self._check_response(response, "create EC2 credentials")
-        credential = _CredentialResponse.model_validate(response.json()).credential
+        payload = response.json()
+        access = _CredentialAccessResponse.model_validate(payload).credential.access.get_secret_value()
+        if on_access_key is not None:
+            on_access_key(access)
+        credential = _CredentialResponse.model_validate(payload).credential
         return S3Credentials(credential.access.get_secret_value(), credential.secret.get_secret_value())
 
     def delete_credentials(self, access_key: str) -> None:
+        if access_key in ("", ".", ".."):
+            raise ValueError("Keystone EC2 access key must not be empty or a relative path segment")
         # Teardown may happen hours after provisioning; obtain a fresh token.
         token, identity = self._authenticate()
         response = self.session.delete(
