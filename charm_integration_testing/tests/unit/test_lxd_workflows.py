@@ -135,18 +135,19 @@ def test_cloud_dispatch_passes_only_supported_inputs() -> None:
                 assert name in supplied
 
 
-def test_lxd_cleanup_categories_run_independently() -> None:
-    # GIVEN all LXD cleanup categories in the workflow
+def test_lxd_cleanup_preserves_potentially_active_networks_and_profiles() -> None:
+    # GIVEN cleanup running independently of test jobs on a shared LXD cluster
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     steps = {step["name"]: step for step in workflow["jobs"]["cleanup-environment"]["steps"]}
 
-    # THEN cancelled() is an explicit status check, avoiding the implicit success() guard
-    for name in (
-        "Find and delete instances older than age threshold",
-        "Find and delete unused Juju networks",
-        "Find and delete unused Juju profiles",
-    ):
-        assert steps[name]["if"] == "${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}"
+    # THEN only age-filtered instances are deleted; empty usage is not proof of stale ownership
+    assert steps["Find and delete instances older than age threshold"]["if"] == (
+        "${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}"
+    )
+    for step in steps.values():
+        script = step.get("run", "")
+        assert "lxc network delete" not in script
+        assert "lxc profile delete" not in script
 
 
 def test_lxd_cloud_paths_reach_same_controller_registration() -> None:

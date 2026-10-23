@@ -460,33 +460,6 @@ jobs:
             echo "Deleting instance: $name"
             lxc delete --force "charmqa:${name}" || true
           done
-      - name: Find and delete unused Juju networks
-        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
-        shell: bash
-        run: |
-          lxc network list charmqa: --format json | jq --raw-output '
-            .[] |
-            select(.name | test("^juju-")) |
-            select(.managed == true) |
-            select((.used_by // []) | length == 0) |
-            .name
-          ' | while read -r name; do
-            echo "Deleting network: $name"
-            lxc network delete "charmqa:${name}" || true
-          done
-      - name: Find and delete unused Juju profiles
-        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
-        shell: bash
-        run: |-
-          lxc profile list charmqa: --format json | jq --raw-output '
-            .[] |
-            select(.name | test("^juju-")) |
-            select((.used_by // []) | length == 0) |
-            .name
-          ' | while read -r name; do
-            echo "Deleting profile: $name"
-            lxc profile delete "charmqa:${name}" || true
-          done
       - name: Remove temporary LXD credentials
         if: ${{ always() && steps.creds.outputs.lxd == 'true' }}
         shell: bash
