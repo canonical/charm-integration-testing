@@ -111,10 +111,10 @@ def test_swift_stale_cleanup_accepts_equivalent_urls(client: S3Client, auth_url:
     original = SwiftS3Provider("https://s3.test", NAMESPACE, original_keystone, CLEANUP_CREDS)
     keystone = KeystoneStub()
     keystone.credentials = replace(SWIFT, auth_url=auth_url, storage_url=storage_url)
-    storage = SwiftS3Provider("https://s3.test/", NAMESPACE, keystone, CLEANUP_CREDS)
+    storage = SwiftS3Provider("https://s3.test/", NAMESPACE, keystone, CLEANUP_CREDS, client_factory=lambda _: client)
 
     # WHEN sweeping with the alternate URL, THEN the original tag is recognized and its key revoked
-    with patch.object(storage, "_client_factory", return_value=client), Stubber(client) as stubber:
+    with Stubber(client) as stubber:
         stubber.add_response("list_buckets", {"Buckets": [{"Name": OLD_BUCKET}]})
         stubber.add_response(
             "get_bucket_tagging",
@@ -448,15 +448,19 @@ def test_stale_cleanup_is_scoped_and_revokes_owned_keys(client: S3Client) -> Non
 
 def test_stale_cleanup_is_scoped_to_swift_cleanup_identity(client: S3Client) -> None:
     with requests.Session() as session:
-        storage = SwiftS3Provider("https://s3.test", NAMESPACE, KeystoneClient(SWIFT, session), CLEANUP_CREDS)
+        storage = SwiftS3Provider(
+            "https://s3.test",
+            NAMESPACE,
+            KeystoneClient(SWIFT, session),
+            CLEANUP_CREDS,
+            client_factory=lambda _: client,
+        )
         other_storage = SwiftS3Provider(
             "https://s3.test",
             NAMESPACE,
             KeystoneClient(SWIFT, session),
             S3Credentials("other-cleanup", "other-secret"),
         )
-        storage._client_factory = lambda _: client
-
         assert storage._bucket_owner != other_storage._bucket_owner
         assert storage.handle.resource_id != other_storage.handle.resource_id
 
@@ -697,6 +701,33 @@ def test_keystone_error_does_not_include_secrets() -> None:
         assert SWIFT.password not in str(error.value)
         assert SWIFT.password not in repr(SWIFT)
         assert CREDS.secret_key not in repr(CREDS)
+
+
+@pytest.mark.parametrize(
+    ("access_key", "path_segment"),
+    [
+        pytest.param("normal-key", "normal-key", id="ordinary-key"),
+        pytest.param("key/other?query#fragment", "key%2Fother%3Fquery%23fragment", id="reserved-characters"),
+        pytest.param("key%2Fother", "key%252Fother", id="encoded-separator"),
+    ],
+)
+def test_keystone_deletion_encodes_access_key_path_segment(access_key: str, path_segment: str) -> None:
+    # GIVEN a key read from bucket metadata and an authenticated Keystone identity
+    token = response(
+        201, {"token": {"user": {"id": "user-id"}, "project": {"id": "project-id"}}}, {"X-Subject-Token": "token"}
+    )
+    with (
+        requests.Session() as session,
+        patch.object(session, "post", return_value=token),
+        patch.object(session, "delete", return_value=response(204, {})) as delete,
+    ):
+        # WHEN cleanup revokes the key, THEN it remains exactly one URL path segment
+        KeystoneClient(SWIFT, session).delete_credentials(access_key)
+        delete.assert_called_once_with(
+            f"{SWIFT.auth_url}/users/user-id/credentials/OS-EC2/{path_segment}",
+            headers={"X-Auth-Token": "token"},
+            timeout=30,
+        )
 
 
 def test_environment_rejects_swift_config_without_storage_url() -> None:

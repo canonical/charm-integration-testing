@@ -1,11 +1,18 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Callable
+
 from s3_storage import CredentialProvider, S3BucketHandle, S3Credentials, S3Storage
 from s3_storage.identity import bucket_owner_identity, provider_identity
 
 from .credentials import KeystoneClient
 from .resource_registry import KeystoneResourceRegistry
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
 
 
 class SwiftCredentialProvider(CredentialProvider):
@@ -63,6 +70,7 @@ class SwiftS3Provider(S3Storage):
         identity: str | None = None,
         *,
         resources: KeystoneResourceRegistry | None = None,
+        client_factory: Callable[[S3Credentials], S3Client] | None = None,
     ) -> None:
         self.keystone = keystone
         if identity is None:
@@ -87,6 +95,7 @@ class SwiftS3Provider(S3Storage):
             namespace,
             SwiftCredentialProvider(keystone, cleanup_credentials, resources),
             region=region,
+            client_factory=client_factory,
             identity=identity,
             bucket_owner_identity=bucket_owner_identity(
                 "swift",

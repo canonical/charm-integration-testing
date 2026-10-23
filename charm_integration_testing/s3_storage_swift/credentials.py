@@ -3,7 +3,7 @@
 
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import requests
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -125,7 +125,7 @@ class KeystoneClient:
         # Teardown may happen hours after provisioning; obtain a fresh token.
         token, identity = self._authenticate()
         response = self.session.delete(
-            f"{self._url}/users/{identity.user.id}/credentials/OS-EC2/{access_key}",
+            f"{self._url}/users/{identity.user.id}/credentials/OS-EC2/{quote(access_key, safe='')}",
             headers={"X-Auth-Token": token},
             timeout=self.timeout,
         )
