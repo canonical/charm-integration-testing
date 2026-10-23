@@ -271,6 +271,12 @@ def test_multiple_workload_containers_are_stressed_together(context: ClientConte
         client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
     )
 
+    def read_after_submissions(**kwargs: Any) -> dict[str, Any]:
+        assert len(context.created) == 2, "Startup polling began before both Engines were submitted"
+        return context.read(**kwargs)
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read_after_submissions
+
     # WHEN requesting unit stress, THEN both Engines remain active together, excluding the charm agent.
     chaos = context.chaos_client()
     if operation == "cpu":
@@ -291,6 +297,7 @@ def test_multiple_workload_containers_are_stressed_together(context: ClientConte
 
     # WHEN explicitly selecting the workload, THEN stress can be requested
     context.created.clear()
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = context.read
     context.chaos_client("postgresql").stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
     assert len(context.created) == 1
 
