@@ -12,6 +12,7 @@ from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
 import pytest
+import requests
 from chaos_client import ResourceConstraintsClient
 from extensions import (
     ConfigureLivepatchServerExtension,
@@ -267,9 +268,9 @@ def session_resource_registry(
     logger: logging.Logger,
     juju_backend: JujuBackend,
     kubernetes_client_registry: KubernetesClientRegistry,
-    s3_provider_registry: S3ProviderRegistry,
+    s3_http_session: requests.Session,
 ) -> Iterator[ResourceRegistry]:
-    """Session registry; provider dependency keeps S3 sessions open through registry teardown."""
+    """Session registry; the S3 HTTP session stays open through credential teardown."""
     registry = ResourceRegistry(
         global_collectors=[
             JujuCrashdumpCollector(
