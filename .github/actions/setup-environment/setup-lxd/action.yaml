@@ -17,25 +17,21 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Write LXD credentials
-      id: write-creds
-      env:
-        LXD_CREDS: ${{ inputs.lxd-creds }}
-      shell: bash
-      run: |
-        set -euo pipefail
-        credentials_dir="${RUNNER_TEMP}/lxd-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-        umask 077
-        mkdir -p "${credentials_dir}"
-        printf '%s\n' "${LXD_CREDS}" > "${credentials_dir}/creds.yaml"
-        echo "lxd-credentials-dir=${credentials_dir}" >> "${GITHUB_OUTPUT}"
     - name: Add LXD Cloud
       env:
+        LXD_CREDS: ${{ inputs.lxd-creds }}
         CLOUD: ${{ inputs.cloud-name }}
-        CREDENTIALS_DIR: ${{ steps.write-creds.outputs.lxd-credentials-dir }}
       shell: bash
       run: |-
         set -euo pipefail
+        umask 077
+        CREDENTIALS_DIR="$(mktemp -d "${RUNNER_TEMP}/lxd.XXXXXX")"
+        cleanup() {
+          rm -f "${CREDENTIALS_DIR}/creds.yaml" "${CREDENTIALS_DIR}/cloud.yaml" "${CREDENTIALS_DIR}/credentials.yaml"
+          rmdir "${CREDENTIALS_DIR}"
+        }
+        trap cleanup EXIT
+        printf '%s\n' "${LXD_CREDS}" > "${CREDENTIALS_DIR}/creds.yaml"
         endpoint=$(yq '.endpoint' "${CREDENTIALS_DIR}/creds.yaml")
         server_cert=$(yq '.server-cert' "${CREDENTIALS_DIR}/creds.yaml")
         client_cert=$(yq '.client-cert' "${CREDENTIALS_DIR}/creds.yaml")
@@ -62,5 +58,3 @@ runs:
         EOF
         juju add-cloud "${CLOUD}" "${CREDENTIALS_DIR}/cloud.yaml" --client
         juju add-credential "${CLOUD}" -f "${CREDENTIALS_DIR}/credentials.yaml" --client
-        rm -f "${CREDENTIALS_DIR}/creds.yaml" "${CREDENTIALS_DIR}/cloud.yaml" "${CREDENTIALS_DIR}/credentials.yaml"
-        rmdir "${CREDENTIALS_DIR}"

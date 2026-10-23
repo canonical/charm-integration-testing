@@ -429,21 +429,26 @@ jobs:
         with:
           command: sudo snap install lxd
       - name: Set up LXD remote
+        id: lxd-remote
         if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
         shell: bash
         run: |
+          set -euo pipefail
+          umask 077
           endpoint=$(yq '.endpoint' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          server_cert=$(yq '.server-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
           client_cert=$(yq '.client-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
           client_key=$(yq '.client-key' "$LXD_CREDENTIALS_DIR/creds.yaml")
           export LXD_CONF="$LXD_CREDENTIALS_DIR/config"
-          mkdir -p "${LXD_CONF}"
+          mkdir -p "${LXD_CONF}/servercerts"
+          printf '%s\n' "${server_cert}" > "${LXD_CONF}/servercerts/charmqa.crt"
           echo "${client_cert}" > "${LXD_CONF}/client.crt"
           echo "${client_key}" > "${LXD_CONF}/client.key"
           chmod 600 "${LXD_CONF}/client.key"
-          lxc remote add charmqa "${endpoint}" --accept-certificate
+          lxc remote add charmqa "${endpoint}" </dev/null
           echo "LXD_CONF=${LXD_CONF}" >> $GITHUB_ENV
       - name: Find and delete instances older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |
           lxc list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -456,7 +461,7 @@ jobs:
             lxc delete --force "charmqa:${name}" || true
           done
       - name: Find and delete unused Juju networks
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |
           lxc network list charmqa: --format json | jq --raw-output '
@@ -470,7 +475,7 @@ jobs:
             lxc network delete "charmqa:${name}" || true
           done
       - name: Find and delete unused Juju profiles
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |-
           lxc profile list charmqa: --format json | jq --raw-output '
@@ -488,8 +493,10 @@ jobs:
         run: |
           LXD_CONF="${LXD_CREDENTIALS_DIR}/config"
           rm -f "$LXD_CREDENTIALS_DIR/creds.yaml" "$LXD_CONF/client.crt" "$LXD_CONF/client.key" "$LXD_CONF/config.yml"
-          rmdir "$LXD_CONF" "$LXD_CREDENTIALS_DIR" 2>/dev/null || true
-
+          rm -f "$LXD_CONF/servercerts/charmqa.crt"
+          if [[ -d "$LXD_CONF/servercerts" ]]; then rmdir "$LXD_CONF/servercerts"; fi
+          if [[ -d "$LXD_CONF" ]]; then rmdir "$LXD_CONF"; fi
+          rmdir "$LXD_CREDENTIALS_DIR"
       - name: Find and delete orphaned ports that are in the DOWN state and older
           than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
@@ -540,5 +547,4 @@ jobs:
               echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
               openstack port delete "$port_id" || true
             fi
-
           done

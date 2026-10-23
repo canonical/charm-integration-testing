@@ -59,6 +59,7 @@ runs:
       with:
         novarc: ${{ inputs.cloud-credentials }}
         cloud-name: ${{ inputs.cloud-name }}
+        workspace: ${{ steps.workspace.outputs.path }}
     - name: Setup LXD Cloud
       id: setup-lxd
       if: ${{ inputs.cloud-type == 'lxd' }}
@@ -66,4 +67,3 @@ runs:
       with:
         lxd-creds: ${{ inputs.cloud-credentials }}
         cloud-name: ${{ inputs.cloud-name }}
-        workspace: ${{ steps.workspace.outputs.path }}
