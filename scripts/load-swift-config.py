@@ -64,7 +64,7 @@ def main() -> int:
             output.write("available=false\n")
         return 0
 
-    missing = [name for name in SWIFT_CONFIG_REQUIRED_VARIABLES if not values.get(name)]
+    missing = [name for name in SWIFT_CONFIG_REQUIRED_VARIABLES if not values.get(name, "").strip()]
     if missing:
         print(f"::error::{args.secret_name} is missing: {', '.join(missing)}")
         return 1
