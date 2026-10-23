@@ -8,6 +8,7 @@ from .lego import LegoExtension
 from .metacontroller import MetacontrollerExtension
 from .mysql_replication import MysqlDatabaseReplicationExtension, MysqlK8sDatabaseReplicationExtension
 from .remote_logging import RemoteLoggingExtension
+from .s3_integrator import S3IntegratorExtension
 from .temporal import TemporalExtension
 from .unseal_vault import UnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from .validator_injection import ValidatorInjectorExtension
@@ -22,6 +23,7 @@ __all__ = [
     "PostgresqlDatabaseReplicationExtension",
     "PostgresqlK8sDatabaseReplicationExtension",
     "RemoteLoggingExtension",
+    "S3IntegratorExtension",
     "TemporalExtension",
     "UnsealVaultJujuExtension",
     "UnsealVaultK8sJujuExtension",
