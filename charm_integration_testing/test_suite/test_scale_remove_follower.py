@@ -5,10 +5,12 @@ from datetime import timedelta
 
 import pytest
 from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
+from kubernetes_client import KubernetesClientRegistry
 
 from bundle_builder_x import Charm
 
 from .fixtures.integration_spec import require_principal_charm
+from .kubernetes import require_model_kubeconfig
 from .scheduler.states import State
 
 
@@ -19,7 +21,9 @@ def test_scale_remove_follower(
     neighbor_model_ref: JujuModelHandle | None,
     target_application: str,
     target_deployed_charm: Charm | None,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
+    require_model_kubeconfig(juju_client.backend, kubernetes_client_registry, target_model_ref)
     charm = require_principal_charm(target_deployed_charm)
     timeout = timedelta(minutes=15)
     models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))

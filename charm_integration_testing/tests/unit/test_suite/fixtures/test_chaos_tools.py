@@ -354,6 +354,29 @@ class TestInitialDetection:
 
 
 class TestInitialDetectionFixture:
+    def test_missing_mapping_is_logged_without_skipping_other_clouds(self, caplog: pytest.LogCaptureFixture) -> None:
+        # GIVEN two live Kubernetes models, only one with configured access
+        backend = JujuBackendStub()
+        registry = KubernetesClientRegistry(
+            {NEIGHBOR.uri: Path("neighbor.yaml")}, client_factory=lambda path: KubernetesClient(backend.kubernetes)
+        )
+
+        # WHEN reporting tools, THEN missing access does not block detection for the other model
+        with caplog.at_level(logging.INFO):
+            unwrap(chaos_tools.detect_chaos_tools)(
+                make_request(current_state=State.DEPLOYED.value),
+                backend,
+                registry,
+                "unused",
+                TARGET,
+                "unused",
+                NEIGHBOR,
+                logging.getLogger(__name__),
+                None,
+            )
+        assert f"cloud {TARGET.uri}: no kubeconfig supplied" in caplog.text
+        assert f"Initial chaos tools for {NEIGHBOR.uri}" in caplog.text
+
     @pytest.mark.parametrize("state", list(State), ids=lambda state: state.value)
     def test_state_selects_model_or_configured_cloud(self, state: State, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN configured controller clouds without kubeconfigs and live model clients
@@ -794,6 +817,23 @@ class TestExperimentClients:
         with pytest.raises(KeyError):
             chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT)
 
+    def test_missing_cloud_mapping_skips_only_operations_requiring_kubernetes(self) -> None:
+        # GIVEN a known Kubernetes model but no configured access
+        backend = JujuBackendStub()
+
+        client = _chaos_client_for_model(backend, TARGET, RESOURCE_CONSTRAINTS_CLIENT, KubernetesClientRegistry({}))
+
+        # WHEN requesting API-based chaos, THEN the missing mapping skips before mutation
+        with pytest.raises(pytest.skip.Exception, match="Set KUBECONFIG_"):
+            client.io_latency(TARGET, "postgresql/0", "/data", timedelta(milliseconds=50), 80, timedelta(seconds=30))
+        assert backend.kubernetes.crd_reads == []
+        assert backend.exec_calls == []
+
+        # WHEN requesting native disk fill, THEN Juju-only operations remain available
+        client.fill_disk(TARGET, "postgresql/0", "/tmp/fill", 1)
+        client.cleanup_all()
+        assert len(backend.exec_calls) == 2
+
     def test_nonzero_native_exit_and_cleanup_failure_are_reported(self) -> None:
         # GIVEN a native command returning a nonzero exit code
         backend = JujuBackendStub()
@@ -1065,6 +1105,42 @@ def test_unsupported_experiment_preserves_other_tests_and_scheduler(chaos_pytest
     # THEN the scheduler continues in the same state and other tests still run
     result.assert_outcomes(passed=2, skipped=1)
     result.stdout.fnmatch_lines(["*test_missing_stress SKIPPED*", "*test_next_state_test PASSED*"])
+
+
+def test_missing_kubeconfig_preserves_other_tests_and_scheduler(chaos_pytester: pytest.Pytester) -> None:
+    # GIVEN a deployed Kubernetes model without direct access
+    pytester = chaos_pytester
+    pytester.makepyfile(
+        """
+        import pytest
+        from kubernetes_client import KubernetesClientRegistry
+        from test_suite.scheduler.states import State
+
+        @pytest.fixture(scope="session")
+        def kubernetes_client_registry():
+            return KubernetesClientRegistry({})
+
+        @pytest.mark.state(requires=State.DEPLOYED)
+        def test_missing_stress(require_chaos_tool, target_model_ref):
+            from datetime import timedelta
+            require_chaos_tool.stress_cpu(target_model_ref, "postgresql/0", 1, timedelta(seconds=10))
+
+        @pytest.mark.state(requires=State.DEPLOYED)
+        def test_next_state_test():
+            pass
+
+        def test_unrelated():
+            pass
+        """
+    )
+
+    # WHEN missing access skips a dependent operation
+    result = pytester.runpytest("--current-state=deployed", "-v", "-rs")
+
+    # THEN the state remains valid and other tests continue
+    result.assert_outcomes(passed=2, skipped=1)
+    result.stdout.fnmatch_lines(["*test_missing_stress SKIPPED*", "*test_next_state_test PASSED*"])
+    assert "Set KUBECONFIG_" in result.stdout.str()
 
 
 def test_experiments_are_cleaned_up_after_failure_skip_and_success(chaos_pytester: pytest.Pytester) -> None:
