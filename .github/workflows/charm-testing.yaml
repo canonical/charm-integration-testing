@@ -402,7 +402,8 @@ jobs:
             SAME_CONTROLLER_ARG=(--same-controller)
           fi
           if [[ "${same_controller}" == "true" && "${platform}" == "kubernetes" && "${neighbor_platform}" == "machine" ]]; then
-            bootstrap_config=$(jq -c '. + {"controller-service-type": "loadbalancer"}' <<< "${bootstrap_config}")
+            jq '. + {"controller-service-type": "loadbalancer"}' "${bootstrap_config}" > "${bootstrap_config}.loadbalancer"
+            mv "${bootstrap_config}.loadbalancer" "${bootstrap_config}"
           fi
           ./scripts/run-tests.sh \
             --target-cloud "${target_cloud}" \
