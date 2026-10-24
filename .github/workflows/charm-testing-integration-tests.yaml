@@ -14,20 +14,13 @@ jobs:
       max-parallel: 1
       matrix:
         params:
-          - target_environment: ps6-sqa-stg_charm_qa_kubernetes-1
-            target_charm: postgresql-k8s
-            target_endpoint: certificates
-            target_revision: 495
-            target_track: 14
-            target_risk: stable
-            target_base: '22.04'
-            neighbor_charm: self-signed-certificates
-            neighbor_endpoint: certificates
-          # Exercise PostgreSQL through its consumer-side database validator.
-          - target_environment: ps6-sqa-stg_charm_qa_kubernetes-1
+          - target_environment: ps7-sqa-prod_charm_qa_kubernetes-1
+            neighbor_environment: ps7-sqa-prod_charm_qa_lxd-1
+            same_controller: true
+            juju_channel: 3.6/stable
             target_charm: postgresql-k8s
             target_endpoint: database
-            target_revision: 495
+            target_revision: 960
             target_track: 14
             target_risk: stable
             target_base: '22.04'
@@ -39,6 +32,9 @@ jobs:
       actions: write
     with:
       target_environment: ${{ matrix.params.target_environment }}
+      neighbor_environment: ${{ matrix.params.neighbor_environment }}
+      same_controller: ${{ matrix.params.same_controller }}
+      juju_channel: ${{ matrix.params.juju_channel }}
       target_charm: ${{ matrix.params.target_charm }}
       target_endpoint: ${{ matrix.params.target_endpoint }}
       target_revision: ${{ matrix.params.target_revision }}

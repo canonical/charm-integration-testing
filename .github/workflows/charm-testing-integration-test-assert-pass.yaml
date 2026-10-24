@@ -8,6 +8,15 @@ on:
       target_environment:
         type: string
         required: true
+      neighbor_environment:
+        type: string
+        default: ''
+      same_controller:
+        type: boolean
+        default: false
+      juju_channel:
+        type: string
+        default: 3/stable
       target_charm:
         type: string
         required: true
@@ -70,10 +79,12 @@ jobs:
             {
               "test_observer_environment": "staging",
               "target_environment": "${{ inputs.target_environment }}",
+              "neighbor_environment": "${{ inputs.neighbor_environment }}",
+              "same_controller": ${{ inputs.same_controller }},
               "charm_under_test": "${{ inputs.target_charm }}",
               "charm_endpoint": "${{ inputs.target_endpoint }}",
               "execution_id": "${{ steps.create-test-execution.outputs.test_execution_id }}",
-              "juju_channel": "3/stable",
+              "juju_channel": "${{ inputs.juju_channel }}",
               "neighbor": "${{ inputs.neighbor_charm }}",
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
