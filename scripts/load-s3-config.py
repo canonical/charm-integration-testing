@@ -8,40 +8,34 @@ import re
 import sys
 from pathlib import Path
 
-SWIFT_CONFIG_REQUIRED_VARIABLES = (
-    "S3_OS_AUTH_URL",
-    "S3_OS_USERNAME",
-    "S3_OS_PASSWORD",
-    "S3_OS_USER_DOMAIN_NAME",
-    "S3_OS_PROJECT_NAME",
-    "S3_OS_PROJECT_DOMAIN_NAME",
-    "S3_OS_STORAGE_URL",
-    "S3_CLEANUP_ACCESS_KEY",
-    "S3_CLEANUP_SECRET_KEY",
+S3_STORAGE_CONFIG_REQUIRED_VARIABLES = (
+    "S3_ENDPOINT",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
     "S3_BUCKET_NAMESPACE",
 )
-SWIFT_CONFIG_OPTIONAL_VARIABLES = ("S3_ENDPOINT", "S3_REGION")
-SWIFT_CONFIG_VARIABLES = (*SWIFT_CONFIG_REQUIRED_VARIABLES, *SWIFT_CONFIG_OPTIONAL_VARIABLES)
+S3_STORAGE_CONFIG_OPTIONAL_VARIABLES = ("S3_REGION", "S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
+S3_STORAGE_CONFIG_VARIABLES = (*S3_STORAGE_CONFIG_REQUIRED_VARIABLES, *S3_STORAGE_CONFIG_OPTIONAL_VARIABLES)
 
 
-def parse_swift_config(config: str) -> dict[str, str]:
+def parse_s3_storage_config(config: str) -> dict[str, str]:
     """Parse the supported single-line KEY=value format without evaluating shell syntax."""
     values: dict[str, str] = {}
     for line_number, line in enumerate(config.splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         name, separator, value = line.partition("=")
-        if not separator or name not in SWIFT_CONFIG_VARIABLES:
-            raise ValueError(f"Invalid SWIFT_CONFIG entry on line {line_number}")
+        if not separator or name not in S3_STORAGE_CONFIG_VARIABLES:
+            raise ValueError(f"Invalid S3_STORAGE_CONFIG entry on line {line_number}")
         if name in values:
-            raise ValueError(f"Duplicate SWIFT_CONFIG entry for {name}")
+            raise ValueError(f"Duplicate S3_STORAGE_CONFIG entry for {name}")
         values[name] = value
     return values
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Write an environment's Swift credentials to a protected S3 configuration file."
+        description="Write an environment's shared S3 credentials to a protected S3 configuration file."
     )
     parser.add_argument("secret_name", help="GitHub Actions secret name used in diagnostics")
     parser.add_argument("--output-file", type=Path, required=True, help="new mode-600 configuration file")
@@ -53,9 +47,9 @@ def main() -> int:
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_]+", args.secret_name):
         parser.error("secret_name must contain only letters, digits, and underscores")
-    config = os.environ.get("SWIFT_CONFIG", "")
+    config = os.environ.get("S3_STORAGE_CONFIG", "")
     try:
-        values = parse_swift_config(config)
+        values = parse_s3_storage_config(config)
     except ValueError as exc:
         print(f"::error::{exc}")
         return 1
@@ -65,9 +59,13 @@ def main() -> int:
             output.write("available=false\n")
         return 0
 
-    missing = [name for name in SWIFT_CONFIG_REQUIRED_VARIABLES if not values.get(name, "").strip()]
+    missing = [name for name in S3_STORAGE_CONFIG_REQUIRED_VARIABLES if not values.get(name, "").strip()]
     if missing:
         print(f"::error::{args.secret_name} is missing: {', '.join(missing)}")
+        return 1
+    cleanup_names = ("S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
+    if sum(bool(values.get(name, "").strip()) for name in cleanup_names) == 1:
+        print(f"::error::{args.secret_name} must set both or neither of: {', '.join(cleanup_names)}")
         return 1
 
     for value in values.values():
