@@ -64,6 +64,22 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Validate age threshold
+        id: age_threshold
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          from datetime import timedelta
+          try:
+              age = timedelta(minutes=float(os.environ["AGE_THRESHOLD"]))
+              if age <= timedelta(0):
+                  raise ValueError
+          except (ValueError, OverflowError):
+              print("::error::age_threshold must be a positive finite number within the supported duration range")
+              sys.exit(1)
+          PY
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
@@ -103,6 +119,31 @@ jobs:
                 fi
             done <<< "${!NOVARC_SECRET_NAME}"
           fi
+      - name: Check S3 cleanup credentials
+        id: s3_credentials
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
+        shell: bash
+        env:
+          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG: ${{ secrets[steps.env_info.outputs.s3-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+        run: python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file
+          "${RUNNER_TEMP}/cleanup-s3.conf"
+      - name: Install S3 cleanup dependencies
+        id: s3_dependencies
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_credentials.outcome == 'success' && steps.s3_credentials.outputs.available == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
+            install 'boto3>=1.40,<2'
+      - name: Remove stale harness S3 buckets
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_dependencies.outcome == 'success' }}
+        shell: bash
+        env:
+          # Cleanup imports only the storage module, not the full suite and its dependencies.
+          PYTHONPATH: ${{ github.workspace }}/charm_integration_testing
+          S3_CONFIG_PATH: ${{ steps.s3_credentials.outputs.config_path }}
+        run: |
+          "${RUNNER_TEMP}/s3-cleanup/bin/python" scripts/cleanup-s3.py --config "${S3_CONFIG_PATH}" --age-minutes "${AGE_THRESHOLD}"
 
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
@@ -113,12 +154,12 @@ jobs:
       # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
       #
       - name: Install kubectl
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install kubectl --classic
       - name: Remove orphaned rawfile PV directories from nodes
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -196,7 +237,7 @@ jobs:
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
       - name: Find all model and controller namespaces older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -206,7 +247,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all webhook configurations older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -235,7 +276,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential service accounts older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -245,7 +286,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential secrets older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -256,7 +297,7 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find released rawfile PersistentVolumes older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
@@ -270,7 +311,7 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find old QA cluster RBAC
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           kubectl get clusterroles,clusterrolebindings --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -281,7 +322,7 @@ jobs:
           ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           set -uo pipefail
 
@@ -335,42 +376,48 @@ jobs:
       #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
       #
       - name: Install openstack client
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install openstackclients
       - name: Find and delete servers older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           openstack server list --format json | jq --raw-output '.[].ID' | while read -r server_id; do
             created=$(openstack server show "$server_id" --format json | jq -r '.created')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
+            age_minutes=$((age_seconds / 60))
+            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
               echo "Deleting server: $server_id (age: $age_minutes minutes)"
               openstack server delete "$server_id" || true
             fi
           done
       - name: Find and delete security groups older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           openstack security group list --format json | jq --raw-output '.[] | select(.Name != "default") | .ID' | while read -r sg_id; do
             created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
+            age_minutes=$((age_seconds / 60))
+            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
               echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
               openstack security group delete "$sg_id" || true
             fi
           done
       - name: Find and delete load balancers older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           openstack loadbalancer list --format json | jq --raw-output '.[].id' | while read -r lb_id; do
             created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
+            age_minutes=$((age_seconds / 60))
+            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
               echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
               # Delete pools first
               openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
@@ -382,32 +429,36 @@ jobs:
             fi
           done
       - name: Find and delete volumes older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |
           openstack volume list --format json | jq --raw-output '.[].ID' | while read -r volume_id; do
             created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
+            age_minutes=$((age_seconds / 60))
+            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
               echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
               openstack volume delete "$volume_id" || true
             fi
           done
       - name: Find and delete floating IPs older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |-
           openstack floating ip list --format json | jq --raw-output '.[].ID' | while read -r fip_id; do
             created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
+            age_minutes=$((age_seconds / 60))
+            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
               echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
               openstack floating ip delete "$fip_id" || true
             fi
           done
       - name: Find and delete orphaned ports that are in the DOWN state and older
           than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: |-
           lb_output=$(openstack loadbalancer list -f value -c id) || {
@@ -445,9 +496,11 @@ jobs:
               echo "Failed to parse port $port_id created_at timestamp; refusing to continue orphaned port cleanup"
               exit 1
             }
-            age_minutes=$(( ($(date +%s) - created_ts) / 60 ))
+            age_seconds=$(($(date +%s) - created_ts))
+            age_minutes=$((age_seconds / 60))
             [[ $device_owner != "Octavia" ]] && continue
-            [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
+            awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
+              'BEGIN { exit !(age_seconds / 60 > threshold) }' || continue
             lb_id=${device_id#lb-}
             if is_active_lb "$lb_id"; then
               echo "Skipping port $port_id — still used by load balancer $lb_id"
