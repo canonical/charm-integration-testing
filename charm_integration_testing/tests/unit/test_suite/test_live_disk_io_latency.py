@@ -8,28 +8,44 @@ from unittest.mock import MagicMock
 import pytest
 from chaos_client import IoLatencyInjection
 from juju import JujuModelHandle
+from kubernetes import client as K8sClient  # type: ignore[import-untyped]
 from test_suite import test_live_disk_io_latency as module
-from test_suite.test_live_disk_io_latency import (
-    DELAY,
-    LATENCY_DURATION,
-    PERCENT,
-    VOLUME_PATH,
-)
+from test_suite.test_live_disk_io_latency import DELAY, LATENCY_DURATION, PERCENT
 from test_suite.test_live_disk_io_latency import (
     test_live_disk_io_latency as run_disk_io_latency,
 )
 
 MODEL = JujuModelHandle(controller="controller", model="model")
+VOLUME_PATH = "/var/lib/workload"
 # Deliberately different from LATENCY_DURATION, to prove the test observes for however long
 # io_latency() says the experiment was actually configured to run (e.g. a per-charm override),
 # rather than the caller-supplied duration.
 RESOLVED_DURATION = timedelta(minutes=20)
 
 
+def _kubernetes_client(mount_paths: list[str]) -> MagicMock:
+    workload = K8sClient.V1Container(
+        name="workload",
+        env=[K8sClient.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")],
+        volume_mounts=[
+            K8sClient.V1VolumeMount(name=f"volume-{index}", mount_path=path) for index, path in enumerate(mount_paths)
+        ],
+    )
+    pod = K8sClient.V1Pod(
+        metadata=K8sClient.V1ObjectMeta(annotations={"unit.juju.is/id": "target/0"}),
+        spec=K8sClient.V1PodSpec(containers=[workload]),
+        status=K8sClient.V1PodStatus(phase="Running"),
+    )
+    client = MagicMock()
+    client.get_charm_pods.return_value = [pod]
+    return client
+
+
 @pytest.mark.parametrize("failure", [None, "baseline", "io_latency", "observe", "cleanup", "recovery", "validation"])
 def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
     juju, chaos = MagicMock(), MagicMock()
+    kubernetes = _kubernetes_client(["/", VOLUME_PATH])
     waits = iter(["baseline", "recovery"])
     hold = MagicMock()
     # The experiment was created at t=0; 5s elapsed (e.g. awaiting confirmed injection) by
@@ -58,9 +74,9 @@ def test_disk_io_latency_lifecycle(failure: str | None, monkeypatch: pytest.Monk
 
     if failure:
         with pytest.raises(RuntimeError, match=failure):
-            run_disk_io_latency(juju, chaos, MODEL, "target", None)
+            run_disk_io_latency(juju, chaos, MODEL, "target", None, kubernetes)
     else:
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, kubernetes)
         assert events == ["baseline", "io_latency", "observe", "cleanup", "recovery", "validation"]
         juju.validate_model.assert_called_once_with(model=MODEL, level="deep")
         chaos.io_latency.assert_called_once_with(
@@ -92,7 +108,7 @@ def test_skips_before_baseline_wait_when_unsupported() -> None:
     chaos.supports.return_value = False
 
     with pytest.raises(pytest.skip.Exception, match="io_latency"):
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, None)
 
     chaos.supports.assert_called_once_with("io_latency")
     juju.multi_model_idle_for_period.assert_not_called()
@@ -108,7 +124,7 @@ def test_observation_duration_clamped_when_confirmation_outlasts_it(monkeypatch:
     monkeypatch.setattr(module, "observe_io_latency", lambda chaos, model, unit, volume_path, seconds: hold(seconds))
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=0.0)
 
-    run_disk_io_latency(juju, chaos, MODEL, "target", None)
+    run_disk_io_latency(juju, chaos, MODEL, "target", None, _kubernetes_client([VOLUME_PATH]))
 
     # Never pass a negative remaining duration; observe_io_latency must still check for a
     # normally completed status instead of being skipped outright.
@@ -123,7 +139,7 @@ def test_reports_both_errors_when_observation_and_cleanup_fail(monkeypatch: pyte
     chaos.cleanup_all.side_effect = RuntimeError("cleanup unreachable")
 
     with pytest.raises(RuntimeError, match="fault not injected") as excinfo:
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, _kubernetes_client([VOLUME_PATH]))
 
     # The original observation error must be preserved (not replaced), chained from the
     # cleanup failure so neither error is lost.
@@ -140,7 +156,7 @@ def test_keyboard_interrupt_during_observation_still_runs_cleanup_and_propagates
     monkeypatch.setattr(module, "observe_io_latency", MagicMock(side_effect=KeyboardInterrupt))
 
     with pytest.raises(KeyboardInterrupt):
-        run_disk_io_latency(juju, chaos, MODEL, "target", None)
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, _kubernetes_client([VOLUME_PATH]))
 
     chaos.cleanup_all.assert_called_once()
 
@@ -150,11 +166,55 @@ def test_neighbor_validation(neighbor: JujuModelHandle, monkeypatch: pytest.Monk
     juju, chaos = MagicMock(), MagicMock()
     chaos.io_latency.return_value = IoLatencyInjection(duration=RESOLVED_DURATION, injected_at=monotonic())
     monkeypatch.setattr(module, "observe_io_latency", lambda *args, **kwargs: None)
-    run_disk_io_latency(juju, chaos, MODEL, "target", neighbor)
+    run_disk_io_latency(juju, chaos, MODEL, "target", neighbor, _kubernetes_client([VOLUME_PATH]))
     models = [MODEL] if neighbor == MODEL else [MODEL, neighbor]
     assert [call.kwargs for call in juju.validate_model.call_args_list] == [
         {"model": model, "level": "deep"} for model in models
     ]
+
+
+def test_skips_when_workload_has_no_non_root_volume_mount() -> None:
+    juju, chaos = MagicMock(), MagicMock()
+    kubernetes = _kubernetes_client(["/"])
+
+    with pytest.raises(pytest.skip.Exception, match="non-root volume"):
+        run_disk_io_latency(juju, chaos, MODEL, "target", None, kubernetes)
+
+    juju.multi_model_idle_for_period.assert_not_called()
+    chaos.io_latency.assert_not_called()
+    chaos.cleanup_all.assert_not_called()
+
+
+def test_skips_juju_internal_and_read_only_mounts() -> None:
+    kubernetes = _kubernetes_client(
+        ["/", "/charm/bin/pebble", "/charm/container", "/var/run/secrets/kubernetes.io/serviceaccount"]
+    )
+    mounts = kubernetes.get_charm_pods.return_value[0].spec.containers[0].volume_mounts
+    mounts[1].read_only = True
+    mounts[3].read_only = True
+
+    assert module._io_latency_volume_path(kubernetes, "target", MODEL, "target/0") is None
+
+
+def test_selects_workload_volume_mount_and_ignores_root_and_sidecar() -> None:
+    kubernetes = _kubernetes_client(["/", VOLUME_PATH])
+    pod = kubernetes.get_charm_pods.return_value[0]
+    pod.spec.containers.append(
+        K8sClient.V1Container(
+            name="sidecar",
+            volume_mounts=[K8sClient.V1VolumeMount(name="sidecar-data", mount_path="/var/run/sidecar")],
+        )
+    )
+
+    assert module._io_latency_volume_path(kubernetes, "target", MODEL, "target/0") == VOLUME_PATH
+
+
+def test_raises_when_unit_has_no_live_pod() -> None:
+    kubernetes = _kubernetes_client([VOLUME_PATH])
+    kubernetes.get_charm_pods.return_value = []
+
+    with pytest.raises(RuntimeError, match="Expected one live Pod"):
+        module._io_latency_volume_path(kubernetes, "target", MODEL, "target/0")
 
 
 @pytest.mark.parametrize("fail", [False, True])
