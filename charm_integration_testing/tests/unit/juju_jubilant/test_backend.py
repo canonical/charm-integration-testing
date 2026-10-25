@@ -2719,11 +2719,11 @@ class TestJubilantBackend:
             assert stub.app == "my-app"
             assert config == {"setting1": "value1", "setting2": "value2"}
 
-    class TestControllerSetupRetries:
-        @dataclass
+    class TestControllerSetup:
+        @dataclass(config={"arbitrary_types_allowed": True})
         class SetupStub:
-            bootstrap_failures_remaining: int = 0
-            add_model_failures_remaining: int = 0
+            bootstrap_error: RuntimeError | None = None
+            add_model_error: RuntimeError | None = None
             bootstrap_calls: int = 0
             add_model_calls: int = 0
             switch_calls: int = 0
@@ -2743,16 +2743,14 @@ class TestJubilantBackend:
                 config: dict[str, str] | None = None,
             ) -> None:
                 self.bootstrap_calls += 1
-                if self.bootstrap_failures_remaining > 0:
-                    self.bootstrap_failures_remaining -= 1
-                    raise RuntimeError("transient bootstrap failure")
+                if self.bootstrap_error is not None:
+                    raise self.bootstrap_error
 
             def add_model(self, model: str, controller: str, config: dict[str, str], cloud: str | None = None) -> None:
                 self.add_model_calls += 1
                 self.add_model_clouds.append(cloud)
-                if self.add_model_failures_remaining > 0:
-                    self.add_model_failures_remaining -= 1
-                    raise RuntimeError("transient add-model failure")
+                if self.add_model_error is not None:
+                    raise self.add_model_error
 
             def cli(self, *args: str, include_model: bool = True, stdin: str | None = None) -> str:
                 self.cli_calls.append((tuple(args), {"include_model": include_model, "stdin": stdin}))
@@ -2782,51 +2780,63 @@ class TestJubilantBackend:
             credentials.write_text(yaml.safe_dump({"credentials": {cloud: {"test": {"auth-type": "certificate"}}}}))
             return definition, credentials
 
-        def test_bootstrap_controller_retries_then_succeeds(self) -> None:
-            stub = self.SetupStub(bootstrap_failures_remaining=2)
+        def test_bootstrap_controller_succeeds(self) -> None:
+            # GIVEN
+            stub = self.SetupStub()
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            with patch("tenacity.nap.sleep", return_value=None):
+            # WHEN
+            backend.bootstrap_controller(
+                cloud="k8s-stg", controller="test-controller", controller_constraints={}, bootstrap_configuration={}
+            )
+
+            # THEN
+            assert stub.bootstrap_calls == 1
+
+        def test_bootstrap_controller_propagates_original_error_without_retry(self) -> None:
+            # GIVEN
+            error = RuntimeError("bootstrap failed after creating controller resources")
+            stub = self.SetupStub(bootstrap_error=error)
+            backend = JubilantBackend(JubilantClientStub(client=stub))
+
+            # WHEN
+            with pytest.raises(RuntimeError) as exc_info:
                 backend.bootstrap_controller(
-                    cloud="k8s-stg", controller="test-controller", controller_constraints={}, bootstrap_configuration={}
+                    cloud="k8s-stg",
+                    controller="test-controller",
+                    controller_constraints={},
+                    bootstrap_configuration={},
                 )
 
-            assert stub.bootstrap_calls == 3
+            # THEN
+            assert exc_info.value is error
+            assert stub.bootstrap_calls == 1
 
-        def test_bootstrap_controller_retries_then_raises(self) -> None:
-            stub = self.SetupStub(bootstrap_failures_remaining=3)
+        def test_add_model_succeeds(self) -> None:
+            # GIVEN
+            stub = self.SetupStub()
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            with patch("tenacity.nap.sleep", return_value=None):
-                with pytest.raises(RuntimeError, match="transient bootstrap failure"):
-                    backend.bootstrap_controller(
-                        cloud="k8s-stg",
-                        controller="test-controller",
-                        controller_constraints={},
-                        bootstrap_configuration={},
-                    )
+            # WHEN
+            backend.add_model(controller="test-controller", model="test-model", model_config={})
 
-            assert stub.bootstrap_calls == 3
-
-        def test_add_model_retries_then_succeeds(self) -> None:
-            stub = self.SetupStub(add_model_failures_remaining=2)
-            backend = JubilantBackend(JubilantClientStub(client=stub))
-
-            with patch("tenacity.nap.sleep", return_value=None):
-                backend.add_model(controller="test-controller", model="test-model", model_config={})
-
-            assert stub.add_model_calls == 3
+            # THEN
+            assert stub.add_model_calls == 1
             assert stub.switch_calls == 0
 
-        def test_add_model_retries_then_raises(self) -> None:
-            stub = self.SetupStub(add_model_failures_remaining=3)
+        def test_add_model_propagates_original_error_without_retry(self) -> None:
+            # GIVEN
+            error = RuntimeError("add-model failed after creating model resources")
+            stub = self.SetupStub(add_model_error=error)
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            with patch("tenacity.nap.sleep", return_value=None):
-                with pytest.raises(RuntimeError, match="transient add-model failure"):
-                    backend.add_model(controller="test-controller", model="test-model", model_config={})
+            # WHEN
+            with pytest.raises(RuntimeError) as exc_info:
+                backend.add_model(controller="test-controller", model="test-model", model_config={})
 
-            assert stub.add_model_calls == 3
+            # THEN
+            assert exc_info.value is error
+            assert stub.add_model_calls == 1
             assert stub.switch_calls == 0
 
         def test_add_cloud_dispatches_to_add_k8s_for_kubeconfig_cloud(self, tmp_path: Path) -> None:

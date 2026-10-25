@@ -41,7 +41,6 @@ from juju import (
 )
 from juju_cmd import JujuCmdBackend
 from kubernetes_client import KubernetesClient, KubernetesClientRegistry
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from validators.base.validator import ValidationResult
 
@@ -998,7 +997,6 @@ class JubilantBackend(JujuCmdBackend):
     def cli_version(self) -> JujuVersion:
         return JujuVersion.parse(str(self.client.model(None).version()).strip())
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
     def bootstrap_controller(
         self,
         cloud: str,
@@ -1033,7 +1031,6 @@ class JubilantBackend(JujuCmdBackend):
                 config=bootstrap_configuration,
             )
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True)
     def add_model(self, controller: str, model: str, model_config: dict[str, str], cloud: str | None = None) -> None:
         self.client.model(None).add_model(model=model, controller=controller, config=model_config, cloud=cloud)
 
