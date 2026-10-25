@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from s3_storage.configuration import parse_s3_config
+from s3_storage.configuration import parse_s3_config, provider_from_config
 from test_suite.fixtures.s3 import can_cleanup_session_storage
 from test_suite.scheduler.states import State
 
@@ -315,6 +315,33 @@ def test_s3_config_loader_writes_optional_region_and_separate_cleanup_identity(t
     assert config_values["S3_CLEANUP_ACCESS_KEY"] == "cleanup-access"
     assert config_values["S3_REGION"] == "region-1"
     assert not environment_file.exists()
+
+
+def test_s3_config_loader_omits_blank_optional_cleanup_credentials(tmp_path: Path) -> None:
+    # GIVEN an otherwise valid config with both optional cleanup values blank
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES[:4]}
+    values["S3_ENDPOINT"] = "https://s3.example"
+    values.update(S3_CLEANUP_ACCESS_KEY="", S3_CLEANUP_SECRET_KEY="")
+    config_path = tmp_path / "s3.conf"
+    result = subprocess.run(
+        ["python3", "scripts/load-s3-config.py", "S3_STORAGE_TEST", "--output-file", str(config_path)],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "S3_STORAGE_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
+            "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+        },
+        text=True,
+        cwd=ROOT,
+    )
+
+    # WHEN the loader writes the protected config, THEN empty optional fields are absent
+    assert result.returncode == 0
+    loaded = parse_s3_config(config_path.read_text(), S3_STORAGE_CONFIG_VARIABLES)
+    assert "S3_CLEANUP_ACCESS_KEY" not in loaded
+    assert "S3_CLEANUP_SECRET_KEY" not in loaded
+    assert provider_from_config(config_path).endpoint == "https://s3.example"
 
 
 @pytest.mark.parametrize("variable", ["S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY"])
