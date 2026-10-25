@@ -64,9 +64,13 @@ def main() -> int:
         print(f"::error::{args.secret_name} is missing: {', '.join(missing)}")
         return 1
     cleanup_names = ("S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY")
-    if sum(bool(values.get(name, "").strip()) for name in cleanup_names) == 1:
+    cleanup_values = [values.get(name, "").strip() for name in cleanup_names]
+    if any(cleanup_values) and not all(cleanup_values):
         print(f"::error::{args.secret_name} must set both or neither of: {', '.join(cleanup_names)}")
         return 1
+    if not any(cleanup_values):
+        for name in cleanup_names:
+            values.pop(name, None)
 
     for value in values.values():
         escaped_value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
