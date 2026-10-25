@@ -112,3 +112,7 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-4: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-5: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-6: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-7: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-8: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-9: *ps7-sqa-prod_charm_qa_lxd
+  ps7-sqa-prod_charm_qa_lxd-10: *ps7-sqa-prod_charm_qa_lxd
