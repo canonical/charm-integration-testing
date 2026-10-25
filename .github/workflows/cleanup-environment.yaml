@@ -442,16 +442,16 @@ jobs:
           export LXD_CONF="$LXD_CREDENTIALS_DIR/config"
           mkdir -p "${LXD_CONF}/servercerts"
           printf '%s\n' "${server_cert}" > "${LXD_CONF}/servercerts/charmqa.crt"
-          server_fingerprint=$(openssl x509 -in "${LXD_CONF}/servercerts/charmqa.crt" \
-            -noout -fingerprint -sha256 | sed 's/^[^=]*=//' | tr -d ':\r\n' | tr '[:upper:]' '[:lower:]')
-          if [[ ! "$server_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
-            echo "::error::Could not calculate the pinned LXD server certificate fingerprint"
-            exit 1
-          fi
           echo "${client_cert}" > "${LXD_CONF}/client.crt"
           echo "${client_key}" > "${LXD_CONF}/client.key"
           chmod 600 "${LXD_CONF}/client.key"
-          lxc remote add charmqa "${endpoint}" <<< "$server_fingerprint"
+          cat > "${LXD_CONF}/config.yml" <<EOF
+          default-remote: local
+          remotes:
+            charmqa:
+              addr: ${endpoint}
+              auth_type: tls
+          EOF
           echo "LXD_CONF=${LXD_CONF}" >> $GITHUB_ENV
       - name: Find and delete instances older than age threshold
         if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}

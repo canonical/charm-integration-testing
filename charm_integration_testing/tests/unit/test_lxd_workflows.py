@@ -252,16 +252,17 @@ def test_lxd_runner_matches_workflow_placement() -> None:
 
 
 def test_cleanup_pins_server_certificate_before_connecting() -> None:
-    # GIVEN the cleanup remote-registration script
+    # GIVEN the cleanup remote setup script
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     steps = workflow["jobs"]["cleanup-environment"]["steps"]
     script = next(step["run"] for step in steps if step["name"] == "Set up LXD remote")
 
-    # THEN the supplied certificate fingerprint is confirmed before connecting
-    assert script.index('/servercerts/charmqa.crt"') < script.index("lxc remote add")
-    assert "openssl x509" in script
-    assert '<<< "$server_fingerprint"' in script
-    assert "--accept-certificate" not in script
+    # THEN the configured server certificate and client credentials are used without an interactive trust prompt
+    assert '/servercerts/charmqa.crt"' in script
+    assert '"${LXD_CONF}/client.crt"' in script
+    assert '"${LXD_CONF}/client.key"' in script
+    assert 'auth_type: tls' in script
+    assert "lxc remote add" not in script
     cleanup = next(step["run"] for step in steps if step["name"] == "Remove temporary LXD credentials")
     assert '/servercerts/charmqa.crt"' in cleanup
     for step in steps:
