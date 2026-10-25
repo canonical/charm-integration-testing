@@ -24,10 +24,10 @@ outputs:
     description: Name of the GitHub Actions secret holding the novarc (o7k environments
       only).
     value: ${{ steps.lookup.outputs.novarc-secret }}
-  s3-swift-secret:
-    description: Optional name of the GitHub Actions secret enabling Swift-backed
-      S3 storage for this environment.
-    value: ${{ steps.lookup.outputs.s3-swift-secret }}
+  s3-secret:
+    description: Optional name of the GitHub Actions secret holding the shared S3
+      storage configuration for this environment.
+    value: ${{ steps.lookup.outputs.s3-secret }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as
       JSON.
@@ -68,7 +68,7 @@ runs:
         kubeconfig_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["kubeconfig-secret"] // ""' "${table}")
         novarc_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["novarc-secret"] // ""' "${table}")
         remote_logging=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["remote-logging"] // ""' "${table}")
-        s3_swift_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["s3-swift-secret"] // ""' "${table}")
+        s3_secret=$(yq -r '.environments[strenv(ENVIRONMENT_NAME)]["s3-secret"] // ""' "${table}")
 
         # Write Juju config objects to per-environment temp files so that
         # multiple calls (e.g. target + neighbor) don't overwrite each other.
@@ -84,7 +84,7 @@ runs:
         echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
         echo "kubeconfig-secret=${kubeconfig_secret}" >> "${GITHUB_OUTPUT}"
         echo "novarc-secret=${novarc_secret}" >> "${GITHUB_OUTPUT}"
-        echo "s3-swift-secret=${s3_swift_secret}" >> "${GITHUB_OUTPUT}"
+        echo "s3-secret=${s3_secret}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"

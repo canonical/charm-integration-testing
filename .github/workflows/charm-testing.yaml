@@ -166,23 +166,23 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.neighbor_environment }}
-      - name: Check target Swift storage credentials
+      - name: Check target S3 storage credentials
         id: target_s3_config
-        if: ${{ steps.target_env_info.outputs.s3-swift-secret != '' }}
+        if: ${{ steps.target_env_info.outputs.s3-secret != '' }}
         shell: bash
         env:
-          SWIFT_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
-        run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
+          S3_STORAGE_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG: ${{ secrets[steps.target_env_info.outputs.s3-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+        run: python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/target-s3.conf"
-      - name: Check neighbor Swift storage credentials
+      - name: Check neighbor S3 storage credentials
         id: neighbor_s3_config
-        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-swift-secret != '' }}
+        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-secret != '' }}
         shell: bash
         env:
-          SWIFT_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-swift-secret }}
-          SWIFT_CONFIG: ${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
-        run: python3 scripts/load-swift-config.py "${SWIFT_SECRET_NAME}" --output-file
+          S3_STORAGE_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG: ${{ secrets[steps.neighbor_env_info.outputs.s3-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+        run: python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file
           "${RUNNER_TEMP}/neighbor-s3.conf"
       - name: Log job information
         shell: bash

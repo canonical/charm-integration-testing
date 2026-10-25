@@ -13,36 +13,31 @@ from test_suite.fixtures.s3 import can_cleanup_session_storage
 from test_suite.scheduler.states import State
 
 ROOT = Path(__file__).resolve().parents[4]
-SWIFT_CONFIG_VARIABLES = (
-    "S3_OS_AUTH_URL",
-    "S3_OS_USERNAME",
-    "S3_OS_PASSWORD",
-    "S3_OS_USER_DOMAIN_NAME",
-    "S3_OS_PROJECT_NAME",
-    "S3_OS_PROJECT_DOMAIN_NAME",
-    "S3_OS_STORAGE_URL",
+S3_STORAGE_CONFIG_VARIABLES = (
+    "S3_ENDPOINT",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_BUCKET_NAMESPACE",
+    "S3_REGION",
     "S3_CLEANUP_ACCESS_KEY",
     "S3_CLEANUP_SECRET_KEY",
-    "S3_BUCKET_NAMESPACE",
-    "S3_ENDPOINT",
-    "S3_REGION",
 )
-TARGET_SECRET_EXPRESSION = "${{ secrets[steps.target_env_info.outputs.s3-swift-secret] }}"
-NEIGHBOR_SECRET_EXPRESSION = "${{ secrets[steps.neighbor_env_info.outputs.s3-swift-secret] }}"
+TARGET_SECRET_EXPRESSION = "${{ secrets[steps.target_env_info.outputs.s3-secret] }}"
+NEIGHBOR_SECRET_EXPRESSION = "${{ secrets[steps.neighbor_env_info.outputs.s3-secret] }}"
 
 
-def test_ci_swift_secret_lookup_uses_trusted_environment_metadata() -> None:
+def test_ci_s3_secret_lookup_uses_trusted_environment_metadata() -> None:
     # GIVEN environment metadata as the source of truth for the configured secret name
     workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
     job = workflow["jobs"]["execute-charm-test"]
-    assert "S3_SWIFT_SECRET_NAMES" not in job["env"]
-    assert all(not name.startswith("S3_SWIFT_CONFIG_") for name in job["env"])
+    assert "S3_STORAGE_SECRET_NAMES" not in job["env"]
+    assert all(not name.startswith("S3_STORAGE_CONFIG_") for name in job["env"])
 
     # WHEN each environment selects a secret, THEN the workflow dereferences that exact name
     for side in ("target", "neighbor"):
         step = next(step for step in job["steps"] if step.get("id") == f"{side}_s3_config")
-        selected = f"steps.{side}_env_info.outputs.s3-swift-secret"
-        assert step["env"]["SWIFT_CONFIG"] == f"${{{{ secrets[{selected}] }}}}"
+        selected = f"steps.{side}_env_info.outputs.s3-secret"
+        assert step["env"]["S3_STORAGE_CONFIG"] == f"${{{{ secrets[{selected}] }}}}"
         assert "S3_BUCKET_NAMESPACE" not in step["env"]
         assert "--namespace" not in step["run"]
 
@@ -57,7 +52,7 @@ def test_ci_test_entrypoints_receive_cloud_scoped_config_paths() -> None:
     for step in test_steps:
         environment = step["env"]
         # THEN only the path crosses the test-entrypoint boundary
-        assert "SWIFT_CONFIG" not in environment
+        assert "S3_STORAGE_CONFIG" not in environment
         assert "S3_BUCKET_NAMESPACE" not in environment
         assert environment["S3_CONFIG_target_cloud"] == "${{ steps.target_s3_config.outputs.config_path }}"
     cmr = next(step for step in test_steps if step["id"] == "run_tests_cmr")
@@ -66,26 +61,26 @@ def test_ci_test_entrypoints_receive_cloud_scoped_config_paths() -> None:
     assert "inputs.same_controller" in cmr["env"]["neighbor_cloud"]
 
 
-def test_ci_checks_each_environment_swift_secret_before_test_entrypoints() -> None:
+def test_ci_checks_each_environment_s3_secret_before_test_entrypoints() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
     steps = workflow["jobs"]["execute-charm-test"]["steps"]
     test_steps = [step for step in steps if step.get("id") in ("run_tests", "run_tests_cmr")]
-    target_check = next(step for step in steps if step.get("name") == "Check target Swift storage credentials")
-    neighbor_check = next(step for step in steps if step.get("name") == "Check neighbor Swift storage credentials")
+    target_check = next(step for step in steps if step.get("name") == "Check target S3 storage credentials")
+    neighbor_check = next(step for step in steps if step.get("name") == "Check neighbor S3 storage credentials")
 
     assert len(test_steps) == 2
     assert "continue-on-error" not in target_check
-    assert target_check["if"] == "${{ steps.target_env_info.outputs.s3-swift-secret != '' }}"
-    assert target_check["env"]["SWIFT_SECRET_NAME"] == "${{ steps.target_env_info.outputs.s3-swift-secret }}"
-    assert target_check["env"]["SWIFT_CONFIG"] == TARGET_SECRET_EXPRESSION
-    assert "scripts/load-swift-config.py" in target_check["run"]
+    assert target_check["if"] == "${{ steps.target_env_info.outputs.s3-secret != '' }}"
+    assert target_check["env"]["S3_STORAGE_SECRET_NAME"] == "${{ steps.target_env_info.outputs.s3-secret }}"
+    assert target_check["env"]["S3_STORAGE_CONFIG"] == TARGET_SECRET_EXPRESSION
+    assert "scripts/load-s3-config.py" in target_check["run"]
     assert target_check["id"] == "target_s3_config"
     assert '"${RUNNER_TEMP}/target-s3.conf"' in target_check["run"]
     assert neighbor_check["if"] == (
-        "${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-swift-secret != '' }}"
+        "${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-secret != '' }}"
     )
-    assert neighbor_check["env"]["SWIFT_SECRET_NAME"] == "${{ steps.neighbor_env_info.outputs.s3-swift-secret }}"
-    assert neighbor_check["env"]["SWIFT_CONFIG"] == NEIGHBOR_SECRET_EXPRESSION
+    assert neighbor_check["env"]["S3_STORAGE_SECRET_NAME"] == "${{ steps.neighbor_env_info.outputs.s3-secret }}"
+    assert neighbor_check["env"]["S3_STORAGE_CONFIG"] == NEIGHBOR_SECRET_EXPRESSION
     assert neighbor_check["id"] == "neighbor_s3_config"
     assert '"${RUNNER_TEMP}/neighbor-s3.conf"' in neighbor_check["run"]
     test_start = next(step for step in steps if step.get("name") == "Post 'test_start' event")
@@ -97,12 +92,12 @@ def test_ci_checks_each_environment_swift_secret_before_test_entrypoints() -> No
 @pytest.mark.parametrize(
     ("secret_name", "prefix", "missing_variable"),
     [
-        pytest.param("S3_SWIFT_TEST", "TARGET_", "S3_OS_PASSWORD", id="target-missing"),
-        pytest.param("S3_SWIFT_NEIGHBOR", "NEIGHBOR_", "S3_CLEANUP_ACCESS_KEY", id="neighbor-missing"),
-        pytest.param("S3_SWIFT_TEST", "TARGET_", "S3_BUCKET_NAMESPACE", id="target-missing-namespace"),
-        pytest.param("S3_SWIFT_NEIGHBOR", "NEIGHBOR_", "S3_BUCKET_NAMESPACE", id="neighbor-missing-namespace"),
-        pytest.param("S3_SWIFT_TEST", "TARGET_", None, id="target-complete"),
-        pytest.param("S3_SWIFT_NEIGHBOR", "NEIGHBOR_", None, id="neighbor-complete"),
+        pytest.param("S3_STORAGE_TEST", "TARGET_", "S3_SECRET_KEY", id="target-missing"),
+        pytest.param("S3_STORAGE_NEIGHBOR", "NEIGHBOR_", "S3_ACCESS_KEY", id="neighbor-missing"),
+        pytest.param("S3_STORAGE_TEST", "TARGET_", "S3_BUCKET_NAMESPACE", id="target-missing-namespace"),
+        pytest.param("S3_STORAGE_NEIGHBOR", "NEIGHBOR_", "S3_BUCKET_NAMESPACE", id="neighbor-missing-namespace"),
+        pytest.param("S3_STORAGE_TEST", "TARGET_", None, id="target-complete"),
+        pytest.param("S3_STORAGE_NEIGHBOR", "NEIGHBOR_", None, id="neighbor-complete"),
     ],
 )
 def test_ci_preflight_checks_environment_secrets(
@@ -111,17 +106,17 @@ def test_ci_preflight_checks_environment_secrets(
     workflow = yaml.safe_load((ROOT / ".github/workflows/charm-testing.yaml").read_text())
     steps = workflow["jobs"]["execute-charm-test"]["steps"]
     check_name = (
-        "Check target Swift storage credentials" if prefix == "TARGET_" else "Check neighbor Swift storage credentials"
+        "Check target S3 storage credentials" if prefix == "TARGET_" else "Check neighbor S3 storage credentials"
     )
     preflight = next(step for step in steps if step.get("name") == check_name)
-    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES}
     values["S3_BUCKET_NAMESPACE"] = "shared-storage"
     if missing_variable is not None:
         values[missing_variable] = ""
     config = "\n".join(f"{name}={value}" for name, value in values.items())
     environment = {
-        "SWIFT_SECRET_NAME": secret_name,
-        "SWIFT_CONFIG": config,
+        "S3_STORAGE_SECRET_NAME": secret_name,
+        "S3_STORAGE_CONFIG": config,
         "GITHUB_ENV": str(tmp_path / "github-env"),
         "GITHUB_OUTPUT": str(tmp_path / "github-output"),
         "RUNNER_TEMP": str(tmp_path),
@@ -139,7 +134,7 @@ def test_ci_preflight_checks_environment_secrets(
     if missing_variable is None:
         assert result.returncode == 0
         path = tmp_path / ("target-s3.conf" if prefix == "TARGET_" else "neighbor-s3.conf")
-        assert parse_s3_config(path.read_text(), SWIFT_CONFIG_VARIABLES) == values
+        assert parse_s3_config(path.read_text(), S3_STORAGE_CONFIG_VARIABLES) == values
         assert path.stat().st_mode & 0o777 == 0o600
         assert Path(environment["GITHUB_OUTPUT"]).read_text() == f"config_path={path}\navailable=true\n"
         assert not Path(environment["GITHUB_ENV"]).exists()
@@ -148,20 +143,17 @@ def test_ci_preflight_checks_environment_secrets(
         assert f"{secret_name} is missing: {missing_variable}" in result.stdout
 
 
-def test_environment_info_exposes_optional_swift_secret() -> None:
+def test_environment_info_exposes_optional_s3_secret() -> None:
     action = yaml.safe_load((ROOT / ".github/actions/get-environment-info/action.yaml").read_text())
     lookup = action["runs"]["steps"][0]["run"]
     environment_lookups = [line for line in lookup.splitlines() if "yq " in line and ".environments[" in line]
 
     assert "swift-storage" not in action["outputs"]
-    assert action["outputs"]["s3-swift-secret"]["value"] == "${{ steps.lookup.outputs.s3-swift-secret }}"
+    assert action["outputs"]["s3-secret"]["value"] == "${{ steps.lookup.outputs.s3-secret }}"
     assert "s3-bucket-namespace" not in action["outputs"]
-    assert any(
-        "s3_swift_secret=$(yq -r" in line and "s3-swift-secret" in line and '// ""' in line
-        for line in lookup.splitlines()
-    )
+    assert any("s3_secret=$(yq -r" in line and "s3-secret" in line and '// ""' in line for line in lookup.splitlines())
     assert "swift_storage" not in lookup
-    assert 'echo "s3-swift-secret=${s3_swift_secret}"' in lookup
+    assert 'echo "s3-secret=${s3_secret}"' in lookup
     environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     assert all("swift-storage" not in environment for environment in environments.values())
     assert environment_lookups
@@ -173,26 +165,26 @@ def test_environment_info_exposes_optional_swift_secret() -> None:
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        pytest.param("OS_PASSWORD=unrecognized", "Invalid SWIFT_CONFIG entry on line 1", id="unknown-variable"),
+        pytest.param("OS_PASSWORD=unrecognized", "Invalid S3_STORAGE_CONFIG entry on line 1", id="unknown-variable"),
         pytest.param(
-            "S3_OS_PASSWORD=first\nS3_OS_PASSWORD=second",
-            "Duplicate SWIFT_CONFIG entry for S3_OS_PASSWORD",
+            "S3_SECRET_KEY=first\nS3_SECRET_KEY=second",
+            "Duplicate S3_STORAGE_CONFIG entry for S3_SECRET_KEY",
             id="duplicate-variable",
         ),
     ],
 )
-def test_swift_config_loader_rejects_invalid_entries(tmp_path: Path, config: str, message: str) -> None:
+def test_s3_config_loader_rejects_invalid_entries(tmp_path: Path, config: str, message: str) -> None:
     environment = {
         **os.environ,
-        "SWIFT_CONFIG": config,
+        "S3_STORAGE_CONFIG": config,
         "GITHUB_ENV": str(tmp_path / "github-env"),
         "GITHUB_OUTPUT": str(tmp_path / "github-output"),
     }
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--output-file",
             str(tmp_path / "s3.conf"),
         ],
@@ -206,20 +198,20 @@ def test_swift_config_loader_rejects_invalid_entries(tmp_path: Path, config: str
     assert message in result.stdout
 
 
-def test_optional_swift_config_skips_when_missing(tmp_path: Path) -> None:
+def test_optional_s3_config_skips_when_missing(tmp_path: Path) -> None:
     output = tmp_path / "github-output"
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--optional",
             "--output-file",
             str(tmp_path / "s3.conf"),
         ],
         capture_output=True,
         check=False,
-        env={**os.environ, "SWIFT_CONFIG": "", "GITHUB_OUTPUT": str(output)},
+        env={**os.environ, "S3_STORAGE_CONFIG": "", "GITHUB_OUTPUT": str(output)},
         text=True,
         cwd=ROOT,
     )
@@ -228,12 +220,12 @@ def test_optional_swift_config_skips_when_missing(tmp_path: Path) -> None:
     assert not (tmp_path / "s3.conf").exists()
 
 
-def test_optional_swift_config_rejects_partial_values(tmp_path: Path) -> None:
+def test_optional_s3_config_rejects_partial_values(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--optional",
             "--output-file",
             str(tmp_path / "s3.conf"),
@@ -242,7 +234,7 @@ def test_optional_swift_config_rejects_partial_values(tmp_path: Path) -> None:
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": "S3_OS_AUTH_URL=https://identity.example/v3",
+            "S3_STORAGE_CONFIG": "S3_ENDPOINT=https://s3.example",
             "GITHUB_ENV": str(tmp_path / "github-env"),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
         },
@@ -250,17 +242,17 @@ def test_optional_swift_config_rejects_partial_values(tmp_path: Path) -> None:
         cwd=ROOT,
     )
     assert result.returncode == 1
-    assert "S3_SWIFT_TEST is missing: " in result.stdout
-    assert "S3_OS_PASSWORD" in result.stdout
+    assert "S3_STORAGE_TEST is missing: " in result.stdout
+    assert "S3_SECRET_KEY" in result.stdout
 
 
-@pytest.mark.parametrize("variable", SWIFT_CONFIG_VARIABLES[:-2])
+@pytest.mark.parametrize("variable", S3_STORAGE_CONFIG_VARIABLES[:4])
 @pytest.mark.parametrize("optional", [False, True], ids=["required", "optional"])
-def test_swift_config_loader_rejects_whitespace_only_required_values(
+def test_s3_config_loader_rejects_whitespace_only_required_values(
     tmp_path: Path, variable: str, optional: bool
 ) -> None:
     # GIVEN a declared configuration with one required value containing only whitespace
-    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES}
     values[variable] = " \t "
     config_path = tmp_path / "s3.conf"
     output = tmp_path / "github-output"
@@ -269,8 +261,8 @@ def test_swift_config_loader_rejects_whitespace_only_required_values(
     result = subprocess.run(
         [
             sys.executable,
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--output-file",
             str(config_path),
             *(["--optional"] if optional else []),
@@ -279,29 +271,30 @@ def test_swift_config_loader_rejects_whitespace_only_required_values(
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
+            "S3_STORAGE_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
             "GITHUB_OUTPUT": str(output),
         },
         text=True,
         cwd=ROOT,
     )
     assert result.returncode == 1
-    assert f"S3_SWIFT_TEST is missing: {variable}" in result.stdout
+    assert f"S3_STORAGE_TEST is missing: {variable}" in result.stdout
     assert not config_path.exists()
     assert not output.exists()
 
 
-def test_swift_config_loader_writes_optional_endpoint_and_region(tmp_path: Path) -> None:
+def test_s3_config_loader_writes_optional_region_and_separate_cleanup_identity(tmp_path: Path) -> None:
     environment_file = tmp_path / "github-env"
-    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES}
     values["S3_ENDPOINT"] = "https://s3.example"
     values["S3_REGION"] = "region-1"
+    values["S3_CLEANUP_ACCESS_KEY"] = "cleanup-access"
     config = "\n".join(f"{name}={value}" for name, value in values.items())
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--output-file",
             str(tmp_path / "s3.conf"),
         ],
@@ -309,7 +302,7 @@ def test_swift_config_loader_writes_optional_endpoint_and_region(tmp_path: Path)
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": config,
+            "S3_STORAGE_CONFIG": config,
             "GITHUB_ENV": str(environment_file),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
         },
@@ -317,24 +310,49 @@ def test_swift_config_loader_writes_optional_endpoint_and_region(tmp_path: Path)
         cwd=ROOT,
     )
     assert result.returncode == 0
-    config_values = parse_s3_config((tmp_path / "s3.conf").read_text(), SWIFT_CONFIG_VARIABLES)
+    config_values = parse_s3_config((tmp_path / "s3.conf").read_text(), S3_STORAGE_CONFIG_VARIABLES)
     assert config_values["S3_ENDPOINT"] == "https://s3.example"
+    assert config_values["S3_CLEANUP_ACCESS_KEY"] == "cleanup-access"
     assert config_values["S3_REGION"] == "region-1"
     assert not environment_file.exists()
 
 
-def test_swift_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -> None:
+@pytest.mark.parametrize("variable", ["S3_CLEANUP_ACCESS_KEY", "S3_CLEANUP_SECRET_KEY"])
+def test_s3_config_loader_rejects_unpaired_cleanup_credentials(tmp_path: Path, variable: str) -> None:
+    # GIVEN a configuration with only half of the optional cleanup identity
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES if not name.startswith("S3_CLEANUP_")}
+    values[variable] = "configured"
+    config_path = tmp_path / "s3.conf"
+    # WHEN the loader runs, THEN it fails before writing the protected file
+    result = subprocess.run(
+        ["python3", "scripts/load-s3-config.py", "S3_STORAGE_TEST", "--output-file", str(config_path)],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "S3_STORAGE_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
+            "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+        },
+        text=True,
+        cwd=ROOT,
+    )
+    assert result.returncode == 1
+    assert "must set both or neither of" in result.stdout
+    assert not config_path.exists()
+
+
+def test_s3_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -> None:
     environment_file = tmp_path / "github-env"
     output_file = tmp_path / "github-output"
-    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
-    values["S3_OS_PASSWORD"] = " first=second%value "
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES}
+    values["S3_SECRET_KEY"] = " first=second%value "
     values["S3_ENDPOINT"] = "https://s3.example"
     config = "# config comment\n" + "\n".join(f"{name}={value}" for name, value in values.items())
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_NEIGHBOR",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_NEIGHBOR",
             "--output-file",
             str(tmp_path / "s3.conf"),
             "--optional",
@@ -343,7 +361,7 @@ def test_swift_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": config,
+            "S3_STORAGE_CONFIG": config,
             "GITHUB_ENV": str(environment_file),
             "GITHUB_OUTPUT": str(output_file),
         },
@@ -352,22 +370,22 @@ def test_swift_config_loader_preserves_equals_and_masks_values(tmp_path: Path) -
     )
     assert result.returncode == 0
     assert "first=second%25value" in result.stdout
-    assert parse_s3_config((tmp_path / "s3.conf").read_text(), SWIFT_CONFIG_VARIABLES) == values
+    assert parse_s3_config((tmp_path / "s3.conf").read_text(), S3_STORAGE_CONFIG_VARIABLES) == values
     assert not environment_file.exists()
     assert output_file.read_text() == f"config_path={tmp_path / 's3.conf'}\navailable=true\n"
 
 
-def test_swift_config_loader_does_not_overwrite_existing_credentials(tmp_path: Path) -> None:
+def test_s3_config_loader_does_not_overwrite_existing_credentials(tmp_path: Path) -> None:
     # GIVEN an existing file that could belong to another cloud
     path = tmp_path / "existing.conf"
     path.write_text("existing configuration\n")
-    values = {name: "configured" for name in SWIFT_CONFIG_VARIABLES}
+    values = {name: "configured" for name in S3_STORAGE_CONFIG_VARIABLES}
     # WHEN the loader is given the same destination, THEN it fails without replacing it
     result = subprocess.run(
         [
             "python3",
-            "scripts/load-swift-config.py",
-            "S3_SWIFT_TEST",
+            "scripts/load-s3-config.py",
+            "S3_STORAGE_TEST",
             "--output-file",
             str(path),
         ],
@@ -375,7 +393,7 @@ def test_swift_config_loader_does_not_overwrite_existing_credentials(tmp_path: P
         check=False,
         env={
             **os.environ,
-            "SWIFT_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
+            "S3_STORAGE_CONFIG": "\n".join(f"{name}={value}" for name, value in values.items()),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
         },
         text=True,
