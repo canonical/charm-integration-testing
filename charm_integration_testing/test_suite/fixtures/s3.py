@@ -2,16 +2,13 @@
 # See LICENSE file for licensing details.
 
 import os
-from collections.abc import Callable, Iterator, Mapping
-from functools import partial
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
-import requests
 from resource_registry import ResourceRegistry
 from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
-from s3_storage_swift import KeystoneResourceRegistry
-from s3_storage_swift.configuration import provider_from_config
+from s3_storage.configuration import provider_from_config
 
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, State
 
@@ -45,22 +42,8 @@ def cleanup_s3_buckets(request: pytest.FixtureRequest) -> bool:
 
 
 @pytest.fixture(scope="session")
-def s3_http_session() -> Iterator[requests.Session]:
-    with requests.Session() as session:
-        yield session
-
-
-@pytest.fixture(scope="session")
-def s3_provider_registry(
-    s3_http_session: requests.Session,
-    session_resource_registry: ResourceRegistry,
-    cleanup_s3_buckets: bool,
-) -> S3ProviderRegistry:
-    resources = KeystoneResourceRegistry(session_resource_registry, cleanup_s3_buckets)
-    return S3ProviderRegistry(
-        s3_config_paths(os.environ),
-        partial(provider_from_config, session=s3_http_session, resources=resources),
-    )
+def s3_provider_registry() -> S3ProviderRegistry:
+    return S3ProviderRegistry(s3_config_paths(os.environ), provider_from_config)
 
 
 @pytest.fixture(scope="session")
