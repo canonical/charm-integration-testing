@@ -156,6 +156,7 @@ class TimestampParams:
     timestamp: str
     exit_code: int
     deleted: bool
+    delete_exit_code: int = 0
 
 
 @pytest.mark.parametrize(
@@ -165,6 +166,10 @@ class TimestampParams:
         pytest.param(TimestampParams("2020-01-01T00:00:00.123456789Z", 0, True), id="fractional-seconds"),
         pytest.param(TimestampParams("2999-01-01T00:00:00.123Z", 0, False), id="too-young"),
         pytest.param(TimestampParams("invalid", 5, False), id="invalid-timestamp-fails"),
+        pytest.param(
+            TimestampParams("2020-01-01T00:00:00Z", 9, True, delete_exit_code=9),
+            id="delete-failure-propagates",
+        ),
     ],
 )
 def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) -> None:
@@ -183,7 +188,9 @@ def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) 
         "import json, os, pathlib, sys\n"
         "if sys.argv[1] == 'list':\n"
         "    print(json.dumps([{'name': 'juju-test-0', 'created_at': os.environ['TIMESTAMP']}]))\n"
-        "elif sys.argv[1] == 'delete': pathlib.Path(os.environ['DELETED']).touch()\n"
+        "elif sys.argv[1] == 'delete':\n"
+        "    pathlib.Path(os.environ['DELETED']).touch()\n"
+        "    sys.exit(int(os.environ.get('DELETE_EXIT_CODE', '0')))\n"
         "else: sys.exit(2)\n"
     )
     lxc.chmod(0o700)
@@ -198,6 +205,7 @@ def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) 
             "TIMESTAMP": params.timestamp,
             "AGE_THRESHOLD": "240",
             "DELETED": str(deleted),
+            "DELETE_EXIT_CODE": str(params.delete_exit_code),
         },
         capture_output=True,
         text=True,
@@ -249,8 +257,10 @@ def test_cleanup_pins_server_certificate_before_connecting() -> None:
     steps = workflow["jobs"]["cleanup-environment"]["steps"]
     script = next(step["run"] for step in steps if step["name"] == "Set up LXD remote")
 
-    # THEN the pinned certificate is installed before connecting without trust-on-first-use
+    # THEN the supplied certificate fingerprint is confirmed before connecting
     assert script.index('/servercerts/charmqa.crt"') < script.index("lxc remote add")
+    assert "openssl x509" in script
+    assert '<<< "$server_fingerprint"' in script
     assert "--accept-certificate" not in script
     cleanup = next(step["run"] for step in steps if step["name"] == "Remove temporary LXD credentials")
     assert '/servercerts/charmqa.crt"' in cleanup
@@ -261,3 +271,7 @@ def test_cleanup_pins_server_certificate_before_connecting() -> None:
             "Find and delete unused Juju profiles",
         }:
             assert "steps.lxd-remote.outcome == 'success'" in step["if"]
+    delete_instances = next(
+        step["run"] for step in steps if step["name"] == "Find and delete instances older than age threshold"
+    )
+    assert "lxc delete --force \"charmqa:${name}\" || true" not in delete_instances
