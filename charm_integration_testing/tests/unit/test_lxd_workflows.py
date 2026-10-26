@@ -262,7 +262,7 @@ def test_cleanup_lxd_remote_uses_isolated_config() -> None:
     assert '/servercerts/charmqa.crt"' in script
     assert '"${LXD_CONF}/client.crt"' in script
     assert '"${LXD_CONF}/client.key"' in script
-    assert 'auth_type: tls' in script
+    assert "auth_type: tls" in script
     assert 'LXC_BINARY="/snap/lxd/current/bin/lxc"' in script
     assert '"$LXC_BINARY" remote list --format json | jq -e \'has("charmqa")\'' in script
     cleanup = next(step["run"] for step in steps if step["name"] == "Remove temporary LXD credentials")
