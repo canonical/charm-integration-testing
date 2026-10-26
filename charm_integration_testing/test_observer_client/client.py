@@ -12,9 +12,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Every call this client makes is a read-only GET, so retrying on connect/read timeouts and
-# transient 5xx responses is always safe here (unlike write endpoints, there's no risk of
-# duplicating a side effect).
+# Retry read-only requests without replaying result submissions after response failures.
 DEFAULT_RETRY_KWARGS: MappingProxyType[str, Any] = MappingProxyType(
     {
         "total": 3,
@@ -123,6 +121,18 @@ class TestObserverClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def post_results(self, execution_id: int, results: list[dict[str, Any]]) -> None:
+        """Post results to an existing execution without replaying non-idempotent writes."""
+        endpoint = f"/v1/test-executions/{execution_id}/test-results"
+        try:
+            response = self._session.post(f"{self.api_url}{endpoint}", json=results, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            raise TestObserverClientError(
+                f"Failed to post results to execution {execution_id}: {type(exc).__name__}, HTTP {status}"
+            ) from None
 
     def _get_json(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[dict[str, Any]]:
         """Perform GET request and return JSON response.

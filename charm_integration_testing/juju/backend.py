@@ -269,6 +269,16 @@ class JujuBackend(ABC):
     ) -> None:
         raise NotImplementedError
 
+    def refresh_application_from_local(
+        self, model: JujuModelHandle, application: str, path: Path, resources: dict[str, str]
+    ) -> None:
+        raise NotImplementedError("This backend does not support refreshing from a local charm")
+
+    def refresh_application_from_store(
+        self, model: JujuModelHandle, application: str, charm: str, revision: int, channel: str | None
+    ) -> None:
+        raise NotImplementedError("This backend does not support switching a local charm to Charmhub")
+
     @abstractmethod
     def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         raise NotImplementedError

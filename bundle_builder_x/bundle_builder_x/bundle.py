@@ -120,13 +120,14 @@ class Bundle(BaseModel):
         applications_dict: dict[str, dict[str, object]] = {}
         for application, info in self.applications.items():
             app_dict: dict[str, object] = {
-                "charm": info.charm.name,
-                "channel": str(info.charm.channel),
-                "revision": info.charm.revision,
+                "charm": info.charm.local_path or info.charm.name,
                 "base": f"ubuntu@{info.charm.ubuntu_version}",
                 "trust": True,
                 "options": {key: value for key, value in info.config.items() if value is not None},
             }
+            if info.charm.local_path is None:
+                app_dict["channel"] = str(info.charm.channel)
+                app_dict["revision"] = info.charm.revision
             if not info.charm.subordinate:
                 app_dict[scale_key] = info.num_units
             if len(info.resources) > 0:

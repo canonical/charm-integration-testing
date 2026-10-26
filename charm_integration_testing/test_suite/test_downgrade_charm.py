@@ -6,6 +6,8 @@ from datetime import timedelta
 import pytest
 from juju import JujuClient, JujuModelHandle
 
+from bundle_builder_x import Charm
+
 from .scheduler.states import State
 
 
@@ -19,6 +21,7 @@ def test_downgrade_charm(
     target_application: str,
     target_revision: int | None,
     target_channel: str | None,
+    target_resolved_charm: Charm,
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -29,12 +32,21 @@ def test_downgrade_charm(
         f"Refreshing {target_application} from current revision "
         f"{target_revision} to older bundle revision {target_downgrade_revision}."
     )
-    juju_client.refresh_application(
-        application=target_application,
-        revision=target_downgrade_revision,
-        channel=target_channel,
-        model=target_model_ref,
-    )
+    if target_resolved_charm.local_path is not None:
+        juju_client.refresh_application_from_store(
+            application=target_application,
+            charm=target_charm,
+            revision=target_downgrade_revision,
+            channel=target_channel,
+            model=target_model_ref,
+        )
+    else:
+        juju_client.refresh_application(
+            application=target_application,
+            revision=target_downgrade_revision,
+            channel=target_channel,
+            model=target_model_ref,
+        )
     juju_client.wait_for_application_revision(
         application=target_application,
         expected_revision=target_downgrade_revision,

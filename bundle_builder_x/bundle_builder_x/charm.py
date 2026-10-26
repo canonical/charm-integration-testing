@@ -163,6 +163,7 @@ CharmResourceValue = str | None
 
 class Charm(BaseModel):
     name: str
+    local_path: str | None = None
     channel: CharmChannel
     revision: int
     ubuntu_version: str

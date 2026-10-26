@@ -251,6 +251,18 @@ class JujuClient:
         self.logger.info(f"Refreshing application {application}{options_suffix}.")
         self.backend.refresh_application(model, application, revision=revision, channel=channel)
 
+    def refresh_application_from_local(
+        self, application: str, model: JujuModelHandle, path: Path, resources: dict[str, str]
+    ) -> None:
+        self.logger.info(f"Refreshing application {application} from local charm {path}.")
+        self.backend.refresh_application_from_local(model, application, path, resources)
+
+    def refresh_application_from_store(
+        self, application: str, model: JujuModelHandle, charm: str, revision: int, channel: str | None
+    ) -> None:
+        self.logger.info(f"Switching application {application} to {charm} revision {revision} on Charmhub.")
+        self.backend.refresh_application_from_store(model, application, charm, revision, channel)
+
     def remove_applications(self, *applications: str, model: JujuModelHandle) -> None:
         # Call extensions
         for extension in self.extensions:

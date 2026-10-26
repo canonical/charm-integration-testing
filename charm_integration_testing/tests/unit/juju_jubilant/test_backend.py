@@ -3005,3 +3005,22 @@ class TestMigrationTolerance:
         with pytest.raises(jubilant.CLIError) as exc_info:
             backend.status(JujuModelHandle(controller="dst-ctrl", model="my-model"))
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
+
+
+@pytest.mark.parametrize(("origin", "local"), [("local", True), ("charmhub", False)])
+def test_application_info_identifies_local_charms_by_origin(origin: str, local: bool) -> None:
+    # GIVEN status for a charm whose revision does not reveal its origin
+    status = jubilant.statustypes.AppStatus(
+        charm="myapp-charm",
+        charm_rev=0,
+        exposed=False,
+        app_status=jubilant.statustypes.StatusInfo(current="active", message=""),
+        units={},
+        relations={},
+        endpoint_bindings={},
+        charm_name="myapp-charm",
+        charm_origin=origin,
+    )
+
+    # WHEN/THEN application info reports the origin explicitly
+    assert JubilantBackend._application_info_from_status(status).local is local

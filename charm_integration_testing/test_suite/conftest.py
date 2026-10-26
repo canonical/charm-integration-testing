@@ -44,6 +44,7 @@ from juju.resource_registry import (
 )
 from juju_jubilant import JubilantBackend
 from kubernetes_client import KubernetesBackend, KubernetesClient
+from pydantic import TypeAdapter
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
@@ -386,6 +387,10 @@ def seed_persistence_state_for_resumed_run(
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--target-charm-path", type=Path, default=None, help="Built local .charm to test instead of Charmhub."
+    )
+    parser.addoption("--target-resources", default="{}", help="JSON map of local target resource names to values.")
     parser.addoption(
         "--log-dir",
         type=str,
@@ -857,9 +862,23 @@ def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.
 
 
 @pytest.fixture
-def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
+def charmhub_client(
+    overrides_client: OverridesClient, logger: logging.Logger, request: pytest.FixtureRequest
+) -> CharmhubClient:
     """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
-    return CharmhubClient(logger=logger, overrides_client=overrides_client)
+    client = CharmhubClient(logger=logger, overrides_client=overrides_client)
+    path = request.config.getoption("--target-charm-path")
+    if path is not None:
+        charm = client.register_local_charm(
+            path,
+            ubuntu_arch=request.getfixturevalue("target_arch"),
+            ubuntu_version=request.getfixturevalue("target_series"),
+            channel=request.getfixturevalue("target_channel") or "latest/stable",
+            resources=TypeAdapter(dict[str, str]).validate_json(request.config.getoption("--target-resources")),
+        )
+        if charm.name != request.getfixturevalue("target_charm"):
+            pytest.fail(f"Local charm name {charm.name!r} differs from --target-charm.")
+    return client
 
 
 @pytest.fixture

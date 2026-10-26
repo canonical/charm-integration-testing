@@ -3,7 +3,12 @@
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
+
+import yaml
+from pydantic import BaseModel, Field
 
 from .charm import (
     ASSUMES_OPS,
@@ -56,6 +61,20 @@ _PLATFORM_FEATURES: dict[str, frozenset[str]] = {
 }
 
 
+class _LocalBase(BaseModel):
+    name: str
+    channel: str
+    architectures: list[str]
+
+
+class _LocalManifest(BaseModel):
+    bases: list[_LocalBase] = Field(min_length=1)
+
+
+class _LocalMetadata(CharmMetadata):
+    name: str
+
+
 class CharmhubClient:
     logger: logging.Logger
     http_client: CharmhubHttpClient
@@ -73,6 +92,69 @@ class CharmhubClient:
         self.http_client = http_client if http_client is not None else CharmhubHttpClient(logger=self.logger)
         self.overrides_client = overrides_client if overrides_client is not None else OverridesClient()
         self.timeline = (timeline if timeline is not None else NullTimeline()).child("charmhub")
+        self._local_charms: dict[str, Charm] = {}
+
+    def register_local_charm(
+        self,
+        path: Path,
+        ubuntu_arch: str,
+        ubuntu_version: str | None = None,
+        channel: str = "latest/stable",
+        resources: dict[str, str] | None = None,
+    ) -> Charm:
+        """Resolve a built charm without consulting its published Charmhub metadata.
+
+        Explicit store revisions remain available for historical upgrade/downgrade tests.
+        Local charms cannot use resources attached to a Charmhub release, so OCI images
+        default to their declared ``upstream-source`` and everything else must be supplied.
+        """
+        path = path.resolve(strict=True)
+        with ZipFile(path) as archive:
+            raw_metadata = yaml.safe_load(archive.read("metadata.yaml"))
+            metadata = _LocalMetadata.model_validate(raw_metadata)
+            manifest = _LocalManifest.model_validate(yaml.safe_load(archive.read("manifest.yaml")))
+            config = (
+                CharmConfigSchema.model_validate(yaml.safe_load(archive.read("config.yaml")) or {})
+                if "config.yaml" in archive.namelist()
+                else CharmConfigSchema()
+            )
+        bases = [base.channel for base in manifest.bases if base.name == "ubuntu" and ubuntu_arch in base.architectures]
+        if not bases or (ubuntu_version is not None and ubuntu_version not in bases):
+            raise ValueError(
+                f"Local charm {metadata.name!r} does not support {ubuntu_arch}/{ubuntu_version or 'Ubuntu'}; "
+                f"manifest bases: {manifest.bases}"
+            )
+        charm = self._build_charm(
+            charm_name=metadata.name,
+            channel=CharmChannel.model_validate(channel),
+            revision=-1,
+            ubuntu_version=ubuntu_version or bases[0],
+            ubuntu_arch=ubuntu_arch,
+            metadata=metadata,
+            config_schema=config,
+        )
+        values = {
+            name: str(declared["upstream-source"])
+            for name, declared in (raw_metadata.get("resources") or {}).items()
+            if declared.get("type") == "oci-image" and declared.get("upstream-source")
+        } | (resources or {})
+        if set(values) != set(metadata.resources):
+            raise ValueError(
+                f"Local charm resources must match metadata exactly: expected {sorted(metadata.resources)}, "
+                f"got {sorted(values)}"
+            )
+        for name, value in values.items():
+            if not value:
+                raise ValueError(f"Local resource {name!r} must not be empty")
+            if metadata.resources[name].type == "file" and not Path(value).is_file():
+                raise ValueError(f"Local file resource {name!r} does not exist: {value}")
+        charm.local_path = str(path)
+        charm.resources = {name: [value] for name, value in values.items()}
+        self._local_charms[charm.name] = charm
+        return charm
+
+    def registered_local_charm(self, charm_name: str) -> Charm | None:
+        return self._local_charms.get(charm_name)
 
     def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
         """Return all published channels for a charm, sorted by track then risk tier (stable first)."""
@@ -91,6 +173,16 @@ class CharmhubClient:
         ubuntu_version: str | None = None,
         charm_branch: str | None = None,
     ) -> Charm:
+        local = self._local_charms.get(charm_name)
+        if local is not None and charm_revision is None:
+            request = ReleaseRequest(charm_name=charm_name, architecture=ubuntu_arch, base=ubuntu_version)
+            if ubuntu_arch != local.ubuntu_arch:
+                raise ArchitectureMismatchError(request=request, supported_architectures=(local.ubuntu_arch,))
+            if ubuntu_version is not None and ubuntu_version != local.ubuntu_version:
+                raise BaseMismatchError(
+                    request=request, requested_base=ubuntu_version, supported_bases=(local.ubuntu_version,)
+                )
+            return self._ensure_compatibility(local, juju_version, platform)
         token = self.timeline.on(f"charm/{charm_name}")
         try:
             # Resolve track/risk/revision from overrides when none are specified by the caller.

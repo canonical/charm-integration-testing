@@ -15,6 +15,9 @@
 set -euo pipefail
 
 HELM_VERSION="v3.21.4"
+# CI runners can override the sandbox user and kubeconfig location.
+SANDBOX_USER="${SANDBOX_USER:-ubuntu}"
+KUBECONFIG_PATH="${KUBECONFIG_PATH:-/home/${SANDBOX_USER}/k8s.yaml}"
 HELM_INSTALL_PATH="/usr/local/bin/helm"
 
 die() {
@@ -117,8 +120,8 @@ fi
 # Write kubeconfig
 # ---------------------------------------------------------------------------
 echo "==> Writing kubeconfig..."
-sudo k8s config | tee /home/ubuntu/k8s.yaml > /dev/null
-chown ubuntu:ubuntu /home/ubuntu/k8s.yaml || true
+sudo k8s config | tee "$KUBECONFIG_PATH" > /dev/null
+chown "$SANDBOX_USER:$SANDBOX_USER" "$KUBECONFIG_PATH" || true
 
 # ---------------------------------------------------------------------------
 # Install Juju snap
@@ -137,14 +140,14 @@ if juju clouds --client 2>/dev/null | grep -q "local-k8s"; then
     echo "==> local-k8s cloud already registered."
 else
     echo "==> Registering local-k8s cloud with Juju..."
-    KUBECONFIG=/home/ubuntu/k8s.yaml juju add-k8s local-k8s --client
+    KUBECONFIG="$KUBECONFIG_PATH" juju add-k8s local-k8s --client
 fi
 
 # ---------------------------------------------------------------------------
 # Install or verify Chaos Mesh
 # ---------------------------------------------------------------------------
 echo "==> Setting up Chaos Mesh..."
-bash "$(dirname "${BASH_SOURCE[0]}")/setup-chaos-mesh.sh" /home/ubuntu/k8s.yaml
+bash "$(dirname "${BASH_SOURCE[0]}")/setup-chaos-mesh.sh" "$KUBECONFIG_PATH"
 
 echo ""
 echo "k8s substrate ready."
@@ -152,5 +155,5 @@ echo "  Next steps:"
 echo "    juju bootstrap local-k8s <controller-name>"
 echo "    juju add-model <model-name>"
 echo ""
-echo "  The kubeconfig is at /home/ubuntu/k8s.yaml"
-echo "  Set KUBECONFIG=/home/ubuntu/k8s.yaml if juju commands need it."
+echo "  The kubeconfig is at $KUBECONFIG_PATH"
+echo "  Set KUBECONFIG=$KUBECONFIG_PATH if juju commands need it."

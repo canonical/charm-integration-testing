@@ -26,6 +26,7 @@ dependencies = [
 
 [tool.poetry]
 packages = [
+    { include = "ci_runner" },
     { include = "chaos_client" },
     { include = "extensions" },
     { include = "juju" },

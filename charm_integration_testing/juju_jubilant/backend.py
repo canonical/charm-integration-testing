@@ -594,6 +594,7 @@ class JubilantBackend(JujuCmdBackend):
             revision=app_info.charm_rev,
             channel=CharmChannel.parse(app_info.charm_channel) if app_info.charm_channel else None,
             base=app_info.base.channel if app_info.base else None,
+            local=app_info.charm_origin == "local",
         )
 
     def list_consumed_offers(self, model: JujuModelHandle) -> dict[str, JujuConsumedOfferInfo]:
@@ -749,6 +750,19 @@ class JubilantBackend(JujuCmdBackend):
             revision=revision,
             channel=channel,
         )
+
+    def refresh_application_from_local(
+        self, model: JujuModelHandle, application: str, path: pathlib.Path, resources: dict[str, str]
+    ) -> None:
+        self.client.model(model).refresh(app=application, path=path.resolve(strict=True), resources=resources)
+
+    def refresh_application_from_store(
+        self, model: JujuModelHandle, application: str, charm: str, revision: int, channel: str | None
+    ) -> None:
+        args = ["refresh", application, "--switch", charm, "--revision", str(revision)]
+        if channel is not None:
+            args.extend(["--channel", channel])
+        self.client.model(model).cli(*args)
 
     def validate_application(
         self, model: JujuModelHandle, application: str, level: str

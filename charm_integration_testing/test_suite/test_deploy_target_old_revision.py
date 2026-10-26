@@ -16,6 +16,8 @@ def _create_bundle_with_revision_override(
     destination_bundle: Path,
     target_application: str,
     target_revision: int,
+    target_charm: str | None = None,
+    target_channel: str | None = None,
 ) -> None:
     with bundle_path.open("r", encoding="utf-8") as file:
         bundle_data = next(yaml.safe_load_all(file))
@@ -32,6 +34,10 @@ def _create_bundle_with_revision_override(
         raise ValueError(f"Invalid application definition for '{target_application}' in {bundle_path}")
 
     target_application_data["revision"] = target_revision
+    if target_charm is not None:
+        target_application_data["charm"] = target_charm
+        if target_channel is not None:
+            target_application_data["channel"] = target_channel
 
     with destination_bundle.open("w", encoding="utf-8") as file:
         yaml.safe_dump(bundle_data, file, sort_keys=False)
@@ -47,6 +53,7 @@ def test_deploy_target_old_revision(
     target_charm: str,
     tmp_path: Path,
     target_bundle: Path,
+    target_channel: str | None,
 ) -> None:
     juju_client.logger.info(
         f"Selected historical revision {target_downgrade_revision} for {target_application} ({target_charm})"
@@ -59,6 +66,8 @@ def test_deploy_target_old_revision(
         destination_bundle=overridden_bundle,
         target_application=target_application,
         target_revision=target_downgrade_revision,
+        target_charm=target_charm,
+        target_channel=target_channel,
     )
 
     # Deploy the original bundle with only the target app revision overridden

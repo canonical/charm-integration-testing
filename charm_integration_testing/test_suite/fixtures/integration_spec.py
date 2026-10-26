@@ -194,7 +194,11 @@ def _resolve_deployed_charm(
     if model_ref not in cache:
         cache[model_ref] = juju_client.list_applications(model=model_ref)
     info = cache[model_ref].get(application)
-    if info is None or info.channel is None:
+    if info is None:
+        return None
+    if info.local:
+        return charmhub_client.registered_local_charm(info.charm)
+    if info.channel is None:
         return None
     channel = CharmChannel.model_validate(str(info.channel))
     return charmhub_client.charm_from_store(

@@ -8,4 +8,5 @@ running and debugging tests and charms.
    :maxdepth: 1
 
    run-and-debug-tests-locally
+   local-charm-ci
    use-bundle-builder-x

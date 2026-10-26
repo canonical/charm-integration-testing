@@ -36,6 +36,10 @@ The following environment variables can be set for specific test scenarios:
 
 ## Documentation
 
+To test a locally built charm from any CI provider, including scenario discovery,
+configuration overrides, and optional Test Observer reporting, see
+[the local charm CI runner guide](docs/how-to/local-charm-ci.rst).
+
 Run the documentation locally from the `docs` directory:
 
 ```bash

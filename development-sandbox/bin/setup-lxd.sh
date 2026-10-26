@@ -13,6 +13,9 @@
 
 set -euo pipefail
 
+# CI runners can override the sandbox user.
+SANDBOX_USER="${SANDBOX_USER:-ubuntu}"
+
 # ---------------------------------------------------------------------------
 # Install LXD snap
 # ---------------------------------------------------------------------------
@@ -33,10 +36,10 @@ else
     sudo lxd init --auto
 fi
 
-# Add ubuntu user to the lxd group if not already a member.
-if ! groups ubuntu | grep -q '\blxd\b'; then
-    echo "==> Adding ubuntu user to lxd group..."
-    sudo usermod -aG lxd ubuntu
+# Add the sandbox user to the lxd group if not already a member.
+if ! groups "$SANDBOX_USER" | grep -q '\blxd\b'; then
+    echo "==> Adding $SANDBOX_USER user to lxd group..."
+    sudo usermod -aG lxd "$SANDBOX_USER"
     echo "==> Note: group membership takes effect in new shells."
 fi
 

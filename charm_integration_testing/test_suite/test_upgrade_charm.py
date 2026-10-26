@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from juju import JujuClient, JujuModelHandle
@@ -31,26 +32,38 @@ def test_upgrade_charm(
         f"Refreshing {target_application} from downgrade revision {target_downgrade_revision} "
         f"to original bundle revision {target_revision}."
     )
-    juju_client.refresh_application(
-        application=target_application,
-        revision=target_revision,
-        channel=resolved_target_channel,
-        model=target_model_ref,
-    )
-    juju_client.wait_for_application_revision(
-        application=target_application,
-        expected_revision=target_revision,
-        model=target_model_ref,
-        timeout=timedelta(minutes=5),
-    )
+    if target_resolved_charm.local_path is not None:
+        juju_client.refresh_application_from_local(
+            application=target_application,
+            model=target_model_ref,
+            path=Path(target_resolved_charm.local_path),
+            resources={name: values[0] for name, values in target_resolved_charm.resources.items() if values[0]},
+        )
+    else:
+        juju_client.refresh_application(
+            application=target_application,
+            revision=target_revision,
+            channel=resolved_target_channel,
+            model=target_model_ref,
+        )
+        juju_client.wait_for_application_revision(
+            application=target_application,
+            expected_revision=target_revision,
+            model=target_model_ref,
+            timeout=timedelta(minutes=5),
+        )
     models_to_validate = [m for m in (target_model_ref, neighbor_model_ref) if m is not None]
 
     # Wait for return to idle
     juju_client.multi_model_idle_for_period(models_to_validate, timeout=timedelta(minutes=15))
 
     # Verify the application is upgraded to the target revision and the model is healthy
-    upgraded_revision = juju_client.application_revision(application=target_application, model=target_model_ref)
-    if upgraded_revision != target_revision:
+    upgraded = juju_client.list_applications(model=target_model_ref)[target_application]
+    upgraded_revision = upgraded.revision
+    if target_resolved_charm.local_path is not None:
+        if not upgraded.local:
+            pytest.fail(f"Expected '{target_application}' to run the local charm, got revision {upgraded_revision}.")
+    elif upgraded_revision != target_revision:
         pytest.fail(
             f"Expected '{target_application}' to be on upgraded revision "
             f"{target_revision}, got {upgraded_revision}."
