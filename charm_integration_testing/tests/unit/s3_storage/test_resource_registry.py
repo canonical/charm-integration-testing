@@ -6,8 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
-from s3_storage import S3Bucket, S3BucketHandle, S3Credentials, S3ResourceRegistry, StaticS3Provider
-from s3_storage.resource_registry import S3SessionHandle
+from s3_storage import S3Bucket, S3BucketHandle, S3Credentials, S3ResourceRegistry, S3SessionHandle, StaticS3Provider
 
 
 class BucketStub(S3Bucket):
