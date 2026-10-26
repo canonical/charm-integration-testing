@@ -2,10 +2,12 @@
 # See LICENSE file for licensing details.
 
 import logging
+from dataclasses import dataclass
 
 import pytest
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from s3_storage import S3Bucket, S3BucketHandle, S3Credentials, S3ResourceRegistry, StaticS3Provider
+from s3_storage.resource_registry import S3SessionHandle
 
 
 class BucketStub(S3Bucket):
@@ -40,6 +42,40 @@ class ProviderStub(StaticS3Provider):
         bucket = BucketStub(f"{self.handle.namespace}-{len(self.buckets)}", self.events)
         self.buckets.append(bucket)
         return bucket
+
+
+@dataclass(frozen=True)
+class ControllerHandle:
+    @property
+    def resource_id(self) -> str:
+        return "controller:test"
+
+    @property
+    def resource_type(self) -> str:
+        return "controller"
+
+    @property
+    def path_segment(self) -> str:
+        return "controller-test"
+
+
+def test_shared_storage_is_torn_down_after_later_registered_consumers() -> None:
+    # GIVEN an S3 session root registered before its Juju consumers
+    events: list[str] = []
+    registry = ResourceRegistry([], logging.getLogger(__name__))
+    session = S3SessionHandle()
+    registry.register(session)
+    controller = ControllerHandle()
+    registry.register(controller, destroyer=lambda: events.append("controller"))
+    provider = ProviderStub("provider", events)
+    scope = S3ResourceRegistry(provider, registry, cleanup_buckets=True, parent=session)
+    bucket = scope.new_bucket()
+
+    # WHEN the session registry tears down, THEN consumers stop before shared buckets are deleted
+    registry.teardown_all()
+
+    assert events == ["controller", bucket.handle.name]
+    assert registry.registered_handles() == []
 
 
 def test_session_teardown_attempts_each_bucket_once_and_continues_after_failure() -> None:
