@@ -61,7 +61,10 @@ runs:
           k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
           o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
           lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
-          *)   credentials_secret="" ;;
+          *)
+            echo "::error::Unsupported cloud type '${cloud_type}' for environment '${ENVIRONMENT_NAME}'."
+            exit 1
+            ;;
         esac
         remote_logging=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"remote-logging\"] // \"\"" "${table}")
 
