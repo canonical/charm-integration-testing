@@ -1,12 +1,12 @@
 ---
 # Source: https://github.com/canonical/blackbox-exporter-k8s-operator
-# Tracks 0.28/dev support mesh; tracks 1/2 predate it.
+# Tracks 1/2 predate mesh; fallback covers 0.28/dev and future tracks.
 # Mesh companions follow charm.py::ServiceMeshConsumer's self-metrics-endpoint policy.
 overrides:
   - criteria:
-      - any_of:
-          - track: '0.28'
-          - track: dev
+      - none_of:
+          - track: '1'
+          - track: '2'
     requires:
       require-cmr-mesh:
         optional: true  # optional identity exchange; ServiceMeshConsumer::_send_cmr_data
