@@ -202,6 +202,7 @@ def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) 
         env={
             **os.environ,
             "PATH": f"{tools}:{os.environ['PATH']}",
+            "LXC_BINARY": str(lxc),
             "TIMESTAMP": params.timestamp,
             "AGE_THRESHOLD": "240",
             "DELETED": str(deleted),
@@ -251,18 +252,19 @@ def test_lxd_runner_matches_workflow_placement() -> None:
                 assert any(job.get("runs-on") == labels for job in workflow["jobs"].values())
 
 
-def test_cleanup_pins_server_certificate_before_connecting() -> None:
+def test_cleanup_lxd_remote_uses_isolated_config() -> None:
     # GIVEN the cleanup remote setup script
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     steps = workflow["jobs"]["cleanup-environment"]["steps"]
     script = next(step["run"] for step in steps if step["name"] == "Set up LXD remote")
 
-    # THEN the configured server certificate and client credentials are used without an interactive trust prompt
+    # THEN the direct snap binary loads the isolated config with supplied credentials
     assert '/servercerts/charmqa.crt"' in script
     assert '"${LXD_CONF}/client.crt"' in script
     assert '"${LXD_CONF}/client.key"' in script
     assert 'auth_type: tls' in script
-    assert "lxc remote add" not in script
+    assert 'LXC_BINARY="/snap/lxd/current/bin/lxc"' in script
+    assert '"$LXC_BINARY" remote list --format json | jq -e \'has("charmqa")\'' in script
     cleanup = next(step["run"] for step in steps if step["name"] == "Remove temporary LXD credentials")
     assert '/servercerts/charmqa.crt"' in cleanup
     for step in steps:
@@ -275,4 +277,4 @@ def test_cleanup_pins_server_certificate_before_connecting() -> None:
     delete_instances = next(
         step["run"] for step in steps if step["name"] == "Find and delete instances older than age threshold"
     )
-    assert "lxc delete --force \"charmqa:${name}\" || true" not in delete_instances
+    assert '"$LXC_BINARY" delete --force "charmqa:${name}"' in delete_instances

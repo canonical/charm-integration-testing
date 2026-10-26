@@ -439,6 +439,11 @@ jobs:
           server_cert=$(yq '.server-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
           client_cert=$(yq '.client-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
           client_key=$(yq '.client-key' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          LXC_BINARY="/snap/lxd/current/bin/lxc"
+          if [[ ! -x "$LXC_BINARY" ]]; then
+            echo "::error::LXD client binary not found at $LXC_BINARY"
+            exit 1
+          fi
           export LXD_CONF="$LXD_CREDENTIALS_DIR/config"
           mkdir -p "${LXD_CONF}/servercerts"
           printf '%s\n' "${server_cert}" > "${LXD_CONF}/servercerts/charmqa.crt"
@@ -452,19 +457,21 @@ jobs:
               addr: ${endpoint}
               auth_type: tls
           EOF
-          echo "LXD_CONF=${LXD_CONF}" >> $GITHUB_ENV
+          "$LXC_BINARY" remote list --format json | jq -e 'has("charmqa")' >/dev/null
+          echo "LXD_CONF=${LXD_CONF}" >> "$GITHUB_ENV"
+          echo "LXC_BINARY=${LXC_BINARY}" >> "$GITHUB_ENV"
       - name: Find and delete instances older than age threshold
         if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |
-          lxc list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          "$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .[] |
             select(.name | test("^juju-")) |
             select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
             .name
           ' | while read -r name; do
             echo "Deleting instance: $name"
-            lxc delete --force "charmqa:${name}"
+            "$LXC_BINARY" delete --force "charmqa:${name}"
           done
       - name: Remove temporary LXD credentials
         if: ${{ always() && steps.creds.outputs.lxd == 'true' }}
