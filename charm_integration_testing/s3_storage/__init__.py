@@ -3,7 +3,7 @@
 
 from .provider import CredentialProvider, S3Bucket, S3Credentials, S3Provider, StaticCredentialProvider
 from .registry import S3ProviderRegistry
-from .resource_registry import S3ResourceRegistry
+from .resource_registry import S3ResourceRegistry, S3SessionHandle
 from .storage import S3BucketHandle, S3Storage, S3StorageHandle, StaticS3Provider
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "S3Provider",
     "S3ProviderRegistry",
     "S3ResourceRegistry",
+    "S3SessionHandle",
     "S3Storage",
     "S3StorageHandle",
     "StaticCredentialProvider",
