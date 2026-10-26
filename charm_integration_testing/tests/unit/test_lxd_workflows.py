@@ -218,8 +218,21 @@ def test_lxd_cleanup_parses_timestamps(tmp_path: Path, params: TimestampParams) 
 
 
 def test_ps7_proxy_bypasses_only_private_destinations() -> None:
-    # GIVEN the shared PS7 proxy policy
-    bypass = "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc,.svc.cluster.local"
+    # GIVEN the PS7 proxy policies for Kubernetes and machine environments
+    kube_bootstrap_bypass = (
+        "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,"
+        ".canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc.cluster.local"
+    )
+    kube_model_bypass = (
+        "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,"
+        ".canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc,.svc.cluster.local"
+    )
+    machine_bootstrap_bypass = (
+        "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc.cluster.local"
+    )
+    machine_model_bypass = (
+        "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.internal,.svc,.svc.cluster.local"
+    )
     proxy = "http://egress.ps7.internal:3128"
     current = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
 
@@ -228,7 +241,12 @@ def test_ps7_proxy_bypasses_only_private_destinations() -> None:
         if name.startswith("ps7-"):
             bootstrap = environment["bootstrap-config"]
             model = environment["model-config"]
-            assert bootstrap["no-proxy"] == model["juju-no-proxy"] == bypass
+            if environment["platform"] == "kubernetes":
+                assert bootstrap["no-proxy"] == kube_bootstrap_bypass
+                assert model["juju-no-proxy"] == kube_model_bypass
+            else:
+                assert bootstrap["no-proxy"] == machine_bootstrap_bypass
+                assert model["juju-no-proxy"] == machine_model_bypass
             for key in ("http-proxy", "https-proxy", "apt-http-proxy", "apt-https-proxy"):
                 assert bootstrap[key] == proxy
             for key in ("juju-http-proxy", "juju-https-proxy", "snap-http-proxy", "snap-https-proxy"):
