@@ -274,6 +274,7 @@ def test_cleanup_lxd_remote_uses_isolated_config() -> None:
     # GIVEN the cleanup remote setup script
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
     steps = workflow["jobs"]["cleanup-environment"]["steps"]
+    step_names = [step["name"] for step in steps]
     script = next(step["run"] for step in steps if step["name"] == "Set up LXD remote")
 
     # THEN the direct snap binary loads the isolated config with supplied credentials
@@ -283,6 +284,9 @@ def test_cleanup_lxd_remote_uses_isolated_config() -> None:
     assert "auth_type: tls" in script
     assert 'LXC_BINARY="/snap/lxd/current/bin/lxc"' in script
     assert '"$LXC_BINARY" remote list --format json | jq -e \'has("charmqa")\'' in script
+    orphaned_ports = next(step for step in steps if step["name"].startswith("Find and delete orphaned ports"))
+    assert step_names.index(orphaned_ports["name"]) < step_names.index("Install lxd client")
+    assert orphaned_ports["if"] == "${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}"
     for step in steps:
         if step["name"] in {
             "Find and delete instances older than age threshold",
