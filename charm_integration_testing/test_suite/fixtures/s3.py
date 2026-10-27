@@ -9,7 +9,6 @@ import pytest
 from resource_registry import ResourceRegistry
 from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
 from s3_storage.configuration import provider_from_config
-from s3_storage.resource_registry import S3SessionHandle
 
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, State
 
@@ -48,20 +47,9 @@ def s3_provider_registry() -> S3ProviderRegistry:
 
 
 @pytest.fixture(scope="session")
-def s3_session_handle(session_resource_registry: ResourceRegistry, cleanup_s3_buckets: bool) -> S3SessionHandle | None:
-    """Register the S3 cleanup root before Juju controllers are created."""
-    if not cleanup_s3_buckets:
-        return None
-    handle = S3SessionHandle()
-    session_resource_registry.register(handle=handle)
-    return handle
-
-
-@pytest.fixture(scope="session")
 def s3_resources_for_provider(
     session_resource_registry: ResourceRegistry,
     cleanup_s3_buckets: bool,
-    s3_session_handle: S3SessionHandle | None,
 ) -> Callable[[S3Provider], S3ResourceRegistry]:
     """Share one lazily registered resource scope per provider across Juju clients."""
     scopes: dict[str, S3ResourceRegistry] = {}
@@ -69,9 +57,7 @@ def s3_resources_for_provider(
     def resources_for_provider(provider: S3Provider) -> S3ResourceRegistry:
         resource_id = provider.handle.resource_id
         if resource_id not in scopes:
-            scopes[resource_id] = S3ResourceRegistry(
-                provider, session_resource_registry, cleanup_s3_buckets, parent=s3_session_handle
-            )
+            scopes[resource_id] = S3ResourceRegistry(provider, session_resource_registry, cleanup_s3_buckets)
         return scopes[resource_id]
 
     return resources_for_provider
