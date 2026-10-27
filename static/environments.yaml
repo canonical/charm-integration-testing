@@ -55,7 +55,7 @@ environments:
     remote-logging: "http://10.156.55.120/k8s-prod-sqa-cos-default-loki"
     kubeconfig-secret: PROD_PS7_KUBECONFIG
     arch: amd64
-    bootstrap-config: &ps7-bootstrap-config
+    bootstrap-config:
       apt-http-proxy: "http://egress.ps7.internal:3128"
       apt-https-proxy: "http://egress.ps7.internal:3128"
       http-proxy: "http://egress.ps7.internal:3128"
@@ -65,7 +65,7 @@ environments:
       snap-https-proxy: "http://egress.ps7.internal:3128"
     bootstrap-constraints: &ps7-model-constraints
       root-disk: '5G'
-    model-config: &ps7-model-config
+    model-config:
       logging-config: "DEBUG"
       update-status-hook-interval: "2m"
       juju-http-proxy: "http://egress.ps7.internal:3128"
