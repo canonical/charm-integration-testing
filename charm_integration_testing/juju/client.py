@@ -452,6 +452,8 @@ class JujuClient:
         bundle: str,
         model: JujuModelHandle,
     ) -> None:
+        for extension in self.extensions:
+            extension.pre_deploy(model, Path(bundle))
         self._deploy_bundle_phase(model, Path(bundle))
 
         # Call extensions
@@ -461,8 +463,9 @@ class JujuClient:
     def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
         """Deploy a bundle file directly via the backend, without invoking extensions.
 
-        Used by ``deploy_bundle_file()`` (which invokes extensions itself afterwards) and by
-        ``deploy_bundles()`` (which invokes extensions itself, once per model, after all phases).
+        Used by ``deploy_bundle_file()`` and ``deploy_bundles()``. These callers invoke
+        pre-deploy hooks before deployment and post-deploy hooks afterwards;
+        ``deploy_bundles()`` invokes each hook once per model, outside the two phases.
         """
         self.logger.info(f"Deploying bundle file: '{path}'")
         self.backend.deploy_bundle_file(model, str(path), trust=True, force=True)
@@ -489,8 +492,8 @@ class JujuClient:
         definitions are stripped from the phase-2 bundles because the offers are already
         present from the between-phase step and re-declaring them would fail.
 
-        Extensions are only invoked once per model, after phase 2, so they never see the
-        deliberately incomplete phase-1 topology.
+        Pre-deploy hooks run for each input bundle before phase 1.
+        Post-deploy hooks run once per model after phase 2, with the complete topology.
 
         Args:
             bundles: List of ``(bundle_path, model)`` pairs.
@@ -498,6 +501,10 @@ class JujuClient:
         """
         juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
         tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        for bundle_path, model in bundles:
+            for extension in self.extensions:
+                extension.pre_deploy(model, bundle_path)
 
         # Phase 1: deploy apps without any offers or saas consumption.
         for i, (bundle_path, model) in enumerate(bundles):
