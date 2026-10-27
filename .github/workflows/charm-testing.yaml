@@ -166,6 +166,24 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.neighbor_environment }}
+      - name: Check target S3 storage credentials
+        id: target_s3_config
+        if: ${{ steps.target_env_info.outputs.s3-secret != '' }}
+        shell: bash
+        env:
+          S3_STORAGE_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG: ${{ secrets[steps.target_env_info.outputs.s3-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+        run: python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file
+          "${RUNNER_TEMP}/target-s3.conf"
+      - name: Check neighbor S3 storage credentials
+        id: neighbor_s3_config
+        if: ${{ inputs.neighbor_environment != '' && steps.neighbor_env_info.outputs.s3-secret != '' }}
+        shell: bash
+        env:
+          S3_STORAGE_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG: ${{ secrets[steps.neighbor_env_info.outputs.s3-secret] }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+        run: python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file
+          "${RUNNER_TEMP}/neighbor-s3.conf"
       - name: Log job information
         shell: bash
         env:
@@ -372,6 +390,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config_path }}
+          S3_CONFIG_neighbor_cloud: ${{ steps.neighbor_s3_config.outputs.config_path }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
@@ -464,6 +484,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config_path }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
           CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
