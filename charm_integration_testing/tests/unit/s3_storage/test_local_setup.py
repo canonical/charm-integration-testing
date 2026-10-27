@@ -14,6 +14,14 @@ ROOT = Path(__file__).resolve().parents[4]
 SETUP = ROOT / "development-sandbox/bin/setup-s3.sh"
 
 
+def test_setup_starts_seaweedfs_without_waiting_for_service_exit() -> None:
+    # GIVEN the long-running SeaweedFS service launch
+    launch = SETUP.read_text().split("sudo -n systemd-run", 1)[1].split("\nfi", 1)[0]
+
+    # THEN systemd-run returns so the setup can perform its readiness check
+    assert "--no-block" in launch
+
+
 @pytest.mark.parametrize(
     ("statuses", "expected_attempts", "success"),
     [
