@@ -11,8 +11,8 @@ from .models import JujuIntegrationApplication
 
 
 class JujuExtension(ABC):
-    def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
-        """Prepare prerequisites before any bundle applications are deployed in this model."""
+    def pre_deploy(self, model: JujuModelHandle, bundle: Path) -> None:
+        """Prepare prerequisites before deploying this bundle in the model."""
         pass
 
     def post_deploy(self, model: JujuModelHandle) -> None:

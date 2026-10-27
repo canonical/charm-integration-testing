@@ -2,7 +2,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-from datetime import timedelta
 from pathlib import Path
 
 import yaml
@@ -16,8 +15,6 @@ from bundle_builder_x import JujuVersion as BundleJujuVersion
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 
-DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
-
 
 class IstioMeshExtension(JujuExtension):
     """Deploys istio-k8s into a model when a mesh-dependent charm is present but has no
@@ -25,12 +22,11 @@ class IstioMeshExtension(JujuExtension):
 
     For bundles without an explicit control plane, ``pre_deploy()`` requests its deployment
     before deploying dependent applications, without waiting for readiness.
-    ``post_deploy()`` waits for the control plane to settle, deploying it if still absent.
 
     istio-beacon-k8s and istio-ingress-k8s each need a reconciling istio-k8s control plane
     in the *same model* to reach "active", with no Juju relation to express the dependency.
-    Checked via Juju application state rather than Kubernetes cluster state: the Gateway API
-    CRDs istio-k8s installs are cluster-scoped, so their presence says nothing about whether
+    Dependents are identified from the bundle and existing control planes from Juju application state.
+    The Gateway API CRDs istio-k8s installs are cluster-scoped, so their presence says nothing about whether
     *this* model has a working control plane -- a model on a cluster where istio-k8s happens
     to be deployed elsewhere still hangs the same way (confirmed live: istio-ingress-k8s's
     Gateway stayed unprogrammed even with the CRD already present cluster-wide from another
@@ -65,48 +61,26 @@ class IstioMeshExtension(JujuExtension):
         self.logger = logger
         self.charmhub_client = charmhub_client
 
-    def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
+    def pre_deploy(self, model: JujuModelHandle, bundle: Path) -> None:
         # Preserve charm names across documents that only add options or offers.
         charms: dict[str, str] = {}
-        for bundle in bundles:
-            for document in yaml.safe_load_all(bundle.read_text(encoding="utf-8")):
-                if not isinstance(document, dict):
-                    continue
-                applications = document.get("applications")
-                if not isinstance(applications, dict):
-                    continue
-                for name, app in applications.items():
-                    if app is None:
-                        charms.pop(name, None)
-                    elif isinstance(app, dict) and isinstance(app.get("charm"), str):
-                        charms[name] = app["charm"].removeprefix("ch:")
+        for document in yaml.safe_load_all(bundle.read_text(encoding="utf-8")):
+            if not isinstance(document, dict):
+                continue
+            applications = document.get("applications")
+            if not isinstance(applications, dict):
+                continue
+            for name, app in applications.items():
+                if app is None:
+                    charms.pop(name, None)
+                elif isinstance(app, dict) and isinstance(app.get("charm"), str):
+                    charms[name] = app["charm"].removeprefix("ch:")
         if not ISTIO_MESH_DEPENDENT_CHARMS.intersection(charms.values()):
             return
         # Let the bundle deploy its explicit control plane with its own settings.
         if ISTIO_CONTROL_PLANE_CHARM in charms.values() or not self.juju.is_k8s_model(model):
             return
         self._ensure_istio_deployed(model)
-
-    def post_deploy(self, model: JujuModelHandle) -> None:
-        applications = self.juju.list_applications(model)
-        dependents = sorted(info.charm for info in applications.values() if info.charm in ISTIO_MESH_DEPENDENT_CHARMS)
-        if not dependents:
-            return
-
-        if not self.juju.is_k8s_model(model):
-            return
-
-        existing = self._find_istio_application(applications)
-        if existing is not None:
-            self.juju.wait_application_settled(model, existing, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
-            return
-
-        self.logger.info(
-            f"{dependents} present in '{model.uri}' with no '{ISTIO_CONTROL_PLANE_CHARM}' of its own; "
-            f"deploying '{ISTIO_CONTROL_PLANE_CHARM}'."
-        )
-        application = self._ensure_istio_deployed(model)
-        self.juju.wait_application_settled(model, application, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
 
     def _ensure_istio_deployed(self, model: JujuModelHandle) -> str:
         existing = self._find_istio_application(self.juju.list_applications(model))

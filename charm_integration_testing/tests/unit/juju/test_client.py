@@ -1614,9 +1614,9 @@ class TestDeployBundles:
         bundle.write_text("applications: {}")
 
         class Prerequisite(JujuExtension):
-            def pre_deploy(self, target: JujuModelHandle, bundles: list[Path]) -> None:
+            def pre_deploy(self, target: JujuModelHandle, bundle_path: Path) -> None:
                 assert target == model
-                assert bundles == [bundle]
+                assert bundle_path == bundle
                 assert backend.calls == []
                 backend.calls.append(("prepare", model.uri))
                 if fail:
@@ -1639,23 +1639,23 @@ class TestDeployBundles:
             assert backend.calls[0] == ("prepare", model.uri)
             assert backend.calls[1][0] == "deploy"
 
-    def test_prepares_each_model_with_all_its_bundles(self, tmp_path: Path) -> None:
+    def test_prepares_each_bundle_with_its_model(self, tmp_path: Path) -> None:
         backend = DeployBundlesBackendStub()
         models = [JujuModelHandle(controller="ctrl", model=name) for name in ("target", "migrated")]
         paths = [tmp_path / f"bundle-{i}.yaml" for i in range(3)]
         for path in paths:
             path.write_text("applications: {}")
-        prepared: list[tuple[JujuModelHandle, list[Path]]] = []
+        prepared: list[tuple[JujuModelHandle, Path]] = []
 
         class Prerequisite(JujuExtension):
-            def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
+            def pre_deploy(self, model: JujuModelHandle, bundle: Path) -> None:
                 assert backend.calls == []
-                prepared.append((model, bundles))
+                prepared.append((model, bundle))
 
         _client(backend, [Prerequisite()]).deploy_bundles(
             [(paths[0], models[0]), (paths[1], models[1]), (paths[2], models[0])], tmp_path
         )
-        assert prepared == [(models[0], [paths[0], paths[2]]), (models[1], [paths[1]])]
+        assert prepared == [(models[0], paths[0]), (models[1], paths[1]), (models[0], paths[2])]
 
     def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"

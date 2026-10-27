@@ -102,13 +102,19 @@ class TestIstioMeshExtension:
             f"applications:\n  dependent:\n    charm: {dependent}\n---\napplications:\n  dependent:\n    offers: {{}}\n"
         )
         extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
-        extension.pre_deploy(TEST_MODEL, [bundle])
+        extension.pre_deploy(TEST_MODEL, bundle)
         # Simulate Juju reporting the application on a subsequent deployment.
         if not existing:
             backend.applications["istio-k8s"] = "istio-k8s"
-        extension.pre_deploy(TEST_MODEL, [bundle])
+        extension.pre_deploy(TEST_MODEL, bundle)
         assert store.requested == ([] if existing else ["istio-k8s"])
-        assert len(backend.deployed) == (0 if existing else 1)
+        assert backend.deployed == (
+            [] if existing else [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM)]
+        )
+        assert backend.deployed_with_channel == (
+            [] if existing else [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM, store.channel)]
+        )
+        assert backend.deployed_releases == ([] if existing else [(1, "ubuntu@24.04")])
         assert backend.waited_idle == []
         assert backend.waited_settled == []
 
@@ -128,7 +134,7 @@ class TestIstioMeshExtension:
         bundle = tmp_path / "bundle.yaml"
         bundle.write_text(content)
         store = CharmhubStub()
-        IstioMeshExtension(backend, logger, cast(CharmhubClient, store)).pre_deploy(TEST_MODEL, [bundle])
+        IstioMeshExtension(backend, logger, cast(CharmhubClient, store)).pre_deploy(TEST_MODEL, bundle)
         assert backend.deployed == []
         assert store.requested == []
 
@@ -144,114 +150,36 @@ class TestIstioMeshExtension:
         extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
 
         # WHEN inspecting the bundle before deployment
-        extension.pre_deploy(TEST_MODEL, [bundle])
+        extension.pre_deploy(TEST_MODEL, bundle)
 
         # THEN skip prerequisite deployment without querying Charmhub
         assert backend.deployed == []
         assert store.requested == []
 
-    class TestPostDeploy:
-        def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:
-            # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s
-            juju = JujuStub(applications={"other-app": "other-charm"})
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
+    def test_deploys_istio_once_for_both_dependents(self, tmp_path: Path, logger: logging.Logger) -> None:
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text(
+            "applications: {beacon: {charm: istio-beacon-k8s}, ingress: {charm: istio-ingress-k8s}}",
+            encoding="utf-8",
+        )
+        backend = JujuStub()
+        store = CharmhubStub()
+        extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
 
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
+        extension.pre_deploy(TEST_MODEL, bundle)
 
-            # THEN nothing is deployed
-            assert juju.deployed == []
-            assert charmhub.requested == []
+        assert backend.deployed == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM)]
+        assert store.requested == [ISTIO_CONTROL_PLANE_CHARM]
+        assert backend.waited_settled == []
 
-        @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
-        def test_deploys_istio_when_dependent_present_and_istio_not_yet_in_model(
-            self, logger: logging.Logger, dependent_charm: str
-        ) -> None:
-            # GIVEN a dependent charm is present with no istio-k8s of its own in the model
-            juju = JujuStub(
-                applications={"dependent": dependent_charm},
-            )
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
+    def test_post_deploy_does_not_deploy_or_wait(self, logger: logging.Logger) -> None:
+        backend = JujuStub(applications={"beacon": ISTIO_BEACON_CHARM})
+        store = CharmhubStub()
+        extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
 
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
+        extension.post_deploy(TEST_MODEL)
 
-            # THEN istio-k8s is deployed on the resolved default channel and awaited to settle
-            assert juju.deployed == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM)]
-            assert juju.deployed_with_channel == [
-                (TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM, charmhub.channel)
-            ]
-            assert charmhub.requested == [ISTIO_CONTROL_PLANE_CHARM]
-            assert juju.deployed_releases == [(1, "ubuntu@24.04")]
-            assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
-
-        @pytest.mark.parametrize("dependent_charm", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
-        def test_skips_deploy_when_istio_already_deployed_in_the_same_model(
-            self, logger: logging.Logger, dependent_charm: str
-        ) -> None:
-            # GIVEN the dependent charm and istio-k8s are already both in the model
-            juju = JujuStub(
-                applications={"dependent": dependent_charm, ISTIO_CONTROL_PLANE_CHARM: ISTIO_CONTROL_PLANE_CHARM},
-            )
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
-
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
-
-            # THEN no new deploy happens, but the extension still waits for it to settle
-            assert juju.deployed == []
-            assert charmhub.requested == []
-            assert juju.waited_settled == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, "0:15:00")]
-
-        def test_deploys_istio_only_once_when_both_dependents_present(self, logger: logging.Logger) -> None:
-            # GIVEN both istio-beacon-k8s and istio-ingress-k8s are present with no istio-k8s yet
-            juju = JujuStub(
-                applications={"beacon": ISTIO_BEACON_CHARM, "ingress": ISTIO_INGRESS_CHARM},
-            )
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
-
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
-
-            # THEN istio-k8s is deployed exactly once
-            assert juju.deployed == [(TEST_MODEL.uri, ISTIO_CONTROL_PLANE_CHARM, ISTIO_CONTROL_PLANE_CHARM)]
-            assert charmhub.requested == [ISTIO_CONTROL_PLANE_CHARM]
-
-        def test_skips_deploy_when_istio_already_deployed_under_a_different_application_name(
-            self, logger: logging.Logger
-        ) -> None:
-            # GIVEN istio-beacon-k8s is present and istio-k8s is already deployed under a
-            # custom application name
-            juju = JujuStub(
-                applications={
-                    "istio-beacon-k8s": ISTIO_BEACON_CHARM,
-                    "my-istio": ISTIO_CONTROL_PLANE_CHARM,
-                },
-            )
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
-
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
-
-            # THEN no new deploy happens; the extension waits on the existing application
-            assert juju.deployed == []
-            assert charmhub.requested == []
-            assert juju.waited_settled == [(TEST_MODEL.uri, "my-istio", "0:15:00")]
-
-        def test_ignores_models_on_non_k8s_controllers(self, logger: logging.Logger) -> None:
-            # GIVEN istio-beacon-k8s is present but the controller isn't backed by Kubernetes
-            juju = JujuStub(applications={"istio-beacon-k8s": ISTIO_BEACON_CHARM}, is_k8s=False)
-            charmhub = CharmhubStub()
-            extension = IstioMeshExtension(juju, logger, cast(CharmhubClient, charmhub))
-
-            # WHEN post_deploy is called
-            extension.post_deploy(TEST_MODEL)
-
-            # THEN nothing is deployed
-            assert juju.deployed == []
-            assert charmhub.requested == []
+        assert backend.deployed == []
+        assert store.requested == []
+        assert backend.waited_idle == []
+        assert backend.waited_settled == []
