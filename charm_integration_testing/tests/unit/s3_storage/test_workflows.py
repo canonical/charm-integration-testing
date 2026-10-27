@@ -65,13 +65,22 @@ def test_ci_test_entrypoints_receive_cloud_scoped_config_paths() -> None:
 
 
 def test_cleanup_s3_secret_lookup_uses_environment_metadata() -> None:
-    # GIVEN cleanup's metadata-based lookup for manual and scheduled runs
+    # GIVEN cleanup's metadata-selected secret name for manual and scheduled runs
     workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     job = workflow["jobs"]["cleanup-environment"]
-    # THEN cleanup uses the exact metadata-selected secret without a second name registry
-    assert "S3_STORAGE_SECRET_NAMES" not in job["env"]
+    allowed_secrets = {
+        environments[name]["s3-secret"]
+        for name in workflow.get("on", workflow.get(True))["workflow_dispatch"]["inputs"]["environment"]["options"]
+    }
     step = next(step for step in job["steps"] if step.get("id") == "s3_credentials")
-    assert step["env"]["S3_STORAGE_CONFIG"] == "${{ secrets[steps.env_info.outputs.s3-secret] }}"
+    # THEN metadata chooses only among the explicitly mapped cleanup credentials
+    assert step["env"]["S3_STORAGE_SECRET_NAME"] == "${{ steps.env_info.outputs.s3-secret }}"
+    assert set(step["env"]) == {"S3_STORAGE_SECRET_NAME", *allowed_secrets}
+    assert all(step["env"][name] == f"${{{{ secrets.{name} }}}}" for name in allowed_secrets)
+    assert all(f"{name})" in step["run"] for name in allowed_secrets)
+    assert "secrets[" not in step["run"]
+    assert "not allowed for cleanup" in step["run"]
 
 
 def test_ci_checks_each_environment_s3_secret_before_test_entrypoints() -> None:
@@ -188,10 +197,11 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert '--config "${S3_CONFIG_PATH}"' in step["run"]
     assert step["env"]["S3_CONFIG_PATH"] == "${{ steps.s3_credentials.outputs.config_path }}"
     assert credential_step["id"] == "s3_credentials"
-    assert set(credential_step["env"]) == {"S3_STORAGE_CONFIG", "S3_STORAGE_SECRET_NAME"}
-    assert credential_step["env"]["S3_STORAGE_CONFIG"] == "${{ secrets[steps.env_info.outputs.s3-secret] }}"
+    assert "S3_STORAGE_CONFIG" not in credential_step["env"]
     assert credential_step["env"]["S3_STORAGE_SECRET_NAME"] == "${{ steps.env_info.outputs.s3-secret }}"
     assert "scripts/load-s3-config.py" in credential_step["run"]
+    assert 'case "${S3_STORAGE_SECRET_NAME}" in' in credential_step["run"]
+    assert "not allowed for cleanup" in credential_step["run"]
     assert "S3_STORAGE_CONFIG" not in step["env"]
     assert credential_step["if"] == (
         "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
@@ -331,8 +341,8 @@ def test_cleanup_requires_declared_s3_credentials(tmp_path: Path, missing_variab
         check=False,
         env={
             **os.environ,
-            "S3_STORAGE_SECRET_NAME": "S3_STORAGE_TEST",
-            "S3_STORAGE_CONFIG": config,
+            "S3_STORAGE_SECRET_NAME": "S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1",
+            "S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1": config,
             "GITHUB_OUTPUT": str(output),
             "RUNNER_TEMP": str(tmp_path),
         },
@@ -348,10 +358,39 @@ def test_cleanup_requires_declared_s3_credentials(tmp_path: Path, missing_variab
         assert output.read_text() == f"config_path={config_path}\navailable=true\n"
     else:
         assert result.returncode == 1
-        assert "::error::S3_STORAGE_TEST is missing:" in result.stdout
+        assert "::error::S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1 is missing:" in result.stdout
         assert "configured" not in result.stdout
         assert not output.exists()
         assert not (tmp_path / "cleanup-s3.conf").exists()
+
+
+def test_cleanup_rejects_unlisted_s3_secret(tmp_path: Path) -> None:
+    # GIVEN metadata that names a non-S3 repository secret
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = workflow["jobs"]["cleanup-environment"]["steps"]
+    preflight = next(step for step in steps if step.get("id") == "s3_credentials")
+    output = tmp_path / "github-output"
+
+    # WHEN the workflow preflight runs, THEN the secret name is rejected before loading
+    result = subprocess.run(
+        ["bash", "-c", preflight["run"]],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "S3_STORAGE_SECRET_NAME": "PROD_SQA_KUBECONFIG",
+            "S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1": "S3_ENDPOINT=https://s3.example",
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": str(tmp_path),
+        },
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 1
+    assert "not allowed for cleanup" in result.stdout
+    assert not output.exists()
+    assert not (tmp_path / "cleanup-s3.conf").exists()
 
 
 def test_cleanup_entrypoint_passes_config_and_age_to_provider(
