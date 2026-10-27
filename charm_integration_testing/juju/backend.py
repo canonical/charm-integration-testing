@@ -152,6 +152,10 @@ class JujuTask:
 
 
 class JujuBackend(ABC):
+    def wait_for_model_crd(self, model: JujuModelHandle, name: str, timeout: timedelta) -> None:
+        """Wait for a CRD to be established in the model's Kubernetes cluster."""
+        raise NotImplementedError
+
     def model_architecture(self, model: JujuModelHandle) -> str:
         """Return the default architecture for new applications in the model."""
         raise NotImplementedError

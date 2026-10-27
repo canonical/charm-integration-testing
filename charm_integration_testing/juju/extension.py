@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 from abc import ABC
+from pathlib import Path
 
 from validators.base import ValidationResult
 
@@ -10,6 +11,10 @@ from .models import JujuIntegrationApplication
 
 
 class JujuExtension(ABC):
+    def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
+        """Prepare prerequisites before any bundle applications are deployed in this model."""
+        pass
+
     def post_deploy(self, model: JujuModelHandle) -> None:
         pass
 

@@ -1605,6 +1605,58 @@ class DeployBundlesBackendStub(NullJujuBackend):
 
 
 class TestDeployBundles:
+    @pytest.mark.parametrize("single", [True, False])
+    @pytest.mark.parametrize("fail", [True, False])
+    def test_prerequisites_run_before_any_bundle_deployment(self, tmp_path: Path, single: bool, fail: bool) -> None:
+        backend = DeployBundlesBackendStub()
+        model = JujuModelHandle(controller="ctrl", model="model")
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text("applications: {}")
+
+        class Prerequisite(JujuExtension):
+            def pre_deploy(self, target: JujuModelHandle, bundles: list[Path]) -> None:
+                assert target == model
+                assert bundles == [bundle]
+                assert backend.calls == []
+                backend.calls.append(("prepare", model.uri))
+                if fail:
+                    raise TimeoutError("Prerequisite unavailable")
+
+        client = _client(backend, [Prerequisite()])
+
+        def deploy() -> None:
+            if single:
+                client.deploy_bundle_file(str(bundle), model)
+            else:
+                client.deploy_bundles([(bundle, model)], tmp_path)
+
+        if fail:
+            with pytest.raises(TimeoutError, match="Prerequisite unavailable"):
+                deploy()
+            assert backend.calls == [("prepare", model.uri)]
+        else:
+            deploy()
+            assert backend.calls[0] == ("prepare", model.uri)
+            assert backend.calls[1][0] == "deploy"
+
+    def test_prepares_each_model_with_all_its_bundles(self, tmp_path: Path) -> None:
+        backend = DeployBundlesBackendStub()
+        models = [JujuModelHandle(controller="ctrl", model=name) for name in ("target", "migrated")]
+        paths = [tmp_path / f"bundle-{i}.yaml" for i in range(3)]
+        for path in paths:
+            path.write_text("applications: {}")
+        prepared: list[tuple[JujuModelHandle, list[Path]]] = []
+
+        class Prerequisite(JujuExtension):
+            def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
+                assert backend.calls == []
+                prepared.append((model, bundles))
+
+        _client(backend, [Prerequisite()]).deploy_bundles(
+            [(paths[0], models[0]), (paths[1], models[1]), (paths[2], models[0])], tmp_path
+        )
+        assert prepared == [(models[0], [paths[0], paths[2]]), (models[1], [paths[1]])]
+
     def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)

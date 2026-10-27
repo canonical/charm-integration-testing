@@ -452,6 +452,8 @@ class JujuClient:
         bundle: str,
         model: JujuModelHandle,
     ) -> None:
+        for extension in self.extensions:
+            extension.pre_deploy(model, [Path(bundle)])
         self._deploy_bundle_phase(model, Path(bundle))
 
         # Call extensions
@@ -489,8 +491,8 @@ class JujuClient:
         definitions are stripped from the phase-2 bundles because the offers are already
         present from the between-phase step and re-declaring them would fail.
 
-        Extensions are only invoked once per model, after phase 2, so they never see the
-        deliberately incomplete phase-1 topology.
+        Pre-deploy hooks receive all input bundles for each model before phase 1.
+        Post-deploy hooks run once per model after phase 2, with the complete topology.
 
         Args:
             bundles: List of ``(bundle_path, model)`` pairs.
@@ -498,6 +500,11 @@ class JujuClient:
         """
         juju4 = self.cli_version() >= JujuVersion(4, 0, 0)
         tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        for model in dict.fromkeys(model for _, model in bundles):
+            model_bundles = [path for path, bundle_model in bundles if bundle_model == model]
+            for extension in self.extensions:
+                extension.pre_deploy(model, model_bundles)
 
         # Phase 1: deploy apps without any offers or saas consumption.
         for i, (bundle_path, model) in enumerate(bundles):

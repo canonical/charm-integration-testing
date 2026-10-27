@@ -3,7 +3,9 @@
 
 import logging
 from datetime import timedelta
+from pathlib import Path
 
+import yaml
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
 
 from bundle_builder_x import CharmhubClient
@@ -15,11 +17,16 @@ ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
 
 DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
+GATEWAY_CRD = "gateways.gateway.networking.k8s.io"
 
 
 class IstioMeshExtension(JujuExtension):
     """Deploys istio-k8s into a model when a mesh-dependent charm is present but has no
     istio-k8s of its own to reconcile against.
+
+    For bundles without an explicit control plane, prepare it before deploying
+    dependent applications. The post-deploy check remains a fallback for other
+    callers and for bundles that own their control-plane deployment.
 
     istio-beacon-k8s and istio-ingress-k8s each need a reconciling istio-k8s control plane
     in the *same model* to reach "active", with no Juju relation to express the dependency.
@@ -58,6 +65,29 @@ class IstioMeshExtension(JujuExtension):
         self.juju = juju
         self.logger = logger
         self.charmhub_client = charmhub_client
+
+    def pre_deploy(self, model: JujuModelHandle, bundles: list[Path]) -> None:
+        # Offers may occupy separate YAML documents; retain charm identities when an
+        # overlay only adds options or offers to an existing application.
+        charms: dict[str, str] = {}
+        for bundle in bundles:
+            for document in yaml.safe_load_all(bundle.read_text()):
+                if not isinstance(document, dict):
+                    continue
+                for name, app in (document.get("applications") or {}).items():
+                    if app is None:
+                        charms.pop(name, None)
+                    elif isinstance(app, dict) and isinstance(app.get("charm"), str):
+                        charms[name] = app["charm"].removeprefix("ch:")
+        if not ISTIO_MESH_DEPENDENT_CHARMS.intersection(charms.values()):
+            return
+        # An explicit control plane belongs to the bundle, including its release,
+        # configuration and relations. Leave its deployment to the bundle owner.
+        if ISTIO_CONTROL_PLANE_CHARM in charms.values() or not self.juju.is_k8s_model(model):
+            return
+        application = self._ensure_istio_deployed(model)
+        self.juju.wait_idle(model, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT, count=1, applications=[application])
+        self.juju.wait_for_model_crd(model, GATEWAY_CRD, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         applications = self.juju.list_applications(model)

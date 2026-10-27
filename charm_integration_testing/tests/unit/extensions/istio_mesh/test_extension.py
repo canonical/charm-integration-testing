@@ -3,6 +3,8 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -88,6 +90,63 @@ class TestIstioMeshExtension:
         # Documents the exact set covered by this extension, so an addition/removal here
         # is a visible, deliberate test change rather than a silent behavior change.
         assert ISTIO_MESH_DEPENDENT_CHARMS == frozenset({ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM})
+
+    @pytest.mark.parametrize("dependent", [ISTIO_BEACON_CHARM, ISTIO_INGRESS_CHARM])
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_prepares_control_plane_before_dependents(
+        self, tmp_path: Path, logger: logging.Logger, dependent: str, existing: bool
+    ) -> None:
+        events: list[str] = []
+
+        class Backend(JujuStub):
+            def wait_idle(
+                self,
+                model: JujuModelHandle,
+                timeout: timedelta | None,
+                count: int | None,
+                strict_timeout: bool = False,
+                applications: list[str] | None = None,
+            ) -> None:
+                assert model == TEST_MODEL
+                assert applications == ["mesh" if existing else "istio-k8s"]
+                events.append("idle")
+
+            def wait_for_model_crd(self, model: JujuModelHandle, name: str, timeout: timedelta) -> None:
+                assert model == TEST_MODEL
+                assert name == "gateways.gateway.networking.k8s.io"
+                assert events == ["idle"]
+                events.append("crd")
+
+        backend = Backend(applications={"mesh": "istio-k8s"} if existing else {})
+        store = CharmhubStub()
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text(
+            f"applications:\n  dependent:\n    charm: {dependent}\n---\napplications:\n  dependent:\n    offers: {{}}\n"
+        )
+        IstioMeshExtension(backend, logger, cast(CharmhubClient, store)).pre_deploy(TEST_MODEL, [bundle])
+        assert events == ["idle", "crd"]
+        assert store.requested == ([] if existing else ["istio-k8s"])
+        assert len(backend.deployed) == (0 if existing else 1)
+
+    @pytest.mark.parametrize(
+        "content,is_k8s",
+        [
+            ("applications: {other: {charm: postgresql}}", True),
+            ("applications: {beacon: {charm: istio-beacon-k8s}}", False),
+            ("applications: {beacon: {charm: istio-beacon-k8s}, mesh: {charm: istio-k8s, revision: 82}}", True),
+        ],
+    )
+    def test_pre_deploy_leaves_unrelated_and_explicit_bundles_unchanged(
+        self, tmp_path: Path, logger: logging.Logger, content: str, is_k8s: bool
+    ) -> None:
+        backend = JujuStub()
+        backend.is_k8s = is_k8s
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text(content)
+        store = CharmhubStub()
+        IstioMeshExtension(backend, logger, cast(CharmhubClient, store)).pre_deploy(TEST_MODEL, [bundle])
+        assert backend.deployed == []
+        assert store.requested == []
 
     class TestPostDeploy:
         def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:

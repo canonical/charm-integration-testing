@@ -3373,6 +3373,41 @@ class TestMigrationTolerance:
         assert not isinstance(exc_info.value, TransientModelUnavailabilityError)
 
 
+@pytest.mark.parametrize("ready", [True, False])
+def test_wait_for_model_crd_uses_the_requested_models_cluster(ready: bool) -> None:
+    model = JujuModelHandle(controller="destination", model="migrated")
+    timeout = timedelta(seconds=7)
+
+    class CrdBackend:
+        def crd_is_established(self, name: str) -> bool:
+            assert name == "gateways.gateway.networking.k8s.io"
+            return ready
+
+    class KubernetesStub:
+        backend = CrdBackend()
+
+        def wait(self, check: Callable[[], bool | None], message: str, timeout: timedelta) -> None:
+            assert timeout == timedelta(seconds=7)
+            assert model.uri in message
+            if ready:
+                assert check() is True
+            else:
+                assert check() is None
+                raise TimeoutError(message)
+
+    class Backend(JubilantBackend):
+        def _required_kubernetes_client_for_model(self, requested: JujuModelHandle) -> KubernetesClient:
+            assert requested == model
+            return cast(KubernetesClient, KubernetesStub())
+
+    backend = Backend()
+    if ready:
+        backend.wait_for_model_crd(model, "gateways.gateway.networking.k8s.io", timeout)
+    else:
+        with pytest.raises(TimeoutError, match="did not become established"):
+            backend.wait_for_model_crd(model, "gateways.gateway.networking.k8s.io", timeout)
+
+
 class WorkloadKubernetesClientStub:
     def __init__(self) -> None:
         self.ready_pods = {"app/0": CharmPod(unit="app/0", name="app-0", uid="old-uid")}

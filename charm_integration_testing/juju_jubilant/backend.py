@@ -160,6 +160,14 @@ class JubilantBackend(JujuCmdBackend):
             raise ValueError(f"Model {model.uri} is not Kubernetes-backed.")
         return self._kubernetes_client_for_cloud(cloud)
 
+    def wait_for_model_crd(self, model: JujuModelHandle, name: str, timeout: timedelta) -> None:
+        kubernetes = self._required_kubernetes_client_for_model(model)
+        kubernetes.wait(
+            lambda: True if kubernetes.backend.crd_is_established(name) else None,
+            f"CRD '{name}' did not become established for model '{model.uri}'.",
+            timeout=timeout,
+        )
+
     def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
         self._required_kubernetes_client_for_model(model).delete_pod(namespace=model.model, pod_name=instance_name)
 
