@@ -473,16 +473,6 @@ jobs:
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
-      - name: Remove temporary LXD credentials
-        if: ${{ always() && steps.creds.outputs.lxd == 'true' }}
-        shell: bash
-        run: |
-          LXD_CONF="${LXD_CREDENTIALS_DIR}/config"
-          rm -f "$LXD_CREDENTIALS_DIR/creds.yaml" "$LXD_CONF/client.crt" "$LXD_CONF/client.key" "$LXD_CONF/config.yml"
-          rm -f "$LXD_CONF/servercerts/charmqa.crt"
-          if [[ -d "$LXD_CONF/servercerts" ]]; then rmdir "$LXD_CONF/servercerts"; fi
-          if [[ -d "$LXD_CONF" ]]; then rmdir "$LXD_CONF"; fi
-          rmdir "$LXD_CREDENTIALS_DIR"
       - name: Find and delete orphaned ports that are in the DOWN state and older
           than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
