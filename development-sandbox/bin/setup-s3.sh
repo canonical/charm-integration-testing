@@ -121,7 +121,7 @@ if ! sudo -n systemctl is-active --quiet charmqa-s3.service; then
         echo "Existing charmqa-s3 service is not active; inspect journalctl before restarting" >&2
         exit 1
     fi
-    sudo -n systemd-run --unit=charmqa-s3 \
+    sudo -n systemd-run --no-block --unit=charmqa-s3 \
         --property="User=$(id -un)" --property="WorkingDirectory=${state}" \
         "${state}/bin/weed" server -ip=127.0.0.1 -ip.bind=127.0.0.1 -dir="${state}/data" \
         -volume.port=18080 -volume.max=0 -master.volumeSizeLimitMB=64 -filer.port=18888 \

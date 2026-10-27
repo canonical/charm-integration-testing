@@ -169,10 +169,15 @@ identical copies. Each secret contains the endpoint, the access/secret key pair 
 The parser accepts comments and values containing ``=``; do not quote values or
 put them on multiple lines. In cross-model runs, each integrator uses the
 provider selected by its model's cloud, so both environment secrets must be
-configured. The key must be able to create buckets, write bucket tags, upload the
-marker object, list buckets, read harness bucket tags, and remove buckets, object
-versions, and incomplete uploads, within the dedicated QA project only. Scheduled
-cleanup uses the same environment secret and namespace as test provisioning. CI
+configured. Bucket creation, ownership tagging, listing, and deletion use the
+``S3_CLEANUP_ACCESS_KEY``/``S3_CLEANUP_SECRET_KEY`` pair when configured, or the
+shared access key otherwise. That identity needs permission to manage harness
+buckets, their object versions, and incomplete uploads within the dedicated QA
+project only. The ``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair is sent to the
+integrator and should have only the object permissions required by tested
+consumers; it does not need bucket creation, ownership-tagging, or stale-cleanup
+permissions when a separate cleanup identity is configured. Scheduled cleanup
+uses the same environment secret and namespace as test provisioning. CI
 validates each S3-enabled environment's configuration before its test step starts and
 reports missing variable names; other environments skip this check. CI writes
 mode-0600 files under the runner's temporary directory and passes
