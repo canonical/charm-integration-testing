@@ -91,7 +91,7 @@ if [[ ! -f "${state}/s3.json" ]]; then
         {name: "charmqa-tests", credentials: [{
             accessKey: env.S3_ACCESS_KEY, secretKey: env.S3_SECRET_KEY #gitleaks:allow
         }], actions: [
-            "Read:charmqa-s3-*", "Write:charmqa-s3-*", "List:charmqa-s3-*", "Tagging:charmqa-s3-*"
+            "Read:charmqa-s3-*", "Write:charmqa-s3-*", "List:charmqa-s3-*"
         ]}
     ]}' > "${config_tmp}"
     mv "${config_tmp}" "${state}/s3.json"
