@@ -222,7 +222,7 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     environments = yaml.safe_load((ROOT / "static/environments.yaml").read_text())["environments"]
     reusable = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
 
-    # WHEN inspecting the matrix, THEN each substrate is scheduled once and secrets are inherited
+    # WHEN inspecting the matrix, THEN each substrate is scheduled once and only required secrets are passed
     assert set(schedule["jobs"]) == {"cleanup-schedule"}
     job = schedule["jobs"]["cleanup-schedule"]
     assert job["strategy"]["matrix"] == {"environment": expected}
@@ -231,8 +231,6 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     assert job["uses"] == "./.github/workflows/cleanup-environment.yaml"
     assert job["with"] == {"environment": "${{ matrix.environment }}"}
     events = reusable.get("on", reusable.get(True))
-    assert job["secrets"] == "inherit"
-    assert all(not name.startswith("S3_") for name in events["workflow_call"]["secrets"])
     substrates = set()
     s3_secrets = []
     for name in expected:
@@ -242,6 +240,20 @@ def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> No
     assert len(substrates) == len(expected)
     assert all(s3_secrets)
     assert len(s3_secrets) == len(set(s3_secrets))
+    expected_secrets = {
+        secret
+        for name in expected
+        for secret in (
+            environments[name].get("kubeconfig-secret"),
+            environments[name].get("novarc-secret"),
+            environments[name]["s3-secret"],
+        )
+        if secret
+    }
+    assert job["secrets"] == {name: f"${{{{ secrets.{name} }}}}" for name in expected_secrets}
+    call_secrets = events["workflow_call"]["secrets"]
+    assert set(call_secrets) == expected_secrets
+    assert all(not call_secrets[name]["required"] for name in s3_secrets)
     assert events["workflow_dispatch"]["inputs"]["environment"]["options"] == expected
     assert "cleanup_substrate" not in events["workflow_call"]["inputs"]
     assert "cleanup_substrate" not in events["workflow_dispatch"]["inputs"]

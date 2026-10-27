@@ -44,6 +44,16 @@ on:
         required: true
       PROD_PS7_NOVARC:
         required: true
+      S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1:
+        required: false
+      S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1:
+        required: false
+      S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1:
+        required: false
 jobs:
   cleanup-environment:
     name: Clean up any leftover artifacts from old Charm QA environments
