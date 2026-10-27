@@ -47,6 +47,143 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+S3 storage
+~~~~~~~~~~
+
+Bundles containing an ``unconfigured`` ``s3-integrator`` require external object
+storage. The post-deploy extension configures it; no MinIO charm is deployed.
+An integrator with an explicit endpoint is left untouched.
+The extension looks up the model's current Juju cloud through the backend, then
+obtains its provider from ``S3ProviderRegistry``. Pass configuration paths using
+``S3_CONFIG_<cloud>``, just as Kubernetes configuration files use
+``KUBECONFIG_<cloud>``. Variable suffixes are converted to lowercase, and
+underscores become hyphens; for example,
+``S3_CONFIG_target_cloud=/protected/target-s3.conf`` configures ``target-cloud``.
+The suite does not read ambient S3 credential variables.
+
+Each logical Juju cloud has one S3 configuration per run. Register distinct cloud
+aliases when models on the same physical substrate need different credentials.
+Models on the same cloud share a provider, including models created later in a
+cross-model run. Equivalent configurations reuse the same provider even when
+their file paths differ. Conflicting paths for the same normalized alias fail
+explicitly.
+
+Configuration files contain unquoted, single-line ``KEY=value`` entries, with
+optional comments. They are parsed, never sourced or evaluated. Keep credential
+files outside the checkout and restrict permissions with ``chmod 600``.
+
+Supply ``S3_ENDPOINT``, ``S3_ACCESS_KEY``, ``S3_SECRET_KEY`` and
+``S3_BUCKET_NAMESPACE`` in the configuration file. The generic ``s3_storage`` package
+contains the contracts, the shared lifecycle, static configuration, and registries;
+it never contacts Keystone or issues credentials at runtime. For the shared QA
+object storage, create one long-lived access/secret key pair in a dedicated QA
+project (or RADOS Gateway account) that holds only harness buckets. The suite and the
+cleanup script share it, so cleanup may delete everything in that project. Because
+the pair is shared, individual buckets cannot be isolated from one another or
+revoked separately; rotate it manually by creating a new pair, updating the
+repository secrets, verifying a run, then revoking the old pair. Optionally supply
+``S3_CLEANUP_ACCESS_KEY`` and ``S3_CLEANUP_SECRET_KEY`` as a separate bucket-management
+identity; the provider uses it for bucket creation and cleanup but sends only the
+``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair to the integrator. In the development
+sandbox, ``bash development-sandbox/bin/setup-s3.sh`` provisions a local service with
+that separate identity and a test identity restricted to harness buckets. It writes
+the protected ``$HOME/.local/share/charmqa-s3/s3.conf`` file. Load the path-only
+``s3.env`` in the same directory to export ``S3_CONFIG_localhost`` in the test shell:
+
+.. code:: bash
+
+   bash development-sandbox/bin/setup-s3.sh
+   source "$HOME/.local/share/charmqa-s3/s3.env"
+
+``S3_REGION`` defaults to ``us-east-1``.
+
+Each application gets a randomly named, isolated bucket and an initial ``charmqa/``
+directory marker for consumers such as Spark History Server. The namespace is a
+cleanup scope, not a bucket name: applications sharing a namespace still get
+different buckets. ``S3_BUCKET_NAMESPACE`` belongs in the protected storage
+configuration alongside its credentials. It defaults to ``local`` outside CI;
+CI requires an explicit, non-empty value and never derives it from the environment
+or secret name.
+``S3ProviderRegistry`` only resolves providers and removes duplicates. Each used provider
+has one ``S3ResourceRegistry`` shared across its clouds and Juju clients. That scope
+registers the provider and its child buckets with the session ``ResourceRegistry``;
+it does not implement another teardown loop. The session registry continues after
+individual bucket failures, without storage-specific cleanup retries.
+Provider scopes are independent of controller resources.
+
+Runs that create their controller attempt to delete their buckets; runs reusing an
+existing controller preserve their buckets because storage may still be in use.
+
+Scheduled cleanup covers the five existing shared-substrate representatives
+using the existing age threshold (240 minutes by default). Configure each numbered
+environment's storage secret with the same namespace and effective storage/account
+and cleanup identity as its group's representative:
+
+* PS6 production Kubernetes: ``ps6-prod-kubernetes``
+* PS6 staging Kubernetes: ``ps6-stg-kubernetes``
+* PS6 production OpenStack: ``ps6-prod-openstack``
+* PS7 production Kubernetes: ``ps7-prod-kubernetes``
+* PS7 production OpenStack: ``ps7-prod-openstack``
+
+The representative can then sweep the group's stale buckets. A shared namespace
+alone does not grant cleanup ownership across different endpoints, regions,
+cleanup access keys or storage accounts. Use the cleanup CLI with the relevant
+configuration for separate storage identities or namespaces. Only strictly named harness
+buckets in the matching namespace and with the matching provider ownership tag
+are eligible; log containers, other providers' buckets, and externally
+configured buckets are not touched. Buckets without ownership tags are retained
+and reported for manual inspection. The four-hour threshold is longer than any
+supported test run. Cleanup uses the static
+``S3_CLEANUP_ACCESS_KEY``/``S3_CLEANUP_SECRET_KEY`` pair when configured and
+otherwise the shared access key. Failed teardown is reported; stale buckets are left for
+scheduled cleanup. Run the same cleanup manually with:
+
+.. code:: bash
+
+   poetry run python scripts/cleanup-s3.py \
+     --config "$HOME/.local/share/charmqa-s3/s3.conf" --age-minutes 240
+
+When changing an existing namespace, first sweep its stale buckets using the old
+configuration. The new namespace will not discover buckets created under the old
+scope. Retain the old configuration for cleanup of any remaining
+buckets once their runs finish; do not rename active buckets or change their tags.
+
+Supported test environments opt into shared S3 storage by setting ``s3-secret``
+to their repository secret's name in ``static/environments.yaml``. An absent or
+empty name skips S3 configuration; a nonempty name requires complete
+configuration. Create one repository secret per enabled
+environment (22 with the current environment table) and store that
+environment's configuration there. Environments in the same group may hold
+identical copies. Each secret contains the endpoint, the access/secret key pair and
+``S3_BUCKET_NAMESPACE``, plus optional ``S3_REGION`` and an optional paired
+``S3_CLEANUP_ACCESS_KEY``/``S3_CLEANUP_SECRET_KEY``. Use unquoted, single-line
+``KEY=value`` format:
+
+.. code:: text
+
+   S3_ENDPOINT=https://s3.example
+   S3_ACCESS_KEY=...
+   S3_SECRET_KEY=...
+   S3_BUCKET_NAMESPACE=ps6-prod-kubernetes
+
+The parser accepts comments and values containing ``=``; do not quote values or
+put them on multiple lines. In cross-model runs, each integrator uses the
+provider selected by its model's cloud, so both environment secrets must be
+configured. Bucket creation, ownership tagging, listing, and deletion use the
+``S3_CLEANUP_ACCESS_KEY``/``S3_CLEANUP_SECRET_KEY`` pair when configured, or the
+shared access key otherwise. That identity needs permission to manage harness
+buckets, their object versions, and incomplete uploads within the dedicated QA
+project only. The ``S3_ACCESS_KEY``/``S3_SECRET_KEY`` pair is sent to the
+integrator and should have only the object permissions required by tested
+consumers; it does not need bucket creation, ownership-tagging, or stale-cleanup
+permissions when a separate cleanup identity is configured. Scheduled cleanup
+uses the same environment secret and namespace as test provisioning. CI
+validates each S3-enabled environment's configuration before its test step starts and
+reports missing variable names; other environments skip this check. CI writes
+mode-0600 files under the runner's temporary directory and passes
+``S3_CONFIG_target_cloud`` and ``S3_CONFIG_neighbor_cloud`` alongside the matching
+kubeconfig paths. Credentials themselves are not exported through ``GITHUB_ENV``.
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
