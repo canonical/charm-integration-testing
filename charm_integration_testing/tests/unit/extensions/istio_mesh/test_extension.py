@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -96,8 +97,6 @@ class TestIstioMeshExtension:
     def test_prepares_control_plane_before_dependents(
         self, tmp_path: Path, logger: logging.Logger, dependent: str, existing: bool
     ) -> None:
-        events: list[str] = []
-
         class Backend(JujuStub):
             def wait_idle(
                 self,
@@ -105,17 +104,9 @@ class TestIstioMeshExtension:
                 timeout: timedelta | None,
                 count: int | None,
                 strict_timeout: bool = False,
-                applications: list[str] | None = None,
+                applications: Iterable[str] | None = None,
             ) -> None:
-                assert model == TEST_MODEL
-                assert applications == ["mesh" if existing else "istio-k8s"]
-                events.append("idle")
-
-            def wait_for_model_crd(self, model: JujuModelHandle, name: str, timeout: timedelta) -> None:
-                assert model == TEST_MODEL
-                assert name == "gateways.gateway.networking.k8s.io"
-                assert events == ["idle"]
-                events.append("crd")
+                raise AssertionError("Pre-deploy must not wait for readiness")
 
         backend = Backend(applications={"mesh": "istio-k8s"} if existing else {})
         store = CharmhubStub()
@@ -123,8 +114,12 @@ class TestIstioMeshExtension:
         bundle.write_text(
             f"applications:\n  dependent:\n    charm: {dependent}\n---\napplications:\n  dependent:\n    offers: {{}}\n"
         )
-        IstioMeshExtension(backend, logger, cast(CharmhubClient, store)).pre_deploy(TEST_MODEL, [bundle])
-        assert events == ["idle", "crd"]
+        extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
+        extension.pre_deploy(TEST_MODEL, [bundle])
+        # Simulate Juju reporting the application on a subsequent deployment.
+        if not existing:
+            backend.applications["istio-k8s"] = "istio-k8s"
+        extension.pre_deploy(TEST_MODEL, [bundle])
         assert store.requested == ([] if existing else ["istio-k8s"])
         assert len(backend.deployed) == (0 if existing else 1)
 

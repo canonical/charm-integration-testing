@@ -92,48 +92,6 @@ class TestCrdExists:
             backend.crd_exists("boom.example.com")
 
 
-class TestCrdEstablished:
-    @pytest.mark.parametrize("status,expected", [("True", True), ("False", False), (None, False)])
-    def test_requires_established_condition(self, status: str | None, expected: bool) -> None:
-        class Api:
-            def read_custom_resource_definition(
-                self, name: str, _request_timeout: int
-            ) -> client.V1CustomResourceDefinition:
-                assert name == "gateways.gateway.networking.k8s.io"
-                return client.V1CustomResourceDefinition(
-                    metadata=client.V1ObjectMeta(name=name),
-                    spec=client.V1CustomResourceDefinitionSpec(
-                        group="gateway.networking.k8s.io",
-                        names=client.V1CustomResourceDefinitionNames(plural="gateways", kind="Gateway"),
-                        scope="Namespaced",
-                        versions=[],
-                    ),
-                    status=client.V1CustomResourceDefinitionStatus(
-                        conditions=[client.V1CustomResourceDefinitionCondition(type="Established", status=status)]
-                        if status
-                        else []
-                    ),
-                )
-
-        backend = KubernetesBackend(client.ApiClient())
-        backend.apiextensions_v1_api = Api()
-        assert backend.crd_is_established("gateways.gateway.networking.k8s.io") is expected
-
-    @pytest.mark.parametrize("status", [404, 403, 500])
-    def test_only_not_found_is_treated_as_not_ready(self, status: int) -> None:
-        class Api:
-            def read_custom_resource_definition(self, name: str, _request_timeout: int) -> object:
-                raise ApiException(status=status)
-
-        backend = KubernetesBackend(client.ApiClient())
-        backend.apiextensions_v1_api = Api()
-        if status == 404:
-            assert not backend.crd_is_established("gateways.gateway.networking.k8s.io")
-        else:
-            with pytest.raises(ApiException):
-                backend.crd_is_established("gateways.gateway.networking.k8s.io")
-
-
 class FakeAppsV1Api:
     def __init__(self, deployment: client.V1Deployment | None = None, error: ApiException | None = None) -> None:
         self.deployment = deployment

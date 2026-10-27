@@ -65,18 +65,6 @@ class KubernetesBackend:
             raise
         return True
 
-    def crd_is_established(self, name: str) -> bool:
-        """Check CRD establishment, propagating API errors other than not-found."""
-        try:
-            crd = self.apiextensions_v1_api.read_custom_resource_definition(name, _request_timeout=30)
-        except ApiException as error:
-            if error.status == 404:
-                return False
-            raise
-        if crd.metadata is None or crd.metadata.deletion_timestamp is not None or crd.status is None:
-            return False
-        return any(c.type == "Established" and c.status == "True" for c in crd.status.conditions or [])
-
     def deployment_is_ready(self, namespace: str, name: str) -> bool:
         """Return True when updated, ready and available replicas meet the nonzero desired count.
 

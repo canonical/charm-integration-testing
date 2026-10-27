@@ -463,8 +463,9 @@ class JujuClient:
     def _deploy_bundle_phase(self, model: JujuModelHandle, path: Path) -> None:
         """Deploy a bundle file directly via the backend, without invoking extensions.
 
-        Used by ``deploy_bundle_file()`` (which invokes extensions itself afterwards) and by
-        ``deploy_bundles()`` (which invokes extensions itself, once per model, after all phases).
+        Used by ``deploy_bundle_file()`` and ``deploy_bundles()``. These callers invoke
+        pre-deploy hooks before deployment and post-deploy hooks afterwards;
+        ``deploy_bundles()`` invokes each hook once per model, outside the two phases.
         """
         self.logger.info(f"Deploying bundle file: '{path}'")
         self.backend.deploy_bundle_file(model, str(path), trust=True, force=True)
