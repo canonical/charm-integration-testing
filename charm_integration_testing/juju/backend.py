@@ -514,6 +514,10 @@ class JujuBackend(ABC):
     def debug_log(self, model: JujuModelHandle) -> str:
         raise NotImplementedError
 
+    def cloud_for_model(self, model: JujuModelHandle) -> str:
+        """Return the cloud hosting the model, regardless of substrate."""
+        raise NotImplementedError
+
     def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         """Return the model's Kubernetes cloud, or None when it is not Kubernetes-backed."""
         return None

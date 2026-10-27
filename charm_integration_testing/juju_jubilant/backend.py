@@ -1130,6 +1130,9 @@ class JubilantBackend(JujuCmdBackend):
     def is_k8s_model(self, model: JujuModelHandle) -> bool:
         return self.kubernetes_cloud_for_model(model) is not None
 
+    def cloud_for_model(self, model: JujuModelHandle) -> str:
+        return self.client.model(model).show_model().cloud
+
     def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         info = self.client.model(model).show_model()
         return info.cloud if info.type == "kubernetes" else None

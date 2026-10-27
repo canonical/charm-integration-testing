@@ -67,7 +67,7 @@ class JujuClient:
 
         # Call extensions
         for extension in self.extensions:
-            extension.post_scale(model)
+            extension.post_scale_application(model, application, num)
 
     def restart_follower(self, application: str, model: JujuModelHandle, timeout: timedelta) -> str:
         self.logger.info(f"Restarting a follower of {application}.")

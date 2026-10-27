@@ -332,6 +332,32 @@ class TestModelKubernetesCloud:
         assert client.lookups == [TEST_MODEL.uri, TEST_MODEL.uri]
 
 
+class TestModelCloud:
+    @pytest.mark.parametrize("substrate", ["iaas", "kubernetes"])
+    def test_uses_workload_model_on_either_substrate(self, substrate: str) -> None:
+        # GIVEN an owner-qualified model and its current cloud
+        model = JujuModelHandle(controller="shared", model="workload", owner="other")
+        client = ModelLookupClientStub(
+            {model.uri: ShowModelStub(ModelInfoStub(type=substrate, cloud="workload-cloud"))}
+        )
+        backend = JubilantBackend(client=client)
+        # WHEN resolving its cloud, THEN its complete identity is preserved
+        assert backend.cloud_for_model(model) == "workload-cloud"
+        assert client.lookups == [model.uri]
+
+    def test_rechecks_cloud_and_propagates_lookup_errors(self) -> None:
+        # GIVEN a model whose topology can change
+        model = ShowModelStub(ModelInfoStub(type="iaas", cloud="first"))
+        backend = JubilantBackend(client=ModelLookupClientStub({TEST_MODEL.uri: model}))
+        assert backend.cloud_for_model(TEST_MODEL) == "first"
+        # WHEN the cloud changes, THEN no stale cloud mapping is retained
+        model.info = ModelInfoStub(type="iaas", cloud="second")
+        assert backend.cloud_for_model(TEST_MODEL) == "second"
+        model.error = RuntimeError("Model lookup failed")
+        with pytest.raises(RuntimeError, match="Model lookup failed"):
+            backend.cloud_for_model(TEST_MODEL)
+
+
 class TestJubilantClient:
     def test_model(self) -> None:
         # GIVEN a jubilant client
