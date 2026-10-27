@@ -132,6 +132,24 @@ class TestIstioMeshExtension:
         assert backend.deployed == []
         assert store.requested == []
 
+    @pytest.mark.parametrize("applications", ["[istio-beacon-k8s]", "istio-beacon-k8s", "null", "42"])
+    def test_pre_deploy_skips_non_mapping_applications(
+        self, tmp_path: Path, logger: logging.Logger, applications: str
+    ) -> None:
+        # GIVEN a bundle whose applications section is not a mapping
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text(f"applications: {applications}\n", encoding="utf-8")
+        backend = JujuStub()
+        store = CharmhubStub()
+        extension = IstioMeshExtension(backend, logger, cast(CharmhubClient, store))
+
+        # WHEN inspecting the bundle before deployment
+        extension.pre_deploy(TEST_MODEL, [bundle])
+
+        # THEN skip prerequisite deployment without querying Charmhub
+        assert backend.deployed == []
+        assert store.requested == []
+
     class TestPostDeploy:
         def test_ignores_models_without_a_dependent_charm(self, logger: logging.Logger) -> None:
             # GIVEN a model with neither istio-beacon-k8s nor istio-ingress-k8s

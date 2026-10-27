@@ -72,7 +72,10 @@ class IstioMeshExtension(JujuExtension):
             for document in yaml.safe_load_all(bundle.read_text(encoding="utf-8")):
                 if not isinstance(document, dict):
                     continue
-                for name, app in (document.get("applications") or {}).items():
+                applications = document.get("applications")
+                if not isinstance(applications, dict):
+                    continue
+                for name, app in applications.items():
                     if app is None:
                         charms.pop(name, None)
                     elif isinstance(app, dict) and isinstance(app.get("charm"), str):
