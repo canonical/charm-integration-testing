@@ -97,14 +97,14 @@ the protected ``$HOME/.local/share/charmqa-s3/s3.conf`` file. Load the path-only
 
 ``S3_REGION`` defaults to ``us-east-1``.
 
-Each integrator gets a randomly named, isolated bucket and an initial ``charmqa/``
+Each application gets a randomly named, isolated bucket and an initial ``charmqa/``
 directory marker for consumers such as Spark History Server. The namespace is a
-cleanup scope, not a bucket name: integrators sharing a namespace still get
+cleanup scope, not a bucket name: applications sharing a namespace still get
 different buckets. ``S3_BUCKET_NAMESPACE`` belongs in the protected storage
 configuration alongside its credentials. It defaults to ``local`` outside CI;
-CI requires an explicit, nonblank value and never derives it from the environment
+CI requires an explicit, non-empty value and never derives it from the environment
 or secret name.
-``S3ProviderRegistry`` only resolves and deduplicates providers. Each used provider
+``S3ProviderRegistry`` only resolves providers and removes duplicates. Each used provider
 has one ``S3ResourceRegistry`` shared across its clouds and Juju clients. That scope
 registers the provider and its child buckets with the session ``ResourceRegistry``;
 it does not implement another teardown loop. The session registry continues after
@@ -146,7 +146,7 @@ scheduled cleanup. Run the same cleanup manually with:
 When changing an existing namespace, first sweep its stale buckets using the old
 configuration. The new namespace will not discover buckets created under the old
 scope. Retain the old configuration for cleanup of any remaining
-buckets once their runs finish; do not rename or retag active buckets.
+buckets once their runs finish; do not rename active buckets or change their tags.
 
 Supported test environments opt into shared S3 storage by setting ``s3-secret``
 to their repository secret's name in ``static/environments.yaml``. An absent or
