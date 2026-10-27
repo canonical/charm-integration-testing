@@ -2,9 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -97,18 +95,7 @@ class TestIstioMeshExtension:
     def test_prepares_control_plane_before_dependents(
         self, tmp_path: Path, logger: logging.Logger, dependent: str, existing: bool
     ) -> None:
-        class Backend(JujuStub):
-            def wait_idle(
-                self,
-                model: JujuModelHandle,
-                timeout: timedelta | None,
-                count: int | None,
-                strict_timeout: bool = False,
-                applications: Iterable[str] | None = None,
-            ) -> None:
-                raise AssertionError("Pre-deploy must not wait for readiness")
-
-        backend = Backend(applications={"mesh": "istio-k8s"} if existing else {})
+        backend = JujuStub(applications={"mesh": "istio-k8s"} if existing else {})
         store = CharmhubStub()
         bundle = tmp_path / "bundle.yaml"
         bundle.write_text(
@@ -122,6 +109,8 @@ class TestIstioMeshExtension:
         extension.pre_deploy(TEST_MODEL, [bundle])
         assert store.requested == ([] if existing else ["istio-k8s"])
         assert len(backend.deployed) == (0 if existing else 1)
+        assert backend.waited_idle == []
+        assert backend.waited_settled == []
 
     @pytest.mark.parametrize(
         "content,is_k8s",
