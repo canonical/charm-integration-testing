@@ -82,10 +82,10 @@ class IstioMeshExtension(JujuExtension):
             return
         self._ensure_istio_deployed(model)
 
-    def _ensure_istio_deployed(self, model: JujuModelHandle) -> str:
+    def _ensure_istio_deployed(self, model: JujuModelHandle) -> None:
         existing = self._find_istio_application(self.juju.list_applications(model))
         if existing is not None:
-            return existing
+            return
         charm = self.charmhub_client.charm_from_store(
             charm_name=ISTIO_CONTROL_PLANE_CHARM,
             ubuntu_arch=self.juju.model_architecture(model),
@@ -103,14 +103,12 @@ class IstioMeshExtension(JujuExtension):
                 base=f"ubuntu@{charm.ubuntu_version}",
             )
             self.logger.info(f"Deployed '{ISTIO_CONTROL_PLANE_CHARM}' into '{model.uri}'.")
-            return ISTIO_CONTROL_PLANE_CHARM
         except Exception as error:
             # Re-check authoritative state instead of pattern-matching backend errors, to
             # tolerate a concurrent worker having already deployed istio-k8s.
             existing = self._find_istio_application(self.juju.list_applications(model))
             if existing is None:
                 raise error from None
-            return existing
 
     @staticmethod
     def _find_istio_application(applications: dict[str, JujuApplicationInfo]) -> str | None:
