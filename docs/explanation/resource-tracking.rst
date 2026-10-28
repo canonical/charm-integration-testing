@@ -117,11 +117,12 @@ marker, so the scheduler appends it after every state-marked test and runs it
 exactly once. It computes discrepancies and, if any exist, raises
 ``ResourceDiscrepancyError`` carrying the structured discrepancies.
 
-The ``record_failure_execution_metadata`` fixture in ``conftest.py`` recognises
+The ``pytest_runtest_makereport`` hook in ``conftest.py`` recognises
 ``ResourceDiscrepancyError`` (alongside the other domain exceptions it handles)
 and normalises the discrepancies into execution metadata. The test itself does
-no formatting; the domain object carries structure; the recorder owns the
-metadata schema.
+no formatting; the domain object carries structure; the hook owns the metadata
+schema and records it even when setup fails before function-scoped metadata
+fixtures are set up.
 
 Resource-specific discrepancy kinds
 -----------------------------------
@@ -546,7 +547,7 @@ kind is added without touching any of them. Following the PVC example:
    `Resource-specific discrepancy kinds`_.
 
 No change to ``StateResourceTracker``, ``calculate_discrepancies``,
-``ModelResourceDiscrepancy``, ``test_resource_consistency_report``, or the
-``record_failure_execution_metadata`` recorder is required: the new kind flows
-through the same generic path and is published under
+``ModelResourceDiscrepancy``, or ``test_resource_consistency_report`` is
+required: the failure metadata handler in ``conftest.py`` publishes the new
+kind through the same generic path under
 ``resource_discrepancy:<new_resource_type>:<qualifier>``.
