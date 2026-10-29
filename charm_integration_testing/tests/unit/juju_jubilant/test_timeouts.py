@@ -12,7 +12,6 @@ from unittest.mock import patch
 import jubilant
 import pytest
 from juju import JujuModelHandle
-from juju_cmd.cmd import CmdError
 from juju_jubilant import JubilantBackend
 from juju_jubilant.client import JubilantClient
 
@@ -62,30 +61,30 @@ def test_query_timeout_kills_and_reaps_cli(sleeping_juju: Path) -> None:
     assert_processes_reaped(sleeping_juju.parent)
 
 
-def test_inherited_queries_use_bounded_transport(sleeping_juju: Path) -> None:
-    # GIVEN a query still implemented by the deprecated backend
+def test_unit_queries_use_bounded_transport(sleeping_juju: Path) -> None:
+    # GIVEN a unit query backed by a blocked Juju status command
     backend = JubilantBackend(ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=200)))
 
-    # WHEN the inherited implementation fetches status
+    # WHEN the backend fetches status
     with pytest.raises(subprocess.TimeoutExpired):
         backend.num_units(JujuModelHandle(controller="controller", model="model"), "application")
 
-    # THEN it uses the bounded CLI rather than the old command runner
+    # THEN the timed-out CLI is not left running
     assert_processes_reaped(sleeping_juju.parent)
 
 
-def test_inherited_queries_preserve_cli_error_type(tmp_path: Path) -> None:
+def test_unit_queries_preserve_cli_error_details(tmp_path: Path) -> None:
     # GIVEN a command that fails with useful output
     executable = tmp_path / "juju"
     executable.write_text(f"#!{sys.executable}\nimport sys\nprint('unreachable', file=sys.stderr)\nsys.exit(1)\n")
     executable.chmod(0o755)
     backend = JubilantBackend(ExecutableClient(executable))
 
-    # WHEN an inherited operation fails
-    with pytest.raises(CmdError) as exc_info:
+    # WHEN the status query fails
+    with pytest.raises(jubilant.CLIError) as exc_info:
         backend.num_units(JujuModelHandle(controller="controller", model="model"), "application")
 
-    # THEN its existing exception contract and diagnostics are preserved
+    # THEN the native Jubilant exception retains the command's diagnostics
     assert exc_info.value.returncode == 1
     assert exc_info.value.stderr == "unreachable\n"
 

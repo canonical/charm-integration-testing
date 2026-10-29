@@ -33,8 +33,8 @@ Blocking command budgets
 -----------------------
 
 Ordinary Juju CLI commands have a 60-second subprocess timeout, enforced centrally
-by the Jubilant transport. This includes status polling, diagnostic queries, and
-operations inherited from the deprecated command backend. A blocked command is
+by the Jubilant transport. This includes status polling, diagnostic queries,
+scaling, and relation operations. A blocked command is
 terminated and raises ``subprocess.TimeoutExpired``.
 
 Long-running commands such as bootstrap, deployment, actions, and SSH use the
