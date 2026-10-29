@@ -2,7 +2,8 @@
 name: Clean up environment
 run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}
+  group: ${{ github.workflow }}-${{ inputs.environment }}${{ inputs.dry_run && '-dry-run'
+    || '' }}
   cancel-in-progress: true
 permissions:
   contents: read  # only needed for private repos
@@ -24,6 +25,11 @@ on:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
+      dry_run:
+        description: List deletion candidates without deleting resources (skips rawfile
+          node cleanup).
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       environment:
@@ -34,6 +40,11 @@ on:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
+      dry_run:
+        description: List deletion candidates without deleting resources (skips rawfile
+          node cleanup).
+        type: boolean
+        default: false
     secrets:
       PROD_SQA_KUBECONFIG:
         required: true
@@ -53,6 +64,7 @@ jobs:
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
 
       ##################################################################################
@@ -128,7 +140,7 @@ jobs:
         with:
           command: sudo snap install kubectl --classic
       - name: Remove orphaned rawfile PV directories from nodes
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' && !inputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
@@ -304,6 +316,12 @@ jobs:
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           set -uo pipefail
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run: Kubernetes resources that would be deleted:"
+            cat resources_to_remove.txt || exit 1
+            echo "Dry run: rawfile node cleanup skipped (no debug pods created)."
+            exit 0
+          fi
 
           # Group resources by namespace
           declare -A namespaced_resources
@@ -367,6 +385,10 @@ jobs:
             created=$(openstack server show "$server_id" --format json | jq -r '.created')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete server: $server_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting server: $server_id (age: $age_minutes minutes)"
               openstack server delete "$server_id" || true
             fi
@@ -379,6 +401,10 @@ jobs:
             created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete security group: $sg_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
               openstack security group delete "$sg_id" || true
             fi
@@ -391,6 +417,10 @@ jobs:
             created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete load balancer: $lb_id and its pools (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
               # Delete pools first
               openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
@@ -409,6 +439,10 @@ jobs:
             created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete volume: $volume_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
               openstack volume delete "$volume_id" || true
             fi
@@ -421,6 +455,10 @@ jobs:
             created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete floating IP: $fip_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
               openstack floating ip delete "$fip_id" || true
             fi
@@ -472,6 +510,10 @@ jobs:
             if is_active_lb "$lb_id"; then
               echo "Skipping port $port_id — still used by load balancer $lb_id"
             else
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
+                continue
+              fi
               echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
               openstack port delete "$port_id" || true
             fi
@@ -531,6 +573,10 @@ jobs:
             select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
             .name
           ' | while read -r name; do
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would delete instance: $name"
+              continue
+            fi
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
