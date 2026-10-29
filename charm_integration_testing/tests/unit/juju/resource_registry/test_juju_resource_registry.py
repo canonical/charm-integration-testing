@@ -16,6 +16,7 @@ from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
 from kubernetes_client import KubernetesClientRegistry
 from resource_registry.registry import ResourceRegistry
+from utils.timeouts import timeout_after
 
 from ...extensions.shared import NullJujuBackend
 
@@ -267,6 +268,26 @@ class TestJujuCrashdumpCollectorK8s:
         with patch("subprocess.run", side_effect=FileNotFoundError("juju-k8s-crashdump not found")):
             with pytest.raises(FileNotFoundError):
                 collector.collect(handle)
+
+
+@pytest.mark.parametrize("kubernetes", [False, True], ids=["machine", "kubernetes"])
+def test_crashdump_uses_remaining_cleanup_budget(tmp_path: Path, kubernetes: bool) -> None:
+    # GIVEN either crashdump tool running under a shorter shared cleanup deadline
+    backend = CrashdumpBackendStub(
+        k8s_controllers={"ctrl"} if kubernetes else set(),
+        kubeconfig=tmp_path / "kubeconfig" if kubernetes else None,
+    )
+    collector = _crashdump_collector(LoggerStub(), backend, output_dir=tmp_path)
+
+    def run(cmd: list[str], *, timeout: float, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        # THEN the subprocess receives the remaining budget, not its usual ten minutes
+        assert 0 < timeout <= 0.1
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    # WHEN collection cannot complete in time, the failure remains visible
+    with timeout_after(0.1), patch("subprocess.run", side_effect=run):
+        with pytest.raises(subprocess.TimeoutExpired):
+            collector.collect(JujuControllerHandle(controller="ctrl"))
 
 
 # ---------------------------------------------------------------------------

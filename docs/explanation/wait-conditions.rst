@@ -29,6 +29,29 @@ The wait mechanism supports two timeout modes controlled by the ``strict_timeout
 
 This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behaviour, as long as the model reaches the idle state, it will be given additional time to confirm stability.
 
+Blocking command budgets
+-----------------------
+
+Ordinary Juju CLI queries have a 60-second subprocess timeout. Polling uses a
+monotonic clock and constrains status subprocesses to the remaining wait budget,
+including concurrent multi-model queries. A blocked query raises a
+``JujuWaitTimeoutError`` with the subprocess timeout chained as its cause.
+Non-strict waits retain their stability-check grace period; each query remains
+bounded.
+
+Status dumps and execution-metadata collection each have a shared 30-second
+budget. Session resource cleanup has a shared 15-minute budget, covering Juju
+commands and crashdump subprocesses. Nested budgets cannot extend an enclosing
+deadline, and timeouts remain visible as errors or teardown warnings.
+
+Bootstrap, deployment, actions, and other long-running commands are not subject
+to the ordinary query limit. Their existing operation-specific timeouts remain
+in effect, constrained by any enclosing deadline. Bundle deployment and its
+follow-up polling share the supplied deployment budget.
+
+These are command and operation budgets, not a whole-suite timeout. Pytest's
+configured timeout applies separately to each test.
+
 The ``assert_idle`` Fixture
 ---------------------------
 
