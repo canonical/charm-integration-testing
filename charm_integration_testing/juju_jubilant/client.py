@@ -6,7 +6,8 @@ from datetime import timedelta
 
 import jubilant
 from juju import JujuModelHandle
-from utils.timeouts import remaining_timeout
+
+_KILL_CONTROLLER_TIMEOUT_SECONDS = 120
 
 _LONG_RUNNING_COMMANDS = frozenset(
     {
@@ -43,13 +44,16 @@ class _BoundedJuju(jubilant.Juju):
     ) -> tuple[str, str]:
         # Jubilant's public cli()/status() do not expose a subprocess timeout.
         if timeout is None:
-            timeout = self.wait_timeout if args[0] in _LONG_RUNNING_COMMANDS else self.query_timeout
+            if args[0] == "kill-controller":
+                timeout = _KILL_CONTROLLER_TIMEOUT_SECONDS
+            else:
+                timeout = self.wait_timeout if args[0] in _LONG_RUNNING_COMMANDS else self.query_timeout
         return super()._cli(
             *args,
             include_model=include_model,
             stdin=stdin,
             log=log,
-            timeout=remaining_timeout(timeout),
+            timeout=timeout,
         )
 
 

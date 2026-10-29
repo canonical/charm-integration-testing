@@ -7,14 +7,14 @@ import sys
 import time
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import jubilant
 import pytest
-from juju import JujuModelHandle, JujuWaitTimeoutError
+from juju import JujuModelHandle
 from juju_cmd.cmd import CmdError
 from juju_jubilant import JubilantBackend
 from juju_jubilant.client import JubilantClient
-from utils.timeouts import remaining_timeout, timeout_after
 
 
 class ExecutableClient(JubilantClient):
@@ -90,16 +90,30 @@ def test_inherited_queries_preserve_cli_error_type(tmp_path: Path) -> None:
     assert exc_info.value.stderr == "unreachable\n"
 
 
+def test_controller_cleanup_bounds_subprocess_not_just_juju_wait() -> None:
+    # GIVEN a controller removal that would block during API connection setup
+    backend = JubilantBackend()
+    error = subprocess.TimeoutExpired(cmd="juju kill-controller", timeout=120)
+
+    # WHEN cleanup runs through the public backend operation
+    with patch("jubilant._juju.subprocess.run", side_effect=error) as run:
+        with pytest.raises(subprocess.TimeoutExpired):
+            backend.kill_controller("controller")
+
+    # THEN a subprocess limit covers connection setup as well as Juju's own wait
+    assert run.call_args.kwargs["timeout"] == 120
+
+
 @pytest.mark.parametrize("wait_kind", ["single-model", "multi-model", "model-exists"])
-def test_polling_deadline_bounds_blocked_status(sleeping_juju: Path, wait_kind: str) -> None:
-    # GIVEN status queries whose normal timeout exceeds the entire operation budget
-    backend = JubilantBackend(ExecutableClient(sleeping_juju))
+def test_polling_uses_command_timeout(sleeping_juju: Path, wait_kind: str) -> None:
+    # GIVEN blocked status queries with a short per-command limit
+    backend = JubilantBackend(ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=200)))
     models = [JujuModelHandle(controller="controller", model=name) for name in ("first", "second")]
-    budget = timedelta(milliseconds=200)
+    budget = timedelta(seconds=10)
     start = time.monotonic()
 
     # WHEN a status query blocks, including concurrent multi-model queries
-    with pytest.raises(JujuWaitTimeoutError, match="Timed out querying model"):
+    with pytest.raises(subprocess.TimeoutExpired):
         if wait_kind == "multi-model":
             backend.wait_idle_multi_model(models, timeout=budget, count=1, strict_timeout=True)
         elif wait_kind == "single-model":
@@ -107,26 +121,11 @@ def test_polling_deadline_bounds_blocked_status(sleeping_juju: Path, wait_kind: 
         else:
             backend.wait_for_model_to_exist(models[0], timeout=budget)
 
-    # THEN the operation deadline interrupts the CLI, including executor shutdown
+    # THEN command timeouts also bound executor shutdown, without a shared deadline
     assert time.monotonic() - start < 2
     assert_processes_reaped(sleeping_juju.parent)
     if wait_kind == "multi-model":
         assert len(list(sleeping_juju.parent.glob("*.pid"))) == 2
-
-
-def test_long_operation_uses_enclosing_deadline(sleeping_juju: Path) -> None:
-    # GIVEN a long operation, exempt from the ordinary query timeout
-    client = ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=1))
-    start = time.monotonic()
-
-    # WHEN its enclosing cleanup budget expires
-    with timeout_after(0.2), pytest.raises(subprocess.TimeoutExpired) as exc_info:
-        client.model(None).cli("kill-controller", "controller", "--timeout", "2m")
-
-    # THEN cleanup cannot outlive that budget or use the shorter query timeout
-    assert 0.1 < exc_info.value.timeout <= 0.2
-    assert time.monotonic() - start < 2
-    assert_processes_reaped(sleeping_juju.parent)
 
 
 @pytest.mark.parametrize("command", ["bootstrap", "deploy", "run", "exec"])
@@ -138,44 +137,7 @@ def test_long_operations_are_not_limited_to_query_budget(tmp_path: Path, command
     client = ExecutableClient(executable, query_timeout=timedelta(milliseconds=1))
 
     # WHEN its operation-specific budget permits it to finish
-    with timeout_after(2):
-        result = client.model(None).cli(command)
+    result = client.model(None).cli(command)
 
     # THEN the ordinary query limit has not truncated the operation
     assert result == "complete\n"
-
-
-def test_deployment_deadline_includes_deploy_command(sleeping_juju: Path, tmp_path: Path) -> None:
-    # GIVEN deployment itself hangs before follow-up polling starts
-    bundle = tmp_path / "bundle.yaml"
-    bundle.write_text("applications: {}\n")
-    backend = JubilantBackend(ExecutableClient(sleeping_juju))
-
-    # WHEN the deployment budget expires
-    with pytest.raises(subprocess.TimeoutExpired):
-        backend.deploy_bundle_file(
-            JujuModelHandle(controller="controller", model="model"),
-            str(bundle),
-            timeout=timedelta(milliseconds=200),
-        )
-
-    # THEN the initial command was bounded, not just its subsequent polling
-    assert_processes_reaped(sleeping_juju.parent)
-
-
-def test_nested_deadlines_cannot_extend_parent_and_restore_after_failure() -> None:
-    # GIVEN an enclosing deadline
-    with timeout_after(10):
-        parent = remaining_timeout(100)
-
-        # WHEN a longer nested budget fails
-        with pytest.raises(RuntimeError), timeout_after(100):
-            assert remaining_timeout(100) <= parent
-            raise RuntimeError("operation failed")
-
-        # THEN the parent remains active, and a shorter nested budget is restored on exit
-        with timeout_after(1):
-            assert remaining_timeout(100) <= 1
-        assert 1 < remaining_timeout(100) <= parent
-
-    assert remaining_timeout(100) == 100

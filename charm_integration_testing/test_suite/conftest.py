@@ -55,7 +55,6 @@ from utils.juju_releases import (
     fetch_stable_juju_versions,
     select_upgrade_target,
 )
-from utils.timeouts import timeout_after
 
 from bundle_builder_x import (
     ApplicationReleaseDiagnostic,
@@ -99,9 +98,6 @@ pytest_plugins = [
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
 ]
-
-_DIAGNOSTIC_TIMEOUT_SECONDS = 30
-_CLEANUP_TIMEOUT_SECONDS = 15 * 60
 
 
 @pytest.fixture
@@ -285,8 +281,7 @@ def session_resource_registry(
         yield registry
     finally:
         try:
-            with timeout_after(_CLEANUP_TIMEOUT_SECONDS):
-                registry.teardown_all()
+            registry.teardown_all()
         except Exception as exc:
             warnings.warn(f"session_resource_registry teardown_all raised: {exc}", ResourceTeardownWarning)
 
@@ -1130,7 +1125,6 @@ def print_setup_and_teardown_info(
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
-    @timeout_after(_DIAGNOSTIC_TIMEOUT_SECONDS)
     def _print_all_model_statuses() -> None:
         client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
         if client_and_models is None:
@@ -1299,7 +1293,6 @@ def record_charm_info_execution_metadata(
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
-    @timeout_after(_DIAGNOSTIC_TIMEOUT_SECONDS)
     def _record_all() -> None:
         client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
         if client_and_models is None:
@@ -1576,9 +1569,8 @@ def record_juju_execution_metadata(
     client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
     if client_and_models is not None:
         juju_client, model_handles = client_and_models
-        with timeout_after(_DIAGNOSTIC_TIMEOUT_SECONDS):
-            for handle in model_handles:
-                execution_metadata("juju:version", str(juju_client.version(handle)))
+        for handle in model_handles:
+            execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
 @pytest.fixture

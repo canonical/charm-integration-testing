@@ -5,7 +5,7 @@ import logging
 import subprocess
 from collections.abc import Collection
 from dataclasses import field, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
 from typing import Any, Callable, cast
@@ -876,9 +876,16 @@ class TestJubilantBackend:
             client = JubilantClientStub(client=stub)
             backend = JubilantBackend(client)
 
-            # WHEN the monotonic clock advances past the timeout
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_idle is called with datetime mocked to jump past the timeout
             # THEN it times out because the agent is not idle
-            with patch("juju_jubilant.backend.monotonic", side_effect=[0, 0, 0, 1]):
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=1),  # iteration_start, loop 2 — past 100ms timeout
+                ]
                 with pytest.raises(JujuWaitTimeoutError):
                     backend.wait_idle(TEST_MODEL, timedelta(milliseconds=100), count=3)
 
@@ -1390,11 +1397,16 @@ class TestJubilantBackend:
             stub = ModelExistsStub(error_stderr="ERROR model test-controller:my-model not found\n", max_errors=0)
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            # WHEN the monotonic clock advances past the timeout
-            with (
-                patch("juju_jubilant.backend.monotonic", side_effect=[0, 0, 0, 31]),
-                patch("juju_jubilant.backend.time.sleep"),
-            ):
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_for_model_to_exist is called with datetime mocked to jump past the timeout
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(seconds=31),  # iteration_start, loop 2 — past timeout
+                ]
+
                 # THEN JujuWaitTimeoutError is raised and its message names the model
                 with pytest.raises(JujuWaitTimeoutError) as exc_info:
                     backend.wait_for_model_to_exist(
@@ -1408,11 +1420,17 @@ class TestJubilantBackend:
             stub = ModelExistsStub(error_stderr="ERROR model test-controller:my-model not found\n", max_errors=0)
             backend = JubilantBackend(JubilantClientStub(client=stub))
 
-            # WHEN the monotonic clock advances past the default timeout (5 minutes)
-            with (
-                patch("juju_jubilant.backend.monotonic", side_effect=[0, 0, 0, 360]),
-                patch("juju_jubilant.backend.time.sleep"),
-            ):
+            t0 = datetime(2025, 1, 1, 0, 0, 0)
+            # WHEN wait_for_model_to_exist is called with timeout=None and datetime mocked to jump
+            # past the default_timeout (5 minutes)
+            with patch("juju_jubilant.backend.datetime") as mock_dt, patch("juju_jubilant.backend.time.sleep"):
+                mock_dt.now.side_effect = [
+                    t0,  # start
+                    t0,  # iteration_start, loop 1 — within timeout
+                    t0,  # elapsed, loop 1
+                    t0 + timedelta(minutes=6),  # iteration_start, loop 2 — past default 5-min timeout
+                ]
+
                 # THEN JujuWaitTimeoutError is raised, confirming the default timeout was used
                 with pytest.raises(JujuWaitTimeoutError) as exc_info:
                     backend.wait_for_model_to_exist(

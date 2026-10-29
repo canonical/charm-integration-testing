@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from kubernetes_client import KubernetesClientRegistry
 from resource_registry.protocols import ResourceHandle
-from utils.timeouts import remaining_timeout
 
 from ..handles import JujuControllerHandle, JujuModelHandle
 
@@ -79,7 +78,7 @@ class JujuCrashdumpCollector:
             cmd,
             capture_output=True,
             text=True,
-            timeout=remaining_timeout(_SUBPROCESS_TIMEOUT_SECONDS),
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             if result.stdout:
@@ -117,7 +116,7 @@ class JujuCrashdumpCollector:
             cmd,
             capture_output=True,
             text=True,
-            timeout=remaining_timeout(_SUBPROCESS_TIMEOUT_SECONDS),
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             if result.stdout:

@@ -32,25 +32,23 @@ This design addresses scenarios where tests timeout despite the model being idle
 Blocking command budgets
 -----------------------
 
-Ordinary Juju CLI queries have a 60-second subprocess timeout. Polling uses a
-monotonic clock and constrains status subprocesses to the remaining wait budget,
-including concurrent multi-model queries. A blocked query raises a
-``JujuWaitTimeoutError`` with the subprocess timeout chained as its cause.
-Non-strict waits retain their stability-check grace period; each query remains
-bounded.
+Ordinary Juju CLI commands have a 60-second subprocess timeout, enforced centrally
+by the Jubilant transport. This includes status polling, diagnostic queries, and
+operations inherited from the deprecated command backend. A blocked command is
+terminated and raises ``subprocess.TimeoutExpired``.
 
-Status dumps and execution-metadata collection each have a shared 30-second
-budget. Session resource cleanup has a shared 15-minute budget, covering Juju
-commands and crashdump subprocesses. Nested budgets cannot extend an enclosing
-deadline, and timeouts remain visible as errors or teardown warnings.
+Long-running commands such as bootstrap, deployment, actions, and SSH use the
+client's existing one-day wait budget as a subprocess backstop, rather than the
+ordinary command limit. Juju's own operation-specific limits still apply.
+``kill-controller`` has a two-minute subprocess limit, matching the backend's
+existing cleanup timeout.
 
-Bootstrap, deployment, actions, and other long-running commands are not subject
-to the ordinary query limit. Their existing operation-specific timeouts remain
-in effect, constrained by any enclosing deadline. Bundle deployment and its
-follow-up polling share the supplied deployment budget.
-
-These are command and operation budgets, not a whole-suite timeout. Pytest's
-configured timeout applies separately to each test.
+These are per-command limits, not shared diagnostic, cleanup, or whole-suite
+deadlines. Polling can overrun its configured deadline while a command finishes
+or times out. Multiple commands each receive their own budget, and existing
+non-strict stability-check grace is unchanged. Crashdump tools retain their
+existing subprocess limits. Pytest's configured timeout applies separately to
+each test.
 
 The ``assert_idle`` Fixture
 ---------------------------

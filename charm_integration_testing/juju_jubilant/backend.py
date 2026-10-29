@@ -15,10 +15,8 @@ import time
 import warnings
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
-from contextvars import copy_context
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import partial
-from time import monotonic
 from typing import Any, Callable
 
 import jubilant
@@ -44,7 +42,6 @@ from juju import (
 from juju_cmd import JujuCmdBackend
 from juju_cmd.cmd import CmdArg, CmdError
 from kubernetes_client import KubernetesClient, KubernetesClientRegistry
-from utils.timeouts import remaining_timeout, timeout_after
 
 from validators.base.validator import ValidationResult
 
@@ -66,15 +63,6 @@ from .wait import (
 )
 
 _UNIT_REBOOT_COMMAND = "sudo -n systemd-run --quiet --collect --on-active=3s /usr/bin/systemctl reboot"
-
-
-def _sleep_before_poll(delay: timedelta, iteration_start: float, deadline: float | None) -> None:
-    now = monotonic()
-    seconds = max(0, delay.total_seconds() - (now - iteration_start))
-    if deadline is not None:
-        seconds = min(seconds, max(0, deadline - now))
-    if seconds:
-        time.sleep(remaining_timeout(seconds))
 
 
 def _skip_unreadable(dir_: str, names: list[str]) -> set[str]:
@@ -421,15 +409,14 @@ class JubilantBackend(JujuCmdBackend):
         last_wait_state = JujuWaitState()
         noncompliant_wait_state = None
         success_count = 0
-        start = monotonic()
+        start = datetime.now()
 
         # Begin wait loop
         while True:
-            iteration_start = monotonic()
+            iteration_start = datetime.now()
             # With strict_timeout=False, allow continuation if we're making progress (ready=True)
             # With strict_timeout=True, always enforce timeout
-            remaining = timeout.total_seconds() - (iteration_start - start)
-            timeout_reached = remaining <= 0
+            timeout_reached = iteration_start - start > timeout
             if timeout_reached and (strict_timeout or success_count == 0):
                 break
 
@@ -440,22 +427,15 @@ class JubilantBackend(JujuCmdBackend):
             # wait, matching wait_for_model_to_exist's tolerance for the same
             # condition. See issue #812.
             try:
-                with timeout_after(remaining if remaining > 0 else self.default_timeout.total_seconds()):
-                    status = self.status(model)
-            except (subprocess.TimeoutExpired, TimeoutError) as exc:
-                raise JujuWaitTimeoutError(
-                    wait_state=dataclasses.replace(
-                        noncompliant_wait_state or last_wait_state,
-                        message=f"Timed out querying model {model.uri}: {exc}",
-                    )
-                ) from exc
+                status = self.status(model)
             except TransientModelUnavailabilityError as e:
                 noncompliant_wait_state = dataclasses.replace(
                     last_wait_state,
                     message=f"Model {model.uri} temporarily unavailable during migration: {e.stderr.strip()}",
                 )
                 success_count = 0
-                _sleep_before_poll(delay, iteration_start, start + timeout.total_seconds())
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
                 continue
 
             # Check for error condition
@@ -475,8 +455,8 @@ class JubilantBackend(JujuCmdBackend):
                 success_count = 0
 
             # Wait before next iteration
-            deadline = start + timeout.total_seconds() if strict_timeout or success_count == 0 else None
-            _sleep_before_poll(delay, iteration_start, deadline)
+            elapsed = datetime.now() - iteration_start
+            time.sleep(max(0, (delay - elapsed).total_seconds()))
 
         # Timeout reached
         if noncompliant_wait_state is None:
@@ -549,28 +529,20 @@ class JubilantBackend(JujuCmdBackend):
         delay = self.default_delay
         success_count = 0
         last_wait_states: dict[str, JujuWaitState] = {}
-        start = monotonic()
+        start = datetime.now()
 
         with ThreadPoolExecutor(max_workers=len(unique_models)) as executor:
             while True:
-                iteration_start = monotonic()
-                remaining = timeout.total_seconds() - (iteration_start - start)
-                timeout_reached = remaining <= 0
+                iteration_start = datetime.now()
+                timeout_reached = iteration_start - start > timeout
                 if timeout_reached and (strict_timeout or success_count == 0):
                     break
 
-                with timeout_after(remaining if remaining > 0 else self.default_timeout.total_seconds()):
-                    futures = {
-                        model: executor.submit(copy_context().run, self.status, model) for model in unique_models
-                    }
+                futures = {model: executor.submit(self.status, model) for model in unique_models}
                 wait_states: dict[str, JujuWaitState] = {}
                 for model, future in futures.items():
                     try:
                         status = future.result()
-                    except (subprocess.TimeoutExpired, TimeoutError) as exc:
-                        raise JujuWaitTimeoutError(
-                            wait_state=JujuWaitState(message=f"Timed out querying model {model.uri}: {exc}")
-                        ) from exc
                     except TransientModelUnavailabilityError as error:
                         wait_states[model.uri] = JujuWaitState(
                             message=(
@@ -599,8 +571,8 @@ class JubilantBackend(JujuCmdBackend):
                     if success_count >= successes:
                         return
 
-                deadline = start + timeout.total_seconds() if strict_timeout or success_count == 0 else None
-                _sleep_before_poll(delay, iteration_start, deadline)
+                elapsed = datetime.now() - iteration_start
+                time.sleep(max(0, (delay - elapsed).total_seconds()))
 
         if not last_wait_states:
             last_wait_states = {model.uri: JujuWaitState(insufficient_status_checks=True) for model in unique_models}
@@ -653,12 +625,11 @@ class JubilantBackend(JujuCmdBackend):
         if timeout is None:
             timeout = self.default_timeout
         delay = self.default_delay
-        start = monotonic()
+        start = datetime.now()
 
         while True:
-            iteration_start = monotonic()
-            remaining = timeout.total_seconds() - (iteration_start - start)
-            if remaining <= 0:
+            iteration_start = datetime.now()
+            if iteration_start - start > timeout:
                 raise JujuWaitTimeoutError(
                     wait_state=JujuWaitState(
                         message=f"Model {model.uri} does not exist",
@@ -666,17 +637,13 @@ class JubilantBackend(JujuCmdBackend):
                     )
                 )
             try:
-                with timeout_after(remaining):
-                    self.status(model)
+                self.status(model)
                 return
-            except (subprocess.TimeoutExpired, TimeoutError) as exc:
-                raise JujuWaitTimeoutError(
-                    wait_state=JujuWaitState(message=f"Timed out querying model {model.uri}: {exc}")
-                ) from exc
             except TransientModelUnavailabilityError:
                 pass
 
-            _sleep_before_poll(delay, iteration_start, start + timeout.total_seconds())
+            elapsed = datetime.now() - iteration_start
+            time.sleep(max(0, (delay - elapsed).total_seconds()))
 
     def wait_for_application_revision(
         self,
@@ -755,10 +722,9 @@ class JubilantBackend(JujuCmdBackend):
     ) -> None:
         if not pathlib.Path(bundle).is_file():
             raise ValueError(f"Bundle file '{bundle}' not found.")
-        budget = self.default_timeout if timeout is None else timeout
-        with timeout_after(budget.total_seconds()):
-            self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=trust, force=force)
-            self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
+        self.client.model(model).deploy(charm=pathlib.Path(bundle).resolve(), trust=trust, force=force)
+
+        self.wait(model, lambda status: bundle_applications_integrations_exist(status, bundle), timeout=timeout)
 
     def deploy_application(
         self,
@@ -901,7 +867,7 @@ class JubilantBackend(JujuCmdBackend):
         args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
         try:
             return subprocess.run(  # nosec B603
-                args, check=True, capture_output=True, text=True, timeout=remaining_timeout(timeout)
+                args, check=True, capture_output=True, text=True, timeout=timeout
             ).stdout
         except subprocess.CalledProcessError as error:
             raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
@@ -1239,10 +1205,9 @@ class JubilantBackend(JujuCmdBackend):
             )
 
     def kill_controller(self, controller: str) -> None:
-        with timeout_after(timedelta(minutes=2).total_seconds()):
-            self.client.model(None).cli(
-                "kill-controller", controller, "--no-prompt", "--timeout", "2m", include_model=False
-            )
+        self.client.model(None).cli(
+            "kill-controller", controller, "--no-prompt", "--timeout", "2m", include_model=False
+        )
 
     def migrate_model(self, model_name: str, source_controller: str, target_controller: str) -> None:
         self.client.model(JujuModelHandle(controller=source_controller, model=model_name)).cli(
