@@ -60,7 +60,7 @@ overrides:
         ubuntu_version: '20.04'
     requires:
       receive-ca-cert:
-        optional: false  # _update_workload needs the OAuth provider CA chain.
+        optional: true  # _update_trusted_ca_certs returns when the relation is absent; the TLS constraint below requires it when needed.
       oauth:
         optional: false  # _update_workload waits for OAuth relation data.
         features: [tls]
