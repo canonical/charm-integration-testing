@@ -221,7 +221,7 @@ jobs:
             kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
-      - name: Find QA namespaces older than the age threshold
+      - name: Find all model and controller namespaces older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -256,25 +256,23 @@ jobs:
             )) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find Juju credential service accounts older than the age threshold
+      - name: Find all juju-credential service accounts older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get serviceaccounts --all-namespaces --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find Juju credential secrets older than the age threshold
+      - name: Find all juju-credential secrets older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get secrets --all-namespaces --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
             select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
@@ -286,10 +284,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get persistentvolumes --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
+          # will get stuck if the node they were provisioned on no longer exists. Add them to
+          # the delete list
+          kubectl get pv --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.status.phase == "Released" and .spec.storageClassName == "csi-rawfile-default") |
+            select(.status.phase == "Released") |
+            select(.spec.storageClassName == "csi-rawfile-default") |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
@@ -301,45 +302,21 @@ jobs:
           kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json > rbac.json
           jq --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
             [$namespaces[0].items[].metadata.name] as $namespaces |
-            def old:
-              (now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60);
-            def qa_namespace:
-              test("^(controller-)?charmqa-");
-            def orphaned_qa_namespace:
-              . as $namespace | qa_namespace and ($namespaces | index($namespace) == null);
-            def credential:
-              .metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$");
-            def owner_namespaces:
-              [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]]
-              | map(select(. != null and . != ""));
-            def live_owner:
-              any(owner_namespaces[]; . as $namespace | $namespaces | index($namespace) != null);
-            def orphaned_qa_owner:
-              any(owner_namespaces[]; orphaned_qa_namespace) and (live_owner | not);
-            def helm_managed:
-              .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
-              or (
-                (.metadata.annotations["meta.helm.sh/release-name"] // "") != "" and
-                (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
-              );
-            def protected_rbac:
-              (.metadata.labels["kubernetes.io/bootstrapping"] != null)
-              or (.metadata.name | startswith("system:"))
-              or live_owner
-              or (helm_managed and (orphaned_qa_owner | not));
-            def live_subject:
-              any(.subjects[]?; .kind != "ServiceAccount" or (.namespace // "") == "" or
-                (.namespace as $namespace | $namespaces | index($namespace) != null));
-            def orphaned_qa_subjects:
-              (.subjects | length > 0) and all(.subjects[];
-                .kind == "ServiceAccount" and ((.namespace // "") | orphaned_qa_namespace)
-              );
-            [.items[] | select(.kind == "ClusterRoleBinding" and old) |
-              select(protected_rbac | not) |
+            [.items[] | select(.kind == "ClusterRoleBinding") |
+              select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
               select(
-                credential or
-                (((.metadata.name | qa_namespace) or orphaned_qa_owner or orphaned_qa_subjects) and
-                  (live_subject | not))
+                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or
+                (.metadata.labels["model.juju.is/name"] // "" | test("^(controller-)?charmqa-"))
+              ) |
+              select(all(
+                [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
+                . == null or (. as $namespace | $namespaces | index($namespace) == null)
+              )) |
+              select(
+                (.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) or
+                all(.subjects[]?; .kind == "ServiceAccount" and
+                  ((.namespace // "") | test("^(controller-)?charmqa-")) and
+                  (.namespace as $namespace | $namespaces | index($namespace) == null))
               )]
           ' rbac.json > bindings_to_remove.json
           jq --raw-output '.[] | .kind + "/" + .metadata.name' bindings_to_remove.json >> resources_to_remove.txt
@@ -352,9 +329,7 @@ jobs:
             --slurpfile namespaces namespaces.json --slurpfile bindings bindings_to_remove.json '
             .items as $resources |
             [$namespaces[0].items[].metadata.name] as $namespaces |
-            $bindings[0] as $bindings |
-            [$bindings[].metadata.name] as $binding_names |
-            [$bindings[] | select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $orphan_roles |
+            [$bindings[0][].metadata.name] as $binding_names |
             # A ClusterRole may also be used by a namespaced RoleBinding.
             [$resources[] |
               select(.kind == "RoleBinding" or
@@ -364,24 +339,13 @@ jobs:
             $resources[] |
               select(.kind == "ClusterRole") |
               select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-              select(.metadata.labels["kubernetes.io/bootstrapping"] == null) |
-              select(.metadata.name | startswith("system:") | not) |
-              ([.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]]
-                | map(select(. != null and . != ""))) as $owners |
-              select(all($owners[]; . as $namespace | $namespaces | index($namespace) == null)) |
-              any($owners[]; test("^(controller-)?charmqa-")) as $orphaned_qa_owner |
               select(
-                $orphaned_qa_owner or (
-                  .metadata.labels["app.kubernetes.io/managed-by"] != "Helm" and
-                  ((.metadata.annotations["meta.helm.sh/release-name"] // "") == "" or
-                    (.metadata.annotations["meta.helm.sh/release-namespace"] // "") == "")
-                )
+                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or
+                (.metadata.labels["model.juju.is/name"] // "" | test("^(controller-)?charmqa-"))
               ) |
-              select(
-                $orphaned_qa_owner or
-                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or (
-                .metadata.labels["app.kubernetes.io/managed-by"] == "juju" and
-                (.metadata.name as $name | $orphan_roles | index($name) != null)
+              select(all(
+                [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
+                . == null or (. as $namespace | $namespaces | index($namespace) == null)
               )) |
               select(.metadata.name as $name | $retained_roles | index($name) == null) |
             .kind + "/" + .metadata.name
