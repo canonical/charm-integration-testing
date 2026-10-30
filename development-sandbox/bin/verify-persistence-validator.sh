@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run persistence validator checks in the sandbox"
+#MISE raw_args=true
+#MISE alias="sandbox:verify-persistence-validator"
 # Run deterministic persistence-validator verification gates inside the VM workspace.
 #
 # This script is VM-native and must be run from inside the sandbox VM where
@@ -29,7 +32,7 @@ RESTORE_CMD=""
 usage() {
     cat <<'EOF'
 Usage:
-  development-sandbox/bin/verify-persistence-validator.sh \
+  mise run sandbox:verify-persistence-validator -- \
     --model <model> --app <app> --provider <provider> --validator <validator-name> [options]
 
 Required:
@@ -221,8 +224,8 @@ PY
 }
 
 run_step pre_status "juju status -m $MODEL --relations"
-run_step format "./scripts/format.sh"
-run_step lint "./scripts/lint.sh"
+run_step format "mise run format"
+run_step lint "mise run lint"
 run_step unit_tests "$TEST_CMD"
 
 # Poetry normalises underscores to hyphens in distribution names, so derive
@@ -234,7 +237,7 @@ run_step entrypoint "cd '$PROJECT' && poetry run python3 -c \"from importlib.met
 
 # Seed canary data while the workload is up. --reinstall pushes the latest
 # validator code onto the units.
-run_step prepare "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op prepare --state-file $state_file --reinstall"
+run_step prepare "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op prepare --state-file $state_file --reinstall"
 run_step status_prepared "juju status -m $MODEL --relations"
 
 # Disrupt the provider, then restore it and wait for the model to settle before
@@ -349,14 +352,14 @@ run_step wait_settled "$wait_cmd"
 
 # Verify the canary data survived the disruption.
 if [ "${STEP_RC[wait_settled]:-1}" -eq 0 ]; then
-    run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+    run_step checkpoint "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op checkpoint --state-file $state_file"
 else
     printf "[checkpoint] skipped because wait_settled failed\n  rc=1\n\n" >> "$summary"
     STEP_RC[checkpoint]=1
 fi
 
 # Drop the canary data.
-run_step cleanup "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op cleanup --state-file $state_file"
+run_step cleanup "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op cleanup --state-file $state_file"
 
 quality_pass=false
 wiring_pass=false

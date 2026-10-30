@@ -368,7 +368,7 @@ rather than registering multiple entry points for the same interface.
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `poetry install` (or `poetry update <package>` for a single
+   way, run `mise run setup` (or `poetry update <package>` for a single
    path dependency) after *any* change to a package's `pyproject.toml` made
    in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
@@ -378,10 +378,10 @@ rather than registering multiple entry points for the same interface.
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
    tests below. In the development sandbox this matters especially for a
-   long-lived `scripts/sandbox.sh run --interactive` session: `poetry
-   install` runs once at `sandbox.sh up` time, so the VM's venv reflects the
+   long-lived `mise run sandbox -- run --interactive` session: `mise run setup`
+   runs once at `mise run sandbox -- up` time, so the VM's environment reflects the
    `pyproject.toml` as of `up` and goes stale for any change made mid-session
-   - re-run `poetry install` inside the VM after editing a `pyproject.toml`,
+   - re-run `mise run setup` inside the VM after editing a `pyproject.toml`,
    or the runner won't discover the new/changed entry point until the next
    `up`.
 
@@ -471,10 +471,10 @@ rather than registering multiple entry points for the same interface.
    ```
    poetry run pytest validators/<name>
    poetry run pytest validators/runner    # confirm discovery/wiring still passes
-   ./scripts/format.sh
-   ./scripts/lint.sh
+   mise run format
+   mise run lint
    ```
-   `scripts/lint.sh` is the same check the repository CI/reviewers require -
+   `mise run lint` is the same check the repository CI/reviewers require -
    beyond ruff/mypy it also runs bandit, yamlfix, and markdownlint-cli2, so
    running only a subset (e.g. just `ruff check`/`mypy`) can pass locally
    while still failing the established repository checks. Fix any issues
@@ -560,14 +560,14 @@ rather than registering multiple entry points for the same interface.
    commands) and confirm the canary resource is gone.
 
 9. Capture verification evidence with
-   `development-sandbox/bin/verify-persistence-validator.sh`. This is the
+   `mise run sandbox:verify-persistence-validator --`. This is the
    persistence counterpart of `verify-validator.sh`: it runs the quality and
    wiring gates, then drives the full `prepare -> disrupt -> checkpoint ->
    cleanup` lifecycle against a live model and writes a `summary.txt` +
    `report.json` evidence bundle. Run it after step 8 has injected the
    validators venv onto the units (a plain `juju deploy` does not create it):
    ```
-   $PROJECT_ROOT/development-sandbox/bin/verify-persistence-validator.sh \
+   mise run sandbox:verify-persistence-validator -- \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
@@ -583,7 +583,7 @@ rather than registering multiple entry points for the same interface.
    databag retains credentials at zero units), pass `--down-cmd`/`--restore-cmd`
    instead (e.g. `kubectl scale deployment ... --replicas=0` / `--replicas=1`).
    The script drives the lifecycle through
-   `development-sandbox/bin/dev-persistence.py`, which uses
+   `mise run sandbox:dev-persistence`, which uses
    `ValidatorInjectorExtension` and so handles the `--operator` flag for
    Kubernetes charms automatically. The script exits non-zero unless every
    gate passes, and `checkpoint_pass` requires a `PASS` result for the
@@ -744,11 +744,11 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 - Unit tests cover role gating, prepare, checkpoint (pass and fail), and
   cleanup (including the no-canary-resources case).
 - `poetry run pytest validators/<name> validators/runner` passes.
-- `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
+- `mise run format` and `mise run lint` pass (ruff, mypy, bandit,
   yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
   includes nested markdown documentation, run markdownlint-cli2 explicitly on
   those files).
-- `development-sandbox/bin/verify-persistence-validator.sh` produces a
+- `mise run sandbox:verify-persistence-validator --` produces a
   `summary.txt` + `report.json` evidence bundle (in
   `development-sandbox/reports/` when run as documented in step 9) with
   `checkpoint_pass=true` for the interface.

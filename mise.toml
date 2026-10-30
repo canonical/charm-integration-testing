@@ -1,0 +1,19 @@
+[task_config]
+includes = ["scripts", "development-sandbox/bin", "mise-tasks"]
+excludes = ["scripts/*.py", "development-sandbox/bin/install-mise.sh"]
+
+[settings]
+lockfile = true
+task.run_auto_install = false
+
+[tools]
+python = "3.12.12"
+uv = "0.13.6"
+pipx = "1.18.8"
+"pipx:poetry" = "2.3.0"
+"aqua:jqlang/jq" = "1.8.2"
+"aqua:mikefarah/yq" = "4.54.1"
+"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"aqua:kubernetes/kubernetes/kubectl" = "1.35.10"
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12" }

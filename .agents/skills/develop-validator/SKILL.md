@@ -137,7 +137,7 @@ under `validators/<name>/` with passing `dev-validate` output.
 4. Create the model and generate the bundle:
    ```
    juju add-model <interface>-test
-   bundle-builder-x --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
+   mise run bundle:build-x -- --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
    ```
 
 5. Deploy:
@@ -159,18 +159,18 @@ under `validators/<name>/` with passing `dev-validate` output.
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
    - Add `validators-<name> = { path = "./validators/<name>", develop = true }`
      to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
-   - Run `poetry install` from `$PROJECT_ROOT` so the new package is available.
+   - Run `mise run setup` from `$PROJECT_ROOT` so the new package is available.
 
 8. Run and iterate:
    ```
-   $PROJECT_ROOT/development-sandbox/bin/dev-validate.py --model <interface>-test --app <requirer> --reinstall
+   mise run sandbox:dev-validate -- --model <interface>-test --app <requirer> --reinstall
    ```
    Read the JSON output. Fix checks that fail. Repeat until all PASS.
 
 9. Run code quality checks from `$PROJECT_ROOT` and fix any issues:
    ```
-   ./scripts/format.sh
-   ./scripts/lint.sh
+   mise run format
+   mise run lint
    ```
    Do not finish while either command fails.
 
@@ -220,7 +220,7 @@ under `validators/<name>/` with passing `dev-validate` output.
     **highest level the validator supports** (check `validate()` in `validator.py`
     -- use `deep` if implemented, otherwise `simple`):
     ```
-    $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
+    mise run sandbox:verify-validator -- \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
@@ -233,7 +233,7 @@ under `validators/<name>/` with passing `dev-validate` output.
     Juju databag retains credentials even at 0 units. In that case use `--down-cmd` and
     `--restore-cmd` to scale the k8s deployment directly:
     ```
-    $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
+    mise run sandbox:verify-validator -- \
       --model <interface>-test \
       --app <requirer> \
       --provider <provider> \
@@ -317,7 +317,7 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ## Validator-specific notes
 
-- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
+- Run `dev-validate.py` through `mise run sandbox:dev-validate` so it uses the pinned Python and project dependencies.
 - If a relation has no remote app (`relation.app is None`), return an `ERROR` result immediately.
 - Keep validators focused on a single interface. Do not add cross-interface logic.
 - Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
@@ -332,8 +332,8 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 - `validators/runner/pyproject.toml` includes `validators-<name>`.
 - Root `$PROJECT_ROOT/pyproject.toml` includes `validators-<name>` as a Poetry
   develop dependency.
-- `./scripts/format.sh` exits 0 after all changes.
-- `./scripts/lint.sh` exits 0 after all changes.
+- `mise run format` exits 0 after all changes.
+- `mise run lint` exits 0 after all changes.
 - Self-review complete: all structure, license, naming, and test coverage criteria met.
 - `verify-validator.sh` exits 0.
 - Verification evidence includes both workload-up pass and workload-down detection.

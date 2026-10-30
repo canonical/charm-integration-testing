@@ -5,14 +5,20 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Python dependencies are managed through poetry.
+Install [mise](https://mise.jdx.dev/getting-started.html) first. Tool versions
+are pinned with mise, and Python dependencies are managed through Poetry.
+The base `mise.toml` contains the test-execution toolchain used locally and in CI.
 
 ```bash
-pipx install poetry==2.0
-poetry install
+mise run setup
 ```
 
 ## Development
+
+Development tools (including linters) are added by `mise.development.toml`.
+Select them with `export MISE_ENV=development` before following the installation
+commands above. The sandbox adds its own extras from
+`development-sandbox/mise.toml` automatically.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
 best practices.
@@ -20,10 +26,14 @@ best practices.
 ## Usage
 
 ```bash
-./scripts/run-test-suite.sh \ 
-    --model {juju_model} \
-    --requirer {application}:{endpoint} \
-    --provider {application}:{endpoint}
+mise run test:suite -- \
+    --target-cloud "{juju_cloud}" \
+    --target-charm "{target_charm}" \
+    --target-application "{target_application}" \
+    --target-endpoint "{target_endpoint}" \
+    --neighbor-charm "{neighbor_charm}" \
+    --neighbor-application "{neighbor_application}" \
+    --neighbor-endpoint "{neighbor_endpoint}"
 ```
 
 ### Optional Environment Variables

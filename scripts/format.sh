@@ -1,9 +1,13 @@
 #!/bin/bash
+#MISE description="Format repository files"
+#MISE raw_args=true
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
 poetry run ruff check --fix
 poetry run ruff format
-poetry run yamlfix $(find . -type f \( -name "*.yaml" -o -name "*.yml" \))
+mapfile -d '' -t yaml_files < <(find . -type d -name .mise -prune -o \
+    -type f \( -name "*.yaml" -o -name "*.yml" \) -print0)
+poetry run yamlfix "${yaml_files[@]}"
 markdownlint-cli2 --fix --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md"

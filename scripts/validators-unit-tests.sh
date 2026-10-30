@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run validator unit tests"
+#MISE raw_args=true
+#MISE alias="test:validators"
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 

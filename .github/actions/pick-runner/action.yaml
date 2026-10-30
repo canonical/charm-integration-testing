@@ -29,10 +29,16 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install yq
-      uses: ./.github/actions/install-with-retry
+    - name: Read pinned mise version
+      id: mise-version
+      shell: bash
+      run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
+    - name: Install runner lookup tool
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
       with:
-        command: sudo snap install yq
+        version: ${{ steps.mise-version.outputs.version }}
+        install_args: aqua:mikefarah/yq
+        cache: false
     - name: Pick compatible runner
       id: pick
       shell: bash

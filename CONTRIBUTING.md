@@ -7,34 +7,55 @@ Testing.
 
 ## General recommendations
 
-Following the [README Getting Started](README.md#getting-started) guide to clone
-and download dependencies.
+Follow the [README Getting Started](README.md#getting-started) guide to install
+the locked toolchain and project dependencies. Select the development overlay
+first so the same commands also install linters and the GitHub CLI:
+
+```bash
+export MISE_ENV=development
+mise run setup
+```
+
+`mise.toml` defines the shared test-execution tools. `mise.development.toml`
+adds development tools; CI lint and secret-scanning jobs use this overlay too.
+Sandbox-only tools are defined in `development-sandbox/mise.toml` and enabled
+automatically inside the VM. Each tool's version is declared in one config.
+CI setup installs the selected configuration without per-job tool lists.
+`kubectl` and both Juju crashdump tools are part of the shared test toolchain.
 
 ## Linting and Formatting
 
 Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
 [markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
-automatically on Pull Requests to this repository. To format, run:
+automatically on Pull Requests to this repository. Tool versions are pinned by
+mise; use these task entry points:
 
 ```bash
-./scripts/format.sh
+mise run format
+mise run lint
 ```
 
 ## Tooling and Continuous Integration
 
-### Scripts
+### Mise tasks
+
+Existing shell scripts are discovered directly from `scripts/` and
+`development-sandbox/bin/` using their `#MISE` headers. `mise-tasks/` contains
+only additional commands without an existing shell entry point.
+`install-tools` owns tool installation for local setup, CI, and the sandbox;
+`setup` calls it before installing Poetry dependencies.
 
 | Script | Purpose |
 |---|---|
-| `scripts/format.sh` | Auto-fix: ruff, yamlfix, markdownlint |
-| `scripts/lint.sh` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
-| `scripts/charm-integration-testing-unit-tests.sh` | Run `charm_integration_testing` unit tests |
-| `scripts/validators-unit-tests.sh` | Run validator unit tests |
-| `scripts/bundle-builder-x-tests.sh` | Run bundle builder tests |
+| `mise run format` | Auto-fix: ruff, yamlfix, markdownlint |
+| `mise run lint` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
+| `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
+| `mise run test:validators` | Run validator unit tests |
+| `mise run test:bundle-builder-x` | Run bundle builder tests |
 
 ### CI gates (all must pass on every PR)
 
-1. **lint** — `scripts/lint.sh`
+1. **lint** — `mise run lint`
 2. **charm-integration-testing-unit-tests**
 3. **validators-unit-tests**
 4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
@@ -68,9 +89,11 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective scripts above before submitting a PR.
+Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective mise tasks above before submitting a PR.
 
-Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `scripts/run-tests.sh` (with the required Juju environment configured).
+Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `mise run test:suite` (with the required Juju environment configured).
+
+The integration-test task uses the base toolchain; no CI-specific profile is needed.
 
 ## Pull requests
 

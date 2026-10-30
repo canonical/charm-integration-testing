@@ -1,9 +1,12 @@
 #!/bin/bash
+#MISE description="Install or verify Chaos Mesh on the selected cluster"
+#MISE raw_args=true
+#MISE alias="sandbox:setup-chaos-mesh"
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 #
 # Install Chaos Mesh on the sandbox after Kubernetes setup.
-# Usage: bash setup-chaos-mesh.sh [kubeconfig]
+# Usage (from the project root): mise run sandbox:setup-chaos-mesh -- [kubeconfig]
 # Requires Helm 3, jq, and kubectl or Canonical k8s.
 
 set -euo pipefail
@@ -26,8 +29,8 @@ die() {
 [[ -f "$KUBECONFIG_PATH" && -r "$KUBECONFIG_PATH" ]] \
     || die "Kubeconfig must be a readable file: $KUBECONFIG_PATH"
 
-command -v helm >/dev/null 2>&1 || die "Install Helm 3 before running this script."
-command -v jq >/dev/null 2>&1 || die "jq is required."
+command -v helm >/dev/null 2>&1 || die "Helm missing; run 'mise run setup' inside the sandbox."
+command -v jq >/dev/null 2>&1 || die "jq missing; run 'mise run setup' inside the sandbox."
 helm_version=$(helm version --short)
 [[ "$helm_version" == v3.* ]] || die "Expected Helm 3; found $helm_version."
 

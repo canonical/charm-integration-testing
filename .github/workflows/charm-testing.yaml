@@ -131,6 +131,21 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Configure pip proxy
+        shell: bash
+        env:
+          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+        run: |
+          if [[ -n "${PIP_PROXY}" ]]; then
+            sudo tee /etc/pip.conf <<EOF
+          [global]
+          proxy= ${PIP_PROXY}
+          EOF
+          fi
+      - name: Set up project tools
+        uses: ./.github/actions/setup-mise
+        env:
+          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -151,10 +166,6 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
-      - name: Install yq
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install yq
       - name: Get target environment info
         id: target_env_info
         uses: ./.github/actions/get-environment-info
@@ -311,40 +322,11 @@ jobs:
       - name: Debug Setup
         if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
-      - name: Install Repository
+      - name: Install repository dependencies
         shell: bash
         env:
-          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-        run: |
-          sudo apt-get update --quiet
-          sudo apt-get install pipx --quiet --assume-yes
-          if [[ -n "${PIP_PROXY}" ]]; then
-            sudo tee /etc/pip.conf <<EOF
-          [global]
-          proxy= ${PIP_PROXY}
-          EOF
-            HTTPS_PROXY="${PIP_PROXY}" pipx install poetry==2.3
-            HTTPS_PROXY="${PIP_PROXY}" poetry install
-          else
-            pipx install poetry==2.3
-            poetry install
-          fi
-      - name: Install TruffleHog CLI
-        shell: bash
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin v3.56.0
-      - name: Install juju-k8s-crashdump
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: pipx install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
-      - name: Install juju-crashdump
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install juju-crashdump --classic
-      - name: Install kubectl
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install kubectl --classic
+          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+        run: mise run setup
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -401,7 +383,7 @@ jobs:
           if [[ "${same_controller}" == "true" ]]; then
             SAME_CONTROLLER_ARG=(--same-controller)
           fi
-          ./scripts/run-tests.sh \
+          mise run test:suite -- \
             --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
@@ -474,7 +456,7 @@ jobs:
           target_arch: ${{ steps.target_env_info.outputs.arch }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-          ./scripts/run-tests.sh \
+          mise run test:suite -- \
             --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
