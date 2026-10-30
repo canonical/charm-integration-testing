@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -77,6 +78,53 @@ def test_kubernetes_dry_run_fails_if_candidates_cannot_be_read(tmp_path: Path) -
     assert result.returncode != 0
     assert "resources_to_remove.txt" in result.stderr
     assert "STUB_DELETE" not in result.stdout
+
+
+def test_cluster_rbac_cleanup_matches_credential_names_and_preserves_age_filter(tmp_path: Path) -> None:
+    # GIVEN old singular/plural credentials, QA resources, unrelated names, and a new credential
+    names = [
+        "juju-credential-fff5a8d9",
+        "juju-credentials-AbC12345",
+        "charmqa-model",
+        "controller-charmqa-test",
+        "juju-credential-short",
+        "juju-credentials-fff5a8d9-extra",
+        "other-juju-credential-fff5a8d9",
+        "juju-credential-1234567_",
+    ]
+    items = [
+        {"kind": kind, "metadata": {"name": name, "creationTimestamp": "2020-01-01T00:00:00Z"}}
+        for kind in ("ClusterRole", "ClusterRoleBinding")
+        for name in names
+    ]
+    items.append(
+        {
+            "kind": "ClusterRole",
+            "metadata": {"name": "juju-credentials-12345678", "creationTimestamp": "2999-01-01T00:00:00Z"},
+        }
+    )
+
+    # WHEN the workflow discovers RBAC using the real jq filter and a stub Kubernetes response
+    result = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            'kubectl() { printf "%s\\n" "$RBAC_FIXTURE"; }\n' + _step_script("Find old QA cluster RBAC"),
+        ],
+        cwd=tmp_path,
+        env=os.environ | {"AGE_THRESHOLD": "240", "RBAC_FIXTURE": json.dumps({"items": items})},
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+
+    # THEN only old QA resources and exact eight-character singular/plural credential names are selected
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "resources_to_remove.txt").read_text().splitlines() == [
+        f"{kind}/{name}" for kind in ("ClusterRole", "ClusterRoleBinding") for name in names[:4]
+    ]
 
 
 @pytest.mark.parametrize(
