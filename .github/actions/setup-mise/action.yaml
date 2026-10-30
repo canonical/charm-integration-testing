@@ -19,11 +19,14 @@ runs:
         version: ${{ steps.version.outputs.version }}
         install_args: uv
         cache: false
+    - name: Install pipx
+      shell: bash
+      run: mise install --locked pipx
     - name: Install requested tools
       if: inputs.install_args != ''
       shell: bash
       env:
         MISE_INSTALL_ARGS: ${{ inputs.install_args }}
-      run: |
+      run: |-
         read -r -a tools <<< "$MISE_INSTALL_ARGS"
-        mise install --locked "${tools[@]}"
+        mise install --locked uv pipx "${tools[@]}"

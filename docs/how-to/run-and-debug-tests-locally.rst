@@ -200,6 +200,8 @@ Use mise to install the locked tool versions and Poetry dependencies:
 
 .. code:: bash
 
+   mise install --locked uv
+   mise install --locked pipx
    mise install --locked
    mise run setup
 

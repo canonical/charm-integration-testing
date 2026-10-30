@@ -78,6 +78,7 @@ When running the integration-test task outside the development sandbox, install 
 
 ```bash
 MISE_ENV=ci mise install --locked uv
+MISE_ENV=ci mise install --locked pipx
 MISE_ENV=ci mise install --locked
 ```
 

@@ -11,6 +11,7 @@ The CI and development-sandbox profiles add their own locked tools.
 
 ```bash
 mise install --locked uv
+mise install --locked pipx
 mise install --locked
 mise run setup
 ```
