@@ -266,8 +266,9 @@ jobs:
             [$resources[] | select(.kind == "ClusterRoleBinding" and old) |
               select(protected_rbac | not) |
               select(
-                (.metadata.name | qa_namespace) or credential or
-                ((orphaned_qa_owner or orphaned_qa_subjects) and (live_subject | not))
+                credential or
+                (((.metadata.name | qa_namespace) or orphaned_qa_owner or orphaned_qa_subjects) and
+                  (live_subject | not))
               )] as $bindings |
             [$bindings[].metadata.name] as $binding_names |
             [$bindings[] | select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $orphan_roles |
