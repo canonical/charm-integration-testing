@@ -2,7 +2,8 @@
 name: Clean up environment
 run-name: Clean up ${{ inputs.environment }} environment
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}
+  group: ${{ github.workflow }}-${{ inputs.environment }}${{ inputs.dry_run && '-dry-run'
+    || '' }}
   cancel-in-progress: true
 permissions:
   contents: read  # only needed for private repos
@@ -19,10 +20,16 @@ on:
           - ps6-sqa-prod_charm_qa_openstack-1
           - ps7-sqa-prod_charm_qa_kubernetes-1
           - ps7-sqa-prod_charm_qa_openstack-1
+          - ps7-sqa-prod_charm_qa_lxd-1
       age_threshold:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
+      dry_run:
+        description: Preview cleanup without deleting resources or rawfile data (creates
+          temporary debug pods).
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       environment:
@@ -33,6 +40,11 @@ on:
         description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
+      dry_run:
+        description: Preview cleanup without deleting resources or rawfile data (creates
+          temporary debug pods).
+        type: boolean
+        default: false
     secrets:
       PROD_SQA_KUBECONFIG:
         required: true
@@ -44,12 +56,15 @@ on:
         required: true
       PROD_PS7_NOVARC:
         required: true
+      PROD_PS7_LXD:
+        required: true
 jobs:
   cleanup-environment:
     name: Clean up any leftover artifacts from old Charm QA environments
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
       AGE_THRESHOLD: ${{ inputs.age_threshold }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
 
       ##################################################################################
@@ -73,20 +88,20 @@ jobs:
         id: creds
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.env_info.outputs.credentials-secret }}
+          CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
+          if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT
-            echo "${!KUBECONFIG_SECRET_NAME}" > "kubeconfig"
+            echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
             echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
-          fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
+          elif [[ "${CLOUD_TYPE}" == "o7k" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "openstack=true" >> $GITHUB_OUTPUT
             # Extract environment variables from the RC file
             while IFS= read -r line; do
@@ -101,7 +116,14 @@ jobs:
                   echo "::add-mask::$value"
                   echo "$key=$value" >> $GITHUB_ENV
                 fi
-            done <<< "${!NOVARC_SECRET_NAME}"
+            done <<< "${!CREDENTIALS_SECRET_NAME}"
+          elif [[ "${CLOUD_TYPE}" == "lxd" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "lxd=true" >> "$GITHUB_OUTPUT"
+            umask 077
+            LXD_CREDENTIALS_DIR="${RUNNER_TEMP}/lxd-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            mkdir -p "$LXD_CREDENTIALS_DIR"
+            printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
+            echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
 
       ##################################################################################
@@ -153,7 +175,7 @@ jobs:
             debug_output=$(kubectl debug "node/$node" \
               --image=ubuntu:24.04 \
               --profile=sysadmin \
-              -- bash -c "
+              -- env DRY_RUN="$DRY_RUN" bash -c "
                 storage=\"/host${STORAGE_PATH}\"
                 known_pvs='${KNOWN_PVS}'
                 [[ -d \"\$storage\" ]] || { echo '  (no rawfile-storage directory)'; exit 0; }
@@ -167,8 +189,12 @@ jobs:
                   else
                     size=\$(stat --format='%s' \"\$storage/\$dir/disk.img\" 2>/dev/null || echo 0)
                     human=\$(numfmt --to=iec \"\$size\" 2>/dev/null || echo \"\${size}B\")
-                    echo \"  DELETING orphan: \$dir (apparent: \$human)\"
-                    rm -rf \"\$storage/\$dir\"
+                    if [[ \"\$DRY_RUN\" == \"true\" ]]; then
+                      echo \"  Dry run: would delete orphan: \$dir (apparent: \$human)\"
+                    else
+                      echo \"  DELETING orphan: \$dir (apparent: \$human)\"
+                      rm -rf \"\$storage/\$dir\"
+                    fi
                   fi
                 done
               " 2>&1) || debug_status=$?
@@ -275,7 +301,7 @@ jobs:
         run: |
           kubectl get clusterroles,clusterrolebindings --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
-            select(.metadata.name | test("^(controller-)?charmqa-")) |
+            select(.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
@@ -284,6 +310,11 @@ jobs:
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           set -uo pipefail
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run: Kubernetes resources that would be deleted:"
+            cat resources_to_remove.txt || exit 1
+            exit 0
+          fi
 
           # Group resources by namespace
           declare -A namespaced_resources
@@ -347,6 +378,10 @@ jobs:
             created=$(openstack server show "$server_id" --format json | jq -r '.created')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete server: $server_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting server: $server_id (age: $age_minutes minutes)"
               openstack server delete "$server_id" || true
             fi
@@ -359,6 +394,10 @@ jobs:
             created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete security group: $sg_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
               openstack security group delete "$sg_id" || true
             fi
@@ -371,6 +410,10 @@ jobs:
             created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete load balancer: $lb_id and its pools (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
               # Delete pools first
               openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
@@ -389,6 +432,10 @@ jobs:
             created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete volume: $volume_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
               openstack volume delete "$volume_id" || true
             fi
@@ -401,6 +448,10 @@ jobs:
             created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
             age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
             if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete floating IP: $fip_id (age: $age_minutes minutes)"
+                continue
+              fi
               echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
               openstack floating ip delete "$fip_id" || true
             fi
@@ -452,7 +503,73 @@ jobs:
             if is_active_lb "$lb_id"; then
               echo "Skipping port $port_id — still used by load balancer $lb_id"
             else
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "Dry run: would delete orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
+                continue
+              fi
               echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
               openstack port delete "$port_id" || true
             fi
+          done
+      ##################################################################################
+      #  _     __   _______
+      # | |    \ \ / /  __ \
+      # | |     \ V /| |  | |
+      # | |      > < | |  | |
+      # | |____ / . \| |__| |
+      # |______/_/ \_\_____/
+      #
+      - name: Install lxd client
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo snap install lxd
+      - name: Set up LXD remote
+        id: lxd-remote
+        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          endpoint=$(yq '.endpoint' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          server_cert=$(yq '.server-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          client_cert=$(yq '.client-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          client_key=$(yq '.client-key' "$LXD_CREDENTIALS_DIR/creds.yaml")
+          LXC_BINARY="/snap/lxd/current/bin/lxc"
+          if [[ ! -x "$LXC_BINARY" ]]; then
+            echo "::error::LXD client binary not found at $LXC_BINARY"
+            exit 1
+          fi
+          export LXD_CONF="$LXD_CREDENTIALS_DIR/config"
+          mkdir -p "${LXD_CONF}/servercerts"
+          printf '%s\n' "${server_cert}" > "${LXD_CONF}/servercerts/charmqa.crt"
+          echo "${client_cert}" > "${LXD_CONF}/client.crt"
+          echo "${client_key}" > "${LXD_CONF}/client.key"
+          chmod 600 "${LXD_CONF}/client.key"
+          cat > "${LXD_CONF}/config.yml" <<EOF
+          default-remote: local
+          remotes:
+            charmqa:
+              addr: ${endpoint}
+              auth_type: tls
+          EOF
+          "$LXC_BINARY" remote list --format json | jq -e 'has("charmqa")' >/dev/null
+          echo "LXD_CONF=${LXD_CONF}" >> "$GITHUB_ENV"
+          echo "LXC_BINARY=${LXC_BINARY}" >> "$GITHUB_ENV"
+      - name: Find and delete instances older than age threshold
+        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
+        shell: bash
+        run: |-
+          "$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .[] |
+            select(.name | test("^juju-")) |
+            select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
+            .name
+          ' | while read -r name; do
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would delete instance: $name"
+              continue
+            fi
+            echo "Deleting instance: $name"
+            "$LXC_BINARY" delete --force "charmqa:${name}"
           done
