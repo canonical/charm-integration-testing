@@ -1339,6 +1339,7 @@ def _domain_with_two_mismatched_peers(anchor_channel: str, anchor_revision: int)
         platforms=["kubernetes"],
         constraints=[constraint],
     )
+    assert anchor.channel is not None
     # Peer A matches risk but has the wrong revision.
     peer_a = anchor.model_copy(update={"revision": anchor_revision + 1})
     # Peer B matches revision but has the wrong risk.
