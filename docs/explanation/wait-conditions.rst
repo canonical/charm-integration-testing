@@ -32,16 +32,11 @@ This design addresses scenarios where tests timeout despite the model being idle
 Blocking command budgets
 -----------------------
 
-Ordinary Juju CLI commands have a 60-second subprocess timeout, enforced centrally
-by the Jubilant transport. This includes status polling, diagnostic queries,
-scaling, and relation operations. A blocked command is
-terminated and raises ``subprocess.TimeoutExpired``.
-
-Long-running commands such as bootstrap, deployment, actions, and SSH use the
-client's existing one-day wait budget as a subprocess backstop, rather than the
-ordinary command limit. Juju's own operation-specific limits still apply.
-``kill-controller`` has a two-minute subprocess limit, matching the backend's
-existing cleanup timeout.
+All Juju CLI commands through the Jubilant transport have a five-minute
+subprocess ceiling, including bootstrap, actions, and transfers. Shorter explicit
+subprocess timeouts are preserved. A command exceeding its limit is terminated
+and raises ``subprocess.TimeoutExpired``. Juju's own operation-specific limits
+still apply. Terminating a CLI process does not roll back controller-side work.
 
 These are per-command limits, not shared diagnostic, cleanup, or whole-suite
 deadlines. Polling can overrun its configured deadline while a command finishes

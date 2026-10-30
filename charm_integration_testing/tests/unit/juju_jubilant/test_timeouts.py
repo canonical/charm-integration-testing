@@ -17,8 +17,8 @@ from juju_jubilant.client import JubilantClient
 
 
 class ExecutableClient(JubilantClient):
-    def __init__(self, executable: Path, query_timeout: timedelta = timedelta(seconds=60)) -> None:
-        super().__init__(query_timeout)
+    def __init__(self, executable: Path, command_timeout: timedelta = timedelta(minutes=5)) -> None:
+        super().__init__(command_timeout)
         self.executable = executable
 
     def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
@@ -49,13 +49,14 @@ def assert_processes_reaped(directory: Path) -> None:
             os.kill(int(pid.stem), 0)
 
 
-def test_query_timeout_kills_and_reaps_cli(sleeping_juju: Path) -> None:
-    # GIVEN a Juju command that never responds within its query budget
-    client = ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=200))
+@pytest.mark.parametrize("command", ["status", "bootstrap", "deploy", "run", "exec", "ssh", "scp"])
+def test_command_timeout_kills_and_reaps_cli(sleeping_juju: Path, command: str) -> None:
+    # GIVEN a Juju command that never responds within its command budget
+    client = ExecutableClient(sleeping_juju, command_timeout=timedelta(milliseconds=200))
 
     # WHEN the query runs
     with pytest.raises(subprocess.TimeoutExpired):
-        client.model(None).cli("status")
+        client.model(None).cli(command)
 
     # THEN the timed-out CLI is not left running
     assert_processes_reaped(sleeping_juju.parent)
@@ -63,7 +64,7 @@ def test_query_timeout_kills_and_reaps_cli(sleeping_juju: Path) -> None:
 
 def test_unit_queries_use_bounded_transport(sleeping_juju: Path) -> None:
     # GIVEN a unit query backed by a blocked Juju status command
-    backend = JubilantBackend(ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=200)))
+    backend = JubilantBackend(ExecutableClient(sleeping_juju, command_timeout=timedelta(milliseconds=200)))
 
     # WHEN the backend fetches status
     with pytest.raises(subprocess.TimeoutExpired):
@@ -92,7 +93,7 @@ def test_unit_queries_preserve_cli_error_details(tmp_path: Path) -> None:
 def test_controller_cleanup_bounds_subprocess_not_just_juju_wait() -> None:
     # GIVEN a controller removal that would block during API connection setup
     backend = JubilantBackend()
-    error = subprocess.TimeoutExpired(cmd="juju kill-controller", timeout=120)
+    error = subprocess.TimeoutExpired(cmd="juju kill-controller", timeout=300)
 
     # WHEN cleanup runs through the public backend operation
     with patch("jubilant._juju.subprocess.run", side_effect=error) as run:
@@ -100,13 +101,13 @@ def test_controller_cleanup_bounds_subprocess_not_just_juju_wait() -> None:
             backend.kill_controller("controller")
 
     # THEN a subprocess limit covers connection setup as well as Juju's own wait
-    assert run.call_args.kwargs["timeout"] == 120
+    assert run.call_args.kwargs["timeout"] == 300
 
 
 @pytest.mark.parametrize("wait_kind", ["single-model", "multi-model", "model-exists"])
 def test_polling_uses_command_timeout(sleeping_juju: Path, wait_kind: str) -> None:
     # GIVEN blocked status queries with a short per-command limit
-    backend = JubilantBackend(ExecutableClient(sleeping_juju, query_timeout=timedelta(milliseconds=200)))
+    backend = JubilantBackend(ExecutableClient(sleeping_juju, command_timeout=timedelta(milliseconds=200)))
     models = [JujuModelHandle(controller="controller", model=name) for name in ("first", "second")]
     budget = timedelta(seconds=10)
     start = time.monotonic()
@@ -127,16 +128,15 @@ def test_polling_uses_command_timeout(sleeping_juju: Path, wait_kind: str) -> No
         assert len(list(sleeping_juju.parent.glob("*.pid"))) == 2
 
 
-@pytest.mark.parametrize("command", ["bootstrap", "deploy", "run", "exec"])
-def test_long_operations_are_not_limited_to_query_budget(tmp_path: Path, command: str) -> None:
-    # GIVEN an operation taking longer than the ordinary query limit
-    executable = tmp_path / "juju"
-    executable.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(0.1)\nprint('complete')\n")
-    executable.chmod(0o755)
-    client = ExecutableClient(executable, query_timeout=timedelta(milliseconds=1))
+@pytest.mark.parametrize(("explicit_timeout", "expected"), [(2, 2), (600, 300)])
+def test_explicit_timeout_respects_command_ceiling(explicit_timeout: float, expected: float) -> None:
+    # GIVEN an explicit subprocess timeout supplied by Jubilant
+    client = JubilantClient().model(None)
+    error = subprocess.TimeoutExpired(cmd="juju status", timeout=expected)
 
-    # WHEN its operation-specific budget permits it to finish
-    result = client.model(None).cli(command)
+    # WHEN the command runs, THEN shorter limits survive and longer ones are capped
+    with patch("jubilant._juju.subprocess.run", side_effect=error) as run:
+        with pytest.raises(subprocess.TimeoutExpired):
+            client._cli("status", timeout=explicit_timeout)
 
-    # THEN the ordinary query limit has not truncated the operation
-    assert result == "complete\n"
+    assert run.call_args.kwargs["timeout"] == expected
