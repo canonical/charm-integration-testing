@@ -26,6 +26,7 @@ runs:
       if: inputs.install_args != ''
       shell: bash
       env:
+        GIT_CONFIG_GLOBAL: /dev/null
         MISE_INSTALL_ARGS: ${{ inputs.install_args }}
       run: |-
         read -r -a tools <<< "$MISE_INSTALL_ARGS"
