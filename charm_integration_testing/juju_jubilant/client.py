@@ -8,6 +8,8 @@ import jubilant
 from juju import JujuModelHandle
 
 
+# TODO: Remove once our Jubilant dependency provides equivalent subprocess limits:
+# https://github.com/canonical/jubilant/issues/443
 class _BoundedJuju(jubilant.Juju):
     command_timeout: float
 
@@ -20,7 +22,6 @@ class _BoundedJuju(jubilant.Juju):
         timeout: float | None = None,
     ) -> tuple[str, str]:
         # Bound connection stalls that Juju/Jubilant's operation waits do not cover.
-        # Temporary transport safeguard until canonical/jubilant#443 is addressed.
         timeout = self.command_timeout if timeout is None else min(timeout, self.command_timeout)
         return super()._cli(
             *args,
