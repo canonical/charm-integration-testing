@@ -29,22 +29,6 @@ The wait mechanism supports two timeout modes controlled by the ``strict_timeout
 
 This design addresses scenarios where tests timeout despite the model being idle, simply because insufficient time remained to complete all required consecutive stability checks. With the default non-strict behaviour, as long as the model reaches the idle state, it will be given additional time to confirm stability.
 
-Blocking command budgets
------------------------
-
-All Juju CLI commands through the Jubilant transport have a five-minute
-subprocess ceiling, including bootstrap, actions, and transfers. Shorter explicit
-subprocess timeouts are preserved. A command exceeding its limit is terminated
-and raises ``subprocess.TimeoutExpired``. Juju's own operation-specific limits
-still apply. Terminating a CLI process does not roll back controller-side work.
-
-These are per-command limits, not shared diagnostic, cleanup, or whole-suite
-deadlines. Polling can overrun its configured deadline while a command finishes
-or times out. Multiple commands each receive their own budget, and existing
-non-strict stability-check grace is unchanged. Crashdump tools retain their
-existing subprocess limits. Pytest's configured timeout applies separately to
-each test.
-
 The ``assert_idle`` Fixture
 ---------------------------
 
