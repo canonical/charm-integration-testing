@@ -17,5 +17,13 @@ runs:
       uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
       with:
         version: ${{ steps.version.outputs.version }}
-        install_args: ${{ inputs.install_args }}
+        install_args: uv
         cache: false
+    - name: Install requested tools
+      if: inputs.install_args != ''
+      shell: bash
+      env:
+        MISE_INSTALL_ARGS: ${{ inputs.install_args }}
+      run: |
+        read -r -a tools <<< "$MISE_INSTALL_ARGS"
+        mise install --locked "${tools[@]}"

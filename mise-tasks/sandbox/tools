@@ -2,6 +2,7 @@
 #MISE description="Install sandbox developer tools"
 set -euo pipefail
 
+GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked uv
 GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked
 
 MISE_ENV=sandbox mise exec -- bash -c '

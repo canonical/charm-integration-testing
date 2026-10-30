@@ -10,6 +10,7 @@ are pinned with mise, and Python dependencies are managed through Poetry.
 The CI and development-sandbox profiles add their own locked tools.
 
 ```bash
+mise install --locked uv
 mise install --locked
 mise run setup
 ```
