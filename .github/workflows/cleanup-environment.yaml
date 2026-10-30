@@ -248,7 +248,10 @@ jobs:
               any(owner_namespaces[]; orphaned_qa_namespace) and (live_owner | not);
             def helm_managed:
               .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
-              or (.metadata.annotations["meta.helm.sh/release-name"] // "") != "";
+              or (
+                (.metadata.annotations["meta.helm.sh/release-name"] // "") != "" and
+                (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
+              );
             def protected_rbac:
               (.metadata.labels["kubernetes.io/bootstrapping"] != null)
               or (.metadata.name | startswith("system:"))
