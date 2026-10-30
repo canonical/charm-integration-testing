@@ -122,6 +122,33 @@ overrides:
       - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
       - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
   - criteria:
+      - track: 'latest'
+      - risk: edge
+      - ubuntu_version: '24.04'
+    provides:
+      provide-cmr-mesh:
+        optional: true
+    requires:
+      dashboard-links:
+        optional: true
+      ingress:
+        optional: true
+        features: [sdi-legacy]
+      istio-ingress-route:
+        optional: true
+      kfp-api:
+        features: [kfp-api]
+      require-cmr-mesh:
+        optional: true
+      service-mesh:
+        optional: true
+    constraints:
+      - 'bool(endpoint[ingress]) => features(endpoint[ingress]) == {"sdi-legacy"}'
+      - '"kfp-api" in features(endpoint[kfp-api])'
+      - 'tracks({self}) == tracks(charms(endpoint[kfp-api]))'
+      - 'risks({self}) == risks(charms(endpoint[kfp-api]))'
+      - 'len(endpoint[object-storage]) + len(endpoint[s3-credentials]) == 1'  # Blocks on zero or both (charms/kfp-ui/src/charm.py::s3_relations_conflict_detector).
+  - criteria:
       - any_of:
           - track: '2.15'
           - track: '2.16'
