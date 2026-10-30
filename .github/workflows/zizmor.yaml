@@ -5,7 +5,7 @@ permissions:
 on:
   push:
     paths: [.github/workflows/*, .github/actions/**, .mise-version, mise*.toml, mise*.lock,
-      mise-tasks/**]
+      mise-tasks/*]
 jobs:
   workflow_validation:
     name: Workflow validation
