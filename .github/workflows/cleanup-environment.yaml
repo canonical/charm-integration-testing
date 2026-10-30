@@ -26,8 +26,8 @@ on:
         type: number
         default: 240
       dry_run:
-        description: List deletion candidates without deleting resources (skips rawfile
-          node cleanup).
+        description: Preview cleanup without deleting resources or rawfile data (creates
+          temporary debug pods).
         type: boolean
         default: false
   workflow_call:
@@ -41,8 +41,8 @@ on:
         type: number
         default: 240
       dry_run:
-        description: List deletion candidates without deleting resources (skips rawfile
-          node cleanup).
+        description: Preview cleanup without deleting resources or rawfile data (creates
+          temporary debug pods).
         type: boolean
         default: false
     secrets:
@@ -140,7 +140,7 @@ jobs:
         with:
           command: sudo snap install kubectl --classic
       - name: Remove orphaned rawfile PV directories from nodes
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' && !inputs.dry_run }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -175,7 +175,7 @@ jobs:
             debug_output=$(kubectl debug "node/$node" \
               --image=ubuntu:24.04 \
               --profile=sysadmin \
-              -- bash -c "
+              -- env DRY_RUN="$DRY_RUN" bash -c "
                 storage=\"/host${STORAGE_PATH}\"
                 known_pvs='${KNOWN_PVS}'
                 [[ -d \"\$storage\" ]] || { echo '  (no rawfile-storage directory)'; exit 0; }
@@ -189,8 +189,12 @@ jobs:
                   else
                     size=\$(stat --format='%s' \"\$storage/\$dir/disk.img\" 2>/dev/null || echo 0)
                     human=\$(numfmt --to=iec \"\$size\" 2>/dev/null || echo \"\${size}B\")
-                    echo \"  DELETING orphan: \$dir (apparent: \$human)\"
-                    rm -rf \"\$storage/\$dir\"
+                    if [[ \"\$DRY_RUN\" == \"true\" ]]; then
+                      echo \"  Dry run: would delete orphan: \$dir (apparent: \$human)\"
+                    else
+                      echo \"  DELETING orphan: \$dir (apparent: \$human)\"
+                      rm -rf \"\$storage/\$dir\"
+                    fi
                   fi
                 done
               " 2>&1) || debug_status=$?
@@ -309,7 +313,6 @@ jobs:
           if [[ "$DRY_RUN" == "true" ]]; then
             echo "Dry run: Kubernetes resources that would be deleted:"
             cat resources_to_remove.txt || exit 1
-            echo "Dry run: rawfile node cleanup skipped (no debug pods created)."
             exit 0
           fi
 
