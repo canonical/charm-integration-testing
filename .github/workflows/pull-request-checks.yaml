@@ -11,28 +11,22 @@ permissions:
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
-    env:
-      GITLEAKS_VERSION: 8.30.1
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Install gitleaks
-        run: |
-          set -euo pipefail
-          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          sha256sum --check --ignore-missing "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          tar xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
-          install -m 755 gitleaks /usr/local/bin/gitleaks
+      - name: Set up mise
+        uses: ./.github/actions/setup-mise
+        with:
+          install_args: aqua:gitleaks/gitleaks@8.30.1
       - name: Scan git history for secrets
         env:
           GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
             }}
         run: |
-          gitleaks git --config .gitleaks.toml --redact -v \
+          mise run security:gitleaks -- git --config .gitleaks.toml --redact -v \
             --log-opts="$GITLEAKS_LOG_OPTS"
   lint:
     runs-on: ubuntu-latest
@@ -41,18 +35,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Setup NPM
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - name: Set up mise
+        uses: ./.github/actions/setup-mise
         with:
-          node-version: 18
-      - name: Install markdownlint-cli2
-        run: npm install markdownlint-cli2 --global
+          install_args: python pipx:poetry
+      - name: Install dependencies
+        run: mise run setup
       - name: Run linter
-        run: ./scripts/lint.sh
+        run: mise run lint
   charm-integration-testing-unit-tests:
     runs-on: ubuntu-latest
     steps:
@@ -60,12 +50,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
+      - name: Set up mise
+        uses: ./.github/actions/setup-mise
+        with:
+          install_args: python pipx:poetry
       - name: Install dependencies
-        run: poetry install
+        run: mise run setup
       - name: Run Charm Integration Testing Unit Tests
-        run: ./scripts/charm-integration-testing-unit-tests.sh
+        run: mise run test:charm-integration-testing
   charm-testing-integration-tests:
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
     permissions:
@@ -80,12 +72,14 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
+      - name: Set up mise
+        uses: ./.github/actions/setup-mise
+        with:
+          install_args: python pipx:poetry
       - name: Install dependencies
-        run: poetry install
+        run: mise run setup
       - name: Run Validators Unit Tests
-        run: ./scripts/validators-unit-tests.sh
+        run: mise run test:validators
   bundle-builder-x-tests:
     runs-on: ubuntu-latest
     steps:
@@ -94,13 +88,15 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Install poetry
-        run: pipx install poetry==2.0.1
+      - name: Set up mise
+        uses: ./.github/actions/setup-mise
+        with:
+          install_args: python pipx:poetry
       - name: Install dependencies
-        run: poetry install
+        run: mise run setup
       - name: Run Bundle Builder X Tests
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |-
-          ./scripts/bundle-builder-x-tests.sh 'unit|integration|logic|overrides' \
+          mise run test:bundle-builder-x -- 'unit|integration|logic|overrides' \
             --overrides ./static/charm-overrides --overrides-modified-since "origin/${GITHUB_BASE_REF}"

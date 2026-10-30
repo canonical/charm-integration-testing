@@ -26,7 +26,7 @@ RESTORE_CMD=""
 usage() {
     cat <<'EOF'
 Usage:
-  development-sandbox/bin/verify-validator.sh \
+  mise run sandbox:verify-validator -- \
     --model <model> --app <requirer-app> --provider <provider-app> --validator <validator-name> [options]
 
 Required:
@@ -229,8 +229,8 @@ PY
 
 run_step pre_status "juju status -m $MODEL --relations"
 
-run_step format "./scripts/format.sh"
-run_step lint "./scripts/lint.sh"
+run_step format "mise run format"
+run_step lint "mise run lint"
 run_step unit_tests "$TEST_CMD"
 
 # Poetry normalises underscores to hyphens in distribution names, so derive
@@ -246,10 +246,10 @@ _first_up=true
 for _level in "${LEVEL_ARRAY[@]}"; do
     _step="validate_up_${_level}"
     if [ "$_first_up" = "true" ]; then
-        run_step "$_step" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level --reinstall"
+        run_step "$_step" "mise run sandbox:dev-validate -- --model $MODEL --app $APP --level $_level --reinstall"
         _first_up=false
     else
-        run_step "$_step" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "$_step" "mise run sandbox:dev-validate -- --model $MODEL --app $APP --level $_level"
     fi
 done
 run_step status_up "juju status -m $MODEL --relations"
@@ -259,7 +259,7 @@ if [ -n "$DOWN_CMD" ]; then
     run_step provider_down "$DOWN_CMD"
     run_step status_down "juju status -m $MODEL --relations"
     for _level in "${LEVEL_ARRAY[@]}"; do
-        run_step "validate_down_${_level}" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "validate_down_${_level}" "mise run sandbox:dev-validate -- --model $MODEL --app $APP --level $_level"
     done
     run_step provider_restore "$RESTORE_CMD"
     run_step status_restored "juju status -m $MODEL --relations"
@@ -294,7 +294,7 @@ PY
     run_step provider_down "juju scale-application -m $MODEL $PROVIDER 0"
     run_step status_down "juju status -m $MODEL --relations"
     for _level in "${LEVEL_ARRAY[@]}"; do
-        run_step "validate_down_${_level}" "$PROJECT/development-sandbox/bin/dev-validate.py --model $MODEL --app $APP --level $_level"
+        run_step "validate_down_${_level}" "mise run sandbox:dev-validate -- --model $MODEL --app $APP --level $_level"
     done
     run_step provider_restore "juju scale-application -m $MODEL $PROVIDER $orig_units"
     run_step status_restored "juju status -m $MODEL --relations"

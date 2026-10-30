@@ -91,7 +91,7 @@ constraint, not a workload storage setting.
 
 When the test suite bootstraps controllers instead, pass
 ``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
-``scripts/run-tests.sh``. For a separate neighbor controller, also pass
+``mise run test:suite``. For a separate neighbor controller, also pass
 ``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
 These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
 When reproducing a specific execution, preserve any other bootstrap constraints
@@ -193,17 +193,18 @@ active/idle wait, followed by simple validation without additional restarts.
 These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
-Install the repository dependencies
------------------------------------
+Install the repository tools and dependencies
+---------------------------------------------
 
-Next, install the Python dependencies to run the repository code:
+Use mise to install the locked tool versions and Poetry dependencies:
 
 .. code:: bash
 
-   sudo apt-get update
-   sudo apt-get install pipx
-   pipx install poetry==2.0
-   poetry install
+   mise install --locked
+   mise run setup
+
+The tasks below can be invoked through mise, for example
+``mise run bundle:build`` and ``mise run test:suite``.
 
 Generate dynamic bundles
 ------------------------
@@ -212,7 +213,7 @@ To run the tests, we will generate a dynamic bundle that includes our test charm
 
 .. code:: bash
 
-   ./scripts/build-bundle.sh \
+   mise run bundle:build -- \
     --charms \
       "target::${TARGET_CHARM}::${CHANNEL}::${REVISION}::${SERIES}" \
       "neighbor::${NEIGHBOR_CHARM}::default::default::default" \
@@ -257,7 +258,7 @@ correct order:
 
 .. code:: bash
 
-   ./scripts/run-tests.sh \
+   mise run test:suite -- \
      --juju-cloud "${K8S_CLOUD_NAME}" \
      --juju-controller "${K8S_CONTROLLER_NAME}" \
      --model "${MODEL_NAME}" \
@@ -439,7 +440,7 @@ to place the neighbor model:
 
   .. code:: bash
 
-     ./scripts/run-tests.sh \
+     mise run test:suite -- \
        --target-cloud "${CLOUD_NAME}" \
        --target-charm "mysql" \
        --target-endpoint "database" \

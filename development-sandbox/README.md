@@ -6,36 +6,36 @@ A Multipass VM for developing and testing charm integration validators and other
 
 ### Host-side
 
-All host operations go through a single entry point:
+Run host operations through the repository's mise tasks:
 
 | Command | Purpose |
 |---|---|
-| `scripts/sandbox.sh up` | Create or resume the VM and install deps |
-| `scripts/sandbox.sh down` | Stop the VM |
-| `scripts/sandbox.sh destroy` | Delete the VM |
-| `scripts/sandbox.sh shell` | Open a shell inside the VM |
-| `scripts/sandbox.sh run 'task'` | Launch Copilot autonomously |
-| `scripts/sandbox.sh run --interactive` | Launch Copilot interactively |
+| `mise run sandbox:up` | Create or resume the VM and install deps |
+| `mise run sandbox:down` | Stop the VM |
+| `mise run sandbox:destroy` | Delete the VM |
+| `mise run sandbox:shell` | Open a shell inside the VM |
+| `mise run sandbox:run -- 'task'` | Launch Copilot autonomously |
+| `mise run sandbox:run -- --interactive` | Launch Copilot interactively |
 
 Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
 
-Run these inside the VM after entering with `scripts/sandbox.sh shell` or by the agent.
+Run these inside the VM after entering with `mise run sandbox:shell` or by the agent.
 
 | Command | Purpose |
 |---|---|
-| `bin/setup-k8s.sh` | Install Canonical k8s and Chaos Mesh, and register as Juju cloud |
-| `bash bin/setup-chaos-mesh.sh` | Install or verify Chaos Mesh on an existing sandbox cluster |
-| `bin/setup-lxd.sh` | Install/initialize LXD for Juju's built-in `localhost` cloud |
-| `bin/verify-validator.sh` | Run quality gates and workload-up/down evidence |
-| `bin/dev-validate.py` | Inject validators into a unit and report results |
+| `mise run sandbox:setup-k8s` | Install Canonical k8s and register it as a Juju cloud |
+| `mise run sandbox:setup-chaos-mesh` | Install or verify Chaos Mesh on an existing sandbox cluster |
+| `mise run sandbox:setup-lxd` | Install/initialize LXD for Juju's built-in `localhost` cloud |
+| `mise run sandbox:verify-validator --` | Run quality gates and workload-up/down evidence |
+| `mise run sandbox:dev-validate --` | Inject validators into a unit and report results |
 
 ## Typical flow
 
-1. `scripts/sandbox.sh up` - provision or resume the VM.
-2. `scripts/sandbox.sh run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
+1. `mise run sandbox:up` - provision or resume the VM.
+2. `mise run sandbox:run -- --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
 3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
 
 ## Chaos Mesh
@@ -78,7 +78,7 @@ Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).
 - `SANDBOX_MOUNT` overrides the VM-side mount path (default: `/project`). Set this to a unique path (e.g. `/project-fork`) when multiple repo clones share the same VM.
 - `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` override VM resources at creation time (defaults: `4`, `8G`, `40G`). These can be set via environment variables or CLI flags (`--cpus`, `--memory`, `--disk`) and apply only when creating a new VM.
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
-- Python dependencies are managed with Poetry.
+- mise installs the repository's locked tools from the sandbox profile; Poetry manages Python dependencies.
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
 - **nginx API cache:** auto-provisioned via `substrate.yaml` cloud-init, listening on `http://localhost:8080` *inside the VM* (`/charmhub/`, `/snapcraft/`), caching responses for 4h.
 - Any host env var prefixed `SANDBOX_VAR_` is passed into the VM with the prefix stripped, e.g. `SANDBOX_VAR_CHARMHUB_API_URL` / `SANDBOX_VAR_SNAPCRAFT_API_URL` override `bundle_builder_x`'s API base URLs inside the VM as `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL` (e.g. point at the nginx cache above), and `SANDBOX_VAR_COPILOT_MODEL` overrides the Copilot model inside the VM. See `.env.sample`.

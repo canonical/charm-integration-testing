@@ -8,11 +8,15 @@ a Z3 constraint solver to produce minimal, valid bundles.
 Prerequisites
 -------------
 
-The tool is installed as part of the monorepo Poetry environment::
+Install the locked toolchain and Poetry dependencies with mise::
 
-    poetry install
+    mise install --locked
+    mise run setup
 
-This makes the ``bundle-builder-x`` CLI available inside the Poetry shell.
+Build bundles through the repository task (or use the CLI from the mise
+environment)::
+
+    mise run bundle:build-x -- --help
 
 Writing a spec file
 -------------------
@@ -39,7 +43,7 @@ Running the CLI
 
 .. code-block:: bash
 
-   poetry run bundle-builder-x \
+   mise run bundle:build-x -- \
        --spec my-spec.yaml \
        --overrides static/charm-overrides \
        --output-bundles output/ \

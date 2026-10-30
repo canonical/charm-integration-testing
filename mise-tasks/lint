@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Run repository linters"
+#MISE raw_args=true
+#MISE tools.node="24.22.0"
+#MISE tools."npm:markdownlint-cli2"="0.24.0"
+set -euo pipefail
+
+export PATH="$(mise where npm:markdownlint-cli2)/node_modules/.bin:$PATH"
+exec ./scripts/lint.sh "$@"

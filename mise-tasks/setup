@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Install the repository's Poetry dependencies"
+#MISE raw_args=true
+set -euo pipefail
+
+poetry install "$@"

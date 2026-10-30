@@ -21,7 +21,7 @@ it passes at the requested level. Report any failures with diagnostic detail.
 3. Create the model, generate, and deploy the bundle:
    ```
    juju add-model <interface>-test
-   bundle-builder-x --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
+   mise run bundle:build-x -- --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
    juju deploy /tmp/bundles/<interface>-test.yaml -m <interface>-test
    juju wait-for application <provider> -m <interface>-test --timeout 10m
    juju wait-for application <requirer> -m <interface>-test --timeout 10m
@@ -30,7 +30,7 @@ it passes at the requested level. Report any failures with diagnostic detail.
 4. Run the validator at the **highest level the validator supports** (check
    `validate()` in `validator.py` -- use `deep` if implemented, otherwise `simple`):
    ```
-   $PROJECT_ROOT/development-sandbox/bin/dev-validate.py \
+   mise run sandbox:dev-validate -- \
      --model <interface>-test \
      --app <requirer> \
      --level <highest-supported-level>
@@ -38,7 +38,7 @@ it passes at the requested level. Report any failures with diagnostic detail.
 
 5. Run automated verification evidence:
    ```
-   $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
+   mise run sandbox:verify-validator -- \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
@@ -51,7 +51,7 @@ it passes at the requested level. Report any failures with diagnostic detail.
    Juju databag retains credentials even at 0 units. In that case use `--down-cmd` and
    `--restore-cmd` to scale the k8s deployment directly:
    ```
-   $PROJECT_ROOT/development-sandbox/bin/verify-validator.sh \
+   mise run sandbox:verify-validator -- \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \

@@ -81,6 +81,7 @@ Always install these regardless of platform, since log collection needs both too
   - Collects logs from Kubernetes controllers
   - Captures pod logs, statefulset events, and K8s-specific state
   - **Required for reproducing issue #693** (mixed-cloud CMR logging)
+  - Installed from the commit pinned in the mise environment profile and `mise.lock`
 
 - **kubectl** (snap)
   - Inspect Kubernetes pods and events
@@ -105,16 +106,25 @@ Always install these regardless of platform, since log collection needs both too
 
 ## Step-by-Step Setup
 
+Install the repository's locked tools before setting up substrates:
+
+```bash
+cd "$PROJECT_ROOT"
+GIT_CONFIG_GLOBAL=/dev/null mise run sandbox:tools
+```
+
+This task installs and verifies the `sandbox` mise profile, including the pinned
+crashdump and log-scanning tools.
+
 ### Option 1: Machine Charms Only (LXD)
 
 ```bash
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup LXD only
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 
 # That's it! Test suite will bootstrap controller when you run tests with --current-state
 ```
@@ -125,10 +135,9 @@ $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup K8s only
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # That's it! Test suite will bootstrap controller when you run tests with --current-state
 ```
@@ -139,11 +148,10 @@ $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 # 1. Install logging tools
 sudo snap install juju-crashdump --classic
 sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
 
 # 2. Setup both substrates
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
+cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # That's it! Test suite will bootstrap both controllers when you run tests with --current-state
 ```
@@ -159,9 +167,7 @@ sudo snap install juju-crashdump --classic
 # kubectl: For Kubernetes inspection and juju-k8s-crashdump support
 sudo snap install kubectl --classic
 
-# juju-k8s-crashdump: For Kubernetes controllers
-# Using specific commit hash from charm-testing.yaml workflow
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+# juju-k8s-crashdump is installed from the commit pinned in mise.toml and mise.lock.
 ```
 
 **Note**: If installation fails, see Troubleshooting section below.
@@ -188,7 +194,7 @@ Once setup is complete, run tests with the test suite. The suite handles control
 
 ```bash
 # The test suite will bootstrap LXD controller automatically
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --target-endpoint "database" \
@@ -198,7 +204,7 @@ Once setup is complete, run tests with the test suite. The suite handles control
   ...
 
 # The test suite will bootstrap both controllers for CMR
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "glauth-utils" \
   --neighbor-cloud "local-k8s" \
@@ -242,7 +248,7 @@ juju controllers
 This is fine! The setup scripts are idempotent:
 
 ```bash
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 # Output: LXD substrate ready (or already configured)
 ```
 
@@ -266,7 +272,7 @@ If `/home/ubuntu/k8s.yaml` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
@@ -306,7 +312,7 @@ After setup completes, you can run charm integration tests:
 
 ```bash
 # Test a single charm on LXD
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --target-endpoint "database" \
@@ -316,7 +322,7 @@ After setup completes, you can run charm integration tests:
   --prefix "test-1"
 
 # Test mixed-cloud CMR (LXD + K8s)
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "glauth-utils" \
   --target-endpoint "glauth-auxiliary" \
@@ -339,8 +345,8 @@ See the `run-charm-tests` skill for full documentation.
 ## Key References
 
 - **charm-testing.yaml**: Official workflow that shows the canonical setup process
-- **setup-lxd.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh`
-- **setup-k8s.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh`
+- **setup-lxd.sh**: `mise run sandbox:setup-lxd`
+- **setup-k8s.sh**: `mise run sandbox:setup-k8s`
 - **Issue #693**: Mixed-cloud CMR logging (requires juju-k8s-crashdump)
 
 ---

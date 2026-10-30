@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Install or verify Chaos Mesh on the selected cluster"
+#MISE raw_args=true
+#MISE tools."aqua:helm/helm"="3.21.4"
+#MISE tools."aqua:jqlang/jq"="1.8.2"
+set -euo pipefail
+
+exec bash ./development-sandbox/bin/setup-chaos-mesh.sh "$@"

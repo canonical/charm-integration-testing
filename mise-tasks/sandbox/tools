@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Install sandbox developer tools"
+set -euo pipefail
+
+GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked
+
+MISE_ENV=sandbox mise exec -- bash -c '
+    command -v copilot
+    command -v gh
+    command -v yq
+    command -v markdownlint-cli2
+    command -v trufflehog
+    command -v juju-k8s-crashdump
+'

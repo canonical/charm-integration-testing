@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run charm integration testing unit tests"
+#MISE raw_args=true
+set -euo pipefail
+
+exec ./scripts/charm-integration-testing-unit-tests.sh "$@"

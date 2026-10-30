@@ -1,0 +1,8 @@
+[settings]
+lockfile = true
+
+[tools]
+python = "3.12.12"
+"pipx:poetry" = "2.3.0"
+"aqua:jqlang/jq" = "1.8.2"
+"aqua:mikefarah/yq" = "4.54.1"

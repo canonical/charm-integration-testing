@@ -1,13 +1,13 @@
 ---
 name: run-charm-tests
-description: Run charm integration tests to reproduce test failures and issues. Uses scripts/run-tests.sh with test observer parameters to recreate exact test scenarios locally.
+description: Run charm integration tests to reproduce test failures and issues. Uses the mise test:suite task with Test Observer parameters to recreate exact test scenarios locally.
 ---
 
 # Skill: run-charm-tests
 
 ## Goal
 
-Run charm integration tests via `scripts/run-tests.sh` to reproduce test failures and issues. Given test observer execution parameters, recreate the exact test scenario and execute it locally.
+Run charm integration tests via `mise run test:suite --` to reproduce test failures and issues. The task runs `scripts/run-tests.sh` with the selected mise environment and locked test tools.
 
 ## Overview
 
@@ -39,7 +39,7 @@ This installs:
 ### Minimal Example - Single Cloud (LXD)
 ```bash
 # Test a single charm on LXD (machine cloud)
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --target-endpoint "database" \
@@ -55,7 +55,7 @@ This installs:
 # Test with both models on a single controller (no second bootstrap). --same-controller
 # requires --neighbor-cloud; pass the same cloud as --target-cloud for a same-platform
 # neighbor.
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "mysql" \
   --target-endpoint "database" \
@@ -74,7 +74,7 @@ This installs:
 ### With Cross-Model Relation (CMR) - Mixed Clouds
 ```bash
 # Test with target on LXD (machine) and neighbor on K8s
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "glauth-utils" \
   --target-endpoint "glauth-auxiliary" \
@@ -97,7 +97,7 @@ This installs:
 UNIQUE_PREFIX="test-cmr-$(date +%s)"
 
 # IMPORTANT: Include controller bootstrap constraints (even if empty) and log-level
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-bundle "./generated-target-bundle.yaml" \
   --target-controller-bootstrap-config '{}' \
@@ -164,10 +164,10 @@ additional constraints when reproducing a specific execution.
 **Common Mistake:**
 ```bash
 # ❌ WRONG - Missing constraints parameters
-./scripts/run-tests.sh --target-cloud localhost --target-charm postgresql ...
+mise run test:suite -- --target-cloud localhost --target-charm postgresql ...
 
 # ✅ CORRECT - Includes all required parameters
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud localhost \
   --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --target-charm postgresql ...
@@ -184,19 +184,19 @@ When multiple agents or users run tests simultaneously, use **unique controller 
 **Option 1: Timestamp-based (recommended for simple cases)**
 ```bash
 PREFIX="test-$(date +%s)"  # e.g., test-1719001627
-./scripts/run-tests.sh --prefix "$PREFIX" ...
+mise run test:suite -- --prefix "$PREFIX" ...
 ```
 
 **Option 2: UUID-based (guaranteed unique)**
 ```bash
 PREFIX="test-$(python3 -c 'import uuid; print(str(uuid.uuid4())[:8])')"  # e.g., test-a1b2c3d4
-./scripts/run-tests.sh --prefix "$PREFIX" ...
+mise run test:suite -- --prefix "$PREFIX" ...
 ```
 
 **Option 3: Agent-based (for CI/CD agents)**
 ```bash
 PREFIX="agent-${AGENT_NAME}-${BUILD_ID}"  # e.g., agent-copilot1-12345
-./scripts/run-tests.sh --prefix "$PREFIX" ...
+mise run test:suite -- --prefix "$PREFIX" ...
 ```
 
 ### Example: Parallel Execution
@@ -204,7 +204,7 @@ PREFIX="agent-${AGENT_NAME}-${BUILD_ID}"  # e.g., agent-copilot1-12345
 ```bash
 # Agent 1 - Using timestamp
 AGENT1_PREFIX="test-$(date +%s)-agent1"
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --log-dir "./test-logs-${AGENT1_PREFIX}" \
@@ -213,7 +213,7 @@ AGENT1_PREFIX="test-$(date +%s)-agent1"
 
 # Agent 2 - Using UUID
 AGENT2_PREFIX="test-$(python3 -c 'import uuid; print(str(uuid.uuid4())[:12])')"
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --log-dir "./test-logs-${AGENT2_PREFIX}" \
@@ -251,12 +251,12 @@ juju kill-controller "<controller-name>" -y
 ⚠️ **Do NOT reuse prefixes** across concurrent test runs:
 ```bash
 # ❌ WRONG - Multiple agents using same prefix
-./scripts/run-tests.sh --prefix "test-509067" &  # Agent 1
-./scripts/run-tests.sh --prefix "test-509067" &  # Agent 2 - COLLISION!
+mise run test:suite -- --prefix "test-509067" &  # Agent 1
+mise run test:suite -- --prefix "test-509067" &  # Agent 2 - COLLISION!
 
 # ✅ CORRECT - Each agent uses unique prefix
-./scripts/run-tests.sh --prefix "test-509067-agent1" &
-./scripts/run-tests.sh --prefix "test-509067-agent2" &
+mise run test:suite -- --prefix "test-509067-agent1" &
+mise run test:suite -- --prefix "test-509067-agent2" &
 ```
 
 ---
@@ -284,7 +284,7 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 
 **Option A: Run tests via CLI**
 ```bash
-./scripts/run-tests.sh --target-cloud kubernetes --target-charm postgresql-k8s
+mise run test:suite -- --target-cloud kubernetes --target-charm postgresql-k8s
 ```
 The test suite handles setup, execution, and teardown automatically.
 
@@ -480,7 +480,7 @@ juju clouds                    # Should see 'localhost' (LXD) and 'local-k8s'
 
 Run the test:
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "glauth-utils" \
   --target-endpoint "glauth-auxiliary" \
@@ -509,7 +509,7 @@ ls -lh test-logs/juju-controller-*.tar.gz
 ### Scenario 2: Run Single Test Class
 
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --target-endpoint "database" \
@@ -525,7 +525,7 @@ ls -lh test-logs/juju-controller-*.tar.gz
 
 Run with verbose logging and preserve environment:
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --target-endpoint "database" \
@@ -559,7 +559,7 @@ juju status -m target/mymodel
 The skill translates test observer parameters to `run-tests.sh` invocation:
 
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \                    # LXD
   --target-bundle "./generated-target-bundle.yaml" \
   --target-controller-bootstrap-config "..." \
@@ -672,7 +672,7 @@ The sandbox environment has resource constraints that cause some tests to fail u
 When validating fixes, especially for mixed-cloud logging bugs, exclude these tests:
 
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "glauth-utils" \
   --neighbor-cloud "local-k8s" \
@@ -706,7 +706,7 @@ juju kill-controller target -y
 juju kill-controller neighbor -y
 
 # Retry the test
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   ...
@@ -722,7 +722,7 @@ juju clouds | grep local-k8s
 
 # If not found, install and configure K8s
 # (See setup-k8s skill documentation)
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+mise run sandbox:setup-k8s
 
 # Bootstrap a K8s controller
 juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
@@ -733,7 +733,7 @@ juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
 Increase the timeout and use verbose logging:
 
 ```bash
-./scripts/run-tests.sh \
+mise run test:suite -- \
   --target-cloud "localhost" \
   --target-charm "postgresql" \
   --log-cli-level "DEBUG" \
@@ -769,7 +769,7 @@ juju ssh -m target/mymodel 0 "sudo grep -i relation /var/log/juju/unit*.log"
 1. **Start Simple**: Begin with single-cloud tests before CMR
 2. **Narrow Scope**: Run individual test modules before full suite
 3. **Preserve Models**: Use `--current-state` to skip teardown for debugging
-4. **Clean Between Runs**: Use `scripts/sandbox.sh` to reset or create new VMs between test iterations
+4. **Clean Between Runs**: Use `mise run sandbox:destroy` or `mise run sandbox:up` to reset or create VMs between test iterations
 5. **Check Prerequisites**: Verify LXD/K8s available before running with `/setup-lxd` or `/setup-k8s`
 6. **Capture Output**: Logs are automatically collected into the log directory specified by `--log-dir`
 
@@ -793,4 +793,4 @@ After identifying and fixing an issue:
 - **Resource Registry**: `charm_integration_testing/juju/resource_registry/`
 - **Scheduler**: `charm_integration_testing/test_suite/scheduler/`
 - **Workflow**: `.github/workflows/charm-testing.yaml`
-- **Run Script**: `scripts/run-tests.sh`
+- **Run Task**: `mise run test:suite`

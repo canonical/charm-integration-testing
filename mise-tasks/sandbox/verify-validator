@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run validator quality and workload checks in the sandbox"
+#MISE raw_args=true
+set -euo pipefail
+
+exec bash ./development-sandbox/bin/verify-validator.sh "$@"

@@ -15,7 +15,7 @@ clusters. Setup does not create chaos experiments.
 
 1. Run the setup script:
    ```
-   $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+   cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
    ```
    This also runs the Chaos Mesh setup. Do not run it separately afterward.
    Wait for the script to finish successfully before proceeding.
@@ -45,7 +45,7 @@ or verification is needed. Do not bootstrap another controller or model.
    The script uses kubectl, or `sudo -n k8s kubectl` if kubectl is absent.
 2. Run:
    ```bash
-   bash "$PROJECT_ROOT/development-sandbox/bin/setup-chaos-mesh.sh" /home/ubuntu/k8s.yaml
+   cd "$PROJECT_ROOT" && mise run sandbox:setup-chaos-mesh -- /home/ubuntu/k8s.yaml
    ```
    The configuration path is optional and defaults to `/home/ubuntu/k8s.yaml`.
 3. Confirm the script exits successfully. It checks StressChaos and IOChaos
@@ -53,11 +53,10 @@ or verification is needed. Do not bootstrap another controller or model.
 
 ## Versions and settings
 
-The scripts are the source of truth for versions. Kubernetes setup installs
-Helm 3.21.4 with SHA-256 verification if Helm is absent. It keeps an existing
-Helm 3 installation and rejects other major versions. It also installs curl,
-jq, and CA certificates if needed. Tool setup and the Canonical k8s fallback
-need sudo access without a password prompt.
+mise pins Helm 3.21.4 and jq 1.8.2 for the setup tasks. Canonical k8s setup
+still manages substrate provisioning and may install curl and CA certificates
+if needed. Tool setup and the Canonical k8s fallback need sudo access without
+a password prompt.
 
 Chaos Mesh uses chart 2.8.4 from https://charts.chaos-mesh.org, release and
 namespace `chaos-mesh`, runtime `containerd`, socket

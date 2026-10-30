@@ -1,0 +1,6 @@
+[settings]
+task.run_auto_install = false
+
+[tools]
+"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12" }

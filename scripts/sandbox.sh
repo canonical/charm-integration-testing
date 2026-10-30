@@ -358,51 +358,14 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Set up Python venv with project packages (poetry manages the venv)
-    echo "==> Installing Python dependencies via poetry..."
+    # Install the project-pinned mise toolchain and Poetry dependencies in the VM.
+    echo "==> Installing the mise toolchain and Python dependencies..."
+    multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
-        if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
-            if ! command -v pipx &>/dev/null; then
-                sudo apt-get install -y -q pipx
-            fi
-            pipx install 'poetry==2.*'
-            pipx ensurepath
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
-        fi
         cd '$VM_MOUNT'
-        poetry install
-    "
-
-    # Install node-based tools used by the sandbox if not present
-    echo "==> Checking for node-based tools..."
-    multipass exec "$VM_NAME" -- bash -lc "
-        set -euo pipefail
-        if ! command -v node &>/dev/null; then
-            sudo snap install node --classic
-        fi
-
-        if ! command -v copilot &>/dev/null; then
-            echo '==> Installing @github/copilot...'
-            sudo npm install -g @github/copilot
-        else
-            echo '==> @github/copilot: found.'
-        fi
-
-
-        if ! command -v markdownlint-cli2 &>/dev/null; then
-            echo '==> Installing markdownlint-cli2...'
-            sudo npm install -g markdownlint-cli2
-        else
-            echo '==> markdownlint-cli2: found.'
-        fi
-
-        if ! command -v gh &>/dev/null; then
-            echo '==> Installing gh (GitHub CLI)...'
-            sudo snap install gh --classic
-        else
-            echo '==> gh: found.'
-        fi
+        GIT_CONFIG_GLOBAL=/dev/null MISE_ENV=sandbox mise run sandbox:tools
+        mise run setup
     "
 
     _vm_gh_auth_login

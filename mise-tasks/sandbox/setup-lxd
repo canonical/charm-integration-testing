@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Set up the sandbox LXD substrate"
+#MISE raw_args=true
+set -euo pipefail
+
+exec bash ./development-sandbox/bin/setup-lxd.sh "$@"

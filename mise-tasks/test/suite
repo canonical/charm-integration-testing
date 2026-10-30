@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run charm integration suite tests"
+#MISE raw_args=true
+set -euo pipefail
+
+export MISE_ENV="${MISE_ENV:-ci}"
+export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}"
+exec mise exec -- ./scripts/run-tests.sh "$@"

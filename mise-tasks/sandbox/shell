@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Open a shell in the development sandbox"
+#MISE raw_args=true
+set -euo pipefail
+
+exec ./scripts/sandbox.sh shell "$@"

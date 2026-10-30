@@ -7,34 +7,36 @@ Testing.
 
 ## General recommendations
 
-Following the [README Getting Started](README.md#getting-started) guide to clone
-and download dependencies.
+Follow the [README Getting Started](README.md#getting-started) guide to install
+the locked toolchain and project dependencies.
 
 ## Linting and Formatting
 
 Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
 [markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
-automatically on Pull Requests to this repository. To format, run:
+automatically on Pull Requests to this repository. Tool versions are pinned by
+mise; use these task entry points:
 
 ```bash
-./scripts/format.sh
+mise run format
+mise run lint
 ```
 
 ## Tooling and Continuous Integration
 
-### Scripts
+### Mise tasks
 
 | Script | Purpose |
 |---|---|
-| `scripts/format.sh` | Auto-fix: ruff, yamlfix, markdownlint |
-| `scripts/lint.sh` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
-| `scripts/charm-integration-testing-unit-tests.sh` | Run `charm_integration_testing` unit tests |
-| `scripts/validators-unit-tests.sh` | Run validator unit tests |
-| `scripts/bundle-builder-x-tests.sh` | Run bundle builder tests |
+| `mise run format` | Auto-fix: ruff, yamlfix, markdownlint |
+| `mise run lint` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
+| `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
+| `mise run test:validators` | Run validator unit tests |
+| `mise run test:bundle-builder-x` | Run bundle builder tests |
 
 ### CI gates (all must pass on every PR)
 
-1. **lint** — `scripts/lint.sh`
+1. **lint** — `mise run lint`
 2. **charm-integration-testing-unit-tests**
 3. **validators-unit-tests**
 4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
@@ -68,9 +70,11 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective scripts above before submitting a PR.
+Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective mise tasks above before submitting a PR.
 
-Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `scripts/run-tests.sh` (with the required Juju environment configured).
+Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `mise run test:suite` (with the required Juju environment configured).
+
+When running the integration-test task outside the development sandbox, install its profile first with `MISE_ENV=ci mise install --locked`. The sandbox setup installs its own profile.
 
 ## Pull requests
 
