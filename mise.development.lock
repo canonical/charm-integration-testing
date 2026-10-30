@@ -36,6 +36,21 @@ checksum_source = "mise-versions"
 url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
 url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/378332058"
 
+[[tools."aqua:mpalmer/action-validator"]]
+version = "0.6.0"
+backend = "aqua:mpalmer/action-validator"
+specifiers = ["0.6.0"]
+
+[tools."aqua:mpalmer/action-validator"."platforms.linux-arm64"]
+checksum = "sha256:38a582690ab7e64ba33b4c29eaf16979ed116d4daf40fde39ec18992c475c0b1"
+url = "https://github.com/mpalmer/action-validator/releases/download/v0.6.0/action-validator_linux_arm64"
+url_api = "https://api.github.com/repos/mpalmer/action-validator/releases/assets/153122332"
+
+[tools."aqua:mpalmer/action-validator"."platforms.linux-x64"]
+checksum = "sha256:fa61521913ee4cf5de7e4d5b803741b2c60ebde447ee38e2b71abbd213d3354a"
+url = "https://github.com/mpalmer/action-validator/releases/download/v0.6.0/action-validator_linux_amd64"
+url_api = "https://api.github.com/repos/mpalmer/action-validator/releases/assets/153122329"
+
 [[tools.node]]
 version = "24.22.0"
 backend = "core:node"
@@ -54,3 +69,9 @@ version = "0.24.0"
 aube = { path = ".mise/locks/mise.development/npm-markdownlint-cli2/0.24.0", digest = "sha256:d76beb6e3aac6ad55a254433b35509683547147e7a20f0217eda5a784f0c2e34" }
 backend = "npm:markdownlint-cli2"
 specifiers = ["0.24.0"]
+
+[[tools."pipx:zizmor"]]
+version = "1.5.1"
+backend = "pipx:zizmor"
+specifiers = ["1.5.1"]
+uv = { path = ".mise/locks/mise.development/pipx-zizmor/1.5.1", digest = "sha256:99fc391efa72a9849266efef72be3326d1e13af034d44d37488be7a8017071e7" }

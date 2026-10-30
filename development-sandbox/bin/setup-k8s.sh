@@ -22,15 +22,8 @@ die() {
     exit 1
 }
 
-command -v helm >/dev/null 2>&1 || die "Run this through 'mise run sandbox:setup-k8s' to install Helm."
-command -v jq >/dev/null 2>&1 || die "Run this through 'mise run sandbox:setup-k8s' to install jq."
-
-if ! command -v curl >/dev/null 2>&1 \
-    || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
-    echo "==> Installing curl and CA certificates..."
-    sudo -n apt-get update
-    sudo -n apt-get install -y curl ca-certificates
-fi
+command -v helm >/dev/null 2>&1 || die "Helm missing; run 'mise run setup' inside the sandbox."
+command -v jq >/dev/null 2>&1 || die "jq missing; run 'mise run setup' inside the sandbox."
 
 helm_version=$(helm version --short)
 [[ "$helm_version" == v3.* ]] || die "Expected Helm 3; found $helm_version."

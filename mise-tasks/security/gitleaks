@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Scan the Git history for secrets"
-#MISE raw_args=true
-set -euo pipefail
-
-exec gitleaks "$@"

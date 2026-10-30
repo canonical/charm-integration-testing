@@ -73,17 +73,17 @@ Do not use the manual controller bootstrap steps when the test suite manages it.
 
 Always install these regardless of platform, since log collection needs both tools:
 
-- **juju-crashdump** (snap)
+- **juju-crashdump** (mise)
   - Collects logs from machine/LXD controllers
   - Captures unit logs, charm output, and Juju internals
 
-- **juju-k8s-crashdump** (git+pip)
+- **juju-k8s-crashdump** (mise)
   - Collects logs from Kubernetes controllers
   - Captures pod logs, statefulset events, and K8s-specific state
   - **Required for reproducing issue #693** (mixed-cloud CMR logging)
-  - Installed from the commit pinned in the mise environment profile and `mise.lock`
+  - Installed from the commit pinned in `mise.toml` and `mise.lock`
 
-- **kubectl** (snap)
+- **kubectl** (mise)
   - Inspect Kubernetes pods and events
   - Used by juju-k8s-crashdump
 
@@ -110,20 +110,16 @@ Install the repository's locked tools before setting up substrates:
 
 ```bash
 cd "$PROJECT_ROOT"
-GIT_CONFIG_GLOBAL=/dev/null mise run sandbox:tools
+mise run setup
 ```
 
-This task installs and verifies the `sandbox` mise profile, including the pinned
-crashdump and log-scanning tools.
+This installs the shared toolchain and project dependencies. The sandbox
+automatically selects the development and sandbox additions.
 
 ### Option 1: Machine Charms Only (LXD)
 
 ```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-
-# 2. Setup LXD only
+# Setup LXD only
 cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 
 # That's it! Test suite will bootstrap controller when you run tests with --current-state
@@ -132,11 +128,7 @@ cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 ### Option 2: Kubernetes Charms Only
 
 ```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-
-# 2. Setup K8s only
+# Setup K8s only
 cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # That's it! Test suite will bootstrap controller when you run tests with --current-state
@@ -145,34 +137,12 @@ cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 ### Option 3: Mixed-Cloud CMR Tests (LXD + K8s)
 
 ```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-
-# 2. Setup both substrates
+# Setup both substrates
 cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # That's it! Test suite will bootstrap both controllers when you run tests with --current-state
 ```
-
-### Installing Logging Tools Details
-
-All three tools should be installed regardless of which clouds you're using, since you might need both for log collection in mixed-cloud scenarios.
-
-```bash
-# juju-crashdump: For machine/LXD controllers
-sudo snap install juju-crashdump --classic
-
-# kubectl: For Kubernetes inspection and juju-k8s-crashdump support
-sudo snap install kubectl --classic
-
-# juju-k8s-crashdump is installed from the commit pinned in mise.toml and mise.lock.
-```
-
-**Note**: If installation fails, see Troubleshooting section below.
-
----
 
 ## Running Tests After Setup
 
@@ -222,7 +192,7 @@ See the `run-charm-tests` skill for full test execution documentation.
 ### Check Logging Tools
 
 ```bash
-juju-crashdump --version
+juju-crashdump --help
 juju-k8s-crashdump --help  # Should show help without errors
 kubectl version --client
 ```
@@ -254,16 +224,11 @@ cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 
 ### Problem: "Cannot install juju-k8s-crashdump"
 
-The tool is in a private repository. If you encounter issues:
+Check access to the pinned source repository, then rerun the shared setup:
 
 ```bash
-# Try with git+https instead of git+ssh
-git clone https://github.com/canonical/juju-k8s-crashdump.git
-cd juju-k8s-crashdump
-pip install .
-
-# Or use the commit hash from charm-testing.yaml
-pip install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
+git ls-remote https://github.com/canonical/juju-k8s-crashdump.git HEAD
+mise run setup
 ```
 
 ### Problem: "kubeconfig not found"
@@ -280,13 +245,11 @@ ls -la /home/ubuntu/k8s.yaml
 
 ### Problem: "juju-crashdump: command not found"
 
-If snap installation failed:
+Rerun the shared setup and verify the mise-managed executable:
 
 ```bash
-# Try reinstalling
-sudo snap remove juju-crashdump
-sudo snap install juju-crashdump --classic
-juju-crashdump --version
+mise run setup
+mise exec -- juju-crashdump --help
 ```
 
 ### Problem: "Controller bootstrap timeout"

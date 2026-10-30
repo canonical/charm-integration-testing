@@ -29,8 +29,10 @@ best practices.
 mise run test:suite -- \
     --target-cloud "{juju_cloud}" \
     --target-charm "{target_charm}" \
+    --target-application "{target_application}" \
     --target-endpoint "{target_endpoint}" \
     --neighbor-charm "{neighbor_charm}" \
+    --neighbor-application "{neighbor_application}" \
     --neighbor-endpoint "{neighbor_endpoint}"
 ```
 

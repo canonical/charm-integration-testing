@@ -26,7 +26,7 @@ jobs:
           GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
             }}
         run: |
-          mise run security:gitleaks -- git --config .gitleaks.toml --redact -v \
+          mise exec -- gitleaks git --config .gitleaks.toml --redact -v \
             --log-opts="$GITLEAKS_LOG_OPTS"
   lint:
     runs-on: ubuntu-latest

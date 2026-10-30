@@ -29,8 +29,8 @@ die() {
 [[ -f "$KUBECONFIG_PATH" && -r "$KUBECONFIG_PATH" ]] \
     || die "Kubeconfig must be a readable file: $KUBECONFIG_PATH"
 
-command -v helm >/dev/null 2>&1 || die "Run this through 'mise run sandbox:setup-chaos-mesh' to install Helm."
-command -v jq >/dev/null 2>&1 || die "Run this through 'mise run sandbox:setup-chaos-mesh' to install jq."
+command -v helm >/dev/null 2>&1 || die "Helm missing; run 'mise run setup' inside the sandbox."
+command -v jq >/dev/null 2>&1 || die "jq missing; run 'mise run setup' inside the sandbox."
 helm_version=$(helm version --short)
 [[ "$helm_version" == v3.* ]] || die "Expected Helm 3; found $helm_version."
 

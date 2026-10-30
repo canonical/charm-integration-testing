@@ -368,7 +368,7 @@ rather than registering multiple entry points for the same interface.
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `mise run setup` (or `mise run setup -- -E <extra>` for a single
+   way, run `mise run setup` (or `poetry update <package>` for a single
    path dependency) after *any* change to a package's `pyproject.toml` made
    in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
@@ -379,7 +379,7 @@ rather than registering multiple entry points for the same interface.
    though the source file itself is present. Do this before running the
    tests below. In the development sandbox this matters especially for a
    long-lived `mise run sandbox -- run --interactive` session: `mise run setup`
-   runs once at `sandbox:up` time, so the VM's environment reflects the
+   runs once at `mise run sandbox -- up` time, so the VM's environment reflects the
    `pyproject.toml` as of `up` and goes stale for any change made mid-session
    - re-run `mise run setup` inside the VM after editing a `pyproject.toml`,
    or the runner won't discover the new/changed entry point until the next

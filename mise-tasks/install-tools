@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Install the selected locked toolchain"
+set -euo pipefail
+
+export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}"
+
+mise install --locked uv
+mise install --locked pipx
+mise install --locked

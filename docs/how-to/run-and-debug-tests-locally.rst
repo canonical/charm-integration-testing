@@ -31,7 +31,7 @@ This guide will reference variables that need to contain values specific to your
 ``MODEL_NAME``:
   The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
 ``OUTPUT_FILE``:
-  A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
+  Path to the model bundle produced by bundle builder X. For example, ``generated-bundles/charm-testing.yaml``.
 ``JUJU_MODEL_CONFIG_FILE``:
   Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
@@ -47,6 +47,17 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+Install the repository tools and dependencies
+---------------------------------------------
+
+Install `mise <https://mise.jdx.dev/getting-started.html>`_, then run:
+
+.. code:: bash
+
+   mise run setup
+
+This installs the locked toolchain, including ``kubectl``, and Poetry dependencies.
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
@@ -57,12 +68,11 @@ To install Juju, run:
 
   sudo snap install juju
 
-To install ``k8s`` and ``kubectl``, run:
+To install ``k8s``, run:
 
 .. code:: bash
 
    sudo snap install k8s --classic --channel latest/edge
-   sudo snap install kubectl --classic --channel 1.30
 
 Next, bootstrap ``k8s`` and configure ``kubectl``:
 
@@ -193,36 +203,14 @@ active/idle wait, followed by simple validation without additional restarts.
 These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
-Install the repository tools and dependencies
----------------------------------------------
-
-Use mise to install the locked tool versions and Poetry dependencies:
-
-.. code:: bash
-
-   mise run setup
-
-The tasks below can be invoked through mise, for example
-``mise run bundle:build`` and ``mise run test:suite``.
-
 Generate dynamic bundles
 ------------------------
 
-To run the tests, we will generate a dynamic bundle that includes our test charm, the neighbor charm, and their respective endpoints. Do this with the following command:
-
-.. code:: bash
-
-   mise run bundle:build -- \
-    --charms \
-      "target::${TARGET_CHARM}::${CHANNEL}::${REVISION}::${SERIES}" \
-      "neighbor::${NEIGHBOR_CHARM}::default::default::default" \
-    --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
-    --substrate "${SUBSTRATE}" \
-    --charm-metadata-overrides ./static/charm-metadata-overrides/ \
-    --charm-platform-overrides ./static/charm-platform-overrides/ \
-    --charm-listing-overrides ./static/charm-listing-overrides.yaml \
-    --charm-test-configs ./static/charm-test-configs/ \
-    --output-file "${OUTPUT_FILE}"
+Follow :doc:`use-bundle-builder-x` to write a spec containing the ``target`` and
+``neighbor`` applications and their integration, then generate the bundles with
+``mise run bundle:build-x``. The :doc:`/reference/spec-file` reference describes
+revision, base, and endpoint settings. Set ``OUTPUT_FILE`` to the generated model
+bundle path.
 
 The contents of the output file will look something like the following:
 

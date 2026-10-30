@@ -53,10 +53,9 @@ or verification is needed. Do not bootstrap another controller or model.
 
 ## Versions and settings
 
-mise pins Helm 3.21.4 and jq 1.8.2 for the setup tasks. Canonical k8s setup
-still manages substrate provisioning and may install curl and CA certificates
-if needed. Tool setup and the Canonical k8s fallback need sudo access without
-a password prompt.
+mise pins Helm and jq for the setup tasks. The sandbox base image provides
+curl and CA certificates. Canonical k8s setup still manages substrate
+provisioning and needs sudo access without a password prompt.
 
 Chaos Mesh uses chart 2.8.4 from https://charts.chaos-mesh.org, release and
 namespace `chaos-mesh`, runtime `containerd`, socket

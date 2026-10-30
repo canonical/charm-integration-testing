@@ -42,6 +42,8 @@ mise run lint
 Existing shell scripts are discovered directly from `scripts/` and
 `development-sandbox/bin/` using their `#MISE` headers. `mise-tasks/` contains
 only additional commands without an existing shell entry point.
+`install-tools` owns tool installation for local setup, CI, and the sandbox;
+`setup` calls it before installing Poetry dependencies.
 
 | Script | Purpose |
 |---|---|

@@ -8,17 +8,12 @@ runs:
       id: version
       shell: bash
       run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
-    - name: Install mise tools
+    - name: Install mise
       uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
       with:
         version: ${{ steps.version.outputs.version }}
-        install_args: uv
+        install: false
         cache: false
-    - name: Install pipx
-      shell: bash
-      run: mise install --locked pipx
     - name: Install configured tools
       shell: bash
-      env:
-        GIT_CONFIG_GLOBAL: /dev/null
-      run: mise install --locked
+      run: mise run install-tools

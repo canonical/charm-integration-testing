@@ -3,8 +3,6 @@
 #MISE raw_args=true
 set -euo pipefail
 
-mise install --locked uv
-mise install --locked pipx
-GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" mise install --locked
+mise run install-tools
 
 mise exec -- poetry install "$@"

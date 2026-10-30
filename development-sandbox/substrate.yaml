@@ -12,6 +12,9 @@
 #   mise run sandbox -- up
 package_update: true
 packages:
+  - curl
+  - ca-certificates
+  - git
   - nginx
 write_files:
   - path: /etc/nginx/sites-available/api-cache
