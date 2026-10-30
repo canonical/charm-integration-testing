@@ -892,7 +892,11 @@ class JubilantBackend(JujuBackend):
         args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
         try:
             return subprocess.run(  # nosec B603
-                args, check=True, capture_output=True, text=True, timeout=timeout
+                args,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=min(timeout, self.client.command_timeout.total_seconds()),
             ).stdout
         except subprocess.CalledProcessError as error:
             raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None

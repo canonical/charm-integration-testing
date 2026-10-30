@@ -3876,17 +3876,27 @@ def test_ssh_timeout_before_reboot_fails() -> None:
 SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
 
 
-def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("requested_timeout", "command_timeout", "expected_timeout"),
+    [(7.5, 300, 7.5), (600, 300, 300), (600, 2, 2)],
+)
+def test_ssh_bounds_process_and_preserves_model(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_timeout: float,
+    command_timeout: float,
+    expected_timeout: float,
+) -> None:
     def run(
         args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
         assert check and capture_output and text
-        assert timeout == 7.5
+        assert timeout == expected_timeout
         return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
 
     monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
-    result = JubilantBackend().ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=7.5)
+    backend = JubilantBackend(JubilantClient(command_timeout=timedelta(seconds=command_timeout)))
+    result = backend.ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=requested_timeout)
     assert result == "boot-id\n"
 
 
