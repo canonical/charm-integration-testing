@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Set up the sandbox Kubernetes substrate"
-#MISE raw_args=true
-set -euo pipefail
-
-exec bash ./development-sandbox/bin/setup-k8s.sh "$@"

@@ -40,6 +40,10 @@ mise run lint
 
 ### Mise tasks
 
+Existing shell scripts are discovered directly from `scripts/` and
+`development-sandbox/bin/` using their `#MISE` headers. `mise-tasks/` contains
+only additional commands without an existing shell entry point.
+
 | Script | Purpose |
 |---|---|
 | `mise run format` | Auto-fix: ruff, yamlfix, markdownlint |

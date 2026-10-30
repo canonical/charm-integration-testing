@@ -1,4 +1,6 @@
 #!/bin/bash
+#MISE description="Manage the development sandbox"
+#MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.

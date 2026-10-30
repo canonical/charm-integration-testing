@@ -9,7 +9,7 @@
 #   mise run sandbox:setup-lxd
 #
 # Launch via:
-#   mise run sandbox:up
+#   mise run sandbox -- up
 package_update: true
 packages:
   - nginx
@@ -87,6 +87,6 @@ runcmd:
   - systemctl reload nginx
 final_message: |-
   Sandbox base image ready.
-  Run 'mise run sandbox:up' on the host to finish provisioning.
+  Run 'mise run sandbox -- up' on the host to finish provisioning.
   nginx API cache listening on http://localhost:8080 (inside the VM)
   (proxies /charmhub/ -> api.charmhub.io, /snapcraft/ -> api.snapcraft.io)

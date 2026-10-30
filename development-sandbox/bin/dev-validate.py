@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# MISE description="Run development validation against a deployed charm"
+# MISE raw_args=true
+# MISE alias="sandbox:dev-validate"
 # Inject and run validators against a deployed Juju application.
 #
 # This script is designed to run INSIDE the sandbox VM.
@@ -118,7 +121,7 @@ def main() -> None:
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
         print(f"ERROR: Could not import project packages: {exc}", file=sys.stderr)
-        print("Run 'mise run sandbox:up' to set up the Python environment.", file=sys.stderr)
+        print("Run 'mise run sandbox -- up' to set up the Python environment.", file=sys.stderr)
         sys.exit(1)
 
     backend = JubilantBackend()

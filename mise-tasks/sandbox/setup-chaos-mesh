@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Install or verify Chaos Mesh on the selected cluster"
-#MISE raw_args=true
-set -euo pipefail
-
-exec bash ./development-sandbox/bin/setup-chaos-mesh.sh "$@"

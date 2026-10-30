@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run persistence validator checks in the sandbox"
+#MISE raw_args=true
+#MISE alias="sandbox:verify-persistence-validator"
 # Run deterministic persistence-validator verification gates inside the VM workspace.
 #
 # This script is VM-native and must be run from inside the sandbox VM where

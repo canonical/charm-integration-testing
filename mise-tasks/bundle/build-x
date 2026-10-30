@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Build a bundle-builder-x bundle"
-#MISE raw_args=true
-set -euo pipefail
-
-exec ./scripts/build-bundle-x.sh "$@"

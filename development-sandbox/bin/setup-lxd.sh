@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Set up the sandbox LXD substrate"
+#MISE raw_args=true
+#MISE alias="sandbox:setup-lxd"
 # Set up LXD and register it as a Juju cloud.
 #
 # Run this inside the sandbox VM before bootstrapping a Juju controller.

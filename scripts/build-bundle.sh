@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Build a charm integration bundle"
+#MISE raw_args=true
+#MISE alias="bundle:build"
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

@@ -378,7 +378,7 @@ rather than registering multiple entry points for the same interface.
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
    tests below. In the development sandbox this matters especially for a
-   long-lived `mise run sandbox:run -- --interactive` session: `mise run setup`
+   long-lived `mise run sandbox -- run --interactive` session: `mise run setup`
    runs once at `sandbox:up` time, so the VM's environment reflects the
    `pyproject.toml` as of `up` and goes stale for any change made mid-session
    - re-run `mise run setup` inside the VM after editing a `pyproject.toml`,

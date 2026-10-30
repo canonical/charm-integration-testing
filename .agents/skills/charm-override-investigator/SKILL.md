@@ -337,9 +337,9 @@ add the override, validate with and without it, and confirm the expected result.
    - *Provision the VM (host side).* Use the development sandbox to get a clean VM. For a
      truly fresh environment, recycle any existing one first:
      ```bash
-     mise run sandbox:destroy     # only if a stale VM exists
-     mise run sandbox:up          # create/resume the VM and install deps
-     mise run sandbox:run -- --interactive   # or: mise run sandbox:shell
+     mise run sandbox -- destroy     # only if a stale VM exists
+     mise run sandbox -- up          # create/resume the VM and install deps
+     mise run sandbox -- run --interactive   # or: mise run sandbox -- shell
      ```
    - *Install substrates and logging tools (inside the VM).* Run the `/setup-charm-tests`
      skill scoped to Kubernetes; it installs Canonical k8s plus the crashdump/kubectl tooling

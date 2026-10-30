@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Format repository files"
-#MISE raw_args=true
-set -euo pipefail
-
-export PATH="$(mise where npm:markdownlint-cli2)/node_modules/.bin:$PATH"
-exec ./scripts/format.sh "$@"

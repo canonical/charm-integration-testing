@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Set up the sandbox Kubernetes substrate"
+#MISE raw_args=true
+#MISE alias="sandbox:setup-k8s"
 # Set up Canonical k8s and register it as a Juju cloud.
 #
 # Run this inside the sandbox VM before bootstrapping a Juju controller.

@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run validator unit tests"
-#MISE raw_args=true
-set -euo pipefail
-
-exec ./scripts/validators-unit-tests.sh "$@"

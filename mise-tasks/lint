@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run repository linters"
-#MISE raw_args=true
-set -euo pipefail
-
-export PATH="$(mise where npm:markdownlint-cli2)/node_modules/.bin:$PATH"
-exec ./scripts/lint.sh "$@"

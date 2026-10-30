@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Install or verify Chaos Mesh on the selected cluster"
+#MISE raw_args=true
+#MISE alias="sandbox:setup-chaos-mesh"
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 #

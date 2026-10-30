@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run development validation against a deployed charm"
-#MISE raw_args=true
-set -euo pipefail
-
-exec python ./development-sandbox/bin/dev-validate.py "$@"

@@ -12,19 +12,19 @@ first.
 
 | Command | Purpose |
 |---|---|
-| `mise run sandbox:up` | Create or resume the VM and install deps |
-| `mise run sandbox:down` | Stop the VM |
-| `mise run sandbox:destroy` | Delete the VM |
-| `mise run sandbox:shell` | Open a shell inside the VM |
-| `mise run sandbox:run -- 'task'` | Launch Copilot autonomously |
-| `mise run sandbox:run -- --interactive` | Launch Copilot interactively |
+| `mise run sandbox -- up` | Create or resume the VM and install deps |
+| `mise run sandbox -- down` | Stop the VM |
+| `mise run sandbox -- destroy` | Delete the VM |
+| `mise run sandbox -- shell` | Open a shell inside the VM |
+| `mise run sandbox -- run 'task'` | Launch Copilot autonomously |
+| `mise run sandbox -- run --interactive` | Launch Copilot interactively |
 
 Skills (`/develop-validator`, `/test-validator`, `/setup-k8s`, `/setup-lxd`, `/review-pr`) are
 auto-discovered via `.agents/skills/` at the repository root.
 
 ### VM-side
 
-Run these inside the VM after entering with `mise run sandbox:shell` or by the agent.
+Run these inside the VM after entering with `mise run sandbox -- shell` or by the agent.
 
 | Command | Purpose |
 |---|---|
@@ -36,8 +36,8 @@ Run these inside the VM after entering with `mise run sandbox:shell` or by the a
 
 ## Typical flow
 
-1. `mise run sandbox:up` - provision or resume the VM.
-2. `mise run sandbox:run -- --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
+1. `mise run sandbox -- up` - provision or resume the VM.
+2. `mise run sandbox -- run --interactive` - use `/develop-validator` or `/test-validator` skills. The skills handle deploying charms and running quality gates.
 3. Review results in `development-sandbox/reports/<name>-<timestamp>/` (gitignored, persists on the host).
 
 ## Chaos Mesh

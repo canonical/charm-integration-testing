@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run validator quality and workload checks in the sandbox"
+#MISE raw_args=true
+#MISE alias="sandbox:verify-validator"
 # Run deterministic validator verification gates inside the VM workspace.
 #
 # This script is VM-native and must be run from inside the sandbox VM where
