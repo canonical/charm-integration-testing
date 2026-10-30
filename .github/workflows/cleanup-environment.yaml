@@ -221,7 +221,7 @@ jobs:
             kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
-      - name: Find old QA namespaces
+      - name: Find QA namespaces older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -233,7 +233,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' namespaces.json > resources_to_remove.txt
-      - name: Find orphaned QA webhooks
+      - name: Find orphaned QA webhooks older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -256,7 +256,7 @@ jobs:
             )) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find old Juju credential service accounts
+      - name: Find Juju credential service accounts older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -268,7 +268,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find old Juju credential secrets
+      - name: Find Juju credential secrets older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -281,7 +281,7 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find old released rawfile PersistentVolumes
+      - name: Find released rawfile PersistentVolumes older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
@@ -293,14 +293,13 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find old QA cluster RBAC
+      - name: Find QA cluster role bindings older than the age threshold
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
-            .items as $resources |
+          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json > rbac.json
+          jq --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
             [$namespaces[0].items[].metadata.name] as $namespaces |
             def old:
               (now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60);
@@ -328,8 +327,6 @@ jobs:
               or (.metadata.name | startswith("system:"))
               or live_owner
               or (helm_managed and (orphaned_qa_owner | not));
-            def qa_rbac:
-              (.metadata.name | qa_namespace) or credential or orphaned_qa_owner;
             def live_subject:
               any(.subjects[]?; .kind != "ServiceAccount" or (.namespace // "") == "" or
                 (.namespace as $namespace | $namespaces | index($namespace) != null));
@@ -337,13 +334,25 @@ jobs:
               (.subjects | length > 0) and all(.subjects[];
                 .kind == "ServiceAccount" and ((.namespace // "") | orphaned_qa_namespace)
               );
-            [$resources[] | select(.kind == "ClusterRoleBinding" and old) |
+            [.items[] | select(.kind == "ClusterRoleBinding" and old) |
               select(protected_rbac | not) |
               select(
                 credential or
                 (((.metadata.name | qa_namespace) or orphaned_qa_owner or orphaned_qa_subjects) and
                   (live_subject | not))
-              )] as $bindings |
+              )]
+          ' rbac.json > bindings_to_remove.json
+          jq --raw-output '.[] | .kind + "/" + .metadata.name' bindings_to_remove.json >> resources_to_remove.txt
+      - name: Find QA cluster roles older than the age threshold
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --raw-output --argjson age "$AGE_THRESHOLD" \
+            --slurpfile namespaces namespaces.json --slurpfile bindings bindings_to_remove.json '
+            .items as $resources |
+            [$namespaces[0].items[].metadata.name] as $namespaces |
+            $bindings[0] as $bindings |
             [$bindings[].metadata.name] as $binding_names |
             [$bindings[] | select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $orphan_roles |
             # A ClusterRole may also be used by a namespaced RoleBinding.
@@ -352,16 +361,31 @@ jobs:
                 (.kind == "ClusterRoleBinding" and
                   (.metadata.name as $name | $binding_names | index($name) == null))) |
               select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $retained_roles |
-            ($bindings[], ($resources[] |
-              select(.kind == "ClusterRole" and old) |
-              select(protected_rbac | not) |
-              select(qa_rbac or (
+            $resources[] |
+              select(.kind == "ClusterRole") |
+              select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+              select(.metadata.labels["kubernetes.io/bootstrapping"] == null) |
+              select(.metadata.name | startswith("system:") | not) |
+              ([.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]]
+                | map(select(. != null and . != ""))) as $owners |
+              select(all($owners[]; . as $namespace | $namespaces | index($namespace) == null)) |
+              any($owners[]; test("^(controller-)?charmqa-")) as $orphaned_qa_owner |
+              select(
+                $orphaned_qa_owner or (
+                  .metadata.labels["app.kubernetes.io/managed-by"] != "Helm" and
+                  ((.metadata.annotations["meta.helm.sh/release-name"] // "") == "" or
+                    (.metadata.annotations["meta.helm.sh/release-namespace"] // "") == "")
+                )
+              ) |
+              select(
+                $orphaned_qa_owner or
+                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or (
                 .metadata.labels["app.kubernetes.io/managed-by"] == "juju" and
                 (.metadata.name as $name | $orphan_roles | index($name) != null)
               )) |
-              select(.metadata.name as $name | $retained_roles | index($name) == null))) |
+              select(.metadata.name as $name | $retained_roles | index($name) == null) |
             .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
+          ' rbac.json >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
         if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
