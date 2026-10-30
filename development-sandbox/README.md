@@ -87,8 +87,9 @@ Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).
   so these extras stay available while working from the project root.
   Poetry manages Python dependencies.
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
-- **nginx API cache:** auto-provisioned via `substrate.yaml` cloud-init, listening on `http://localhost:8080` *inside the VM* (`/charmhub/`, `/snapcraft/`), caching responses for 4h.
-- Any host env var prefixed `SANDBOX_VAR_` is passed into the VM with the prefix stripped, e.g. `SANDBOX_VAR_CHARMHUB_API_URL` / `SANDBOX_VAR_SNAPCRAFT_API_URL` override `bundle_builder_x`'s API base URLs inside the VM as `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL` (e.g. point at the nginx cache above), and `SANDBOX_VAR_COPILOT_MODEL` overrides the Copilot model inside the VM. See `.env.sample`.
+- `up` launches a plain Ubuntu VM, installs missing bootstrap prerequisites
+  (curl, CA certificates, and Git), mounts the project, and runs mise setup.
+- Any host env var prefixed `SANDBOX_VAR_` is passed into the VM with the prefix stripped, e.g. `SANDBOX_VAR_CHARMHUB_API_URL` / `SANDBOX_VAR_SNAPCRAFT_API_URL` override `bundle_builder_x`'s API base URLs inside the VM as `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL`, and `SANDBOX_VAR_COPILOT_MODEL` overrides the Copilot model inside the VM. Overrides must be reachable from the VM; no API cache is provisioned. See `.env.sample`.
 
 ## MCP servers
 

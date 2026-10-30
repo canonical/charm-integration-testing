@@ -336,7 +336,6 @@ _cmd_up() {
                 --cpus "$cpus" \
                 --memory "$memory" \
                 --disk "$disk" \
-                --cloud-init "$DEV_DIR/substrate.yaml" \
                 --timeout 1800
             ;;
         Stopped)
@@ -351,6 +350,17 @@ _cmd_up() {
             multipass start "$VM_NAME"
             ;;
     esac
+
+    echo "==> Checking bootstrap prerequisites..."
+    multipass exec "$VM_NAME" -- bash -c '
+        set -euo pipefail
+        if ! command -v curl >/dev/null 2>&1 \
+            || ! command -v git >/dev/null 2>&1 \
+            || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+            sudo apt-get update --quiet
+            sudo apt-get install --assume-yes --quiet curl ca-certificates git
+        fi
+    '
 
     # Mount project if not already mounted
     echo "==> Checking project mount..."

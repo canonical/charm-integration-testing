@@ -51,7 +51,7 @@ $PROJECT_ROOT/
   bundle_builder_x/           # Build Juju bundles from CharmHub specs
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
-  development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
+  development-sandbox/        # Sandbox tooling and configuration
   pyproject.toml              # Root Poetry project (aggregates all subpackages)
 ```
 
@@ -187,7 +187,7 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 
 ## Important notes
 
-- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
+- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts can break subsequent runs.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
