@@ -222,45 +222,48 @@ jobs:
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
       - name: Find all model and controller namespaces older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
-          kubectl get namespaces --output json > namespaces.json
-          jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.metadata.name | test("^(controller-|log-scraper-)?charmqa-")) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
-          ' namespaces.json > resources_to_remove.txt
-      - name: Find orphaned QA webhooks older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+          ' >> resources_to_remove.txt
+      - name: Find all webhook configurations older than the age threshold
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
-            [$namespaces[0].items[].metadata.name] as $live_namespaces |
-            def absent:
-              . as $namespace | $live_namespaces | index($namespace) == null;
+          namespaces=$(mktemp)
+          trap 'rm -f "$namespaces"' EXIT
+          kubectl get namespaces --output json | jq '[.items[].metadata.name]' > "$namespaces"
+
+          # Helm ownership does not protect webhooks whose QA target namespaces are gone.
+          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces "$namespaces" '
+            def orphaned_qa_webhook:
+              (.webhooks | length > 0) and
+              all(.webhooks[];
+                (.clientConfig.service.namespace // "") as $namespace |
+                ($namespace | test("^(controller-)?charmqa-")) and
+                (($namespaces[0] | index($namespace)) == null)
+              );
+            def helm_managed:
+              .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
+              or (
+                (.metadata.annotations["meta.helm.sh/release-name"] // "") != ""
+                and (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
+              );
             .items[] |
+            select((helm_managed | not) or orphaned_qa_webhook) |
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            select(all(
-              [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
-              . == null or absent
-            )) |
-            select(.webhooks | length > 0) |
-            select(all(.webhooks[];
-              (.clientConfig.service.namespace // "") |
-              test("^(controller-)?charmqa-") and absent
-            )) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential service accounts older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
           kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
@@ -268,10 +271,9 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find all juju-credential secrets older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
           kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
             .items[] |
             select(.type == "kubernetes.io/service-account-token") |
@@ -280,10 +282,9 @@ jobs:
             .metadata.namespace + ":" + .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find released rawfile PersistentVolumes older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
-          set -euo pipefail
           # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
           # will get stuck if the node they were provisioned on no longer exists. Add them to
           # the delete list
@@ -295,10 +296,12 @@ jobs:
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
       - name: Find QA cluster role bindings older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        id: cluster-role-bindings
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
+          kubectl get namespaces --output json > namespaces.json
           kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json > rbac.json
           jq --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
             [$namespaces[0].items[].metadata.name] as $namespaces |
@@ -321,7 +324,7 @@ jobs:
           ' rbac.json > bindings_to_remove.json
           jq --raw-output '.[] | .kind + "/" + .metadata.name' bindings_to_remove.json >> resources_to_remove.txt
       - name: Find QA cluster roles older than the age threshold
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.cluster-role-bindings.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -352,7 +355,7 @@ jobs:
           ' rbac.json >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
-        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           set -uo pipefail
           if [[ "$DRY_RUN" == "true" ]]; then
