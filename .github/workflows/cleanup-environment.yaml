@@ -295,17 +295,16 @@ jobs:
             select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
             .kind + "/" + .metadata.name
           ' >> resources_to_remove.txt
-      - name: Find QA cluster role bindings older than the age threshold
-        id: cluster-role-bindings
+      - name: Find QA cluster RBAC older than the age threshold
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           kubectl get namespaces --output json > namespaces.json
-          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json > rbac.json
-          jq --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
+          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
             [$namespaces[0].items[].metadata.name] as $namespaces |
-            [.items[] | select(.kind == "ClusterRoleBinding") |
+            def candidate:
               select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
               select(
                 (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or
@@ -314,45 +313,29 @@ jobs:
               select(all(
                 [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
                 . == null or (. as $namespace | $namespaces | index($namespace) == null)
-              )) |
+              ));
+            .items as $resources |
+            [$resources[] | select(.kind == "ClusterRole" or .kind == "ClusterRoleBinding") |
+              candidate] as $candidates |
+            [$candidates[] | select(.kind == "ClusterRoleBinding") |
               select(
                 (.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) or
                 all(.subjects[]?; .kind == "ServiceAccount" and
                   ((.namespace // "") | test("^(controller-)?charmqa-")) and
                   (.namespace as $namespace | $namespaces | index($namespace) == null))
-              )]
-          ' rbac.json > bindings_to_remove.json
-          jq --raw-output '.[] | .kind + "/" + .metadata.name' bindings_to_remove.json >> resources_to_remove.txt
-      - name: Find QA cluster roles older than the age threshold
-        if: ${{ !cancelled() && steps.cluster-role-bindings.outcome == 'success' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq --raw-output --argjson age "$AGE_THRESHOLD" \
-            --slurpfile namespaces namespaces.json --slurpfile bindings bindings_to_remove.json '
-            .items as $resources |
-            [$namespaces[0].items[].metadata.name] as $namespaces |
-            [$bindings[0][].metadata.name] as $binding_names |
+              )] as $bindings |
+            [$bindings[].metadata.name] as $binding_names |
             # A ClusterRole may also be used by a namespaced RoleBinding.
             [$resources[] |
               select(.kind == "RoleBinding" or
                 (.kind == "ClusterRoleBinding" and
                   (.metadata.name as $name | $binding_names | index($name) == null))) |
               select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $retained_roles |
-            $resources[] |
+            ($bindings[], ($candidates[] |
               select(.kind == "ClusterRole") |
-              select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-              select(
-                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or
-                (.metadata.labels["model.juju.is/name"] // "" | test("^(controller-)?charmqa-"))
-              ) |
-              select(all(
-                [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
-                . == null or (. as $namespace | $namespaces | index($namespace) == null)
-              )) |
-              select(.metadata.name as $name | $retained_roles | index($name) == null) |
+              select(.metadata.name as $name | $retained_roles | index($name) == null))) |
             .kind + "/" + .metadata.name
-          ' rbac.json >> resources_to_remove.txt
+          ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
