@@ -221,16 +221,87 @@ jobs:
             kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
             kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
           done <<< "$NODES"
-      - name: Find stale Kubernetes resources
-        id: kubernetes-resources
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+      - name: Find old QA namespaces
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
-          kubectl get namespaces,clusterroles,clusterrolebindings,rolebindings,validatingwebhookconfigurations,mutatingwebhookconfigurations,serviceaccounts,secrets,persistentvolumes \
-            --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
+          kubectl get namespaces --output json > namespaces.json
+          jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .items[] |
+            select(.metadata.name | test("^(controller-|log-scraper-)?charmqa-")) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            .kind + "/" + .metadata.name
+          ' namespaces.json > resources_to_remove.txt
+      - name: Find orphaned QA webhooks
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
+            [$namespaces[0].items[].metadata.name] as $live_namespaces |
+            def absent:
+              . as $namespace | $live_namespaces | index($namespace) == null;
+            .items[] |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            select(all(
+              [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
+              . == null or absent
+            )) |
+            select(.webhooks | length > 0) |
+            select(all(.webhooks[];
+              (.clientConfig.service.namespace // "") |
+              test("^(controller-)?charmqa-") and absent
+            )) |
+            .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+      - name: Find old Juju credential service accounts
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get serviceaccounts --all-namespaces --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .items[] |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            .metadata.namespace + ":" + .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+      - name: Find old Juju credential secrets
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get secrets --all-namespaces --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .items[] |
+            select(.type == "kubernetes.io/service-account-token") |
+            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            .metadata.namespace + ":" + .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+      - name: Find old released rawfile PersistentVolumes
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get persistentvolumes --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" '
+            .items[] |
+            select(.status.phase == "Released" and .spec.storageClassName == "csi-rawfile-default") |
+            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
+            .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
+      - name: Find old QA cluster RBAC
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json |
+            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
             .items as $resources |
-            [$resources[] | select(.kind == "Namespace") | .metadata.name] as $namespaces |
+            [$namespaces[0].items[].metadata.name] as $namespaces |
             def old:
               (now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60);
             def qa_namespace:
@@ -281,31 +352,19 @@ jobs:
                 (.kind == "ClusterRoleBinding" and
                   (.metadata.name as $name | $binding_names | index($name) == null))) |
               select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $retained_roles |
-            ($bindings[], ($resources[] | select(old) |
-              select(
-                if .kind == "Namespace" then
-                  .metadata.name | test("^(controller-|log-scraper-)?charmqa-")
-                elif .kind == "ClusterRole" then
-                  (protected_rbac | not) and
-                  (qa_rbac or (
-                    .metadata.labels["app.kubernetes.io/managed-by"] == "juju" and
-                    (.metadata.name as $name | $orphan_roles | index($name) != null)
-                  )) and
-                  (.metadata.name as $name | $retained_roles | index($name) == null)
-                elif .kind == "ValidatingWebhookConfiguration" or .kind == "MutatingWebhookConfiguration" then
-                  (live_owner | not) and (.webhooks | length > 0) and
-                  all(.webhooks[]; (.clientConfig.service.namespace // "") | orphaned_qa_namespace)
-                elif .kind == "ServiceAccount" then credential
-                elif .kind == "Secret" then credential and .type == "kubernetes.io/service-account-token"
-                elif .kind == "PersistentVolume" then
-                  .status.phase == "Released" and .spec.storageClassName == "csi-rawfile-default"
-                else false end
-              ))) |
-            (if .metadata.namespace then .metadata.namespace + ":" else "" end) + .kind + "/" + .metadata.name
-          ' > resources_to_remove.txt
+            ($bindings[], ($resources[] |
+              select(.kind == "ClusterRole" and old) |
+              select(protected_rbac | not) |
+              select(qa_rbac or (
+                .metadata.labels["app.kubernetes.io/managed-by"] == "juju" and
+                (.metadata.name as $name | $orphan_roles | index($name) != null)
+              )) |
+              select(.metadata.name as $name | $retained_roles | index($name) == null))) |
+            .kind + "/" + .metadata.name
+          ' >> resources_to_remove.txt
       - name: Remove all resources
         shell: bash
-        if: ${{ !cancelled() && steps.kubernetes-resources.outcome == 'success' }}
+        if: ${{ success() && steps.creds.outputs.kubernetes == 'true' }}
         run: |-
           set -uo pipefail
           if [[ "$DRY_RUN" == "true" ]]; then
@@ -332,7 +391,8 @@ jobs:
 
           # Delete cluster-scoped resources
           if [ ${#cluster_resources[@]} -gt 0 ]; then
-            kubectl delete "${cluster_resources[@]}" --ignore-not-found=true --timeout=25m &
+            printf '%s\n' "${cluster_resources[@]}" |
+              xargs --no-run-if-empty --max-args=100 kubectl delete --ignore-not-found=true --timeout=25m &
             pids+=("$!")
             descriptions+=("cluster-scoped resources")
           fi
@@ -340,7 +400,8 @@ jobs:
           # Delete namespaced resources (one command per namespace)
           for namespace in "${!namespaced_resources[@]}"; do
             read -r -a resources <<< "${namespaced_resources[$namespace]}"
-            kubectl delete "${resources[@]}" --namespace="$namespace" --ignore-not-found=true --timeout=25m &
+            printf '%s\n' "${resources[@]}" |
+              xargs --no-run-if-empty --max-args=100 kubectl delete --namespace="$namespace" --ignore-not-found=true --timeout=25m &
             pids+=("$!")
             descriptions+=("resources in namespace $namespace")
           done
