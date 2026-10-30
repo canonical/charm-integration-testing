@@ -23,6 +23,8 @@ mise run setup
 adds development tools; CI lint and secret-scanning jobs use this overlay too.
 Sandbox-only tools are defined in `development-sandbox/mise.toml` and enabled
 automatically inside the VM. Each tool's version is declared in one config.
+CI setup installs the selected configuration without per-job tool lists.
+`kubectl` and both Juju crashdump tools are part of the shared test toolchain.
 
 ## Linting and Formatting
 

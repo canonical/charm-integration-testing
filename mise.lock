@@ -19,6 +19,19 @@ url = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64"
 url_api = "https://api.github.com/repos/jqlang/jq/releases/assets/453012752"
 provenance = "github-attestations"
 
+[[tools."aqua:kubernetes/kubernetes/kubectl"]]
+version = "1.35.10"
+backend = "aqua:kubernetes/kubernetes/kubectl"
+specifiers = ["1.35.10"]
+
+[tools."aqua:kubernetes/kubernetes/kubectl"."platforms.linux-arm64"]
+checksum = "sha256:283f1be6a46b3695b625e25030106b8ffe18bd0d3a900f5b65c259ca407f04f5"
+url = "https://dl.k8s.io/v1.35.10/bin/linux/arm64/kubectl"
+
+[tools."aqua:kubernetes/kubernetes/kubectl"."platforms.linux-x64"]
+checksum = "sha256:c49a28f1f4efc4d475ed05f47f2ce8e563bf7bef69ed77fe1b924ea6d83b6327"
+url = "https://dl.k8s.io/v1.35.10/bin/linux/amd64/kubectl"
+
 [[tools."aqua:mikefarah/yq"]]
 version = "4.54.1"
 backend = "aqua:mikefarah/yq"
@@ -82,6 +95,15 @@ specifiers = ["22ef04caaeeb94ad6ed49f8392b6bada65184569"]
 [tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git".options]
 python = "3.12.12"
 uvx = "false"
+
+[[tools."pypi:git+https://github.com/juju/juju-crashdump.git"]]
+version = "bde242ccfdd91cb2372f26d41d62d7b230660c08"
+backend = "pypi:git+https://github.com/juju/juju-crashdump.git"
+specifiers = ["bde242ccfdd91cb2372f26d41d62d7b230660c08"]
+
+[tools."pypi:git+https://github.com/juju/juju-crashdump.git".options]
+python = "3.12.12"
+with = '["ssh-agent-setup==2.0.1"]'
 
 [[tools.python]]
 version = "3.12.12"

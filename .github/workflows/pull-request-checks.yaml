@@ -21,8 +21,6 @@ jobs:
           fetch-depth: 0
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-        with:
-          install_args: aqua:gitleaks/gitleaks
       - name: Scan git history for secrets
         env:
           GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
@@ -41,8 +39,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-        with:
-          install_args: python pipx:poetry node npm:markdownlint-cli2
       - name: Install dependencies
         run: mise run setup
       - name: Run linter
@@ -56,8 +52,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-        with:
-          install_args: python pipx:poetry
       - name: Install dependencies
         run: mise run setup
       - name: Run Charm Integration Testing Unit Tests
@@ -78,8 +72,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-        with:
-          install_args: python pipx:poetry
       - name: Install dependencies
         run: mise run setup
       - name: Run Validators Unit Tests
@@ -94,8 +86,6 @@ jobs:
           fetch-depth: 0
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-        with:
-          install_args: python pipx:poetry
       - name: Install dependencies
         run: mise run setup
       - name: Run Bundle Builder X Tests

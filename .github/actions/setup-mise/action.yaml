@@ -1,11 +1,6 @@
 ---
 name: Set up mise
 description: Install the repository's mise-locked toolchain
-inputs:
-  install_args:
-    description: Optional tool selectors passed to mise install
-    required: false
-    default: ""
 runs:
   using: composite
   steps:
@@ -22,12 +17,8 @@ runs:
     - name: Install pipx
       shell: bash
       run: mise install --locked pipx
-    - name: Install requested tools
-      if: inputs.install_args != ''
+    - name: Install configured tools
       shell: bash
       env:
         GIT_CONFIG_GLOBAL: /dev/null
-        MISE_INSTALL_ARGS: ${{ inputs.install_args }}
-      run: |-
-        read -r -a tools <<< "$MISE_INSTALL_ARGS"
-        mise install --locked uv pipx "${tools[@]}"
+      run: mise install --locked

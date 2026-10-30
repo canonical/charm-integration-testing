@@ -17,5 +17,7 @@ mise exec -- bash -c '
     command -v yq
     command -v markdownlint-cli2
     command -v trufflehog
+    command -v kubectl
+    command -v juju-crashdump
     command -v juju-k8s-crashdump
 '

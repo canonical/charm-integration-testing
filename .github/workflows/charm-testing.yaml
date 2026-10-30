@@ -125,16 +125,27 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Set up mise tools for runner selection
-        uses: ./.github/actions/setup-mise
-        with:
-          install_args: aqua:mikefarah/yq aqua:jqlang/jq
       - name: Pick runner
         id: pick
         uses: ./.github/actions/pick-runner
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
+      - name: Configure pip proxy
+        shell: bash
+        env:
+          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+        run: |
+          if [[ -n "${PIP_PROXY}" ]]; then
+            sudo tee /etc/pip.conf <<EOF
+          [global]
+          proxy= ${PIP_PROXY}
+          EOF
+          fi
+      - name: Set up project tools
+        uses: ./.github/actions/setup-mise
+        env:
+          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -323,36 +334,11 @@ jobs:
       - name: Debug Setup
         if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
-      - name: Configure pip proxy
-        shell: bash
-        env:
-          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-        run: |
-          if [[ -n "${PIP_PROXY}" ]]; then
-            sudo tee /etc/pip.conf <<EOF
-          [global]
-          proxy= ${PIP_PROXY}
-          EOF
-          fi
-      - name: Set up project tools
-        uses: ./.github/actions/setup-mise
-        env:
-          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-        with:
-          install_args: python pipx:poetry aqua:trufflesecurity/trufflehog pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
       - name: Install repository dependencies
         shell: bash
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
         run: mise run setup
-      - name: Install juju-crashdump
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install juju-crashdump --classic
-      - name: Install kubectl
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install kubectl --classic
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
