@@ -299,6 +299,10 @@ jobs:
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: |
+          # Select old RBAC with QA/credential names or QA model labels, only when any
+          # model and Helm owner namespaces are absent. Except for credential bindings,
+          # subjects must all be ServiceAccounts in absent QA namespaces. Keep roles
+          # referenced by surviving cluster bindings or any namespaced RoleBinding.
           set -euo pipefail
           kubectl get namespaces --output json > namespaces.json
           kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json |
