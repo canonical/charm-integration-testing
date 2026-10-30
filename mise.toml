@@ -1,5 +1,6 @@
 [settings]
 lockfile = true
+task.run_auto_install = false
 
 [tools]
 python = "3.12.12"
@@ -8,3 +9,5 @@ pipx = "1.18.8"
 "pipx:poetry" = "2.3.0"
 "aqua:jqlang/jq" = "1.8.2"
 "aqua:mikefarah/yq" = "4.54.1"
+"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12" }

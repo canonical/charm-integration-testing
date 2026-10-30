@@ -7,6 +7,8 @@ A Multipass VM for developing and testing charm integration validators and other
 ### Host-side
 
 Run host operations through the repository's mise tasks:
+install the [development toolchain](../CONTRIBUTING.md#general-recommendations)
+first.
 
 | Command | Purpose |
 |---|---|
@@ -78,7 +80,12 @@ Set tokens in `development-sandbox/.env` (gitignored, copy from `.env.sample`).
 - `SANDBOX_MOUNT` overrides the VM-side mount path (default: `/project`). Set this to a unique path (e.g. `/project-fork`) when multiple repo clones share the same VM.
 - `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` override VM resources at creation time (defaults: `4`, `8G`, `40G`). These can be set via environment variables or CLI flags (`--cpus`, `--memory`, `--disk`) and apply only when creating a new VM.
 - Inside the VM the project is accessible via `$PROJECT_ROOT` (set automatically by the sandbox tooling to the VM-side mount path).
-- mise installs the repository's locked tools from the sandbox profile; Poetry manages Python dependencies.
+- mise loads the shared `../mise.toml`, the `../mise.development.toml` overlay,
+  and sandbox extras from `mise.toml` in this directory. The VM sets
+  `MISE_ENV=development` and
+  `MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml`
+  so these extras stay available while working from the project root.
+  Poetry manages Python dependencies.
 - **Migrating from validator-development-sandbox:** rename `VALIDATOR_VM` to `SANDBOX_VM` and `VALIDATOR_SIGNING_KEY` to `SANDBOX_SIGNING_KEY` in your `.env`.
 - **nginx API cache:** auto-provisioned via `substrate.yaml` cloud-init, listening on `http://localhost:8080` *inside the VM* (`/charmhub/`, `/snapcraft/`), caching responses for 4h.
 - Any host env var prefixed `SANDBOX_VAR_` is passed into the VM with the prefix stripped, e.g. `SANDBOX_VAR_CHARMHUB_API_URL` / `SANDBOX_VAR_SNAPCRAFT_API_URL` override `bundle_builder_x`'s API base URLs inside the VM as `CHARMHUB_API_URL` / `SNAPCRAFT_API_URL` (e.g. point at the nginx cache above), and `SANDBOX_VAR_COPILOT_MODEL` overrides the Copilot model inside the VM. See `.env.sample`.

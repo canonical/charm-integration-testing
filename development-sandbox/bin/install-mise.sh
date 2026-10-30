@@ -29,25 +29,31 @@ else
         --output "$TMP_DIR/SHASUMS256.txt"
     curl --fail --location --silent --show-error "${MISE_URL}/${MISE_ARCHIVE}" \
         --output "$TMP_DIR/$MISE_ARCHIVE"
-    grep -F " ${MISE_ARCHIVE}" "$TMP_DIR/SHASUMS256.txt" > "$TMP_DIR/checksum.txt"
+    grep -F " ./${MISE_ARCHIVE}" "$TMP_DIR/SHASUMS256.txt" > "$TMP_DIR/checksum.txt"
     (
         cd "$TMP_DIR"
         sha256sum --check checksum.txt
-        tar -xzf "$MISE_ARCHIVE" mise
+        tar -xzf "$MISE_ARCHIVE" mise/bin/mise
     )
 
     install -d "$HOME/.local/bin"
-    install -m 0755 "$TMP_DIR/mise" "$HOME/.local/bin/mise"
+    install -m 0755 "$TMP_DIR/mise/bin/mise" "$HOME/.local/bin/mise"
 fi
 
 for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
+    if [[ -f "$startup_file" ]]; then
+        sed -i 's/^export MISE_ENV=sandbox$/export MISE_ENV=development/' "$startup_file"
+    fi
     if ! grep -Fq '# mise sandbox environment' "$startup_file" 2>/dev/null; then
         cat >> "$startup_file" <<'EOF'
 
 # mise sandbox environment
-export MISE_ENV=sandbox
+export MISE_ENV=development
 eval "$(~/.local/bin/mise activate bash)"
 EOF
+    fi
+    if ! grep -Fxq 'export MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml' "$startup_file"; then
+        echo 'export MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml' >> "$startup_file"
     fi
 done
 

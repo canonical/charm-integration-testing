@@ -7,7 +7,7 @@ validating the deployment and interoperability of charms.
 
 Install [mise](https://mise.jdx.dev/getting-started.html) first. Tool versions
 are pinned with mise, and Python dependencies are managed through Poetry.
-The CI and development-sandbox profiles add their own locked tools.
+The base `mise.toml` contains the test-execution toolchain used locally and in CI.
 
 ```bash
 mise install --locked uv
@@ -17,6 +17,11 @@ mise run setup
 ```
 
 ## Development
+
+Development tools (including linters) are added by `mise.development.toml`.
+Select them with `export MISE_ENV=development` before following the installation
+commands above. The sandbox adds its own extras from
+`development-sandbox/mise.toml` automatically.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
 best practices.

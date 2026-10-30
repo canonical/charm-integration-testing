@@ -1,0 +1,5 @@
+[tools]
+node = "24.22.0"
+"aqua:cli/cli" = "2.103.3"
+"npm:markdownlint-cli2" = "0.24.0"
+"aqua:gitleaks/gitleaks" = "8.30.1"

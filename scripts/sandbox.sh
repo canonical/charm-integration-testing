@@ -364,7 +364,7 @@ _cmd_up() {
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
         cd '$VM_MOUNT'
-        GIT_CONFIG_GLOBAL=/dev/null MISE_ENV=sandbox mise run sandbox:tools
+        GIT_CONFIG_GLOBAL=/dev/null mise run sandbox:tools
         mise run setup
     "
 

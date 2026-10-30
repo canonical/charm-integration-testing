@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Set up the sandbox Kubernetes substrate"
 #MISE raw_args=true
-#MISE tools."aqua:helm/helm"="3.21.4"
-#MISE tools."aqua:jqlang/jq"="1.8.2"
 set -euo pipefail
 
 exec bash ./development-sandbox/bin/setup-k8s.sh "$@"

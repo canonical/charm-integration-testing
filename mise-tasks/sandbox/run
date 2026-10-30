@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run Copilot in the development sandbox"
 #MISE raw_args=true
-#MISE tools."aqua:cli/cli"="2.103.3"
 set -euo pipefail
 
 exec ./scripts/sandbox.sh run "$@"

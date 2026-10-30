@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Scan the Git history for secrets"
 #MISE raw_args=true
-#MISE tools."aqua:gitleaks/gitleaks"="8.30.1"
 set -euo pipefail
 
 exec gitleaks "$@"

@@ -120,7 +120,6 @@ jobs:
       TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
       NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
       BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
-      MISE_ENV: ci
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -129,7 +128,7 @@ jobs:
       - name: Set up mise tools for runner selection
         uses: ./.github/actions/setup-mise
         with:
-          install_args: aqua:mikefarah/yq@4.54.1 aqua:jqlang/jq@1.8.2
+          install_args: aqua:mikefarah/yq aqua:jqlang/jq
       - name: Pick runner
         id: pick
         uses: ./.github/actions/pick-runner
@@ -340,8 +339,7 @@ jobs:
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
         with:
-          install_args: python pipx:poetry aqua:trufflesecurity/trufflehog@3.56.0
-            pypi:git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569
+          install_args: python pipx:poetry aqua:trufflesecurity/trufflehog pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
       - name: Install repository dependencies
         shell: bash
         env:

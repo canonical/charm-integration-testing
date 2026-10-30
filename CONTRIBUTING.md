@@ -8,7 +8,21 @@ Testing.
 ## General recommendations
 
 Follow the [README Getting Started](README.md#getting-started) guide to install
-the locked toolchain and project dependencies.
+the locked toolchain and project dependencies. Select the development overlay
+first so the same commands also install linters and the GitHub CLI:
+
+```bash
+export MISE_ENV=development
+mise install --locked uv
+mise install --locked pipx
+mise install --locked
+mise run setup
+```
+
+`mise.toml` defines the shared test-execution tools. `mise.development.toml`
+adds development tools; CI lint and secret-scanning jobs use this overlay too.
+Sandbox-only tools are defined in `development-sandbox/mise.toml` and enabled
+automatically inside the VM. Each tool's version is declared in one config.
 
 ## Linting and Formatting
 
@@ -74,15 +88,7 @@ Unit tests mirror the source structure under `tests/unit/`. Run all unit test su
 
 Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `mise run test:suite` (with the required Juju environment configured).
 
-When running the integration-test task outside the development sandbox, install its profile first:
-
-```bash
-MISE_ENV=ci mise install --locked uv
-MISE_ENV=ci mise install --locked pipx
-MISE_ENV=ci mise install --locked
-```
-
-The sandbox setup installs its own profile.
+The integration-test task uses the base toolchain; no CI-specific profile is needed.
 
 ## Pull requests
 

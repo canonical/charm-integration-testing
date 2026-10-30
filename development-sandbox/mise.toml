@@ -1,0 +1,3 @@
+[tools]
+"npm:@github/copilot" = "1.0.105"
+"aqua:helm/helm" = "3.21.4"

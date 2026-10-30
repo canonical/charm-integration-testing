@@ -11,6 +11,8 @@ permissions:
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
+    env:
+      MISE_ENV: development
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -20,7 +22,7 @@ jobs:
       - name: Set up mise
         uses: ./.github/actions/setup-mise
         with:
-          install_args: aqua:gitleaks/gitleaks@8.30.1
+          install_args: aqua:gitleaks/gitleaks
       - name: Scan git history for secrets
         env:
           GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
@@ -30,6 +32,8 @@ jobs:
             --log-opts="$GITLEAKS_LOG_OPTS"
   lint:
     runs-on: ubuntu-latest
+    env:
+      MISE_ENV: development
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -38,7 +42,7 @@ jobs:
       - name: Set up mise
         uses: ./.github/actions/setup-mise
         with:
-          install_args: python pipx:poetry
+          install_args: python pipx:poetry node npm:markdownlint-cli2
       - name: Install dependencies
         run: mise run setup
       - name: Run linter

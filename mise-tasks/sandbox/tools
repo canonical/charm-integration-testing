@@ -2,12 +2,17 @@
 #MISE description="Install sandbox developer tools"
 set -euo pipefail
 
-GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked uv
-GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked pipx
-GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" MISE_ENV=sandbox mise install --locked
+export MISE_ENV=development
+export MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml
+export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}"
 
-MISE_ENV=sandbox mise exec -- bash -c '
+mise install --locked uv
+mise install --locked pipx
+mise install --locked
+
+mise exec -- bash -c '
     command -v copilot
+    command -v helm
     command -v gh
     command -v yq
     command -v markdownlint-cli2
