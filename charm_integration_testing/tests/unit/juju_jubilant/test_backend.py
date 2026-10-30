@@ -167,6 +167,107 @@ class JubilantCliStub:
         return self.results.get(tuple(args), "")
 
 
+class ApplicationOperationsJuju(jubilant.Juju):
+    def __init__(self, *, kubernetes: bool = False, units: tuple[str, ...] = ("target/0",)) -> None:
+        super().__init__(model=TEST_MODEL.uri)
+        self.kubernetes = kubernetes
+        self.executions: list[tuple[str, ...]] = []
+        self.current_status = StatusStub(
+            application_statuses={"target": "active"},
+            unit_workload_statuses=dict.fromkeys(units, "active"),
+        ).status()
+
+    def cli(self, *args: str, include_model: bool = True, stdin: str | None = None) -> str:
+        self.executions.append(args)
+        return ""
+
+    def status(self) -> jubilant.Status:
+        return self.current_status
+
+    def show_model(self, model: str | None = None) -> jubilant.ModelInfo:
+        return jubilant.ModelInfo(
+            name=TEST_MODEL.uri,
+            short_name=TEST_MODEL.model,
+            model_uuid="model-uuid",
+            model_type="caas" if self.kubernetes else "iaas",
+            controller_uuid="controller-uuid",
+            controller_name=TEST_MODEL.controller,
+            is_controller=False,
+            cloud="test-cloud",
+            life="alive",
+            type="kubernetes" if self.kubernetes else "lxd",
+        )
+
+
+class TestApplicationOperations:
+    @dataclass(frozen=True)
+    class Params:
+        kubernetes: bool
+        units: tuple[str, ...]
+        num: int
+        expected: list[tuple[str, ...]]
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params(True, ("target/0",), 3, [("scale-application", "target", "3")]),
+            Params(True, ("target/0",), 0, [("scale-application", "target", "0")]),
+            Params(False, ("target/0",), 3, [("add-unit", "target", "--num-units", "2")]),
+            Params(False, (), 1, [("add-unit", "target")]),
+            Params(
+                False,
+                ("target/2", "target/0", "target/1"),
+                1,
+                [("remove-unit", "--no-prompt", "target/1", "target/2")],
+            ),
+            Params(False, ("target/0",), 0, [("remove-unit", "--no-prompt", "target/0")]),
+            Params(False, ("target/0",), 1, []),
+        ],
+    )
+    def test_scaling_preserves_substrate_behavior(self, params: Params) -> None:
+        # GIVEN native Jubilant operations with a controlled status and substrate
+        juju = ApplicationOperationsJuju(kubernetes=params.kubernetes, units=params.units)
+        backend = JubilantBackend(JubilantClientStub(juju))
+
+        # WHEN scaling to the requested count
+        backend.scale_application(TEST_MODEL, "target", params.num)
+
+        # THEN Kubernetes scales directly; machines add or remove the excess units
+        assert juju.executions == params.expected
+
+    @pytest.mark.parametrize("units", [(), ("target/0", "target/2")])
+    def test_application_queries_use_native_status(self, units: tuple[str, ...]) -> None:
+        # GIVEN an application's native Jubilant status
+        juju = ApplicationOperationsJuju(units=units)
+        backend = JubilantBackend(JubilantClientStub(juju))
+
+        # WHEN querying the application, THEN its charm and units come from that status
+        assert set(backend.application_units(TEST_MODEL, "target")) == set(units)
+        assert backend.num_units(TEST_MODEL, "target") == len(units)
+        assert backend.application_charm(TEST_MODEL, "target") == "test-charm"
+        with pytest.raises(KeyError):
+            backend.application_units(TEST_MODEL, "missing")
+
+    def test_relation_and_application_removal_use_native_jubilant_commands(self) -> None:
+        # GIVEN a model-specific Jubilant client
+        juju = ApplicationOperationsJuju()
+        backend = JubilantBackend(JubilantClientStub(juju))
+        provider = JujuIntegrationApplication("database", "db")
+        requirer = JujuIntegrationApplication("webapp", "database")
+
+        # WHEN adding/removing a relation and removing applications
+        backend.integrate(TEST_MODEL, provider, requirer)
+        backend.remove_integration(TEST_MODEL, provider, requirer)
+        backend.remove_applications(TEST_MODEL, "database", "webapp")
+
+        # THEN endpoint names, application names, and non-interactive removal are preserved
+        assert juju.executions == [
+            ("integrate", "database:db", "webapp:database"),
+            ("remove-relation", "database:db", "webapp:database"),
+            ("remove-application", "--no-prompt", "database", "webapp"),
+        ]
+
+
 class TestIsK8sCloud:
     @pytest.mark.parametrize(
         ("cloud_type", "expected"),
@@ -3074,10 +3175,7 @@ class TestDeployBundleFile:
         backend = JubilantBackend(client)
         wait_calls: list[Any] = []
 
-        with (
-            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
-            patch.object(backend, "wait", side_effect=lambda *a, **kw: wait_calls.append(a)),
-        ):
+        with patch.object(backend, "wait", side_effect=lambda *a, **kw: wait_calls.append(a)):
             backend.deploy_bundle_file(TEST_MODEL, str(bundle_file))
 
         # THEN wait is called exactly once (combined predicate)
@@ -3106,10 +3204,7 @@ class TestDeployBundleFile:
             nonlocal captured_ready
             captured_ready = ready
 
-        with (
-            patch("juju_jubilant.backend.JujuCmdBackend.deploy_bundle_file"),
-            patch.object(backend, "wait", side_effect=capture_wait),
-        ):
+        with patch.object(backend, "wait", side_effect=capture_wait):
             backend.deploy_bundle_file(TEST_MODEL, str(bundle_file))
 
         # WHEN the predicate is evaluated against a settled status
@@ -3781,24 +3876,35 @@ def test_ssh_timeout_before_reboot_fails() -> None:
 SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
 
 
-def test_ssh_bounds_process_and_preserves_model(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("requested_timeout", "command_timeout", "expected_timeout"),
+    [(7.5, 300, 7.5), (600, 300, 300), (600, 2, 2)],
+)
+def test_ssh_bounds_process_and_preserves_model(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_timeout: float,
+    command_timeout: float,
+    expected_timeout: float,
+) -> None:
     def run(
-        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+        args: list[str], *, check: bool, capture_output: bool, encoding: str, input: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
-        assert check and capture_output and text
-        assert timeout == 7.5
+        assert check and capture_output and encoding == "utf-8"
+        assert input is None
+        assert timeout == expected_timeout
         return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
 
     monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
-    result = JubilantBackend().ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=7.5)
+    backend = JubilantBackend(JubilantClient(command_timeout=timedelta(seconds=command_timeout)))
+    result = backend.ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=requested_timeout)
     assert result == "boot-id\n"
 
 
 @pytest.mark.parametrize("timed_out", [False, True])
 def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) -> None:
     def run(
-        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+        args: list[str], *, check: bool, capture_output: bool, encoding: str, input: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         if timed_out:
             raise subprocess.TimeoutExpired(args, timeout)
