@@ -260,7 +260,7 @@ jobs:
             def qa_rbac:
               (.metadata.name | qa_namespace) or credential or orphaned_qa_owner;
             def live_subject:
-              any(.subjects[]?; .kind == "ServiceAccount" and
+              any(.subjects[]?; .kind != "ServiceAccount" or (.namespace // "") == "" or
                 (.namespace as $namespace | $namespaces | index($namespace) != null));
             def orphaned_qa_subjects:
               (.subjects | length > 0) and all(.subjects[];
