@@ -1,8 +1,16 @@
 ---
-# Source: https://github.com/canonical/istio-ingress-k8s-operator
+# Source: https://github.com/canonical/service-mesh/tree/main/charms/istio-ingress-k8s
 listed: true
 platforms: [kubernetes]
 overrides:
+  - criteria:
+      - any_of:
+          - track: '1.29'
+          - track: '1.31'
+          - track: dev
+    constraints:
+      # src/charm.py: _collect_external_authorization_status blocks auth without ingress config.
+      - 'bool(endpoint[forward-auth]) => bool(endpoint[istio-ingress-config])'
   # Track 2 on Ubuntu 24.04 publishes this endpoint without its optional flag.
   - criteria:
       - all_of:

@@ -1,5 +1,5 @@
 ---
-# Remove after: https://github.com/canonical/vault-k8s-operator/pull/659
+# Remove endpoint optionality overrides after: https://github.com/canonical/vault-k8s-operator/pull/659
 overrides:
   # Tracks 1.18+ renamed common_name to pki_ca_common_name; 2.0 follows same schema
   - criteria:
@@ -31,10 +31,17 @@ overrides:
         optional: true  # additive endpoint, not primary purpose; only 1.18+ (k8s/src/charm.py::_on_collect_status)
     configs:
       pki_ca_common_name: [charmqa, null]
+      # GLAuth requests Kubernetes service FQDNs; see https://github.com/canonical/charm-integration-testing/issues/833.
+      pki_allowed_domains: ['charmqa,svc.cluster.local', null]
+      pki_allow_subdomains: [true, null]
+      pki_allow_any_name: [false, null]
       acme_ca_common_name: [charmqa, null]
     constraints:
       - 'bool(endpoint[vault-pki]) => bool(endpoint[tls-certificates-pki])'
       - 'bool(endpoint[vault-pki]) or bool(endpoint[tls-certificates-pki]) => set(config[pki_ca_common_name])'
+      - 'bool(endpoint[vault-pki]) == set(config[pki_allowed_domains])'
+      - 'bool(endpoint[vault-pki]) == set(config[pki_allow_subdomains])'
+      - 'bool(endpoint[vault-pki]) == set(config[pki_allow_any_name])'
       - 'bool(endpoint[tls-certificates-acme]) => set(config[acme_ca_common_name])'  # REQUIRED once connected - k8s/src/charm.py::_on_collect_status BlockedStatus
   # 1.15 track: no ingress-per-unit endpoint
   - criteria:
