@@ -10,9 +10,6 @@ Prerequisites
 
 Install the locked toolchain and Poetry dependencies with mise::
 
-    mise install --locked uv
-    mise install --locked pipx
-    mise install --locked
     mise run setup
 
 Build bundles through the repository task (or use the CLI from the mise

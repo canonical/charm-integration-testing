@@ -10,9 +10,6 @@ are pinned with mise, and Python dependencies are managed through Poetry.
 The base `mise.toml` contains the test-execution toolchain used locally and in CI.
 
 ```bash
-mise install --locked uv
-mise install --locked pipx
-mise install --locked
 mise run setup
 ```
 

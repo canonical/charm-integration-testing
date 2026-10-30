@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-#MISE description="Install the repository's Poetry dependencies"
+#MISE description="Install the locked toolchain and project dependencies"
 #MISE raw_args=true
 set -euo pipefail
 
-poetry install "$@"
+mise install --locked uv
+mise install --locked pipx
+GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}" mise install --locked
+
+mise exec -- poetry install "$@"

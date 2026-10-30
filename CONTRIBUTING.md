@@ -13,9 +13,6 @@ first so the same commands also install linters and the GitHub CLI:
 
 ```bash
 export MISE_ENV=development
-mise install --locked uv
-mise install --locked pipx
-mise install --locked
 mise run setup
 ```
 
