@@ -1,0 +1,5 @@
+mise*.lock linguist-generated=true
+development-sandbox/mise.lock linguist-generated=true
+.mise/locks/** linguist-generated=true
+development-sandbox/.mise/locks/** linguist-generated=true
+poetry.lock linguist-generated=true
