@@ -889,17 +889,8 @@ class JubilantBackend(JujuBackend):
         if timeout is None:
             juju.ssh(target=application, command=command)
             return None
-        args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
-        try:
-            return subprocess.run(  # nosec B603
-                args,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=min(timeout, self.client.command_timeout.total_seconds()),
-            ).stdout
-        except subprocess.CalledProcessError as error:
-            raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
+        stdout, _ = juju._cli("ssh", application, command, timeout=timeout)
+        return stdout
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")

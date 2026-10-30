@@ -3887,10 +3887,11 @@ def test_ssh_bounds_process_and_preserves_model(
     expected_timeout: float,
 ) -> None:
     def run(
-        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+        args: list[str], *, check: bool, capture_output: bool, encoding: str, input: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         assert args == ["juju", "ssh", "--model", SSH_MODEL.uri, "1", "cat /proc/sys/kernel/random/boot_id"]
-        assert check and capture_output and text
+        assert check and capture_output and encoding == "utf-8"
+        assert input is None
         assert timeout == expected_timeout
         return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
 
@@ -3903,7 +3904,7 @@ def test_ssh_bounds_process_and_preserves_model(
 @pytest.mark.parametrize("timed_out", [False, True])
 def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) -> None:
     def run(
-        args: list[str], *, check: bool, capture_output: bool, text: bool, timeout: float
+        args: list[str], *, check: bool, capture_output: bool, encoding: str, input: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
         if timed_out:
             raise subprocess.TimeoutExpired(args, timeout)
