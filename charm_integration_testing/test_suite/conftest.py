@@ -23,6 +23,7 @@ from extensions import (
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
     RemoteLoggingExtension,
+    S3IntegratorExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
@@ -48,6 +49,7 @@ from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
+from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -97,6 +99,7 @@ pytest_plugins = [
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
+    "test_suite.fixtures.s3",
 ]
 
 
@@ -388,6 +391,8 @@ def juju_client(
     remote_logging_endpoints_by_controller: dict[str, str],
     kubernetes_client_registry: KubernetesClientRegistry,
     unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
+    s3_provider_registry: S3ProviderRegistry,
+    s3_resources_for_provider: Callable[[S3Provider], S3ResourceRegistry],
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
@@ -401,6 +406,7 @@ def juju_client(
             MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
+            S3IntegratorExtension(juju_backend, s3_provider_registry, s3_resources_for_provider),
             UnsealVaultJujuExtension(juju_backend, logger),
             unseal_vault_k8s_extension,
             persistence_extension,
