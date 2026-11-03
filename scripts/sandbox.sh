@@ -424,7 +424,7 @@ _cmd_up() {
 
         if ! command -v copilot &>/dev/null; then
             echo '==> Installing @github/copilot...'
-            sudo npm install -g @github/copilot
+            npm install --global --prefix \"\$HOME/.local\" @github/copilot
         else
             echo '==> @github/copilot: found.'
         fi
@@ -432,7 +432,7 @@ _cmd_up() {
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
-            sudo npm install -g markdownlint-cli2
+            npm install --global --prefix \"\$HOME/.local\" markdownlint-cli2
         else
             echo '==> markdownlint-cli2: found.'
         fi
