@@ -40,7 +40,7 @@ Set options in `development-sandbox/.env` (gitignored). See
 | `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` | VM sizing at creation (defaults: `4` / `8G` / `40G`) |
 | `SANDBOX_VM` / `SANDBOX_MOUNT` | VM name and mount path; use a unique mount path for each checkout sharing a VM |
 
-For `SANDBOX_VAR_GITHUB_TOKEN`, limit repository access to those you need and set:
+For read-only tasks, limit `SANDBOX_VAR_GITHUB_TOKEN` to the repositories you need:
 
 | Repository permission | Access |
 |---|---|
@@ -48,6 +48,9 @@ For `SANDBOX_VAR_GITHUB_TOKEN`, limit repository access to those you need and se
 | Issues | Read-only |
 | Pull requests | Read-only |
 | Actions | Read-only |
+
+Grant write access only for tasks that need it: Pull requests for posting reviews,
+Issues for filing bugs, and Contents for pushing changes.
 
 Without dedicated tokens, the script asks before using your host `gh` token in the
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
@@ -71,6 +74,7 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 ```
 
 This applies to both interactive and autonomous `run` sessions.
+New sandboxes include Go and uvx; install them manually in older VMs.
 
 ### GitHub
 
