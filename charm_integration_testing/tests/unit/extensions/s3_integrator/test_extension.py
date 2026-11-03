@@ -162,8 +162,8 @@ def make_integrator_client(
             scopes[provider.handle] = S3ResourceRegistry(provider, registry, cleanup_buckets)
         return scopes[provider.handle]
 
-    def provider_factory(config: Path | str) -> S3Provider:
-        return providers[str(config)]
+    def provider_factory(path: Path) -> S3Provider:
+        return providers[str(path)]
 
     provider_registry = S3ProviderRegistry({cloud: Path(cloud) for cloud in providers}, provider_factory)
     return JujuClient(
