@@ -9,7 +9,7 @@ import pytest
 from resource_registry import ResourceRegistry
 from s3_storage import S3Credentials, StaticS3Provider
 from test_suite.fixtures import s3
-from test_suite.fixtures.s3 import can_cleanup_session_storage, s3_config_paths
+from test_suite.fixtures.s3 import can_cleanup_session_storage, s3_config_contents, s3_config_paths
 from test_suite.scheduler.states import State
 
 
@@ -28,6 +28,13 @@ def test_cloud_config_paths_follow_kubeconfig_aliases(tmp_path: Path) -> None:
         "target-cloud": tmp_path / "target.conf",
         "neighbor-cloud": tmp_path / "neighbor.conf",
     }
+
+
+def test_inline_config_contents_follow_cloud_aliases() -> None:
+    config = "S3_ENDPOINT=http://s3.test\nS3_ACCESS_KEY=access\nS3_SECRET_KEY=secret\n"
+    assert s3_config_contents(
+        {"S3_CONFIG_CONTENT_target_cloud": config, "S3_CONFIG_CONTENT_NEIGHBOR_CLOUD": config}
+    ) == {"target-cloud": config, "neighbor-cloud": config}
 
 
 def test_cloud_config_paths_strip_surrounding_whitespace(tmp_path: Path) -> None:
@@ -64,6 +71,15 @@ def test_provider_fixture_loads_static_config_lazily(tmp_path: Path, monkeypatch
     )
     monkeypatch.setenv("S3_CONFIG_fixture_cloud", str(path))
     # WHEN the suite fixture resolves that cloud, THEN it returns the static provider
+    provider = unwrap(s3.s3_provider_registry)().provider_for_cloud("fixture-cloud")
+    assert isinstance(provider, StaticS3Provider)
+
+
+def test_provider_fixture_loads_inline_config_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "S3_CONFIG_CONTENT_fixture_cloud",
+        "S3_ENDPOINT=http://s3.test\nS3_ACCESS_KEY=access\nS3_SECRET_KEY=secret\nS3_BUCKET_NAMESPACE=shared\n",
+    )
     provider = unwrap(s3.s3_provider_registry)().provider_for_cloud("fixture-cloud")
     assert isinstance(provider, StaticS3Provider)
 

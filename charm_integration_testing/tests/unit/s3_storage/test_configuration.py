@@ -17,6 +17,11 @@ def test_static_file_constructs_provider_without_http_session(tmp_path: Path) ->
     assert isinstance(provider_from_config(path), StaticS3Provider)
 
 
+def test_inline_config_constructs_provider_without_writing_a_file() -> None:
+    config = "S3_ENDPOINT=https://s3.test\nS3_ACCESS_KEY=access\nS3_SECRET_KEY=secret\nS3_BUCKET_NAMESPACE=shared\n"
+    assert isinstance(provider_from_config(config), StaticS3Provider)
+
+
 def test_parser_defaults_to_generic_keys() -> None:
     # GIVEN a key belonging to an unsupported implementation
     # WHEN the generic parser reads it, THEN the value is not exposed in its error

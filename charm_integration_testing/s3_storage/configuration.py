@@ -33,10 +33,11 @@ def parse_s3_config(content: str, allowed_variables: Collection[str] = S3_CONFIG
     return values
 
 
-def provider_from_config(path: Path) -> S3Provider:
-    """Construct a static provider from a file, independent of the process environment."""
-    values = parse_s3_config(path.expanduser().read_text(encoding="utf-8"))
+def provider_from_config(config: Path | str) -> S3Provider:
+    """Construct a static provider from a file or inline configuration."""
+    content = config.expanduser().read_text(encoding="utf-8") if isinstance(config, Path) else config
+    values = parse_s3_config(content)
     provider = provider_from_environment(values)
     if provider is None:
-        raise ValueError(f"No S3 provider configured in '{path}'")
+        raise ValueError("No S3 provider configured")
     return provider
