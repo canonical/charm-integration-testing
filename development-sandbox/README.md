@@ -55,40 +55,61 @@ Declining leaves the corresponding tools unauthenticated.
 
 ## Recommended MCP servers
 
-Save the configuration below as `development-sandbox/mcp.json` (gitignored), replace
-`***` with your credentials, and add this to `development-sandbox/.env`:
+Create `development-sandbox/mcp.json` (gitignored) using this format:
+
+```json
+{
+  "mcpServers": {}
+}
+```
+
+Add the entries below inside `mcpServers`, replacing `***` with your credentials.
+Do not commit credentials. Set this in `development-sandbox/.env`:
 
 ```
 SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 ```
 
-This applies to both interactive and autonomous `run` sessions. GitHub MCP is
-built into Copilot CLI. Go and uvx are included in new sandboxes; the Test Observer
-launcher also needs Git and authenticated `gh` in the VM. Do not commit credentials.
+This applies to both interactive and autonomous `run` sessions.
+
+### GitHub
+
+Built into Copilot CLI; no additional configuration needed.
+
+### Jira
+
+Uses uvx, included in new sandboxes.
 
 ```json
 {
-  "mcpServers": {
-    "jira": {
-      "command": "uvx",
-      "args": ["mcp-atlassian"],
-      "env": {
-        "JIRA_URL": "https://warthogs.atlassian.net",
-        "JIRA_USERNAME": "***",
-        "JIRA_API_TOKEN": "***"
-      }
-    },
-    "Test Observer MCP (local, prod)": {
-      "type": "stdio",
-      "command": "bash",
-      "args": [
-        "-euc",
-        "dir=\"$HOME/.cache/test-observer-mcp\"; mkdir -p \"$(dirname \"$dir\")\"; if [ ! -d \"$dir/.git\" ]; then GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' clone https://github.com/canonical/test-observer-mcp.git \"$dir\" >&2; fi; cd \"$dir\"; exec go run ./cmd/server --transport stdio"
-      ],
-      "env": {
-        "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
-        "TEST_OBSERVER_API_KEY": "***"
-      }
+  "jira": {
+    "command": "uvx",
+    "args": ["mcp-atlassian"],
+    "env": {
+      "JIRA_URL": "https://warthogs.atlassian.net",
+      "JIRA_USERNAME": "***",
+      "JIRA_API_TOKEN": "***"
+    }
+  }
+}
+```
+
+### Test Observer
+
+Uses Go, included in new sandboxes, plus Git and authenticated `gh` in the VM.
+
+```json
+{
+  "Test Observer MCP (local, prod)": {
+    "type": "stdio",
+    "command": "bash",
+    "args": [
+      "-euc",
+      "dir=\"$HOME/.cache/test-observer-mcp\"; mkdir -p \"$(dirname \"$dir\")\"; if [ ! -d \"$dir/.git\" ]; then GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' clone https://github.com/canonical/test-observer-mcp.git \"$dir\" >&2; fi; cd \"$dir\"; exec go run ./cmd/server --transport stdio"
+    ],
+    "env": {
+      "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
+      "TEST_OBSERVER_API_KEY": "***"
     }
   }
 }
