@@ -44,6 +44,8 @@ yaml
 backend
 backends
 Charmcraft
+mise
+toolchain
 cjk
 cryptographically
 dvipng

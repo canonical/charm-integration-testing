@@ -55,9 +55,7 @@ runs:
         JOB_UUID: ${{ inputs.job_uuid }}
         LOG_PATH: ${{ inputs.log_path }}
       run: |
-        # openstack and openstackclients use the same name space `openstack` so we need to remove the openstack snap if it is installed before installing openstackclients snap
-        sudo snap remove openstack --purge || echo "Openstack snap was not installed"
-        sudo snap install openstackclients || echo "Openstackclients snap was already installed"
+        mise bootstrap packages apply --yes snap:openstackclients
         mkdir -p ${JOB_UUID}
         cp -r ${LOG_PATH}/* ${JOB_UUID}
     - name: Create index.html
@@ -90,4 +88,4 @@ runs:
         if [ -n "$LOG_RETENTION_SECONDS" ]; then
           HEADER_FLAG="--header X-Delete-After:$LOG_RETENTION_SECONDS"
         fi
-        /snap/bin/swift upload $HEADER_FLAG ${SWIFT_BUCKET} ${JOB_UUID}
+        swift upload $HEADER_FLAG ${SWIFT_BUCKET} ${JOB_UUID}

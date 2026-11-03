@@ -1,0 +1,25 @@
+[task_config]
+includes = ["scripts", "mise-tasks"]
+excludes = ["scripts/*.py"]
+
+[settings]
+lockfile = true
+task.run_auto_install = false
+
+[bootstrap.packages]
+"snap:juju" = { channel = "3/stable" }
+"snap:kubectl" = { channel = "1.32/stable", classic = true }
+"snap:openstackclients" = { channel = "latest/stable" }
+"snap:lxd" = { channel = "latest/stable" }
+
+[tools]
+python = "3.12.12"
+# Required by mise's Python-tool installer and dependency locks, not project dependency management.
+uv = "0.13.6"
+pipx = "1.18.8"
+"pipx:poetry" = "2.3.0"
+"aqua:jqlang/jq" = "1.8.2"
+"aqua:mikefarah/yq" = "4.54.1"
+"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12" }

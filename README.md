@@ -5,25 +5,40 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Python dependencies are managed through poetry.
+For local charm testing, use the [development sandbox](development-sandbox/README.md).
+It mounts your checkout and installs the tools inside a VM.
+
+To install directly on your machine, install
+[mise](https://mise.jdx.dev/getting-started.html), then run:
 
 ```bash
-pipx install poetry==2.0
-poetry install
+mise run setup
 ```
+
+For live tests on a snap-enabled Linux host, install the required clients:
+
+```bash
+mise bootstrap packages apply snap:juju snap:kubectl
+```
+
+See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
+machine-wide snap channels, and Python dependencies.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
-best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, linters, and tests.
 
 ## Usage
 
 ```bash
-./scripts/run-test-suite.sh \ 
-    --model {juju_model} \
-    --requirer {application}:{endpoint} \
-    --provider {application}:{endpoint}
+mise run test:suite -- \
+    --target-cloud "{juju_cloud}" \
+    --target-charm "{target_charm}" \
+    --target-application "{target_application}" \
+    --target-endpoint "{target_endpoint}" \
+    --neighbor-charm "{neighbor_charm}" \
+    --neighbor-application "{neighbor_application}" \
+    --neighbor-endpoint "{neighbor_endpoint}"
 ```
 
 ### Optional Environment Variables

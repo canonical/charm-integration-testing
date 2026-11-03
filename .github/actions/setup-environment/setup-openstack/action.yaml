@@ -52,7 +52,7 @@ runs:
         WORKSPACE: ${{ inputs.workspace }}
       shell: bash
       run: |
-        sudo snap install openstack
+        mise bootstrap packages apply --yes snap:openstackclients
         source "${NOVARC_PATH}"
         metadata_path="${WORKSPACE}/images"
         mkdir -p "${metadata_path}"

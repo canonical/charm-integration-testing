@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Install the locked toolchain and project dependencies"
+#MISE raw_args=true
+set -euo pipefail
+
+tools_only=false
+if [[ "${1:-}" == "--tools-only" ]]; then
+    tools_only=true
+    shift
+fi
+
+mise install --locked uv
+mise install --locked pipx
+mise install --locked
+
+if [[ "$tools_only" == false ]]; then
+    mise exec -- poetry install "$@"
+fi

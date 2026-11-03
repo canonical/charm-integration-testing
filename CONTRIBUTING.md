@@ -7,34 +7,65 @@ Testing.
 
 ## General recommendations
 
-Following the [README Getting Started](README.md#getting-started) guide to clone
-and download dependencies.
+Install mise as described in the [README](README.md#getting-started), then
+select the development tools:
+
+```bash
+export MISE_ENV=development
+mise run setup
+```
+
+### What goes where
+
+| File | Owns |
+|---|---|
+| `mise.toml` | Shared locked tools and snap channels for Juju, kubectl, OpenStack clients, and LXD |
+| `mise.development.toml` | Additional development tools, including Ruff, Bandit, yamlfix, and workflow linters |
+| `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
+
+The development configuration extends the shared tools.
+`[tools]` declares isolated, locked executables;
+`[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
+run in isolated environments. Mypy stays with Poetry because it uses the project's
+Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
+
+`mise run setup` installs the selected tools, then the project's Poetry environment.
+`mise run setup -- --tools-only` skips the Poetry environment; the CI setup action
+uses this mode so tools are available before cloud setup. Jobs that need project
+Python code subsequently run `mise exec -- poetry install`.
+
+Workflows apply only the snaps they need; lint and unit-test
+setup does not install them. Snaps require snapd and sudo, use `/snap/bin`, and
+are not revision-locked. Snapd can auto-refresh them; applying a changed channel
+can also refresh an existing daemon. Preview changes with
+`mise bootstrap packages apply --dry-run` on an existing machine.
+
+The test workflow's `juju_channel` input overrides the shared default.
+OpenStack operations and Swift uploads share `openstackclients`; remove any
+conflicting `openstack` snap manually.
 
 ## Linting and Formatting
 
-Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
-[markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
-automatically on Pull Requests to this repository. To format, run:
-
-```bash
-./scripts/format.sh
-```
+Run `mise run format` to apply formatting and `mise run lint` to check it.
+CI runs the same lint checks.
 
 ## Tooling and Continuous Integration
 
-### Scripts
+### Mise tasks
 
-| Script | Purpose |
+Existing shell scripts are discovered directly from `scripts/`
+using their `#MISE` headers. `mise-tasks/` contains
+only additional commands without an existing shell entry point.
+
+| Task | Purpose |
 |---|---|
-| `scripts/format.sh` | Auto-fix: ruff, yamlfix, markdownlint |
-| `scripts/lint.sh` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
-| `scripts/charm-integration-testing-unit-tests.sh` | Run `charm_integration_testing` unit tests |
-| `scripts/validators-unit-tests.sh` | Run validator unit tests |
-| `scripts/bundle-builder-x-tests.sh` | Run bundle builder tests |
+| `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
+| `mise run test:validators` | Run validator unit tests |
+| `mise run test:bundle-builder-x` | Run bundle builder tests |
 
 ### CI gates (all must pass on every PR)
 
-1. **lint** — `scripts/lint.sh`
+1. **lint** — `mise run lint`
 2. **charm-integration-testing-unit-tests**
 3. **validators-unit-tests**
 4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
@@ -43,7 +74,7 @@ automatically on Pull Requests to this repository. To format, run:
 ### Juju / environment notes
 
 - `juju status > file` exits 1 with an empty file — always pipe: `juju status | cat > file`
-- `kubectl` is accessed as `sudo k8s kubectl` (Canonical k8s snap)
+- `kubectl` uses the declared snap channel; `sudo k8s kubectl` also works in the sandbox
 - After editing validator source code, pass `--reinstall` to `dev-validate.py` to force re-injection on units
 
 ## Documentation
@@ -68,9 +99,11 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective scripts above before submitting a PR.
+Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective mise tasks above before submitting a PR.
 
-Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `scripts/run-tests.sh` (with the required Juju environment configured).
+Integration tests live in `charm_integration_testing/test_suite/` and run against
+live charms. Follow the [local testing guide](docs/how-to/run-and-debug-tests-locally.rst)
+to run them in the sandbox.
 
 ## Pull requests
 
