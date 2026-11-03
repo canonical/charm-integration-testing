@@ -394,20 +394,13 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Set up Python venv with project packages (poetry manages the venv)
-    echo "==> Installing Python dependencies via poetry..."
+    # Keep the existing sandbox compatible with the shared development tools.
+    echo "==> Installing the mise toolchain and Python dependencies..."
+    multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
-        if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
-            if ! command -v pipx &>/dev/null; then
-                sudo apt-get install -y -q pipx
-            fi
-            pipx install 'poetry==2.*'
-            pipx ensurepath
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
-        fi
         cd '$VM_MOUNT'
-        poetry install
+        mise run setup
     "
 
     # Install node-based tools used by the sandbox if not present
