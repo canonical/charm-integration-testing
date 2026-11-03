@@ -17,21 +17,11 @@ environments:
       juju-http-proxy: "http://squid.internal:3128"
       juju-https-proxy: "http://squid.internal:3128"
       juju-no-proxy: "127.0.0.1,localhost,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.canonical.com,.launchpad.net,.internal,.jujucharms.com,.svc,.svc.cluster.local"
-  ps6-sqa-prod_charm_qa_kubernetes-2:
-    <<: *ps6-sqa-prod_charm_qa_kubernetes
-    s3-secret: S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_2
-  ps6-sqa-prod_charm_qa_kubernetes-3:
-    <<: *ps6-sqa-prod_charm_qa_kubernetes
-    s3-secret: S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_3
-  ps6-sqa-prod_charm_qa_kubernetes-4:
-    <<: *ps6-sqa-prod_charm_qa_kubernetes
-    s3-secret: S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_4
-  ps6-sqa-prod_charm_qa_kubernetes-5:
-    <<: *ps6-sqa-prod_charm_qa_kubernetes
-    s3-secret: S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_5
-  ps6-sqa-prod_charm_qa_kubernetes-6:
-    <<: *ps6-sqa-prod_charm_qa_kubernetes
-    s3-secret: S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_6
+  ps6-sqa-prod_charm_qa_kubernetes-2: *ps6-sqa-prod_charm_qa_kubernetes
+  ps6-sqa-prod_charm_qa_kubernetes-3: *ps6-sqa-prod_charm_qa_kubernetes
+  ps6-sqa-prod_charm_qa_kubernetes-4: *ps6-sqa-prod_charm_qa_kubernetes
+  ps6-sqa-prod_charm_qa_kubernetes-5: *ps6-sqa-prod_charm_qa_kubernetes
+  ps6-sqa-prod_charm_qa_kubernetes-6: *ps6-sqa-prod_charm_qa_kubernetes
   # PS6 STG KUBERNETES
   ps6-sqa-stg_charm_qa_kubernetes-1: &ps6-sqa-stg_charm_qa_kubernetes
     github-runner: ps7-private-endpoint-runners
