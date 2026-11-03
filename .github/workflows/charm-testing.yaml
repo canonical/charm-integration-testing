@@ -265,10 +265,6 @@ jobs:
           if [[ -z "${S3_SECRET_NAME}" ]]; then
             exit 0
           fi
-          if [[ "${S3_SECRET_NAME}" != S3_STORAGE_CONFIG_* || ! -v "${S3_SECRET_NAME}" ]]; then
-            echo "::error::S3 secret name is not configured"
-            exit 1
-          fi
           umask 077
           S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-target.XXXXXX")"
           printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
@@ -305,10 +301,6 @@ jobs:
         run: |
           if [[ -z "${S3_SECRET_NAME}" ]]; then
             exit 0
-          fi
-          if [[ "${S3_SECRET_NAME}" != S3_STORAGE_CONFIG_* || ! -v "${S3_SECRET_NAME}" ]]; then
-            echo "::error::S3 secret name is not configured"
-            exit 1
           fi
           umask 077
           S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-neighbor.XXXXXX")"
