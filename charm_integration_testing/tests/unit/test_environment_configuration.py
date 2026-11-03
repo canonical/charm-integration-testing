@@ -35,10 +35,6 @@ def test_environment_aliases_share_cluster_s3_secrets() -> None:
     }
 
     for cluster, secret in cluster_secrets.items():
-        aliases = [
-            environment
-            for name, environment in environments.items()
-            if name.startswith(f"{cluster}-")
-        ]
+        aliases = [environment for name, environment in environments.items() if name.startswith(f"{cluster}-")]
         assert aliases, f"No environments found for {cluster}"
         assert {environment["s3-secret"] for environment in aliases} == {secret}
