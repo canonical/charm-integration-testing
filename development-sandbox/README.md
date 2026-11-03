@@ -34,11 +34,20 @@ Set options in `development-sandbox/.env` (gitignored). See
 
 | Option | Purpose |
 |---|---|
-| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT limited to the repositories you need: **Contents: Read-only**, **Issues: Read-only**, **Pull requests: Read-only**, **Actions: Read-only** |
+| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT; recommended permissions below |
 | `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Token for Copilot authentication |
 | `SANDBOX_VAR_COPILOT_MODEL` | Override the Copilot model |
 | `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` | VM sizing at creation (defaults: `4` / `8G` / `40G`) |
 | `SANDBOX_VM` / `SANDBOX_MOUNT` | VM name and mount path; use a unique mount path for each checkout sharing a VM |
+
+For `SANDBOX_VAR_GITHUB_TOKEN`, limit repository access to those you need and set:
+
+| Repository permission | Access |
+|---|---|
+| Contents | Read-only |
+| Issues | Read-only |
+| Pull requests | Read-only |
+| Actions | Read-only |
 
 Without dedicated tokens, the script asks before using your host `gh` token in the
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
