@@ -3951,3 +3951,138 @@ def test_placement_check_uses_explicit_snapshot(other_machine: str | None) -> No
             JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
     else:
         JubilantBackend._check_follower_placement(current, "target", "target/1", "1")
+
+
+@dataclass
+class RefreshClockStub:
+    now: float = 0.0
+    sleeps: list[float] = field(default_factory=list)
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class RefreshModelStub:
+    def __init__(
+        self,
+        clock: RefreshClockStub,
+        results: list[Exception | None],
+        call_duration: float = 0.0,
+    ) -> None:
+        self.clock = clock
+        self.results = results
+        self.call_duration = call_duration
+        self.calls: list[tuple[float, str, int | None, str | None]] = []
+
+    def refresh(self, *, app: str, revision: int | None = None, channel: str | None = None) -> None:
+        self.calls.append((self.clock.now, app, revision, channel))
+        self.clock.now += self.call_duration
+        error = self.results.pop(0)
+        if error is not None:
+            raise error
+
+
+class TestRefreshDeployIncomplete:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        call_duration: float
+        expected_times: list[float]
+        expected_sleeps: list[float]
+
+    timeout_cases = [
+        Params(
+            label="instant-failure",
+            call_duration=0.0,
+            expected_times=[float(i) for i in range(0, 600, 30)],
+            expected_sleeps=[30.0] * 20,
+        ),
+        Params(
+            label="slow-origin-lookup",
+            call_duration=7.0,
+            expected_times=[float(i) for i in range(0, 600, 37)],
+            expected_sleeps=[30.0] * 16 + [1.0],
+        ),
+    ]
+
+    @staticmethod
+    def _incomplete_error() -> jubilant.CLIError:
+        return jubilant.CLIError(
+            1,
+            ["juju", "refresh", "target"],
+            "",
+            'ERROR "target" deploy incomplete, please try refresh again in a little bit.\n',
+        )
+
+    def test_recovers_with_unchanged_arguments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN an origin that resolves after two failed refresh preflight checks
+        clock = RefreshClockStub()
+        stub = RefreshModelStub(clock, [self._incomplete_error(), self._incomplete_error(), None])
+        backend = JubilantBackend(JubilantClientStub(stub))
+        monkeypatch.setattr("juju_jubilant.backend.time", clock)
+
+        # WHEN refreshing to the requested revision and channel
+        backend.refresh_application(TEST_MODEL, "target", revision=205, channel="6/stable")
+
+        # THEN retries are 30 seconds apart and success stops further attempts
+        assert stub.calls == [
+            (0.0, "target", 205, "6/stable"),
+            (30.0, "target", 205, "6/stable"),
+            (60.0, "target", 205, "6/stable"),
+        ]
+        assert clock.sleeps == [30.0, 30.0]
+
+    @pytest.mark.parametrize("params", timeout_cases, ids=lambda params: params.label)
+    def test_deadline_includes_failed_calls(self, monkeypatch: pytest.MonkeyPatch, params: Params) -> None:
+        # GIVEN an origin that remains unresolved throughout the retry budget
+        clock = RefreshClockStub()
+        errors = [self._incomplete_error() for _ in params.expected_times]
+        stub = RefreshModelStub(clock, [*errors, None], call_duration=params.call_duration)
+        backend = JubilantBackend(JubilantClientStub(stub))
+        monkeypatch.setattr("juju_jubilant.backend.time", clock)
+
+        # WHEN the ten-minute deadline expires
+        with pytest.raises(jubilant.CLIError) as raised:
+            backend.refresh_application(TEST_MODEL, "target", revision=205)
+
+        # THEN no attempt starts at the deadline and the last CLI diagnostics are preserved
+        assert raised.value is errors[-1]
+        assert clock.now == 600.0
+        assert [call[0] for call in stub.calls] == params.expected_times
+        assert clock.sleeps == params.expected_sleeps
+
+    def test_unrelated_error_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a refresh failure unrelated to charm resolution
+        clock = RefreshClockStub()
+        error = jubilant.CLIError(1, ["juju", "refresh", "target"], "", "ERROR permission denied")
+        stub = RefreshModelStub(clock, [error, None])
+        backend = JubilantBackend(JubilantClientStub(stub))
+        monkeypatch.setattr("juju_jubilant.backend.time", clock)
+
+        # WHEN refreshing, THEN the original error propagates without delay
+        with pytest.raises(jubilant.CLIError) as raised:
+            backend.refresh_application(TEST_MODEL, "target")
+
+        assert raised.value is error
+        assert stub.calls == [(0.0, "target", None, None)]
+        assert clock.sleeps == []
+
+    def test_different_error_after_retry_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # GIVEN a transient preflight failure followed by a different CLI failure
+        clock = RefreshClockStub()
+        error = jubilant.CLIError(1, ["juju", "refresh", "target"], "", "ERROR cannot refresh application")
+        stub = RefreshModelStub(clock, [self._incomplete_error(), error, None])
+        backend = JubilantBackend(JubilantClientStub(stub))
+        monkeypatch.setattr("juju_jubilant.backend.time", clock)
+
+        # WHEN retrying, THEN only the recognized preflight failure is retried
+        with pytest.raises(jubilant.CLIError) as raised:
+            backend.refresh_application(TEST_MODEL, "target")
+
+        assert raised.value is error
+        assert stub.calls == [(0.0, "target", None, None), (30.0, "target", None, None)]
+        assert clock.sleeps == [30.0]
