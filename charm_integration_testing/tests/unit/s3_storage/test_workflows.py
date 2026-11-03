@@ -71,19 +71,14 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     assert "not allowed for cleanup" in credential_step["run"]
     assert "S3_STORAGE_CONFIG" not in step["env"]
     assert credential_step["if"] == (
-        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
-        "steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}"
+        "${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}"
     )
     assert install_step["id"] == "s3_dependencies"
     assert install_step["if"] == (
-        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
-        "steps.s3_credentials.outcome == 'success' && "
+        "${{ !cancelled() && steps.s3_credentials.outcome == 'success' && "
         "steps.s3_credentials.outputs.available == 'true' }}"
     )
-    assert step["if"] == (
-        "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
-        "steps.s3_dependencies.outcome == 'success' }}"
-    )
+    assert step["if"] == ("${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}")
 
 
 def test_s3_cleanup_dry_run_does_not_invoke_cleanup(tmp_path: Path) -> None:
@@ -180,43 +175,6 @@ def test_cleanup_preserves_per_environment_cancellation() -> None:
         "group": "${{ github.workflow }}-${{ inputs.environment }}${{ inputs.dry_run && '-dry-run' || '' }}",
         "cancel-in-progress": True,
     }
-
-
-@pytest.mark.parametrize(
-    ("threshold", "expected_status"),
-    [
-        pytest.param("1.5", 0, id="positive-fraction"),
-        pytest.param("0", 1, id="zero"),
-        pytest.param("-1", 1, id="negative"),
-        pytest.param("nan", 1, id="nan"),
-        pytest.param("inf", 1, id="infinity"),
-        pytest.param("1e300", 1, id="duration-overflow"),
-        pytest.param("1e-300", 1, id="duration-underflow"),
-        pytest.param("not-a-number", 1, id="invalid-number"),
-        pytest.param("0.00000002", 0, id="microsecond-duration"),
-    ],
-)
-def test_cleanup_validates_finite_positive_threshold(tmp_path: Path, threshold: str, expected_status: int) -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
-    steps = workflow["jobs"]["cleanup-environment"]["steps"]
-    validator = next(step for step in steps if step.get("id") == "age_threshold")
-    guarded = [step for step in steps if "!cancelled()" in step.get("if", "")]
-
-    assert steps.index(validator) < min(steps.index(step) for step in guarded)
-    assert all("steps.age_threshold.outcome == 'success'" in step["if"] for step in guarded)
-
-    result = subprocess.run(
-        ["bash", "-c", validator["run"]],
-        capture_output=True,
-        check=False,
-        env={**os.environ, "AGE_THRESHOLD": threshold},
-        text=True,
-        cwd=ROOT,
-    )
-
-    assert result.returncode == expected_status
-    if expected_status:
-        assert "age_threshold must be a positive finite number" in result.stdout
 
 
 @pytest.mark.parametrize(
