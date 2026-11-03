@@ -69,7 +69,7 @@ launcher also needs Git and authenticated `gh` in the VM. Do not commit credenti
         "JIRA_API_TOKEN": "***"
       }
     },
-    "test-observer-stdio": {
+    "Test Observer MCP (local, prod)": {
       "type": "stdio",
       "command": "bash",
       "args": [
