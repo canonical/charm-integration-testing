@@ -9,7 +9,6 @@ On an amd64 host with [Multipass](https://canonical.com/multipass) and
 [GitHub CLI](https://cli.github.com/) installed, run from the repository root:
 
 ```bash
-gh auth login
 cp development-sandbox/.env.sample development-sandbox/.env
 # Configure credentials and optional settings in .env.
 scripts/sandbox.sh up
