@@ -88,4 +88,4 @@ runs:
         if [ -n "$LOG_RETENTION_SECONDS" ]; then
           HEADER_FLAG="--header X-Delete-After:$LOG_RETENTION_SECONDS"
         fi
-        swift upload $HEADER_FLAG ${SWIFT_BUCKET} ${JOB_UUID}
+        /snap/bin/swift upload $HEADER_FLAG ${SWIFT_BUCKET} ${JOB_UUID}
