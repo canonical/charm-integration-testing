@@ -1115,11 +1115,27 @@ class JubilantBackend(JujuCmdBackend):
         revision: int | None = None,
         channel: str | None = None,
     ) -> None:
-        self.client.model(model).refresh(
-            app=application,
-            revision=revision,
-            channel=channel,
-        )
+        timeout = timedelta(minutes=10)
+        retry_delay = timedelta(seconds=30)
+        deadline = time.monotonic() + timeout.total_seconds()
+        while True:
+            try:
+                self.client.model(model).refresh(
+                    app=application,
+                    revision=revision,
+                    channel=channel,
+                )
+                return
+            except jubilant.CLIError as error:
+                # Juju rejects this before mutation while a prior charm download resolves (#598).
+                if "deploy incomplete" not in error.stderr:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(retry_delay.total_seconds(), remaining))
+                if time.monotonic() >= deadline:
+                    raise
 
     def validate_application(
         self, model: JujuModelHandle, application: str, level: str
