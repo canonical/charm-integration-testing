@@ -619,15 +619,12 @@ jobs:
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
-      #  .-')
-      # ( OO ).
-      #(_)---\_) .-----.
-      #/    _ | /  -.   \
-      #\  :` `. '-' _'  |
-      # '..`''.)   |_  <
-      #.-._)   \.-.  |  |
-      #\       /\ `-'   /
-      # `-----'  `----''
+      #  _________________
+      # /   _____/\_____  \
+      # \_____  \   _(__  <
+      # /        \ /       \
+      #/_______  //______  /
+      #        \/        \/
       #
       # S3 cleanup is independent of substrate cleanup.
       - name: Check S3 cleanup credentials
