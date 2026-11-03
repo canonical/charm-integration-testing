@@ -97,8 +97,9 @@ and set `JIRA_USERNAME` to your Atlassian account email.
 
 ### Test Observer
 
-Ask SQA for a Test Observer API token. The launcher requires Go, Git, and
-authenticated `gh` in the VM.
+Ask SQA for a Test Observer API token. The launcher requires authenticated `gh`
+in the VM with read access to the private repository; the other prerequisites
+are installed by default.
 
 ```json
 {
