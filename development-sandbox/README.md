@@ -79,8 +79,7 @@ launcher also needs Git and authenticated `gh` in the VM. Do not commit credenti
       "env": {
         "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
         "TEST_OBSERVER_API_KEY": "***"
-      },
-      "timeout": 120000
+      }
     }
   }
 }
