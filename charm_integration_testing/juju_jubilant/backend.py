@@ -25,6 +25,7 @@ from juju import (
     CharmChannel,
     JujuApplicationHealth,
     JujuApplicationInfo,
+    JujuBackend,
     JujuConsumedOfferInfo,
     JujuExecOutput,
     JujuIntegration,
@@ -39,7 +40,6 @@ from juju import (
     JujuWorkloadInstance,
     warn_performance,
 )
-from juju_cmd import JujuCmdBackend
 from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base.validator import ValidationResult
@@ -129,7 +129,7 @@ def _is_transient_model_unavailability_error(error: jubilant.CLIError, model: Ju
     return is_missing or is_migrating
 
 
-class JubilantBackend(JujuCmdBackend):
+class JubilantBackend(JujuBackend):
     client: JubilantClient
 
     default_timeout = timedelta(minutes=5)
@@ -141,11 +141,44 @@ class JubilantBackend(JujuCmdBackend):
         client: JubilantClient | None = None,
         kubernetes_client_registry: KubernetesClientRegistry | None = None,
         cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] | None = None,
-    ):
-        super().__init__()
+    ) -> None:
         self.client = client or JubilantClient()
         self.kubernetes_client_registry = kubernetes_client_registry
         self._cloud_definitions: dict[str, tuple[pathlib.Path, pathlib.Path]] = cloud_definitions or {}
+
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        client = self.client.model(model)
+        if self.is_k8s_model(model):
+            client.cli("scale-application", application, str(num))
+            return
+
+        units = sorted(self.application_units(model, application), key=lambda unit: unit.split("/", 1)[1])
+        if len(units) < num:
+            client.add_unit(application, num_units=num - len(units))
+        elif len(units) > num:
+            client.remove_unit(*units[num:])
+
+    def num_units(self, model: JujuModelHandle, application: str) -> int:
+        return len(self.application_units(model, application))
+
+    def application_charm(self, model: JujuModelHandle, application: str) -> str | None:
+        return self.status(model).apps[application].charm
+
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        return list(self.status(model).apps[application].units)
+
+    def integrate(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        self.client.model(model).integrate(str(target_1), str(target_2))
+
+    def remove_integration(
+        self, model: JujuModelHandle, target_1: JujuIntegrationApplication, target_2: JujuIntegrationApplication
+    ) -> None:
+        self.client.model(model).remove_relation(str(target_1), str(target_2))
+
+    def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
+        self.client.model(model).remove_application(*applications)
 
     def _kubernetes_client_for_cloud(self, cloud: str) -> KubernetesClient:
         if self.kubernetes_client_registry is None:
@@ -856,13 +889,8 @@ class JubilantBackend(JujuCmdBackend):
         if timeout is None:
             juju.ssh(target=application, command=command)
             return None
-        args = [juju.cli_binary, "ssh", "--model", model.uri, application, command]
-        try:
-            return subprocess.run(  # nosec B603
-                args, check=True, capture_output=True, text=True, timeout=timeout
-            ).stdout
-        except subprocess.CalledProcessError as error:
-            raise jubilant.CLIError(error.returncode, error.cmd, error.stdout, error.stderr) from None
+        stdout, _ = juju._cli("ssh", application, command, timeout=timeout)
+        return stdout
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:
         application, unit_id = unit.split("/")
