@@ -34,7 +34,7 @@ Set options in `development-sandbox/.env` (gitignored). See
 
 | Option | Purpose |
 |---|---|
-| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT with read-only Contents, Issues, Pull requests, and Actions permissions on the repositories you need |
+| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT limited to the repositories you need: **Contents: Read-only**, **Issues: Read-only**, **Pull requests: Read-only**, **Actions: Read-only** |
 | `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Token for Copilot authentication |
 | `SANDBOX_VAR_COPILOT_MODEL` | Override the Copilot model |
 | `SANDBOX_CPUS` / `SANDBOX_MEMORY` / `SANDBOX_DISK` | VM sizing at creation (defaults: `4` / `8G` / `40G`) |
