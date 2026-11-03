@@ -642,27 +642,7 @@ jobs:
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
         run: |
-          case "${S3_STORAGE_SECRET_NAME}" in
-            S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK}"
-              ;;
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK}"
-              ;;
-            *)
-              echo "::error::S3 config secret '${S3_STORAGE_SECRET_NAME}' is not allowed for cleanup"
-              exit 1
-              ;;
-          esac
+          export S3_STORAGE_CONFIG="${!S3_STORAGE_SECRET_NAME}"
           set -euo pipefail
           umask 077
           config_file="${RUNNER_TEMP}/cleanup-s3.conf"
