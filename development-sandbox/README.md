@@ -78,7 +78,8 @@ Built into Copilot CLI; no additional configuration needed.
 
 ### Jira
 
-Uses uvx, included in new sandboxes.
+Create a [Jira API token](https://id.atlassian.com/manage-profile/security/api-tokens)
+and set `JIRA_USERNAME` to your Atlassian account email.
 
 ```json
 {
@@ -96,7 +97,8 @@ Uses uvx, included in new sandboxes.
 
 ### Test Observer
 
-Uses Go, included in new sandboxes, plus Git and authenticated `gh` in the VM.
+Ask SQA for a Test Observer API token. The launcher requires Go, Git, and
+authenticated `gh` in the VM.
 
 ```json
 {
