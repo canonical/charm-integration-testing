@@ -67,6 +67,9 @@ def main() -> int:
     if sum(bool(values.get(name, "").strip()) for name in cleanup_names) == 1:
         print(f"::error::{args.secret_name} must set both or neither of: {', '.join(cleanup_names)}")
         return 1
+    if not any(values.get(name, "").strip() for name in cleanup_names):
+        for name in cleanup_names:
+            values.pop(name, None)
 
     for value in values.values():
         escaped_value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")

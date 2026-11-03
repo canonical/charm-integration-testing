@@ -35,6 +35,7 @@ def test_cleanup_s3_secret_lookup_uses_environment_metadata() -> None:
     allowed_secrets = {
         environments[name]["s3-secret"]
         for name in workflow.get("on", workflow.get(True))["workflow_dispatch"]["inputs"]["environment"]["options"]
+        if "s3-secret" in environments[name]
     }
     step = next(step for step in job["steps"] if step.get("id") == "s3_credentials")
     # THEN metadata chooses only among the explicitly mapped cleanup credentials
@@ -53,7 +54,11 @@ def test_cleanup_imports_storage_from_checkout() -> None:
     step = next(step for step in steps if step.get("name") == "Remove stale harness S3 buckets")
     install_step = next(step for step in steps if step.get("name") == "Install S3 cleanup dependencies")
     credential_step = next(step for step in steps if step.get("name") == "Check S3 cleanup credentials")
+    lxd_cleanup_step = next(
+        step for step in steps if step.get("name") == "Find and delete instances older than age threshold"
+    )
     # THEN the minimal environment can import storage without installing the full suite
+    assert steps.index(credential_step) > steps.index(lxd_cleanup_step)
     assert step["env"]["PYTHONPATH"] == "${{ github.workspace }}/charm_integration_testing"
     assert "scripts/cleanup-s3.py" in step["run"]
     assert '--config "${S3_CONFIG_PATH}"' in step["run"]
@@ -79,6 +84,38 @@ def test_cleanup_imports_storage_from_checkout() -> None:
         "${{ !cancelled() && steps.age_threshold.outcome == 'success' && "
         "steps.s3_dependencies.outcome == 'success' }}"
     )
+
+
+def test_s3_cleanup_dry_run_does_not_invoke_cleanup(tmp_path: Path) -> None:
+    # GIVEN the cleanup step and a fake Python executable that records invocation
+    workflow = yaml.safe_load((ROOT / ".github/workflows/cleanup-environment.yaml").read_text())
+    steps = workflow["jobs"]["cleanup-environment"]["steps"]
+    step = next(step for step in steps if step.get("name") == "Remove stale harness S3 buckets")
+    fake_python = tmp_path / "s3-cleanup/bin/python"
+    fake_python.parent.mkdir(parents=True)
+    marker = tmp_path / "cleanup-invoked"
+    fake_python.write_text(f"#!/bin/bash\ntouch '{marker}'\n")
+    fake_python.chmod(0o755)
+
+    # WHEN S3 cleanup runs in dry-run mode, THEN it previews the skip without deleting buckets
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        capture_output=True,
+        check=False,
+        env={
+            **os.environ,
+            "DRY_RUN": "true",
+            "RUNNER_TEMP": str(tmp_path),
+            "S3_CONFIG_PATH": str(tmp_path / "cleanup-s3.conf"),
+            "AGE_THRESHOLD": "240",
+        },
+        text=True,
+        cwd=ROOT,
+    )
+
+    assert result.returncode == 0
+    assert "Dry run: skipping stale S3 bucket cleanup" in result.stdout
+    assert not marker.exists()
 
 
 def test_cleanup_schedule_preserves_one_environment_per_shared_substrate() -> None:

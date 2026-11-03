@@ -151,58 +151,6 @@ jobs:
             printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
             echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
-      - name: Check S3 cleanup credentials
-        id: s3_credentials
-        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
-        shell: bash
-        env:
-          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
-          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-        run: |
-          case "${S3_STORAGE_SECRET_NAME}" in
-            S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK}"
-              ;;
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES}"
-              ;;
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK)
-              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK}"
-              ;;
-            *)
-              echo "::error::S3 config secret '${S3_STORAGE_SECRET_NAME}' is not allowed for cleanup"
-              exit 1
-              ;;
-          esac
-          python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file \
-            "${RUNNER_TEMP}/cleanup-s3.conf"
-      - name: Install S3 cleanup dependencies
-        id: s3_dependencies
-        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_credentials.outcome == 'success' && steps.s3_credentials.outputs.available == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
-            install 'boto3>=1.40,<2'
-      - name: Remove stale harness S3 buckets
-        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_dependencies.outcome == 'success' }}
-        shell: bash
-        env:
-          # Cleanup imports only the storage module, not the full suite and its dependencies.
-          PYTHONPATH: ${{ github.workspace }}/charm_integration_testing
-          S3_CONFIG_PATH: ${{ steps.s3_credentials.outputs.config_path }}
-        run: |
-          "${RUNNER_TEMP}/s3-cleanup/bin/python" scripts/cleanup-s3.py --config "${S3_CONFIG_PATH}" --age-minutes "${AGE_THRESHOLD}"
-
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
       # | |/ / |  | |  _ \|  ____|  __ \| \ | |  ____|__   __|  ____|/ ____|
@@ -646,13 +594,13 @@ jobs:
       # |______/_/ \_\_____/
       #
       - name: Install lxd client
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.lxd == 'true' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo snap install lxd
       - name: Set up LXD remote
         id: lxd-remote
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.creds.outputs.lxd == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -683,7 +631,7 @@ jobs:
           echo "LXD_CONF=${LXD_CONF}" >> "$GITHUB_ENV"
           echo "LXC_BINARY=${LXC_BINARY}" >> "$GITHUB_ENV"
       - name: Find and delete instances older than age threshold
-        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |-
           "$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
@@ -699,3 +647,59 @@ jobs:
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
+      # S3 cleanup is independent of substrate cleanup.
+      - name: Check S3 cleanup credentials
+        id: s3_credentials
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
+        shell: bash
+        env:
+          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+        run: |
+          case "${S3_STORAGE_SECRET_NAME}" in
+            S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES)
+              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES}"
+              ;;
+            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES)
+              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES}"
+              ;;
+            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK)
+              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK}"
+              ;;
+            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES)
+              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES}"
+              ;;
+            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK)
+              export S3_STORAGE_CONFIG="${S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK}"
+              ;;
+            *)
+              echo "::error::S3 config secret '${S3_STORAGE_SECRET_NAME}' is not allowed for cleanup"
+              exit 1
+              ;;
+          esac
+          python3 scripts/load-s3-config.py "${S3_STORAGE_SECRET_NAME}" --output-file \
+            "${RUNNER_TEMP}/cleanup-s3.conf"
+      - name: Install S3 cleanup dependencies
+        id: s3_dependencies
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_credentials.outcome == 'success' && steps.s3_credentials.outputs.available == 'true' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
+            install 'boto3>=1.40,<2'
+      - name: Remove stale harness S3 buckets
+        if: ${{ !cancelled() && steps.age_threshold.outcome == 'success' && steps.s3_dependencies.outcome == 'success' }}
+        shell: bash
+        env:
+          # Cleanup imports only the storage module, not the full suite and its dependencies.
+          PYTHONPATH: ${{ github.workspace }}/charm_integration_testing
+          S3_CONFIG_PATH: ${{ steps.s3_credentials.outputs.config_path }}
+        run: |-
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run: skipping stale S3 bucket cleanup"
+          else
+            "${RUNNER_TEMP}/s3-cleanup/bin/python" scripts/cleanup-s3.py --config "${S3_CONFIG_PATH}" --age-minutes "${AGE_THRESHOLD}"
+          fi
