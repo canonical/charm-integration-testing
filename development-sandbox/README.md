@@ -111,3 +111,39 @@ convention. The format is the standard Copilot MCP config:
 
 MCP config applies to both `sandbox.sh run 'task'` and `sandbox.sh run --interactive`.
 It has no effect on `up`, `shell`, `down`, or `destroy`.
+
+### Helpful MCP servers
+
+GitHub MCP is built into Copilot CLI. For Jira and Test Observer, add these entries
+under `mcpServers` in your local config and replace `***` with your credentials.
+Go and uvx are included in newly created sandboxes; authenticate `gh` in the VM
+for access to the internal Test Observer repository. Do not commit credentials.
+
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "command": "uvx",
+      "args": ["mcp-atlassian"],
+      "env": {
+        "JIRA_URL": "https://warthogs.atlassian.net",
+        "JIRA_USERNAME": "***",
+        "JIRA_API_TOKEN": "***"
+      }
+    },
+    "test-observer-stdio": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-euc",
+        "dir=\"$HOME/.cache/test-observer-mcp\"; mkdir -p \"$(dirname \"$dir\")\"; if [ ! -d \"$dir/.git\" ]; then GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' clone https://github.com/canonical/test-observer-mcp.git \"$dir\" >&2; fi; cd \"$dir\"; exec go run ./cmd/server --transport stdio"
+      ],
+      "env": {
+        "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
+        "TEST_OBSERVER_API_KEY": "***"
+      },
+      "timeout": 120000
+    }
+  }
+}
+```
