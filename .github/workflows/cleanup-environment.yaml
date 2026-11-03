@@ -647,6 +647,14 @@ jobs:
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
         run: |-
           set -euo pipefail
+          if ! awk -v age="$AGE_THRESHOLD" 'BEGIN { exit !(age > 0) }'; then
+            echo "::error::AGE_THRESHOLD must be greater than zero"
+            exit 1
+          fi
+          if [[ ! "$S3_STORAGE_SECRET_NAME" =~ ^S3_STORAGE_CONFIG_(PS6_SQA_STG_CHARM_QA_KUBERNETES|PS[67]_SQA_PROD_CHARM_QA_(KUBERNETES|OPENSTACK))$ ]]; then
+            echo "::error::S3 config secret is not allowed for cleanup"
+            exit 1
+          fi
           export S3_STORAGE_CONFIG="${!S3_STORAGE_SECRET_NAME}"
           declare -A config=()
           while IFS='=' read -r name value; do
@@ -658,9 +666,19 @@ jobs:
           done
           namespace="${config[S3_BUCKET_NAMESPACE]}"
           region="${config[S3_REGION]:-us-east-1}"
-          access_key="${config[S3_CLEANUP_ACCESS_KEY]:-${config[S3_ACCESS_KEY]}}"
-          secret_key="${config[S3_CLEANUP_SECRET_KEY]:-${config[S3_SECRET_KEY]}}"
-          owner_access_key="${config[S3_CLEANUP_ACCESS_KEY]:-${config[S3_ACCESS_KEY]}}"
+          cleanup_access_key="${config[S3_CLEANUP_ACCESS_KEY]:-}"
+          cleanup_secret_key="${config[S3_CLEANUP_SECRET_KEY]:-}"
+          if [[ -n "$cleanup_access_key" && -n "$cleanup_secret_key" ]]; then
+            access_key="$cleanup_access_key"
+            secret_key="$cleanup_secret_key"
+          elif [[ -z "$cleanup_access_key" && -z "$cleanup_secret_key" ]]; then
+            access_key="${config[S3_ACCESS_KEY]}"
+            secret_key="${config[S3_SECRET_KEY]}"
+          else
+            echo "::error::S3 cleanup credentials must be provided together"
+            exit 1
+          fi
+          owner_access_key="$access_key"
           namespace_hash="$(printf '%s' "$namespace" | sha256sum | cut -c1-8)"
           bucket_prefix="charmqa-s3-${namespace_hash}-"
           owner_tag="$(jq -acn \
@@ -681,6 +699,7 @@ jobs:
           export AWS_EC2_METADATA_DISABLED=true
           aws="${RUNNER_TEMP}/s3-cleanup/bin/aws"
           now="$(date +%s)"
+          buckets="$("$aws" s3api list-buckets --endpoint-url "$endpoint" --query 'Buckets[].Name' --output text | tr '\t' '\n')"
           while IFS= read -r bucket; do
             if [[ ! "$bucket" =~ ^${bucket_prefix}([0-9]{10})-[0-9a-f]{16}$ ]]; then
               continue
@@ -690,11 +709,14 @@ jobs:
               'BEGIN { exit !(now - created > age * 60) }'; then
               continue
             fi
-            tags="$("$aws" s3api get-bucket-tagging --bucket "$bucket" --endpoint-url "$endpoint" --output json)"
+            if ! tags="$("$aws" s3api get-bucket-tagging --bucket "$bucket" --endpoint-url "$endpoint" --output json)"; then
+              echo "::warning::Could not read S3 ownership tag; retaining bucket $bucket"
+              continue
+            fi
             owner="$(jq -r '.TagSet[]? | select(.Key == "charmqa-storage-owner") | .Value' <<< "$tags")"
             if [[ -z "$owner" ]]; then
-              echo "::error::Missing S3 ownership tag; retaining bucket $bucket"
-              exit 1
+              echo "::warning::Missing S3 ownership tag; retaining bucket $bucket"
+              continue
             fi
             if [[ "$owner" != "$owner_tag" ]]; then
               continue
@@ -724,4 +746,4 @@ jobs:
               "$aws" s3api delete-bucket --bucket "$bucket" --endpoint-url "$endpoint"
               echo "Removed S3 bucket $bucket"
             fi
-          done < <("$aws" s3api list-buckets --endpoint-url "$endpoint" --query 'Buckets[].Name' --output text | tr '\t' '\n')
+          done <<< "$buckets"
