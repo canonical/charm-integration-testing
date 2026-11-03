@@ -116,8 +116,8 @@ It has no effect on `up`, `shell`, `down`, or `destroy`.
 
 GitHub MCP is built into Copilot CLI. For Jira and Test Observer, add these entries
 under `mcpServers` in your local config and replace `***` with your credentials.
-Go and uvx are included in newly created sandboxes; authenticate `gh` in the VM
-for access to the internal Test Observer repository. Do not commit credentials.
+Go and uvx are included in newly created sandboxes. The Test Observer launcher
+requires Git and authenticated `gh` in the VM. Do not commit credentials.
 
 ```json
 {
