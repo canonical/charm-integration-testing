@@ -358,20 +358,6 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    echo "==> Checking for Go and uvx..."
-    multipass exec "$VM_NAME" -- bash -lc "
-        set -euo pipefail
-        if ! command -v go &>/dev/null; then
-            sudo snap install go --classic --channel=1.26/stable
-        fi
-        if ! command -v uvx &>/dev/null; then
-            sudo install -m 0755 '$VM_MOUNT/static/uv' /usr/local/bin/uv
-            sudo ln -sf /usr/local/bin/uv /usr/local/bin/uvx
-        fi
-        go version
-        uvx --version
-    "
-
     # Set up Python venv with project packages (poetry manages the venv)
     echo "==> Installing Python dependencies via poetry..."
     multipass exec "$VM_NAME" -- bash -lc "
