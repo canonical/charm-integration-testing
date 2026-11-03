@@ -239,16 +239,39 @@ jobs:
         shell: bash
         env:
           CREDENTIALS_SECRET_NAME: ${{ steps.target_env_info.outputs.credentials-secret }}
+          S3_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
           PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2 }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2 }}
         run: |
           if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
             echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${S3_SECRET_NAME}" ]]; then
+            echo "s3-config<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!S3_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
       - name: Resolve neighbor credentials
@@ -257,16 +280,39 @@ jobs:
         shell: bash
         env:
           CREDENTIALS_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.credentials-secret }}
+          S3_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
           PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES_2 }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK_2 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_1 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_2 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_3 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_4 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_5 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_6 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_7 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_8 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_9 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES_10 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_1 }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK_2 }}
         run: |
           if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
             echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${S3_SECRET_NAME}" ]]; then
+            echo "s3-config<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!S3_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
       - name: Setup Target Cloud
@@ -360,8 +406,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_CONTENT_target_cloud: ${{ steps.target_env_info.outputs.s3-secret != '' && secrets[steps.target_env_info.outputs.s3-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
-          S3_CONFIG_CONTENT_neighbor_cloud: ${{ steps.neighbor_env_info.outputs.s3-secret != '' && secrets[steps.neighbor_env_info.outputs.s3-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+          S3_CONFIG_CONTENT_target_cloud: ${{ steps.target_creds.outputs.s3-config }}
+          S3_CONFIG_CONTENT_neighbor_cloud: ${{ steps.neighbor_creds.outputs.s3-config }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
@@ -454,7 +500,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          S3_CONFIG_CONTENT_target_cloud: ${{ steps.target_env_info.outputs.s3-secret != '' && secrets[steps.target_env_info.outputs.s3-secret] || '' }}  # zizmor: ignore[overprovisioned-secrets] Secret names come from trusted environment metadata.
+          S3_CONFIG_CONTENT_target_cloud: ${{ steps.target_creds.outputs.s3-config }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
           CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
