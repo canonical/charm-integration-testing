@@ -18,7 +18,7 @@ def s3_config_paths(environ: Mapping[str, str]) -> dict[str, Path]:
     configs: dict[str, Path] = {}
     for name, value in environ.items():
         value = value.strip()
-        if not name.startswith("S3_CONFIG_") or name.startswith("S3_CONFIG_CONTENT_") or not value:
+        if not name.startswith("S3_CONFIG_") or not value:
             continue
         cloud = name.removeprefix("S3_CONFIG_").lower().replace("_", "-")
         if not cloud:
@@ -27,21 +27,6 @@ def s3_config_paths(environ: Mapping[str, str]) -> dict[str, Path]:
         if cloud in configs and configs[cloud] != path:
             raise ValueError(f"Conflicting S3 configuration paths for cloud '{cloud}'")
         configs[cloud] = path
-    return configs
-
-
-def s3_config_contents(environ: Mapping[str, str]) -> dict[str, str]:
-    """Read inline S3 configurations keyed by their Juju cloud aliases."""
-    configs: dict[str, str] = {}
-    for name, value in environ.items():
-        if not name.startswith("S3_CONFIG_CONTENT_") or not value:
-            continue
-        cloud = name.removeprefix("S3_CONFIG_CONTENT_").lower().replace("_", "-")
-        if not cloud:
-            raise ValueError("S3_CONFIG_CONTENT_<cloud> requires a cloud name")
-        if cloud in configs and configs[cloud] != value:
-            raise ValueError(f"Conflicting S3 configuration values for cloud '{cloud}'")
-        configs[cloud] = value
     return configs
 
 
@@ -58,14 +43,7 @@ def cleanup_s3_buckets(request: pytest.FixtureRequest) -> bool:
 
 @pytest.fixture(scope="session")
 def s3_provider_registry() -> S3ProviderRegistry:
-    paths = s3_config_paths(os.environ)
-    contents = s3_config_contents(os.environ)
-    conflicts = paths.keys() & contents.keys()
-    if conflicts:
-        raise ValueError(f"Conflicting S3 configuration sources for cloud(s): {', '.join(sorted(conflicts))}")
-    configs: dict[str, Path | str] = dict(paths)
-    configs.update(contents)
-    return S3ProviderRegistry(configs, provider_from_config)
+    return S3ProviderRegistry(s3_config_paths(os.environ), provider_from_config)
 
 
 @pytest.fixture(scope="session")

@@ -13,8 +13,8 @@ class S3ProviderRegistry:
 
     def __init__(
         self,
-        configs: Mapping[str, Path | str],
-        provider_factory: Callable[[Path | str], S3Provider] = provider_from_config,
+        configs: Mapping[str, Path],
+        provider_factory: Callable[[Path], S3Provider] = provider_from_config,
     ) -> None:
         self._configs = dict(configs)
         self._provider_factory = provider_factory
@@ -26,10 +26,7 @@ class S3ProviderRegistry:
             try:
                 config = self._configs[cloud]
             except KeyError as exc:
-                raise ValueError(
-                    f"No S3 configuration for Juju cloud '{cloud}'; set S3_CONFIG_<cloud> or "
-                    f"S3_CONFIG_CONTENT_<cloud>"
-                ) from exc
+                raise ValueError(f"No S3 configuration for Juju cloud '{cloud}'; set S3_CONFIG_<cloud>") from exc
             provider = self._provider_factory(config)
             self._providers_by_cloud[cloud] = self._providers.setdefault(provider.handle.resource_id, provider)
         return self._providers_by_cloud[cloud]

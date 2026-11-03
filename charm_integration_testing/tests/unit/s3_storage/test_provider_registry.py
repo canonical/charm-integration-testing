@@ -43,10 +43,10 @@ class ProviderStub(S3Provider):
 
 @dataclass
 class ProviderFactory:
-    providers: dict[Path | str, ProviderStub]
-    calls: list[Path | str] = field(default_factory=list)
+    providers: dict[Path, ProviderStub]
+    calls: list[Path] = field(default_factory=list)
 
-    def __call__(self, config: Path | str) -> S3Provider:
+    def __call__(self, config: Path) -> S3Provider:
         self.calls.append(config)
         return self.providers[config]
 
@@ -64,16 +64,6 @@ def test_provider_is_created_lazily_and_reused_by_cloud() -> None:
     assert registry.provider_for_cloud("target-cloud") is provider
 
     # THEN provider creation only happens once
-    assert factory.calls == [config]
-
-
-def test_provider_is_created_lazily_from_inline_config() -> None:
-    config = STATIC_CONFIG
-    provider = ProviderStub("target")
-    factory = ProviderFactory({config: provider})
-    registry = S3ProviderRegistry({"target-cloud": config}, factory)
-
-    assert registry.provider_for_cloud("target-cloud") is provider
     assert factory.calls == [config]
 
 
