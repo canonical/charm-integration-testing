@@ -262,21 +262,13 @@ jobs:
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
         run: |
-          case "${S3_SECRET_NAME}" in
-            "")
-              exit 0
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK|\
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK)
-              ;;
-            *)
-              echo "::error::S3 secret name is not allowed"
-              exit 1
-              ;;
-          esac
+          if [[ -z "${S3_SECRET_NAME}" ]]; then
+            exit 0
+          fi
+          if [[ "${S3_SECRET_NAME}" != S3_STORAGE_CONFIG_* || ! -v "${S3_SECRET_NAME}" ]]; then
+            echo "::error::S3 secret name is not configured"
+            exit 1
+          fi
           umask 077
           S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-target.XXXXXX")"
           printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
@@ -311,21 +303,13 @@ jobs:
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
           S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
         run: |
-          case "${S3_SECRET_NAME}" in
-            "")
-              exit 0
-              ;;
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK|\
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES|\
-            S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK)
-              ;;
-            *)
-              echo "::error::S3 secret name is not allowed"
-              exit 1
-              ;;
-          esac
+          if [[ -z "${S3_SECRET_NAME}" ]]; then
+            exit 0
+          fi
+          if [[ "${S3_SECRET_NAME}" != S3_STORAGE_CONFIG_* || ! -v "${S3_SECRET_NAME}" ]]; then
+            echo "::error::S3 secret name is not configured"
+            exit 1
+          fi
           umask 077
           S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-neighbor.XXXXXX")"
           printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
