@@ -422,10 +422,8 @@ jobs:
         run: |
           openstack server list --format json | jq --raw-output '.[].ID' | while read -r server_id; do
             created=$(openstack server show "$server_id" --format json | jq -r '.created')
-            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
-            age_minutes=$((age_seconds / 60))
-            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry run: would delete server: $server_id (age: $age_minutes minutes)"
                 continue
@@ -440,10 +438,8 @@ jobs:
         run: |
           openstack security group list --format json | jq --raw-output '.[] | select(.Name != "default") | .ID' | while read -r sg_id; do
             created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
-            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
-            age_minutes=$((age_seconds / 60))
-            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry run: would delete security group: $sg_id (age: $age_minutes minutes)"
                 continue
@@ -458,10 +454,8 @@ jobs:
         run: |
           openstack loadbalancer list --format json | jq --raw-output '.[].id' | while read -r lb_id; do
             created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
-            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
-            age_minutes=$((age_seconds / 60))
-            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry run: would delete load balancer: $lb_id and its pools (age: $age_minutes minutes)"
                 continue
@@ -482,10 +476,8 @@ jobs:
         run: |
           openstack volume list --format json | jq --raw-output '.[].ID' | while read -r volume_id; do
             created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
-            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
-            age_minutes=$((age_seconds / 60))
-            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry run: would delete volume: $volume_id (age: $age_minutes minutes)"
                 continue
@@ -500,10 +492,8 @@ jobs:
         run: |-
           openstack floating ip list --format json | jq --raw-output '.[].ID' | while read -r fip_id; do
             created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
-            age_seconds=$(($(date +%s) - $(date -d "$created" +%s)))
-            age_minutes=$((age_seconds / 60))
-            if awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }'; then
+            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
+            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
               if [[ "$DRY_RUN" == "true" ]]; then
                 echo "Dry run: would delete floating IP: $fip_id (age: $age_minutes minutes)"
                 continue
@@ -552,11 +542,9 @@ jobs:
               echo "Failed to parse port $port_id created_at timestamp; refusing to continue orphaned port cleanup"
               exit 1
             }
-            age_seconds=$(($(date +%s) - created_ts))
-            age_minutes=$((age_seconds / 60))
+            age_minutes=$(( ($(date +%s) - created_ts) / 60 ))
             [[ $device_owner != "Octavia" ]] && continue
-            awk -v age_seconds="$age_seconds" -v threshold="$AGE_THRESHOLD" \
-              'BEGIN { exit !(age_seconds / 60 > threshold) }' || continue
+            [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
             lb_id=${device_id#lb-}
             if is_active_lb "$lb_id"; then
               echo "Skipping port $port_id — still used by load balancer $lb_id"
