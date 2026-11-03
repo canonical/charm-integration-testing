@@ -619,74 +619,18 @@ jobs:
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
-      #  _________________
-      # /   _____/\_____  \
-      # \_____  \   _(__  <
-      # /        \ /       \
-      #/_______  //______  /
-      #        \/        \/
+      ###################################################################################
+      ##   _________________
+      ##  /   _____/\_____  \
+      ##  \_____  \   _(__  <
+      ##  /        \ /       \
+      ## /_______  //______  /
+      ##         \/        \/
       #
       # S3 cleanup is independent of substrate cleanup.
-      - name: Check S3 cleanup credentials
-        id: s3_credentials
-        if: ${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
-        shell: bash
-        env:
-          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
-          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-        run: |
-          export S3_STORAGE_CONFIG="${!S3_STORAGE_SECRET_NAME}"
-          set -euo pipefail
-          umask 077
-          config_file="${RUNNER_TEMP}/cleanup-s3.conf"
-          declare -A config=()
-          while IFS= read -r line || [[ -n "$line" ]]; do
-            line="${line%$'\r'}"
-            [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]] && continue
-            if [[ "$line" != *=* ]]; then
-              echo "::error::Invalid S3 config entry"
-              exit 1
-            fi
-            name="${line%%=*}"
-            value="${line#*=}"
-            case "$name" in
-              S3_ENDPOINT|S3_ACCESS_KEY|S3_SECRET_KEY|S3_BUCKET_NAMESPACE|S3_REGION|S3_CLEANUP_ACCESS_KEY|S3_CLEANUP_SECRET_KEY)
-                ;;
-              *)
-                echo "::error::Invalid S3 config entry"
-                exit 1
-                ;;
-            esac
-            if [[ -v "config[$name]" ]]; then
-              echo "::error::Duplicate S3 config entry: $name"
-              exit 1
-            fi
-            config["$name"]="$value"
-            escaped_value="${value//'%'/'%25'}"
-            escaped_value="${escaped_value//$'\r'/'%0D'}"
-            escaped_value="${escaped_value//$'\n'/'%0A'}"
-            echo "::add-mask::$escaped_value"
-          done <<< "$S3_STORAGE_CONFIG"
-          for name in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET_NAMESPACE; do
-            if [[ -z "${config[$name]:-}" ]]; then
-              echo "::error::${S3_STORAGE_SECRET_NAME} is missing: $name"
-              exit 1
-            fi
-          done
-          if [[ (-n "${config[S3_CLEANUP_ACCESS_KEY]:-}" && -z "${config[S3_CLEANUP_SECRET_KEY]:-}") ||
-                (-z "${config[S3_CLEANUP_ACCESS_KEY]:-}" && -n "${config[S3_CLEANUP_SECRET_KEY]:-}") ]]; then
-            echo "::error::${S3_STORAGE_SECRET_NAME} must set both or neither of S3_CLEANUP_ACCESS_KEY and S3_CLEANUP_SECRET_KEY"
-            exit 1
-          fi
-          printf '%s' "$S3_STORAGE_CONFIG" > "$config_file"
-          echo "config_path=$config_file" >> "$GITHUB_OUTPUT"
       - name: Install S3 cleanup dependencies
         id: s3_dependencies
-        if: ${{ !cancelled() && steps.s3_credentials.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
@@ -695,16 +639,19 @@ jobs:
         if: ${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}
         shell: bash
         env:
-          S3_CONFIG_PATH: ${{ steps.s3_credentials.outputs.config_path }}
+          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
+          S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
         run: |-
           set -euo pipefail
+          export S3_STORAGE_CONFIG="${!S3_STORAGE_SECRET_NAME}"
           declare -A config=()
-          while IFS= read -r line || [[ -n "$line" ]]; do
-            line="${line%$'\r'}"
-            [[ -z "$line" || "$line" == \#* ]] && continue
-            name="${line%%=*}"
-            config["$name"]="${line#*=}"
-          done < "$S3_CONFIG_PATH"
+          while IFS='=' read -r name value; do
+            [[ "$name" == S3_* ]] && config["$name"]="$value"
+          done <<< "$S3_STORAGE_CONFIG"
           endpoint="${config[S3_ENDPOINT]}"
           while [[ "$endpoint" == */ ]]; do
             endpoint="${endpoint%/}"
