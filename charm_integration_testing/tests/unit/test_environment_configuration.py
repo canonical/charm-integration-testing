@@ -22,11 +22,23 @@ def test_juju_no_proxy_bypasses_kubernetes_service_domains() -> None:
         assert ".svc.cluster.local" in no_proxy_domains, f"{name} does not bypass cluster-local domains"
 
 
-def test_ps6_prod_kubernetes_environments_share_one_s3_secret() -> None:
+def test_environment_aliases_share_cluster_s3_secrets() -> None:
     environments_path = Path(__file__).resolve().parents[3] / "static" / "environments.yaml"
     environments = yaml.safe_load(environments_path.read_text())["environments"]
-    cluster_secret = "S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES_1"
 
-    for replica in range(1, 7):
-        environment = environments[f"ps6-sqa-prod_charm_qa_kubernetes-{replica}"]
-        assert environment["s3-secret"] == cluster_secret
+    cluster_secrets = {
+        "ps6-sqa-prod_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES",
+        "ps6-sqa-stg_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES",
+        "ps6-sqa-prod_charm_qa_openstack": "S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK",
+        "ps7-sqa-prod_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES",
+        "ps7-sqa-prod_charm_qa_openstack": "S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK",
+    }
+
+    for cluster, secret in cluster_secrets.items():
+        aliases = [
+            environment
+            for name, environment in environments.items()
+            if name.startswith(f"{cluster}-")
+        ]
+        assert aliases, f"No environments found for {cluster}"
+        assert {environment["s3-secret"] for environment in aliases} == {secret}
