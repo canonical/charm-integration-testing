@@ -54,6 +54,41 @@ overrides:
     constraints:
       # postgres-secret-storage is required when vault is not used for secret storage
       - 'not bool(endpoint[vault]) => set(config[postgres-secret-storage])'
+  # Focal track 3 r30 predates ingress-ssh, internal-ingress and logging.
+  - criteria:
+      - track: '3'
+        ubuntu_version: '20.04'
+    requires:
+      receive-ca-cert:
+        optional: true  # _update_trusted_ca_certs returns when the relation is absent; the TLS constraint below requires it when needed.
+      oauth:
+        optional: false  # _update_workload waits for OAuth relation data.
+        features: [tls]
+      openfga:
+        optional: false  # _update_workload waits for OpenFGA relation data.
+      ingress:
+        optional: true  # _get_dns_name supports the dns-name config without ingress.
+      nginx-route:
+        optional: true  # Legacy ingress alternative; _get_dns_name supports dns-name.
+      vault:
+        optional: true  # _update_workload supports postgres-secret-storage instead.
+    provides:
+      dashboard:
+        optional: true  # Secondary UI integration, not required by _ready.
+      grafana-dashboard:
+        optional: true  # Secondary observability integration.
+      metrics-endpoint:
+        optional: true  # Secondary observability integration.
+    configs:
+      uuid: ['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']
+      public-key: ['pE8oX25fmNPzg7i195spacUxTPLpioiSv/BG9FLgtDY=']
+      private-key: ['SdAKRHy3LW7vkmXFhOPTM43kwhgcot0mZrHX8rkHDlM=']
+      dns-name: ['jimm-test.local']
+      postgres-secret-storage: [true, null]
+    constraints:
+      - '"tls" in features(endpoint[oauth]) => reachable(endpoint[receive-ca-cert])
+        >= charms(endpoint[oauth])'
+      - 'not bool(endpoint[vault]) => set(config[postgres-secret-storage])'
   # track 3+ (default): full endpoint set including oauth, openfga, receive-ca-cert
   - requires:
       receive-ca-cert:

@@ -3,6 +3,7 @@
 
 import inspect
 import logging
+from pathlib import Path
 from typing import Any, Callable, cast
 
 import pytest
@@ -45,17 +46,19 @@ class JujuStub(JujuStubBase):
 
 
 @pytest.mark.parametrize("controller", ["target", "neighbor", "migration-destination"])
-def test_resolves_channel_for_model_architecture_and_version(controller: str) -> None:
+def test_resolves_channel_for_model_architecture_and_version(controller: str, tmp_path: Path) -> None:
     # GIVEN models with different architectures and Juju versions, both older than the CLI
     charmhub = CharmhubStub()
     factory = cast(Callable[..., IstioMeshExtension], inspect.unwrap(istio_mesh_extension))
-    juju = JujuStub(applications={"beacon": "istio-beacon-k8s"})
+    juju = JujuStub()
     extension = factory(cast(CharmhubClient, charmhub), juju, logging.getLogger("test"))
     # The model can be created after the fixture, including on a migration destination.
     model = JujuModelHandle(controller=controller, model="test-model")
+    bundle = tmp_path / "bundle.yaml"
+    bundle.write_text("applications: {beacon: {charm: istio-beacon-k8s}}\n", encoding="utf-8")
 
     # WHEN resolving the control-plane channel
-    extension.post_deploy(model)
+    extension.pre_deploy(model, bundle)
 
     # THEN the existing release resolver receives the model architecture and Juju version without a channel pin
     assert juju.deployed == [(model.uri, "istio-k8s", "istio-k8s")]

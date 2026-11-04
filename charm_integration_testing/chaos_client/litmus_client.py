@@ -3,6 +3,8 @@
 
 from dataclasses import dataclass, field
 from datetime import timedelta
+from functools import partial
+from math import ceil
 from time import monotonic, sleep
 from typing import Any, Callable, Literal
 from uuid import uuid4
@@ -17,7 +19,7 @@ from .litmus_detection import LITMUS_CRDS
 from .litmus_experiments import RUNNER_IMAGE, TERMINATION_GRACE_SECONDS, LitmusExperiment
 from .litmus_setup import OWNER_ANNOTATION, REQUEST_TIMEOUT, LitmusSetup
 from .meta_client import ChaosCleanupError
-from .target import workload_target
+from .target import workload_targets
 
 _GROUP = "litmuschaos.io"
 _VERSION = "v1alpha1"
@@ -166,8 +168,8 @@ class LitmusChaosClient(ChaosClient):
         if errors:
             raise ChaosCleanupError(errors) from errors[0]
 
-    def _target(self, namespace: str, unit: str) -> tuple[str, str]:
-        return workload_target(
+    def _target(self, namespace: str, unit: str) -> tuple[str, list[str]]:
+        return workload_targets(
             self._backend, namespace, unit, request_timeout=REQUEST_TIMEOUT, target_container=self._target_container
         )
 
@@ -182,10 +184,51 @@ class LitmusChaosClient(ChaosClient):
         seconds = duration.total_seconds()
         if seconds < 1 or not seconds.is_integer():
             raise ValueError("Chaos duration must be a positive whole number of seconds.")
-        pod, container = self._target(model.model, unit)
+        pod, containers = self._target(model.model, unit)
+        deadline = self._clock() + self._startup_timeout
+        # Early workloads must outlive startup of the remaining Engines.
+        injection_seconds = int(seconds) + ceil(self._startup_timeout)
+        engines = []
+        for container in containers:
+            self._check_startup_deadline(deadline, unit)
+            engines.append(
+                self._create_for_container(
+                    model, unit, pod, container, experiment, settings, injection_seconds, deadline=deadline
+                )
+            )
+            self._check_startup_deadline(deadline, unit)
+
+        self._wait(partial(self._all_started, engines, deadline), deadline, unit, "startup")
+
+    def _all_started(self, engines: list[_ExperimentRun], deadline: float) -> bool:
+        # Recheck every Engine each round, including those that were active in earlier rounds.
+        all_started = True
+        for engine in engines:
+            self._check_startup_deadline(deadline, engine.name)
+            started = self._started(engine)
+            self._check_startup_deadline(deadline, engine.name)
+            all_started = all_started and started
+        return all_started
+
+    def _check_startup_deadline(self, deadline: float, name: str) -> None:
+        if self._clock() >= deadline:
+            raise TimeoutError(f"Litmus startup timed out for {name}.")
+
+    def _create_for_container(
+        self,
+        model: JujuModelHandle,
+        unit: str,
+        pod: str,
+        container: str,
+        experiment: LitmusExperiment,
+        settings: dict[str, str],
+        seconds: int,
+        *,
+        deadline: float,
+    ) -> _ExperimentRun:
         settings = {
             **settings,
-            "TOTAL_CHAOS_DURATION": str(int(seconds)),
+            "TOTAL_CHAOS_DURATION": str(seconds),
             "TARGET_PODS": pod,
             "TARGET_CONTAINER": container,
         }
@@ -220,6 +263,7 @@ class LitmusChaosClient(ChaosClient):
         # Preparation can fail after creating some resources, before an Engine exists.
         self._created.append(engine)
         setup.prepare(experiment)
+        self._check_startup_deadline(deadline, engine.name)
         engine.engine_requested = True
         try:
             created = self._backend.custom_objects_api.create_namespaced_custom_object(
@@ -235,7 +279,7 @@ class LitmusChaosClient(ChaosClient):
                 engine.engine_requested = False
             raise
         engine.uid = created["metadata"]["uid"]
-        self._wait(lambda: self._started(engine), self._clock() + self._startup_timeout, engine.name, "startup")
+        return engine
 
     @staticmethod
     def _target_status(result: dict[str, Any], pod: str) -> str | None:

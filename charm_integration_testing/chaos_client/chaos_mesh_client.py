@@ -12,7 +12,7 @@ from kubernetes_client import KubernetesBackend
 
 from .backend import ChaosClient, IoLatencyInjection
 from .chaos_mesh_detection import CHAOS_MESH_CRDS, missing_chaos_mesh_crds
-from .target import unit_pod_name, workload_target
+from .target import unit_pod_name, workload_targets
 
 _GROUP = "chaos-mesh.org"
 _VERSION = "v1alpha1"
@@ -280,11 +280,11 @@ class ChaosMeshChaosClient(ChaosClient):
     ) -> None:
         if "stresschaos.chaos-mesh.org" in self._missing_crds:
             raise NotImplementedError("StressChaos experiments require the 'stresschaos.chaos-mesh.org' CRD.")
-        pod, container = workload_target(self._backend, model.model, unit, request_timeout=self._request_timeout)
+        pod, containers = workload_targets(self._backend, model.model, unit, request_timeout=self._request_timeout)
         spec: dict[str, object] = {
             "mode": "all",
             "selector": {"pods": {model.model: [pod]}},
-            "containerNames": [container],
+            "containerNames": containers,
             "stressors": stressors,
             "duration": f"{int(duration.total_seconds())}s",
         }

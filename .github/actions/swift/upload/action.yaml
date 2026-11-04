@@ -70,10 +70,6 @@ runs:
             echo "not creating index.html"
         else
             find ${JOB_UUID} -type f -printf "<a href=\"%P\">%P</a><br>\n" > ${JOB_UUID}/index.html
-            for P in "jobs.json" "run.log"
-            do
-              echo "<a href=\"generated/github-runner/$P\">generated/github-runner/$P</a><br>" >> ${JOB_UUID}/index.html
-            done
         fi
     - name: Upload to swift
       shell: bash

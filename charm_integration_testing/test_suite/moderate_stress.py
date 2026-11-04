@@ -45,8 +45,8 @@ def run_moderate_stress(
     unit = sorted(units)[0]
     observation_error: BaseException | None = None
     try:
-        started = monotonic()
         duration = inject(chaos, model, unit)
+        started = monotonic()
         if duration <= timedelta(0):
             raise ValueError("Resolved moderate stress duration must be positive.")
         juju_client.logger.info("Observing moderate %s on %s/%s for %s.", operation, model.uri, unit, duration)

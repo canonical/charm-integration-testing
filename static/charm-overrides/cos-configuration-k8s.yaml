@@ -1,0 +1,11 @@
+---
+# git_repo is required; without it the charm blocks with "Config options missing".
+# Use the charm's integration-test fixtures for dashboards and alert rules.
+# Source: https://github.com/canonical/cos-configuration-k8s-operator/tree/main/tests
+overrides:
+  - configs:
+      git_repo: [https://github.com/canonical/cos-configuration-k8s-operator.git]
+      git_branch: [main]
+      grafana_dashboards_path: [tests/samples/grafana_dashboards]
+      loki_alert_rules_path: [tests/samples/loki_alert_rules]
+      prometheus_alert_rules_path: [tests/samples/prometheus_alert_rules]

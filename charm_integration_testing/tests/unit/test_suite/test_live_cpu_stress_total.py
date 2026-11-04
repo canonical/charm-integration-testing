@@ -1,10 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from typing import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,36 +15,43 @@ MODEL = JujuModelHandle(controller="controller", model="model")
 
 
 @pytest.mark.parametrize(
-    "failure", [None, "stress", "recovery", "skip", "cleanup", "hold", "validation", "neighbor_validation"]
+    "failure",
+    [None, "stress", "recovery", "skip", "cleanup", "hold", "observation", "validation", "neighbor_validation"],
 )
 @pytest.mark.parametrize("neighbor", [None, JujuModelHandle(controller="other", model="neighbor")])
+@pytest.mark.parametrize("container_names", [["workload"], ["loki", "node-exporter"]], ids=["single", "multiple"])
+@pytest.mark.parametrize("cpu_limit", [None, "500m"], ids=["unlimited", "existing-limit"])
 def test_cleanup_and_recovery_order(
-    monkeypatch: pytest.MonkeyPatch, failure: str | None, neighbor: JujuModelHandle | None
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+    neighbor: JujuModelHandle | None,
+    container_names: list[str],
+    cpu_limit: str | None,
 ) -> None:
-    # GIVEN a single StatefulSet workload and recorded lifecycle operations
+    # GIVEN workloads with unchanged resource settings and no StatefulSet ownership
     juju = MagicMock(spec=JujuClient, backend=MagicMock())
     kubernetes = MagicMock()
     pod = client.V1Pod(
         metadata=client.V1ObjectMeta(
             name="app-0",
             annotations={"unit.juju.is/id": "app/0"},
-            owner_references=[
-                client.V1OwnerReference(
-                    api_version="apps/v1", kind="StatefulSet", name="app", uid="uid", controller=True
-                )
-            ],
         ),
         spec=client.V1PodSpec(
             containers=[
                 client.V1Container(
-                    name="workload",
-                    resources=client.V1ResourceRequirements(limits={"cpu": "1"}),
-                    env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")],
+                    name=name,
+                    resources=client.V1ResourceRequirements(
+                        requests={"cpu": "250m"}, limits={"cpu": cpu_limit} if cpu_limit else None
+                    ),
+                    env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value=name)],
                 )
+                for name in container_names
             ]
         ),
     )
-    # Stale Pods must be ignored both before and after the limit rollout.
+    pod.spec.containers.insert(0, client.V1Container(name="charm"))
+    original_resources = deepcopy(pod.spec.containers)
+    # Stale Pods must not be selected for injection.
     completed = deepcopy(pod)
     completed.metadata.name = "aaa-completed"
     completed.status = client.V1PodStatus(phase="Succeeded")
@@ -59,16 +64,6 @@ def test_cleanup_and_recovery_order(
     kubernetes.get_charm_pods.return_value = [completed, failed, terminating, pod]
     events: list[str] = []
     monkeypatch.setattr(module, "available_chaos_tools", lambda _: {ChaosTool.LITMUS})
-
-    @contextmanager
-    def limited(*args: object) -> Iterator[None]:
-        events.append("limit")
-        try:
-            yield
-        finally:
-            events.append("restore")
-
-    monkeypatch.setattr(module, "temporary_cpu_limit", limited)
     chaos = MagicMock()
     factory = MagicMock(return_value=chaos)
 
@@ -89,7 +84,7 @@ def test_cleanup_and_recovery_order(
         assert kwargs["timeout"] == timedelta(minutes=15)
         assert kwargs["strict_timeout"] is True
         events.append("idle")
-        if failure == "recovery" and events.count("idle") == 3:
+        if failure == "recovery" and events.count("idle") == 2:
             raise TimeoutError("neighbor did not recover")
 
     def hold(seconds: float) -> None:
@@ -97,6 +92,12 @@ def test_cleanup_and_recovery_order(
         events.append("hold")
         if failure == "hold":
             raise RuntimeError("interrupted")
+
+    def observe(*args: object) -> None:
+        assert args == (MODEL, "app/0")
+        events.append("observe")
+        if failure == "observation":
+            raise RuntimeError("stress ended early")
 
     def validate(**kwargs: object) -> None:
         is_neighbor = kwargs["applications"] == ["neighbor-app"]
@@ -112,6 +113,7 @@ def test_cleanup_and_recovery_order(
     monkeypatch.setattr(module, "sleep", hold)
     chaos.stress_cpu.side_effect = stress
     chaos.cleanup_all.side_effect = cleanup
+    chaos.check_stress.side_effect = observe
     juju.multi_model_idle_for_period.side_effect = idle
     juju.validate_model.side_effect = validate
 
@@ -128,21 +130,18 @@ def test_cleanup_and_recovery_order(
             factory,
         )
 
-    # WHEN the test succeeds, fails, or skips, THEN cleanup and resource restoration run.
+    # WHEN the test succeeds, fails, or skips, THEN stress is cleaned without resource mutation.
     if failure is None:
         run()
         assert events == [
             "idle",
-            "limit",
-            "idle",
             "stress",
             "hold",
+            "observe",
             "cleanup",
             "idle",
             "validate",
             "validate_neighbor",
-            "restore",
-            "idle",
         ]
         chaos.stress_cpu.assert_called_once_with(MODEL, "app/0", workers=4, duration=timedelta(seconds=130))
     else:
@@ -152,11 +151,17 @@ def test_cleanup_and_recovery_order(
         with pytest.raises(expected):
             run()
         assert "cleanup" in events
-        assert events[-1] == "restore"
+        if failure not in {"validation", "neighbor_validation", "recovery"}:
+            assert events[-1] == "cleanup"
         if failure not in {"validation", "neighbor_validation"}:
             juju.validate_model.assert_not_called()
 
     factory.assert_called_once_with(MODEL)
+    assert pod.spec.containers == original_resources
+    kubernetes.get_charm_pods.assert_called_once_with(application_name="app", model="model")
+    kubernetes.patch_statefulset_template.assert_not_called()
+    assert not kubernetes.backend.apps_v1_api.mock_calls
+    assert not juju.backend.mock_calls
 
 
 @pytest.mark.parametrize("kubernetes", [False, True])

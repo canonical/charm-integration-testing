@@ -1,0 +1,7 @@
+# Gitignore-style patterns, independent of host paths and sandbox mount names.
+# These rules are not access controls.
+.env
+.env.*
+!.env.sample
+mcp.json
+mcp-config-*.json

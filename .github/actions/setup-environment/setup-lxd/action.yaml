@@ -1,0 +1,78 @@
+---
+name: Setup LXD
+description: Setup a remote LXD environment for charm QA
+inputs:
+  lxd-creds:
+    description: >
+      YAML blob containing remote LXD credentials. Expected keys: endpoint,
+      server-cert, client-cert, client-key.
+    required: true
+  cloud-name:
+    description: Name to register the Juju cloud under.
+    required: true
+  workspace:
+    description: Per-cloud temporary workspace retained for the ephemeral job lifetime.
+    required: true
+outputs:
+  cloud-name:
+    description: Name of the cloud prepared for registration by the test suite.
+    value: ${{ inputs.cloud-name }}
+  cloud-definition-path:
+    description: Path to the cloud definition for controller-side registration.
+    value: ${{ steps.register.outputs.cloud-definition-path }}
+  credentials-path:
+    description: Path to the credentials for controller-side registration.
+    value: ${{ steps.register.outputs.credentials-path }}
+runs:
+  using: composite
+  steps:
+    - name: Prepare LXD cloud files
+      id: register
+      env:
+        LXD_CREDS: ${{ inputs.lxd-creds }}
+        CLOUD: ${{ inputs.cloud-name }}
+        CREDENTIALS_DIR: ${{ inputs.workspace }}
+      shell: bash
+      run: |-
+        set -euo pipefail
+        umask 077
+        cleanup() {
+          result=$?
+          rm -f "${CREDENTIALS_DIR}/creds.yaml"
+          if (( result != 0 )); then
+            rm -f "${CREDENTIALS_DIR}/cloud.yaml" "${CREDENTIALS_DIR}/credentials.yaml"
+            rmdir "${CREDENTIALS_DIR}"
+          fi
+          exit "$result"
+        }
+        trap cleanup EXIT
+        printf '%s\n' "${LXD_CREDS}" > "${CREDENTIALS_DIR}/creds.yaml"
+        endpoint=$(yq '.endpoint' "${CREDENTIALS_DIR}/creds.yaml")
+        server_cert=$(yq '.server-cert' "${CREDENTIALS_DIR}/creds.yaml")
+        client_cert=$(yq '.client-cert' "${CREDENTIALS_DIR}/creds.yaml")
+        client_key=$(yq '.client-key' "${CREDENTIALS_DIR}/creds.yaml")
+        cat > "${CREDENTIALS_DIR}/cloud.yaml" << EOF
+        clouds:
+          ${CLOUD}:
+            type: lxd
+            auth-types: [certificate]
+            endpoint: ${endpoint}
+            regions:
+              default:
+                endpoint: ${endpoint}
+        EOF
+        cat > "${CREDENTIALS_DIR}/credentials.yaml" << EOF
+        credentials:
+          ${CLOUD}:
+            default-credential: ${CLOUD}-cert
+            ${CLOUD}-cert:
+              auth-type: certificate
+              client-cert: |
+        $(echo "${client_cert}" | sed 's/^/        /')
+              client-key: |
+        $(echo "${client_key}" | sed 's/^/        /')
+              server-cert: |
+        $(echo "${server_cert}" | sed 's/^/        /')
+        EOF
+        echo "cloud-definition-path=${CREDENTIALS_DIR}/cloud.yaml" >> "$GITHUB_OUTPUT"
+        echo "credentials-path=${CREDENTIALS_DIR}/credentials.yaml" >> "$GITHUB_OUTPUT"
