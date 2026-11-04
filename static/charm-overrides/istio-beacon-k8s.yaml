@@ -1,11 +1,14 @@
 ---
 listed: true
 overrides:
+  # Per-model Istio installations can conflict on shared clusters.
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:
       - any_of:
           - track: '2'
           - track: dev
+    assumes: [unsupported-istio]
     provides:
       provide-cmr-mesh:
         optional: true
+  - assumes: [unsupported-istio]

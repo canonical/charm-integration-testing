@@ -3,11 +3,13 @@
 listed: true
 platforms: [kubernetes]
 overrides:
+  # Per-model Istio installations can conflict on shared clusters.
   - criteria:
       - any_of:
           - track: '1.29'
           - track: '1.31'
           - track: dev
+    assumes: [unsupported-istio]
     constraints:
       # src/charm.py: _collect_external_authorization_status blocks auth without ingress config.
       - 'bool(endpoint[forward-auth]) => bool(endpoint[istio-ingress-config])'
@@ -16,6 +18,8 @@ overrides:
       - all_of:
           - track: '2'
           - ubuntu_version: '24.04'
+    assumes: [unsupported-istio]
     provides:
       gateway-metadata:
         optional: true  # charmcraft.yaml declares GatewayMetadataProvider as an optional integration
+  - assumes: [unsupported-istio]
