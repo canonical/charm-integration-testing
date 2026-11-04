@@ -48,8 +48,8 @@ existing daemon. Preview changes with
 `JUJU_CHANNEL=3/edge mise run setup` overrides the shared Juju channel using a
 temporary mise declaration, without editing the checkout. The action's
 `juju-channel` input and test workflow's `juju_channel` input use the same path;
-empty uses the shared default. Branch overrides also request a native mise upgrade
-because snap's installed-state listing hides branch names.
+empty uses the shared default. Explicit overrides refresh installed Juju before
+applying packages, including branch changes that snap's installed-state listing hides.
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
 

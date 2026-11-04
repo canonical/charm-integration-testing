@@ -48,12 +48,8 @@ if [[ "$bootstrap" == true ]]; then
             mise config set --file "$override_dir/mise.toml" --type string \
                 'bootstrap.packages."snap:juju".channel' "$JUJU_CHANNEL"
             export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
+            mise bootstrap packages upgrade --yes snap:juju
             mise bootstrap packages apply --yes
-            # snap list hides branch names, so apply cannot detect branch-to-branch drift.
-            case "$JUJU_CHANNEL" in
-                */*/*|stable/*|candidate/*|beta/*|edge/*)
-                    mise bootstrap packages upgrade --yes snap:juju ;;
-            esac
         )
     else
         mise bootstrap packages apply --yes
