@@ -1,5 +1,5 @@
 # Gitignore-style patterns, independent of host paths and sandbox mount names.
-# Copilot CLI support is unverified; these rules are not access controls.
+# These rules are not access controls.
 .env
 .env.*
 !.env.sample

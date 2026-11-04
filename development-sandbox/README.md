@@ -77,7 +77,7 @@ This applies to both interactive and autonomous `run` sessions.
 New sandboxes include Go and uvx; install them manually in older VMs.
 
 The root `.copilotignore` uses path-independent patterns for local credential
-files, but Copilot CLI support is unverified. It does not protect process
+files. It does not protect process
 environments or the sandbox's temporary MCP config outside the checkout.
 Assume an unrestricted agent can read and use any credentials available to its
 user, regardless of ignore files.
