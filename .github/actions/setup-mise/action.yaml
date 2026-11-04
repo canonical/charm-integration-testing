@@ -2,18 +2,11 @@
 name: Set up mise
 description: Install the repository's tools, project dependencies and system packages
 inputs:
-  profile:
-    description: Tooling profile (workstation, ci or sandbox); sandbox also works
-      on a GitHub runner
-    default: ci
   install-project:
     description: Install project Python dependencies after the tools
     default: "true"
   bootstrap:
-    description: Apply declared system packages; empty uses the profile default
-    default: ""
-  eager:
-    description: Install optional tools now rather than on first use
+    description: Opt in to installing the declared system packages
     default: "false"
   juju-channel:
     description: Override the Juju client channel for this setup only; empty uses
@@ -35,16 +28,7 @@ runs:
     - name: Set up environment
       shell: bash
       env:
-        SETUP_PROFILE: ${{ inputs.profile }}
-        SETUP_EAGER: ${{ inputs.eager }}
         SETUP_INSTALL_PROJECT: ${{ inputs.install-project }}
         SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
-      run: |-
-        mise run setup
-        case "$SETUP_PROFILE" in
-          workstation) echo 'MISE_ENV=development' >> "$GITHUB_ENV" ;;
-          ci) echo 'MISE_ENV=provisioning' >> "$GITHUB_ENV" ;;
-          sandbox) echo 'MISE_ENV=development,provisioning,sandbox' >> "$GITHUB_ENV" ;;
-          *) echo "Unknown setup profile: $SETUP_PROFILE" >&2; exit 1 ;;
-        esac
+      run: mise run setup

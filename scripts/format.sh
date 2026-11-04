@@ -1,4 +1,6 @@
 #!/bin/bash
+#MISE description="Format repository files"
+#MISE raw_args=true
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

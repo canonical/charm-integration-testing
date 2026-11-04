@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run repository linters"
+#MISE raw_args=true
+#MISE depends=["setup-project"]
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -13,7 +16,7 @@ cd "$(dirname "$0")/.."
 set -e
 
 # Check for prerequisites as appropriate.
-which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise run setup:workstation"'
+which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise run setup"'
 
 # Actual lint checks begin here.
 ruff check || die 'Failed "ruff check"'

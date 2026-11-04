@@ -5,11 +5,5 @@
 # See LICENSE file for licensing details.
 set -euo pipefail
 
-install_args=(--locked)
-case "${SETUP_EAGER:-false}" in
-    true) install_args+=(--include-lazy) ;;
-    false) ;;
-    *) echo "SETUP_EAGER must be true or false" >&2; exit 1 ;;
-esac
-mise install "${install_args[@]}"
+mise install --locked
 mise exec -- poetry install "$@"

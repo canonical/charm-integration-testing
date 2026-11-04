@@ -12,12 +12,12 @@ To install directly on your machine, install
 [mise](https://mise.jdx.dev/getting-started.html), then run:
 
 ```bash
-mise run setup:workstation
+mise run setup
 ```
 
 Workstation setup installs project dependencies without changing system packages.
-Optional development tools install on first use. Integration runners use
-`mise run setup:ci`; add `--no-bootstrap` when system packages are already supplied.
+Optional tools install on first use. Use `mise run setup --bootstrap` to also
+install the declared system packages.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.

@@ -11,7 +11,7 @@ Install mise as described in the [README](README.md#getting-started), then
 prepare a workstation:
 
 ```bash
-mise run setup:workstation
+mise run setup
 ```
 
 ### What goes where
@@ -19,27 +19,24 @@ mise run setup:workstation
 | File | Owns |
 |---|---|
 | `mise.toml` | Shared locked tools and snap channels for Juju, kubectl, OpenStack clients, and LXD |
-| `mise.development.toml` | Additional development tools, including Ruff, Bandit, yamlfix, and workflow linters |
-| `mise.provisioning.toml` | Provisioning executables, including Helm, without development or agent extras |
 | `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
 
-The development configuration extends the shared tools.
+One shared inventory serves development and CI.
 `[tools]` declares isolated, locked executables;
 `[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
 run in isolated environments. Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-### Setup profiles and first-use installation
+### Setup and first-use installation
 
 | Command | Prepares |
 |---|---|
-| `mise run setup:workstation` | Project dependencies and on-demand development tools; system packages are supplied |
-| `mise run setup:ci` | Project dependencies, system packages and on-demand provisioning tools |
-| `mise run setup:sandbox` | Development, provisioning and agent tools plus system packages; requires sandbox adoption |
+| `mise run setup` | Project dependencies and on-demand tools; leaves system packages untouched |
+| `mise run setup --bootstrap` | Also installs the declared system packages |
+| `mise run setup --tools-only` | Prepares executable tools without project dependencies or system packages |
 
-Profiles share one setup implementation. `--no-bootstrap` skips system packages;
-`--tools-only` skips Poetry dependencies; `--eager` installs the selected profile's
-optional tools immediately. Plain `mise run setup` retains active-configuration setup.
+System-package installation is opt-in. To preload every optional executable for
+offline work, run `mise install --locked --include-lazy`.
 
 Python, uv, pipx and Poetry are installed during setup. Other executables declare
 `lazy = true` and their command names (`lazy_bins`) beside their pinned versions.
@@ -47,22 +44,21 @@ Mise creates launchers that install the locked tool on first use, including its
 declared runtime dependencies. Unused tools stay uninstalled. Strict locking
 prevents first-use installation from rewriting committed locks.
 
-`mise run lint` and `mise run format` select development tools themselves, so a
-separate shell export is unnecessary. Project-dependent test tasks and lint share
+All tasks and direct `mise exec -- <command>` invocations use the same inventory;
+no environment selection is required. Project-dependent test tasks and lint share
 `setup-project`, which runs Poetry installation before the task. Poetry owns
 dependency reconciliation; there is no additional readiness cache.
-This does not bootstrap system packages. For direct development commands outside tasks,
-use `mise -E development exec -- <command>` or select `MISE_ENV=development` in
-your interactive shell.
+This does not bootstrap system packages.
 
-The CI setup action selects `profile: ci` by default and exports its environment
-for subsequent steps. It also accepts `profile: workstation` or `profile: sandbox`
-and `eager: "true"`. Lint, unit and security jobs set
-`bootstrap: "false"`; jobs without project dependencies also set
+The CI setup action wraps the same task. Integration and cleanup jobs opt in with
+`bootstrap: "true"`; lint, unit and security jobs leave system packages untouched.
+Jobs without project dependencies set
 `install-project: "false"`. Cloud setup, reporting and upload actions consume
 the prepared environment; their optional executables install on demand.
 Mise-action caching remains disabled; enabling it later should save after the job
-and distinguish profiles and eagerly/lazily prepared inventories.
+and use job-specific keys so immutable caches can reflect different tool usage.
+The pinned mise action must have `install: true` to schedule its post-job cache save;
+the initial locked install still skips lazy executables.
 
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.

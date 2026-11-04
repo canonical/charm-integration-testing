@@ -1,6 +1,6 @@
 [task_config]
 includes = ["scripts", "mise-tasks"]
-excludes = ["scripts/*.py", "scripts/lint.sh", "scripts/format.sh"]
+excludes = ["scripts/*.py"]
 
 [settings]
 lockfile = true
@@ -22,6 +22,42 @@ pipx = "1.18.8"
 "aqua:jqlang/jq" = { version = "1.8.2", lazy = true, lazy_bins = ["jq"] }
 "aqua:mikefarah/yq" = { version = "4.54.1", lazy = true, lazy_bins = ["yq"] }
 "aqua:trufflesecurity/trufflehog" = { version = "3.56.0", lazy = true, lazy_bins = ["trufflehog"] }
+node = { version = "24.22.0", lazy = true, lazy_bins = ["node", "npm", "npx"] }
+"aqua:cli/cli" = { version = "2.103.3", lazy = true, lazy_bins = ["gh"] }
+"aqua:gitleaks/gitleaks" = { version = "8.30.1", lazy = true, lazy_bins = ["gitleaks"] }
+"aqua:mpalmer/action-validator" = { version = "0.6.0", lazy = true, lazy_bins = ["action-validator"] }
+"aqua:helm/helm" = { version = "3.21.4", lazy = true, lazy_bins = ["helm"] }
+
+[tools."npm:markdownlint-cli2"]
+version = "0.24.0"
+lazy = true
+lazy_bins = ["markdownlint-cli2"]
+depends = ["node"]
+
+[tools."pipx:zizmor"]
+version = "1.5.1"
+lazy = true
+lazy_bins = ["zizmor"]
+depends = ["python", "uv", "pipx"]
+
+[tools."pipx:ruff"]
+version = "0.5.7"
+lazy = true
+lazy_bins = ["ruff"]
+depends = ["python", "uv", "pipx"]
+
+[tools."pipx:bandit"]
+version = "1.9.4"
+extras = "toml"
+lazy = true
+lazy_bins = ["bandit"]
+depends = ["python", "uv", "pipx"]
+
+[tools."pipx:yamlfix"]
+version = "1.19.1"
+lazy = true
+lazy_bins = ["yamlfix"]
+depends = ["python", "uv", "pipx"]
 
 [tools."pypi:git+https://github.com/juju/juju-crashdump.git"]
 version = "bde242ccfdd91cb2372f26d41d62d7b230660c08"
@@ -38,32 +74,3 @@ python = "3.12.12"
 lazy = true
 lazy_bins = ["juju-k8s-crashdump"]
 depends = ["python", "uv"]
-
-[tasks."setup:workstation"]
-description = "Prepare project dependencies and on-demand development tools, without system packages"
-file = "mise-tasks/setup"
-env = { SETUP_PROFILE = "workstation" }
-raw_args = true
-
-[tasks."setup:ci"]
-description = "Prepare project dependencies, system packages and on-demand provisioning tools"
-file = "mise-tasks/setup"
-env = { SETUP_PROFILE = "ci" }
-raw_args = true
-
-[tasks."setup:sandbox"]
-description = "Prepare the sandbox's project dependencies, system packages and on-demand tools"
-file = "mise-tasks/setup"
-env = { SETUP_PROFILE = "sandbox" }
-raw_args = true
-
-[tasks.lint]
-description = "Run repository linters with on-demand development tools"
-depends = ["setup-project"]
-run = "mise -E development exec -- scripts/lint.sh"
-raw_args = true
-
-[tasks.format]
-description = "Format repository files with on-demand development tools"
-run = "mise -E development exec -- scripts/format.sh"
-raw_args = true

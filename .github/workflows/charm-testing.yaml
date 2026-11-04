@@ -146,6 +146,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          bootstrap: "true"
           juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
