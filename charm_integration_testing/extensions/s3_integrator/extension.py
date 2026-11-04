@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 import time
 from collections.abc import Callable
 from datetime import timedelta
@@ -19,10 +20,12 @@ class S3IntegratorExtension(JujuExtension):
         juju: JujuBackend,
         providers: S3ProviderRegistry,
         resources_for_provider: Callable[[S3Provider], S3ResourceRegistry],
+        logger: logging.Logger,
     ) -> None:
         self.juju = juju
         self.providers = providers
         self.resources_for_provider = resources_for_provider
+        self.logger = logger.getChild(type(self).__name__)
 
     def post_deploy(self, model: JujuModelHandle) -> None:
         for application, info in self.juju.list_applications(model).items():
@@ -43,6 +46,7 @@ class S3IntegratorExtension(JujuExtension):
             return
         if self.juju.get_application_config(model, application).get("endpoint"):
             return
+        self.logger.info(f"Configuring s3-integrator application '{application}' in model '{model.uri}'.")
         if wait_for_scale:
             self.juju.wait_application_scaled(model, application, _INTEGRATOR_WAIT_TIMEOUT)
         else:

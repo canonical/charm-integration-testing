@@ -406,7 +406,7 @@ def juju_client(
             MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
-            S3IntegratorExtension(juju_backend, s3_provider_registry, s3_resources_for_provider),
+            S3IntegratorExtension(juju_backend, s3_provider_registry, s3_resources_for_provider, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
             unseal_vault_k8s_extension,
             persistence_extension,

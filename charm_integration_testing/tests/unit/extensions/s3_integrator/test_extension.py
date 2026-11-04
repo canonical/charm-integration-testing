@@ -169,7 +169,9 @@ def make_integrator_client(
     return JujuClient(
         backend,
         logging.getLogger(__name__),
-        extensions=[S3IntegratorExtension(backend, provider_registry, resources_for_provider)],
+        extensions=[
+            S3IntegratorExtension(backend, provider_registry, resources_for_provider, logging.getLogger(__name__))
+        ],
     )
 
 

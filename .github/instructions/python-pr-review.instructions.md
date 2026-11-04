@@ -22,7 +22,7 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 
 **`JujuBackend` (ABC)** expresses what an ideal Juju would natively provide. It should contain no workarounds, compensating logic, or implementation detail. If Juju were a perfect API, every method here would map cleanly onto it. Flag any PR that adds workaround behaviour directly to the ABC.
 
-**`JujuClient`** is the single place for high-level orchestration and all logging. It delegates raw operations to the backend and calls extensions in sequence. Logging in a backend or extension is a style violation — it belongs in `JujuClient`.
+**`JujuClient`** owns high-level orchestration and its logging. It delegates raw operations to the backend and calls extensions in sequence. Extensions may log their own lifecycle work using an injected logger, as existing extensions do. Keep backend operation logging in `JujuClient`.
 
 Keep facade APIs in domain terms. `JujuClient` callers should work with Juju concepts and
 operations, not backend implementation details such as Kubernetes workload instances. Keep
