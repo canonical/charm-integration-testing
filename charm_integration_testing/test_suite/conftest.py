@@ -85,6 +85,7 @@ from bundle_builder_x import (
 )
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
 from test_suite.fixtures.juju import get_juju_client_for_registered_models
+from test_suite.kubernetes import require_kubeconfig
 from test_suite.remote_logging import (
     build_remote_logging_endpoints_by_controller,
     remote_logging_existing_state_warning,
@@ -239,6 +240,7 @@ def kubernetes_client(
     cloud = juju_backend.kubernetes_cloud_for_model(target_model_ref)
     if cloud is None:
         return None
+    require_kubeconfig(kubernetes_client_registry, cloud)
     return kubernetes_client_registry.client_for_cloud(cloud)
 
 

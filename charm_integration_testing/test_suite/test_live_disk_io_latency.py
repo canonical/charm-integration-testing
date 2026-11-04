@@ -16,7 +16,9 @@ from time import monotonic, sleep
 import pytest
 from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 
+from .kubernetes import require_model_kubeconfig
 from .scheduler.states import State
 
 # Global default latency target. Per-charm overrides are tracked separately.
@@ -61,11 +63,13 @@ def test_live_disk_io_latency(
     target_model_ref: JujuModelHandle,
     target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
     """Verify the IOChaos lifecycle: confirmed injection, no early stop, and recovery.
 
     Does not measure actual I/O latency in the workload; see module docstring.
     """
+    require_model_kubeconfig(juju_client.backend, kubernetes_client_registry, target_model_ref)
     if not require_chaos_tool.supports("io_latency"):
         # Skip before the baseline wait, not after.
         pytest.skip(f"No available chaos client supports 'io_latency' for {target_model_ref.uri}.")

@@ -7,11 +7,13 @@ from typing import cast
 
 import pytest
 from juju import JujuClient, JujuModelHandle, JujuRestartNotSupportedError
+from kubernetes_client import KubernetesClientRegistry
 from test_suite import test_scale_ha as scale_ha
 from test_suite import test_scale_remove_follower as remove_follower
 from test_suite.fixtures import integration_spec
 
 from .ha_fakes import MODEL, RecordingJujuClient, charm
+from .test_kubernetes_access import CloudBackend
 
 
 def _write_bundle(tmp_path: Path, *, application: str = "target", units: int = 2) -> Path:
@@ -127,6 +129,7 @@ def test_require_principal_charm_rejects_subordinates() -> None:
 class FollowerClient(RecordingJujuClient):
     def __init__(self, *, error: str | None = None, current_units: int = 3) -> None:
         super().__init__(current_units)
+        self.backend = CloudBackend({MODEL.uri: None})
         self.error = error
 
     def multi_model_idle_for_period(
@@ -158,7 +161,7 @@ def test_follower_restart_preserves_ha_without_requiring_scale_down() -> None:
     client = FollowerClient()
     neighbor = JujuModelHandle(controller="controller", model="neighbor")
     remove_follower.test_scale_remove_follower(
-        cast(JujuClient, client), MODEL, neighbor, "target", charm(scale_down=False)
+        cast(JujuClient, client), MODEL, neighbor, "target", charm(scale_down=False), KubernetesClientRegistry({})
     )
     assert client.calls == [
         ("idle", [MODEL, neighbor], True),
@@ -175,7 +178,9 @@ def test_follower_restart_preserves_ha_without_requiring_scale_down() -> None:
 def test_follower_failure_is_not_hidden(error: str) -> None:
     client = FollowerClient(error=error)
     with pytest.raises((RuntimeError, TimeoutError, pytest.fail.Exception)):
-        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", charm())
+        remove_follower.test_scale_remove_follower(
+            cast(JujuClient, client), MODEL, None, "target", charm(), KubernetesClientRegistry({})
+        )
     if error != "validation":
         assert not any(call[0] == "validate_model" for call in client.calls)
 
@@ -183,7 +188,9 @@ def test_follower_failure_is_not_hidden(error: str) -> None:
 def test_follower_requires_ha_count_before_disruption() -> None:
     client = FollowerClient(current_units=2)
     with pytest.raises(pytest.fail.Exception, match="at least 3"):
-        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", charm())
+        remove_follower.test_scale_remove_follower(
+            cast(JujuClient, client), MODEL, None, "target", charm(), KubernetesClientRegistry({})
+        )
     assert not any(call[0] == "restart" for call in client.calls)
 
 
@@ -192,12 +199,16 @@ def test_follower_skips_unsupported_configuration(reason: str) -> None:
     client = FollowerClient(error=reason, current_units=1 if reason == "single" else 3)
     deployed_charm = charm(ha_units=1 if reason == "single" else 3, subordinate=reason == "subordinate")
     with pytest.raises(pytest.skip.Exception):
-        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", deployed_charm)
+        remove_follower.test_scale_remove_follower(
+            cast(JujuClient, client), MODEL, None, "target", deployed_charm, KubernetesClientRegistry({})
+        )
     assert not any(call[0] == "validate_model" for call in client.calls)
 
 
 def test_follower_does_not_skip_unexpected_not_implemented_error() -> None:
     client = FollowerClient(error="not-implemented")
     with pytest.raises(NotImplementedError, match="restart hook failed"):
-        remove_follower.test_scale_remove_follower(cast(JujuClient, client), MODEL, None, "target", charm())
+        remove_follower.test_scale_remove_follower(
+            cast(JujuClient, client), MODEL, None, "target", charm(), KubernetesClientRegistry({})
+        )
     assert not any(call[0] == "validate_model" for call in client.calls)

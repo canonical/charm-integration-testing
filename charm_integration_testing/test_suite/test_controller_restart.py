@@ -4,8 +4,10 @@
 from datetime import timedelta
 
 import pytest
-from juju import JujuClient, JujuModelHandle
+from juju import JujuBackend, JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 
+from .kubernetes import require_kubeconfig
 from .scheduler.states import State
 
 
@@ -14,7 +16,14 @@ def test_controller_restart(
     juju_client: JujuClient,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
+    juju_backend: JujuBackend,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
+    controller_model = JujuModelHandle(controller=target_model_ref.controller, model="controller")
+    cloud = juju_backend.kubernetes_cloud_for_model(controller_model)
+    if cloud is not None:
+        require_kubeconfig(kubernetes_client_registry, cloud)
+
     # Reboot our controllers with a rolling reboot
     juju_client.reboot_model_controller(model=target_model_ref)
 

@@ -6,9 +6,12 @@ from typing import cast
 
 import pytest
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 from test_suite import test_reboot_leader as reboot_leader
 
 from bundle_builder_x import Charm, CharmChannel
+
+from .test_kubernetes_access import CloudBackend
 
 MODEL = JujuModelHandle(controller="controller", model="model")
 NEIGHBOR_MODEL = JujuModelHandle(controller="neighbor-controller", model="neighbor-model")
@@ -34,6 +37,7 @@ class RecordingJujuClient:
         reboot_error: Exception | None = None,
     ) -> None:
         self.calls: list[tuple[object, ...]] = []
+        self.backend = CloudBackend({MODEL.uri: None})
         self.reboot_error = reboot_error
 
     def num_units(self, application: str, model: JujuModelHandle) -> int:
@@ -88,6 +92,7 @@ def test_reboot_leader_validates_before_waiting_for_recovery() -> None:
         _charm(),
         None,
         None,
+        KubernetesClientRegistry({}),
     )
 
     assert client.calls == [
@@ -128,6 +133,7 @@ def test_reboot_leader_waits_for_recovery_when_validation_fails() -> None:
             _charm(),
             None,
             None,
+            KubernetesClientRegistry({}),
         )
 
     assert client.calls[-1] == ("multi_model_idle_for_period", [MODEL], timedelta(minutes=15))
@@ -145,6 +151,7 @@ def test_reboot_leader_waits_for_unavailability_before_recovery_after_reboot_err
             _charm(),
             None,
             None,
+            KubernetesClientRegistry({}),
         )
 
     assert error.value is reboot_error
@@ -165,6 +172,7 @@ def test_reboot_leader_validates_same_model_neighbor() -> None:
         _charm(),
         None,
         "neighbor",
+        KubernetesClientRegistry({}),
     )
 
     assert ("validate_model", MODEL, "deep", ["target"], {"target/1"}) in client.calls
@@ -181,6 +189,7 @@ def test_reboot_leader_validates_neighbor_model_and_recovers() -> None:
         _charm(),
         NEIGHBOR_MODEL,
         "neighbor",
+        KubernetesClientRegistry({}),
     )
 
     assert juju.calls == [
@@ -209,6 +218,7 @@ def test_reboot_leader_waits_for_disruption_after_reboot_error() -> None:
             _charm(),
             None,
             None,
+            KubernetesClientRegistry({}),
         )
 
     assert error.value is reboot_error

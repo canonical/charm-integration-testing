@@ -30,9 +30,55 @@ This installs:
 - ✅ juju-crashdump (machine controller logs)
 - ✅ juju-k8s-crashdump (K8s controller logs) — **Required for issue #693**
 - ✅ kubectl (K8s debugging)
-- ✅ Bootstrapped controllers ready for testing
+- ✅ Cloud substrates ready; let the test suite bootstrap its controllers
 
 **Tip**: The `setup-charm-tests` skill is idempotent—safe to run multiple times.
+
+### Kubernetes cloud access (required for direct Kubernetes tests)
+
+For the sandbox's `local-k8s` cloud, export this in the shell that starts
+`scripts/run-tests.sh`, after substrate setup:
+
+```bash
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+test -r "$KUBECONFIG_local_k8s"
+kubectl --kubeconfig "$KUBECONFIG_local_k8s" get namespaces
+```
+
+If standalone kubectl is unavailable, use `sudo k8s kubectl` with the same
+`--kubeconfig` argument. The read-only check confirms API access, not every
+permission required by disruptive tests.
+
+Use one `KUBECONFIG_<cloud_name>` for each Kubernetes cloud used by the run,
+including target, neighbor and controller clouds when different. The suffix is
+the Juju **cloud** name with hyphens replaced by underscores, not a controller,
+model or Test Observer environment name. For example:
+
+```bash
+export KUBECONFIG_target_cloud=/path/to/target-kubeconfig.yaml
+export KUBECONFIG_neighbor_cloud=/path/to/neighbor-kubeconfig.yaml
+```
+
+These names apply to `--target-cloud target-cloud --neighbor-cloud neighbor-cloud`.
+If both models use `local-k8s`, one `KUBECONFIG_local_k8s` mapping suffices; if
+they use distinct cloud names for the same cluster, configure both names.
+Machine-only clouds need no kubeconfig.
+
+Values are readable file paths with the intended current context, not YAML
+contents or colon-separated kubeconfig lists. Use absolute paths accessible to
+the test process. Plain `KUBECONFIG`, `~/.kube/config` and Juju's stored cloud
+credentials do not populate the suite's mapping. The setup script cannot export
+into its parent shell; repeat the export in each new shell, before pytest starts.
+
+This configuration is needed for direct Kubernetes operations, including
+controller restart, resource tracking and Kubernetes log collection, not only
+chaos tests. Without a required cloud mapping, dependent tests skip automatically
+with the variable to set. This is missing coverage, not proof of restart or
+endpoint health; export the mapping and rerun to cover those operations.
+Explicit but invalid configuration, authentication/permission errors and operation
+failures remain errors. Resource tracking and Kubernetes log collection may
+report warnings separately when access is missing.
+See the [local configuration guide](../../../docs/how-to/run-and-debug-tests-locally.rst#configure-kubernetes-access-for-the-test-suite).
 
 ## Quick Start
 
@@ -593,7 +639,8 @@ The skill translates test observer parameters to `run-tests.sh` invocation:
 ### Environment Variables
 
 ```bash
-export KUBECONFIG=/home/ubuntu/k8s.yaml  # For K8s controller access
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml  # Test suite: Juju cloud local-k8s
+export KUBECONFIG=/home/ubuntu/k8s.yaml  # Optional: kubectl/Helm, not the test suite mapping
 export JUJU_DATA=$HOME/.local/share/juju  # Juju metadata
 export LOG_LEVEL=DEBUG
 export TEST_OUTPUT_DIR=./test-logs
@@ -660,16 +707,16 @@ Tests without state markers always run (unless they fail independently). These a
 
 ### Known Environmental Failures (Sandbox Constraints)
 
-The sandbox environment has resource constraints that cause some tests to fail unrelated to code issues:
+Diagnose the failure before excluding a disruptive test. Missing
+`KUBECONFIG_<cloud_name>` causes dependent tests to skip, not a sandbox resource
+failure; follow the Kubernetes cloud access steps above to enable those tests.
 
 | Test | Issue | Workaround |
 |------|-------|-----------|
-| `test_controller_restart` | "No selected controller" error | Use `-k "not test_controller_restart"` |
-| `test_model_controller_migration` | Machine controller pending during migration | Use `-k "not test_model_controller_migration"` |
+| `test_model_controller_migration` | Machine controller pending during migration | Investigate capacity and bootstrap logs; exclude only for a deliberately narrower run |
 
-**These failures cascade and prevent downstream tests (including log collection) from completing.**
-
-When validating fixes, especially for mixed-cloud logging bugs, exclude these tests:
+After confirming a migration-specific environment limitation, a narrower run
+can exclude that operation, but cannot establish migration coverage:
 
 ```bash
 ./scripts/run-tests.sh \
@@ -680,7 +727,7 @@ When validating fixes, especially for mixed-cloud logging bugs, exclude these te
   --current-state "no_bundle" \
   --charm-overrides "./static/charm-overrides/" \
   --log-dir "./test-logs" \
-  -k "not (test_controller_restart or test_model_controller_migration)"
+  -k "not test_model_controller_migration"
 ```
 
 This allows:
@@ -690,7 +737,8 @@ This allows:
 - ✅ test_deploy (may still fail for other reasons)
 - ✅ test_logs_privacy_check and **log collection to complete**
 
-**Key Point**: Log collection runs in the teardown phase (finally block), so excluding environmental failures ensures both controllers reach log collection even if deployment phases fail.
+**Key Point**: Log collection runs in teardown even after test failure. Successful
+Kubernetes log collection still requires the cloud-specific kubeconfig.
 
 ---
 
@@ -714,19 +762,24 @@ juju kill-controller neighbor -y
 
 ### Problem: "Kubeconfig not found"
 
-K8s cloud setup might be incomplete. Before running tests:
+Distinguish a missing file from a missing cloud mapping. Before running tests:
 
 ```bash
 # Check if K8s cloud is registered
-juju clouds | grep local-k8s
+juju clouds --client
 
-# If not found, install and configure K8s
-# (See setup-k8s skill documentation)
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
-
-# Bootstrap a K8s controller
-juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
+# Configure the test process, even if the cloud is already registered
+export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+test -r "$KUBECONFIG_local_k8s"
+kubectl --kubeconfig "$KUBECONFIG_local_k8s" get namespaces
 ```
+
+If the file or cluster is missing, follow the `setup-k8s` skill. If the suite says
+`No kubeconfig configured for Kubernetes cloud 'local-k8s'`, or teardown asks for
+`KUBECONFIG_local_k8s`, check the exact cloud name and exported variable in the
+shell launching pytest. Plain `KUBECONFIG` is insufficient. Exporting after pytest
+starts will not update that process; restart the test command with the mapping.
+Do not bootstrap an extra controller just to repair this configuration.
 
 ### Problem: "Charm deployment timeout"
 

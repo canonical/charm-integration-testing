@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 from chaos_client import ChaosResourceConstraintsError, MetaChaosClient, ResourceConstraintsClient
 from juju import CharmChannel, JujuApplicationInfo, JujuClient, JujuModelHandle, JujuValidationError
+from kubernetes_client import KubernetesClientRegistry
 from test_suite import moderate_stress
 from test_suite import test_live_memory_stress_moderate as live
 
@@ -44,6 +45,7 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
     monkeypatch.setattr(moderate_stress, "monotonic", lambda: clock[0])
     monkeypatch.setattr(moderate_stress, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
     client = Mock()
+    client.backend.kubernetes_cloud_for_model.return_value = None
     client.backend.list_applications.return_value = {
         "target": JujuApplicationInfo(
             charm="postgresql-k8s", revision=495, channel=CharmChannel.parse("14/stable"), base="22.04"
@@ -69,6 +71,7 @@ def scenario(monkeypatch: pytest.MonkeyPatch) -> Scenario:
         memory_pressure_duration=timedelta(minutes=5),
         memory_pressure_size_mb=128,
         memory_pressure_duration_margin=timedelta(minutes=2),
+        kubernetes_client_registry=KubernetesClientRegistry({}),
     )
     return arguments, client, chaos, clock
 

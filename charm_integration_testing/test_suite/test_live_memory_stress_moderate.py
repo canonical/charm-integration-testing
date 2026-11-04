@@ -8,7 +8,9 @@ from typing import Callable
 import pytest
 from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 
+from .kubernetes import require_model_kubeconfig
 from .moderate_stress import run_moderate_stress
 from .scheduler.states import State
 
@@ -82,7 +84,9 @@ def test_live_memory_stress_moderate(
     memory_pressure_duration: timedelta,
     memory_pressure_size_mb: int,
     memory_pressure_duration_margin: timedelta,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
+    require_model_kubeconfig(juju_client.backend, kubernetes_client_registry, target_model_ref)
     run_moderate_stress(
         juju_client,
         chaos_tool_for_model,

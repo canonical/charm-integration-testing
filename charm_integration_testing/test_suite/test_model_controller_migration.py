@@ -5,7 +5,9 @@ from datetime import timedelta
 
 import pytest
 from juju import JujuBackend, JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClientRegistry
 
+from .kubernetes import require_kubeconfig
 from .scheduler.states import State
 
 
@@ -18,6 +20,7 @@ def test_model_controller_migration(
     model: str,
     target_model_ref: JujuModelHandle,
     neighbor_model_ref: JujuModelHandle | None,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> None:
     temp_model_ref = JujuModelHandle(controller=temp_juju_controller, model=model)
 
@@ -26,6 +29,12 @@ def test_model_controller_migration(
     # See https://github.com/juju/juju/issues/23281
     if juju_client.version(target_model_ref).major >= 4:
         pytest.skip("Model migration is not supported on juju >= 4.0.0 (https://github.com/juju/juju/issues/23281).")
+
+    # Both controllers may need a restart after migration; check before moving the model.
+    for controller in (target_controller, temp_juju_controller):
+        cloud = juju_backend.kubernetes_cloud_for_model(JujuModelHandle(controller=controller, model="controller"))
+        if cloud is not None:
+            require_kubeconfig(kubernetes_client_registry, cloud)
 
     # Validate all applications and relations before migration. Only target_model_ref's controller
     # is migrated below; the neighbor model stays on its own controller throughout, but is included
