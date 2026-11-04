@@ -15,11 +15,8 @@ To install directly on your machine, install
 mise run setup
 ```
 
-For live tests on a snap-enabled Linux host, install the required clients:
-
-```bash
-mise bootstrap packages apply snap:juju snap:kubectl
-```
+Setup also applies the declared system packages on supported hosts. Use
+`mise run setup -- --no-bootstrap` to install only tools and Python dependencies.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.

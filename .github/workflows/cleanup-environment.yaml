@@ -83,7 +83,6 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           install-project: "false"
-          packages: snap:kubectl snap:openstackclients
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info

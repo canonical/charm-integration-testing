@@ -145,7 +145,6 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          packages: snap:juju snap:kubectl snap:openstackclients
           juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}

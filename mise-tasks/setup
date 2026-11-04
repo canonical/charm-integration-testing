@@ -1,18 +1,61 @@
 #!/usr/bin/env bash
-#MISE description="Install the locked toolchain and project dependencies"
+#MISE description="Install locked tools, project dependencies and system packages"
 #MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 set -euo pipefail
 
-tools_only=false
-if [[ "${1:-}" == "--tools-only" ]]; then
-    tools_only=true
+install_project="${SETUP_INSTALL_PROJECT-true}"
+bootstrap="${SETUP_BOOTSTRAP-true}"
+for setting in "$install_project" "$bootstrap"; do
+    case "$setting" in
+        true|false) ;;
+        *) echo "SETUP_INSTALL_PROJECT and SETUP_BOOTSTRAP must be true or false" >&2; exit 1 ;;
+    esac
+done
+
+while (( $# )); do
+    case "$1" in
+        --tools-only) install_project=false ;;
+        --no-bootstrap) bootstrap=false ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
     shift
+done
+
+if [[ "$bootstrap" == true && -n "${JUJU_CHANNEL:-}" ]]; then
+    component='[A-Za-z0-9._][A-Za-z0-9._-]*'
+    if [[ ! "$JUJU_CHANNEL" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
+        echo "Invalid JUJU_CHANNEL: expected a track or [track/]risk[/branch]" >&2
+        exit 1
+    fi
 fi
 
 mise install --locked
 
-if [[ "$tools_only" == false ]]; then
+if [[ "$install_project" == true ]]; then
     mise exec -- poetry install "$@"
+fi
+
+if [[ "$bootstrap" == true ]]; then
+    if [[ -n "${JUJU_CHANNEL:-}" ]]; then
+        (
+            override_dir="$(mktemp -d)"
+            trap 'rm -f "$override_dir/mise.toml"; rmdir "$override_dir"' EXIT
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$override_dir"
+            touch "$override_dir/mise.toml"
+            mise config set --file "$override_dir/mise.toml" --type string \
+                'bootstrap.packages."snap:juju".channel' "$JUJU_CHANNEL"
+            export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
+            mise bootstrap packages apply --yes
+            # snap list hides branch names, so apply cannot detect branch-to-branch drift.
+            case "$JUJU_CHANNEL" in
+                */*/*|stable/*|candidate/*|beta/*|edge/*)
+                    mise bootstrap packages upgrade --yes snap:juju ;;
+            esac
+        )
+    else
+        mise bootstrap packages apply --yes
+    fi
 fi

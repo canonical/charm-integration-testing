@@ -29,22 +29,27 @@ The development configuration extends the shared tools.
 run in isolated environments. Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-`mise run setup` installs the selected tools, then the project's Poetry environment.
-`mise run setup -- --tools-only` skips the Poetry environment.
-The CI setup action installs both by default; tool-only jobs set
-`install-project: "false"`.
+`mise run setup` installs the locked tools, the project's Poetry environment and
+all declared system packages. `--no-bootstrap` skips system packages;
+`--tools-only` skips Poetry. Combine them with
+`mise run setup -- --tools-only --no-bootstrap` for just the locked tools.
 
-The action's `packages` input selects system packages once per job: charm tests
-install Juju, kubectl and OpenStack clients; cleanup installs both client packages.
-Cloud setup, reporting and upload actions consume this environment rather than
-installing their own tools.
-Lint and unit-test setup installs no snaps. Snaps require snapd and sudo, use `/snap/bin`, and
-are not revision-locked. Snapd can auto-refresh them; applying a changed channel
-can also refresh an existing daemon. Preview changes with
+The CI setup action delegates to this task. Lint, unit and security jobs set
+`bootstrap: "false"`; jobs without project dependencies also set
+`install-project: "false"`. Cloud setup, reporting and upload actions consume
+the prepared environment rather than installing tools.
+
+Installing system packages does not initialize substrates or register clouds.
+Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
+Snapd can auto-refresh them; applying a changed channel can also refresh an
+existing daemon. Preview changes with
 `mise bootstrap packages apply --dry-run` on an existing machine.
 
-The test workflow's `juju_channel` input overrides the shared default through
-snap's channel option; empty uses the mise declaration.
+`JUJU_CHANNEL=3/edge mise run setup` overrides the shared Juju channel using a
+temporary mise declaration, without editing the checkout. The action's
+`juju-channel` input and test workflow's `juju_channel` input use the same path;
+empty uses the shared default. Branch overrides also request a native mise upgrade
+because snap's installed-state listing hides branch names.
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
 
