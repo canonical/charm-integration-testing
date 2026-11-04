@@ -1,6 +1,17 @@
 ---
 name: Set up mise
 description: Install the repository's mise-locked toolchain
+inputs:
+  install-project:
+    description: Install project Python dependencies after the tools
+    default: "true"
+  packages:
+    description: Space-separated bootstrap packages to apply (empty installs no system
+      packages)
+    default: ""
+  juju-channel:
+    description: Override the shared Juju snap channel when snap:juju is selected
+    default: ""
 runs:
   using: composite
   steps:
@@ -14,6 +25,36 @@ runs:
         version: ${{ steps.version.outputs.version }}
         install: false
         cache: false
-    - name: Install configured tools
+    - name: Set up tools and project
       shell: bash
-      run: mise run setup -- --tools-only
+      env:
+        INSTALL_PROJECT: ${{ inputs.install-project }}
+      run: |
+        case "$INSTALL_PROJECT" in
+          true) mise run setup ;;
+          false) mise run setup -- --tools-only ;;
+          *) echo "::error::install-project must be true or false"; exit 1 ;;
+        esac
+    - name: Apply selected system packages
+      if: ${{ inputs.packages != '' }}
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        JUJU_CHANNEL: ${{ inputs.juju-channel }}
+      run: |-
+        read -r -a packages <<< "$PACKAGES"
+        selected=()
+        for package in "${packages[@]}"; do
+          if [[ "$package" == "snap:juju" && -n "$JUJU_CHANNEL" ]]; then
+            if snap list juju >/dev/null 2>&1; then
+              sudo snap refresh juju --channel="$JUJU_CHANNEL"
+            else
+              sudo snap install juju --channel="$JUJU_CHANNEL"
+            fi
+          else
+            selected+=("$package")
+          fi
+        done
+        if (( ${#selected[@]} )); then
+          mise bootstrap packages apply --yes "${selected[@]}"
+        fi

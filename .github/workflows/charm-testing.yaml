@@ -144,6 +144,9 @@ jobs:
           fi
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
+        with:
+          packages: snap:juju snap:kubectl snap:openstackclients
+          juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
@@ -248,29 +251,6 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: job_start
           detail: Charm integration test job started.
-      - name: Install Juju
-        shell: bash
-        env:
-          JUJU_CHANNEL: ${{ inputs.juju_channel }}
-        run: |
-          if [[ -z "$JUJU_CHANNEL" ]]; then
-            mise bootstrap packages apply --yes snap:juju
-          else
-            if [[ ! "$JUJU_CHANNEL" =~ ^[a-zA-Z0-9._][a-zA-Z0-9._-]*(/(stable|candidate|beta|edge)(/[a-zA-Z0-9._][a-zA-Z0-9._-]*)?)?$ ]]; then
-              echo "::error::Invalid Juju channel: $JUJU_CHANNEL"
-              exit 1
-            fi
-            config_dir=$(mktemp -d)
-            trap 'rm -f "$config_dir/mise.toml"; rmdir "$config_dir"' EXIT
-            printf '[bootstrap.packages]\n"snap:juju" = { channel = "%s" }\n' \
-              "$JUJU_CHANNEL" > "$config_dir/mise.toml"
-            mise trust "$config_dir/mise.toml"
-            mise -C "$config_dir" bootstrap packages apply --yes snap:juju
-          fi
-          snap list juju
-      - name: Install kubectl
-        shell: bash
-        run: mise bootstrap packages apply --yes snap:kubectl
       - name: Ensure Juju home directory exists
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
@@ -351,11 +331,6 @@ jobs:
       - name: Debug Setup
         if: ${{ inputs.debug_sleep_after == 'setup' && !cancelled() && steps.pick.outputs.debug-mode == 'tmate' }}
         uses: canonical/action-tmate@main  # zizmor: ignore[unpinned-uses] no releases in the repo
-      - name: Install project Python dependencies
-        shell: bash
-        env:
-          HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-        run: mise exec -- poetry install
       - name: Post 'test_start' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -412,7 +387,7 @@ jobs:
           if [[ "${same_controller}" == "true" ]]; then
             SAME_CONTROLLER_ARG=(--same-controller)
           fi
-          bash scripts/run-tests.sh \
+          ./scripts/run-tests.sh \
             --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \
@@ -485,7 +460,7 @@ jobs:
           target_arch: ${{ steps.target_env_info.outputs.arch }}
         run: |
           echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-          bash scripts/run-tests.sh \
+          ./scripts/run-tests.sh \
             --target-cloud "${target_cloud}" \
             --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
             \

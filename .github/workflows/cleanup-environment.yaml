@@ -81,6 +81,9 @@ jobs:
           persist-credentials: false
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
+        with:
+          install-project: "false"
+          packages: snap:kubectl snap:openstackclients
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
@@ -136,10 +139,6 @@ jobs:
       # | . \| |__| | |_) | |____| | \ \| |\  | |____   | |  | |____ ____) |
       # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
       #
-      - name: Install kubectl
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: mise bootstrap packages apply --yes snap:kubectl
       - name: Remove orphaned rawfile PV directories from nodes
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
@@ -403,10 +402,6 @@ jobs:
       # | |__| | |    | |____| |\  |____) |  | |/ ____ \ |____| . \ 
       #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
       #
-      - name: Install openstack client
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: mise bootstrap packages apply --yes snap:openstackclients
       - name: Find and delete servers older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash

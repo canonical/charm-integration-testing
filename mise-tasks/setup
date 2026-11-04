@@ -11,8 +11,6 @@ if [[ "${1:-}" == "--tools-only" ]]; then
     shift
 fi
 
-mise install --locked uv
-mise install --locked pipx
 mise install --locked
 
 if [[ "$tools_only" == false ]]; then

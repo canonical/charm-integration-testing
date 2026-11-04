@@ -55,7 +55,6 @@ runs:
         JOB_UUID: ${{ inputs.job_uuid }}
         LOG_PATH: ${{ inputs.log_path }}
       run: |
-        mise bootstrap packages apply --yes snap:openstackclients
         mkdir -p ${JOB_UUID}
         cp -r ${LOG_PATH}/* ${JOB_UUID}
     - name: Create index.html

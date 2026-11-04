@@ -21,6 +21,8 @@ jobs:
           fetch-depth: 0
       - name: Set up mise
         uses: ./.github/actions/setup-mise
+        with:
+          install-project: "false"
       - name: Scan git history for secrets
         env:
           GITLEAKS_LOG_OPTS: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha
@@ -39,8 +41,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-      - name: Install dependencies
-        run: mise exec -- poetry install
       - name: Run linter
         run: mise run lint
   charm-integration-testing-unit-tests:
@@ -52,8 +52,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-      - name: Install dependencies
-        run: mise exec -- poetry install
       - name: Run Charm Integration Testing Unit Tests
         run: mise run test:charm-integration-testing
   charm-testing-integration-tests:
@@ -72,8 +70,6 @@ jobs:
           persist-credentials: false
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-      - name: Install dependencies
-        run: mise exec -- poetry install
       - name: Run Validators Unit Tests
         run: mise run test:validators
   bundle-builder-x-tests:
@@ -86,8 +82,6 @@ jobs:
           fetch-depth: 0
       - name: Set up mise
         uses: ./.github/actions/setup-mise
-      - name: Install dependencies
-        run: mise exec -- poetry install
       - name: Run Bundle Builder X Tests
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}

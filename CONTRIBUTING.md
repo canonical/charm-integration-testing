@@ -30,17 +30,21 @@ run in isolated environments. Mypy stays with Poetry because it uses the project
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
 `mise run setup` installs the selected tools, then the project's Poetry environment.
-`mise run setup -- --tools-only` skips the Poetry environment; the CI setup action
-uses this mode so tools are available before cloud setup. Jobs that need project
-Python code subsequently run `mise exec -- poetry install`.
+`mise run setup -- --tools-only` skips the Poetry environment.
+The CI setup action installs both by default; tool-only jobs set
+`install-project: "false"`.
 
-Workflows apply only the snaps they need; lint and unit-test
-setup does not install them. Snaps require snapd and sudo, use `/snap/bin`, and
+The action's `packages` input selects system packages once per job: charm tests
+install Juju, kubectl and OpenStack clients; cleanup installs both client packages.
+Cloud setup, reporting and upload actions consume this environment rather than
+installing their own tools.
+Lint and unit-test setup installs no snaps. Snaps require snapd and sudo, use `/snap/bin`, and
 are not revision-locked. Snapd can auto-refresh them; applying a changed channel
 can also refresh an existing daemon. Preview changes with
 `mise bootstrap packages apply --dry-run` on an existing machine.
 
-The test workflow's `juju_channel` input overrides the shared default.
+The test workflow's `juju_channel` input overrides the shared default through
+snap's channel option; empty uses the mise declaration.
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
 
