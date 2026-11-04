@@ -1,7 +1,8 @@
 ---
+# Unsupported pending a safe Istio deployment and testing approach.
+# https://github.com/canonical/charm-integration-testing/issues/1219
 listed: true
 overrides:
-  # Per-model Istio installations can conflict on shared clusters.
   # provide-cmr-mesh only exists from track 2 onwards.
   - criteria:
       - any_of:

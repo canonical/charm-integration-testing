@@ -1,9 +1,10 @@
 ---
+# Unsupported pending a safe Istio deployment and testing approach.
+# https://github.com/canonical/charm-integration-testing/issues/1219
 # Source: https://github.com/canonical/service-mesh/tree/main/charms/istio-ingress-k8s
 listed: true
 platforms: [kubernetes]
 overrides:
-  # Per-model Istio installations can conflict on shared clusters.
   - criteria:
       - any_of:
           - track: '1.29'
