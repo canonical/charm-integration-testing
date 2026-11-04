@@ -58,16 +58,16 @@ Declining leaves the corresponding tools unauthenticated.
 
 ## Recommended MCP servers
 
-Create `development-sandbox/mcp.json` (gitignored) using this format:
+Copy the optional [sample](mcp.json.sample), replace the credential placeholders,
+and remove any servers you do not need:
 
-```json
-{
-  "mcpServers": {}
-}
+```bash
+cp development-sandbox/mcp.json.sample development-sandbox/mcp.json
 ```
 
-Add the entries below inside `mcpServers`, replacing `***` with your credentials.
-Do not commit credentials. Set this in `development-sandbox/.env`:
+The sample uses `{"mcpServers": {...}}`; add separately named entries for other
+services or environments, such as Test Observer staging, with their own endpoint
+and token. Do not commit credentials. Set this in `development-sandbox/.env`:
 
 ```
 SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
@@ -75,6 +75,12 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 
 This applies to both interactive and autonomous `run` sessions.
 New sandboxes include Go and uvx; install them manually in older VMs.
+
+The root `.copilotignore` uses path-independent patterns for local credential
+files, but Copilot CLI support is unverified. It does not protect process
+environments or the sandbox's temporary MCP config outside the checkout.
+Assume an unrestricted agent can read and use any credentials available to its
+user, regardless of ignore files.
 
 ### GitHub
 
@@ -85,39 +91,8 @@ Built into Copilot CLI; no additional configuration needed.
 Create a [Jira API token](https://id.atlassian.com/manage-profile/security/api-tokens)
 and set `JIRA_USERNAME` to your Atlassian account email.
 
-```json
-{
-  "jira": {
-    "command": "uvx",
-    "args": ["mcp-atlassian"],
-    "env": {
-      "JIRA_URL": "https://warthogs.atlassian.net",
-      "JIRA_USERNAME": "***",
-      "JIRA_API_TOKEN": "***"
-    }
-  }
-}
-```
-
 ### Test Observer
 
 Ask SQA for a Test Observer API token. The launcher requires authenticated `gh`
 in the VM with read access to the private repository; the other prerequisites
 are installed by default.
-
-```json
-{
-  "Test Observer MCP (local, prod)": {
-    "type": "stdio",
-    "command": "bash",
-    "args": [
-      "-euc",
-      "dir=\"$HOME/.cache/test-observer-mcp\"; mkdir -p \"$(dirname \"$dir\")\"; if [ ! -d \"$dir/.git\" ]; then GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' clone https://github.com/canonical/test-observer-mcp.git \"$dir\" >&2; fi; cd \"$dir\"; exec go run ./cmd/server --transport stdio"
-    ],
-    "env": {
-      "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
-      "TEST_OBSERVER_API_KEY": "***"
-    }
-  }
-}
-```
