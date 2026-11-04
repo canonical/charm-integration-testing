@@ -27,11 +27,12 @@ def test_environment_aliases_share_cluster_s3_secrets() -> None:
     environments = yaml.safe_load(environments_path.read_text())["environments"]
 
     cluster_secrets = {
-        "ps6-sqa-prod_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_KUBERNETES",
-        "ps6-sqa-stg_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS6_SQA_STG_CHARM_QA_KUBERNETES",
-        "ps6-sqa-prod_charm_qa_openstack": "S3_STORAGE_CONFIG_PS6_SQA_PROD_CHARM_QA_OPENSTACK",
-        "ps7-sqa-prod_charm_qa_kubernetes": "S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_KUBERNETES",
-        "ps7-sqa-prod_charm_qa_openstack": "S3_STORAGE_CONFIG_PS7_SQA_PROD_CHARM_QA_OPENSTACK",
+        "ps6-sqa-prod_charm_qa_kubernetes": "S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES",
+        "ps6-sqa-stg_charm_qa_kubernetes": "S3_PS6_SQA_STG_CHARM_QA_KUBERNETES",
+        "ps6-sqa-prod_charm_qa_openstack": "S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK",
+        "ps7-sqa-prod_charm_qa_kubernetes": "S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES",
+        "ps7-sqa-prod_charm_qa_openstack": "S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK",
+        "ps7-sqa-prod_charm_qa_lxd": "S3_PS7_SQA_PROD_CHARM_QA_LXD",
     }
 
     for cluster, secret in cluster_secrets.items():
