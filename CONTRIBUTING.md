@@ -8,11 +8,10 @@ Testing.
 ## General recommendations
 
 Install mise as described in the [README](README.md#getting-started), then
-select the development tools:
+prepare a workstation:
 
 ```bash
-export MISE_ENV=development
-mise run setup
+mise run setup:workstation
 ```
 
 ### What goes where
@@ -21,6 +20,7 @@ mise run setup
 |---|---|
 | `mise.toml` | Shared locked tools and snap channels for Juju, kubectl, OpenStack clients, and LXD |
 | `mise.development.toml` | Additional development tools, including Ruff, Bandit, yamlfix, and workflow linters |
+| `mise.provisioning.toml` | Provisioning executables, including Helm, without development or agent extras |
 | `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
 
 The development configuration extends the shared tools.
@@ -29,15 +29,39 @@ The development configuration extends the shared tools.
 run in isolated environments. Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-`mise run setup` applies all declared system packages, then installs the locked
-tools and the project's Poetry environment. `--no-bootstrap` skips system packages;
-`--tools-only` skips Poetry. Combine them with
-`mise run setup -- --tools-only --no-bootstrap` for just the locked tools.
+### Setup profiles and first-use installation
 
-The CI setup action delegates to this task. Lint, unit and security jobs set
+| Command | Prepares |
+|---|---|
+| `mise run setup:workstation` | Project dependencies and on-demand development tools; system packages are supplied |
+| `mise run setup:ci` | Project dependencies, system packages and on-demand provisioning tools |
+| `mise run setup:sandbox` | Development, provisioning and agent tools plus system packages; requires sandbox adoption |
+
+Profiles share one setup implementation. `--no-bootstrap` skips system packages;
+`--tools-only` skips Poetry dependencies; `--eager` installs the selected profile's
+optional tools immediately. Plain `mise run setup` retains active-configuration setup.
+
+Python, uv, pipx and Poetry are installed during setup. Other executables declare
+`lazy = true` and their command names (`lazy_bins`) beside their pinned versions.
+Mise creates launchers that install the locked tool on first use, including its
+declared runtime dependencies. Unused tools stay uninstalled. Strict locking
+prevents first-use installation from rewriting committed locks.
+
+`mise run lint` and `mise run format` select development tools themselves, so a
+separate shell export is unnecessary. Project-dependent test tasks and lint share
+`setup-project`, which ensures the Poetry environment before running. This does
+not bootstrap system packages. For direct development commands outside tasks,
+use `mise -E development exec -- <command>` or select `MISE_ENV=development` in
+your interactive shell.
+
+The CI setup action selects `profile: ci` by default and exports its environment
+for subsequent steps. It also accepts `profile: workstation` or `profile: sandbox`
+and `eager: "true"`. Lint, unit and security jobs set
 `bootstrap: "false"`; jobs without project dependencies also set
 `install-project: "false"`. Cloud setup, reporting and upload actions consume
-the prepared environment rather than installing tools.
+the prepared environment; their optional executables install on demand.
+Mise-action caching remains disabled; enabling it later should save after the job
+and distinguish profiles and eagerly/lazily prepared inventories.
 
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.

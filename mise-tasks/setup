@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
-#MISE description="Install locked tools, project dependencies and system packages"
+#MISE description="Prepare dependencies and on-demand tools for the selected environment"
 #MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 set -euo pipefail
 
 install_project="${SETUP_INSTALL_PROJECT-true}"
-bootstrap="${SETUP_BOOTSTRAP-true}"
-for setting in "$install_project" "$bootstrap"; do
+bootstrap_default=true
+case "${SETUP_PROFILE:-}" in
+    workstation) export MISE_ENV=development; bootstrap_default=false ;;
+    ci) export MISE_ENV=provisioning ;;
+    sandbox)
+        [[ -f "$(dirname "${BASH_SOURCE[0]}")/../mise.sandbox.toml" ]] \
+            || { echo "The sandbox profile requires the sandbox adoption changes" >&2; exit 1; }
+        export MISE_ENV=development,provisioning,sandbox
+        ;;
+    "") ;;
+    *) echo "Unknown setup profile: $SETUP_PROFILE" >&2; exit 1 ;;
+esac
+bootstrap="${SETUP_BOOTSTRAP:-$bootstrap_default}"
+eager="${SETUP_EAGER:-false}"
+for setting in "$install_project" "$bootstrap" "$eager"; do
     case "$setting" in
         true|false) ;;
-        *) echo "SETUP_INSTALL_PROJECT and SETUP_BOOTSTRAP must be true or false" >&2; exit 1 ;;
+        *) echo "Setup boolean settings must be true or false" >&2; exit 1 ;;
     esac
 done
 
@@ -18,6 +31,7 @@ while (( $# )); do
     case "$1" in
         --tools-only) install_project=false ;;
         --no-bootstrap) bootstrap=false ;;
+        --eager) eager=true ;;
         --) shift; break ;;
         *) break ;;
     esac
@@ -28,8 +42,14 @@ if [[ "$bootstrap" == true ]]; then
     mise run bootstrap-packages
 fi
 
-mise install --locked
-
 if [[ "$install_project" == true ]]; then
-    mise exec -- poetry install "$@"
+    SETUP_EAGER="$eager" mise run setup-project -- "$@"
+else
+    install_args=(--locked)
+    [[ "$eager" == false ]] || install_args+=(--include-lazy)
+    mise install "${install_args[@]}"
+fi
+
+if [[ -n "${GITHUB_ENV:-}" && -n "${SETUP_PROFILE:-}" ]]; then
+    printf 'MISE_ENV=%s\n' "$MISE_ENV" >> "$GITHUB_ENV"
 fi

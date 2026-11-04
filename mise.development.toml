@@ -1,10 +1,10 @@
 [tools]
-node = "24.22.0"
-"aqua:cli/cli" = "2.103.3"
-"npm:markdownlint-cli2" = "0.24.0"
-"aqua:gitleaks/gitleaks" = "8.30.1"
-"aqua:mpalmer/action-validator" = "0.6.0"
-"pipx:zizmor" = "1.5.1"
-"pipx:ruff" = "0.5.7"
-"pipx:bandit" = { version = "1.9.4", extras = "toml" }
-"pipx:yamlfix" = "1.19.1"
+node = { version = "24.22.0", lazy = true, lazy_bins = ["node", "npm", "npx"] }
+"aqua:cli/cli" = { version = "2.103.3", lazy = true, lazy_bins = ["gh"] }
+"npm:markdownlint-cli2" = { version = "0.24.0", lazy = true, lazy_bins = ["markdownlint-cli2"], depends = ["node"] }
+"aqua:gitleaks/gitleaks" = { version = "8.30.1", lazy = true, lazy_bins = ["gitleaks"] }
+"aqua:mpalmer/action-validator" = { version = "0.6.0", lazy = true, lazy_bins = ["action-validator"] }
+"pipx:zizmor" = { version = "1.5.1", lazy = true, lazy_bins = ["zizmor"], depends = ["python", "uv", "pipx"] }
+"pipx:ruff" = { version = "0.5.7", lazy = true, lazy_bins = ["ruff"], depends = ["python", "uv", "pipx"] }
+"pipx:bandit" = { version = "1.9.4", extras = "toml", lazy = true, lazy_bins = ["bandit"], depends = ["python", "uv", "pipx"] }
+"pipx:yamlfix" = { version = "1.19.1", lazy = true, lazy_bins = ["yamlfix"], depends = ["python", "uv", "pipx"] }

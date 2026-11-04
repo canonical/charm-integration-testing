@@ -10,8 +10,6 @@ jobs:
   workflow_validation:
     name: Workflow validation
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: development
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -20,6 +18,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          profile: workstation
           install-project: "false"
           bootstrap: "false"
       - name: Lint Actions
@@ -31,8 +30,6 @@ jobs:
   workflow_vulnerability_scan:
     name: Workflow vulnerability scanning
     runs-on: ubuntu-latest
-    env:
-      MISE_ENV: development
     steps:
       - name: Checkout repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -41,6 +38,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          profile: workstation
           install-project: "false"
           bootstrap: "false"
       - name: Scan all workflows

@@ -2,12 +2,19 @@
 name: Set up mise
 description: Install the repository's tools, project dependencies and system packages
 inputs:
+  profile:
+    description: Tooling profile (workstation, ci or sandbox); sandbox also works
+      on a GitHub runner
+    default: ci
   install-project:
     description: Install project Python dependencies after the tools
     default: "true"
   bootstrap:
-    description: Apply all declared system packages
-    default: "true"
+    description: Apply declared system packages; empty uses the profile default
+    default: ""
+  eager:
+    description: Install optional tools now rather than on first use
+    default: "false"
   juju-channel:
     description: Override the Juju client channel for this setup only; empty uses
       the saved selection or repository default
@@ -28,6 +35,8 @@ runs:
     - name: Set up environment
       shell: bash
       env:
+        SETUP_PROFILE: ${{ inputs.profile }}
+        SETUP_EAGER: ${{ inputs.eager }}
         SETUP_INSTALL_PROJECT: ${{ inputs.install-project }}
         SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}

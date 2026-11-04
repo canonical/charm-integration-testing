@@ -4,6 +4,7 @@ excludes = ["scripts/*.py"]
 
 [settings]
 lockfile = true
+locked = true
 task.run_auto_install = false
 
 [bootstrap.packages]
@@ -18,8 +19,37 @@ python = "3.12.12"
 uv = "0.13.6"
 pipx = "1.18.8"
 "pipx:poetry" = "2.3.0"
-"aqua:jqlang/jq" = "1.8.2"
-"aqua:mikefarah/yq" = "4.54.1"
-"aqua:trufflesecurity/trufflehog" = "3.56.0"
-"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
-"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12" }
+"aqua:jqlang/jq" = { version = "1.8.2", lazy = true, lazy_bins = ["jq"] }
+"aqua:mikefarah/yq" = { version = "4.54.1", lazy = true, lazy_bins = ["yq"] }
+"aqua:trufflesecurity/trufflehog" = { version = "3.56.0", lazy = true, lazy_bins = ["trufflehog"] }
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12", lazy = true, lazy_bins = ["juju-crashdump", "ssh-agent-setup"], depends = ["python", "uv"] }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12", lazy = true, lazy_bins = ["juju-k8s-crashdump"], depends = ["python", "uv"] }
+
+[tasks."setup:workstation"]
+description = "Prepare project dependencies and on-demand development tools, without system packages"
+file = "mise-tasks/setup"
+env = { SETUP_PROFILE = "workstation" }
+raw_args = true
+
+[tasks."setup:ci"]
+description = "Prepare project dependencies, system packages and on-demand provisioning tools"
+file = "mise-tasks/setup"
+env = { SETUP_PROFILE = "ci" }
+raw_args = true
+
+[tasks."setup:sandbox"]
+description = "Prepare the sandbox's project dependencies, system packages and on-demand tools"
+file = "mise-tasks/setup"
+env = { SETUP_PROFILE = "sandbox" }
+raw_args = true
+
+[tasks.lint]
+description = "Run repository linters with on-demand development tools"
+depends = ["setup-project"]
+run = "mise -E development exec -- scripts/lint.sh"
+raw_args = true
+
+[tasks.format]
+description = "Format repository files with on-demand development tools"
+run = "mise -E development exec -- scripts/format.sh"
+raw_args = true
