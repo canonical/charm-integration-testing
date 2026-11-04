@@ -43,7 +43,7 @@ Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Snapd can auto-refresh them; applying a changed channel can also refresh an
 existing daemon. Preview changes with
-`mise bootstrap packages apply --dry-run` on an existing machine.
+`mise run bootstrap-packages -- --dry-run` on an existing machine.
 
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.

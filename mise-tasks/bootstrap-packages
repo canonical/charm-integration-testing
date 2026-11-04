@@ -5,6 +5,15 @@
 # See LICENSE file for licensing details.
 set -euo pipefail
 
+packages=()
+dry_run=()
+for argument in "$@"; do
+    case "$argument" in
+        --dry-run|-n) dry_run=(--dry-run) ;;
+        *) packages+=("$argument") ;;
+    esac
+done
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
 case "$saved_config" in
@@ -30,9 +39,9 @@ if [[ -n "$channel" || -f "$saved_config" ]]; then
     mise config set --file "$override_dir/mise.toml" --type string \
         'bootstrap.packages."snap:juju".channel' "$channel"
     export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
-    if (( $# == 0 )) || [[ " $* " == *" snap:juju "* ]]; then
-        mise bootstrap packages upgrade --yes snap:juju
+    if (( ${#packages[@]} == 0 )) || [[ " ${packages[*]} " == *" snap:juju "* ]]; then
+        mise bootstrap packages upgrade --yes "${dry_run[@]}" snap:juju
     fi
 fi
 
-mise bootstrap packages apply --yes "$@"
+mise bootstrap packages apply --yes "${dry_run[@]}" "${packages[@]}"
