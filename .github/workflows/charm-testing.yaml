@@ -48,7 +48,8 @@ on:
         description: Test Observer execution ID to post results from this test to.
         required: false
       juju_channel:
-        description: Juju channel override. Empty uses the channel in mise.toml.
+        description: Juju client channel for this run (for example 4/stable); empty
+          uses the default.
         required: false
         default: ''
       neighbor:

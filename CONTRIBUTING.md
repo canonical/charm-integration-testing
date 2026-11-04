@@ -29,8 +29,8 @@ The development configuration extends the shared tools.
 run in isolated environments. Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-`mise run setup` installs the locked tools, the project's Poetry environment and
-all declared system packages. `--no-bootstrap` skips system packages;
+`mise run setup` applies all declared system packages, then installs the locked
+tools and the project's Poetry environment. `--no-bootstrap` skips system packages;
 `--tools-only` skips Poetry. Combine them with
 `mise run setup -- --tools-only --no-bootstrap` for just the locked tools.
 
@@ -45,13 +45,38 @@ Snapd can auto-refresh them; applying a changed channel can also refresh an
 existing daemon. Preview changes with
 `mise bootstrap packages apply --dry-run` on an existing machine.
 
-`JUJU_CHANNEL=3/edge mise run setup` overrides the shared Juju channel using a
-temporary mise declaration, without editing the checkout. The action's
-`juju-channel` input and test workflow's `juju_channel` input use the same path;
-empty uses the shared default. Explicit overrides refresh installed Juju before
-applying packages, including branch changes that snap's installed-state listing hides.
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
+
+### Selecting the Juju client
+
+For a persistent selection on this machine:
+
+```bash
+mise run juju:channel -- 4/stable
+mise run juju:channel                  # Show the saved channel or repository default
+juju version                          # Check the actual installed client
+mise run juju:channel -- --reset       # Remove the selection and apply the default
+```
+
+The task saves only the channel in
+`${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml`, outside
+the checkout. In the sandbox this is VM-local, survives new shells and VM restarts,
+and is shared by checkouts in the same VM. A failed channel install does not replace
+the previous selection. Reset removes the selection before applying the default;
+if installation fails, fix the reported error and retry.
+
+`mise run bootstrap-packages` owns channel selection for setup and substrate tasks.
+Precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
+`JUJU_CHANNEL=4/edge mise run setup` overrides one invocation without changing the
+saved selection. The setup action's `juju-channel` input and test workflow's
+`juju_channel` input use this temporary path; an empty input uses the saved selection
+or repository default.
+
+Selected channels refresh installed Juju before applying packages, including branch
+changes hidden by snap's installed-state listing. Channels are not revision pins.
+This changes only the client, not controllers or model agents; use fresh test
+controllers when experimenting with another major version.
 
 ## Linting and Formatting
 

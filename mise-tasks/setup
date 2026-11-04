@@ -24,34 +24,12 @@ while (( $# )); do
     shift
 done
 
-if [[ "$bootstrap" == true && -n "${JUJU_CHANNEL:-}" ]]; then
-    component='[A-Za-z0-9._][A-Za-z0-9._-]*'
-    if [[ ! "$JUJU_CHANNEL" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
-        echo "Invalid JUJU_CHANNEL: expected a track or [track/]risk[/branch]" >&2
-        exit 1
-    fi
+if [[ "$bootstrap" == true ]]; then
+    mise run bootstrap-packages
 fi
 
 mise install --locked
 
 if [[ "$install_project" == true ]]; then
     mise exec -- poetry install "$@"
-fi
-
-if [[ "$bootstrap" == true ]]; then
-    if [[ -n "${JUJU_CHANNEL:-}" ]]; then
-        (
-            override_dir="$(mktemp -d)"
-            trap 'rm -f "$override_dir/mise.toml"; rmdir "$override_dir"' EXIT
-            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$override_dir"
-            touch "$override_dir/mise.toml"
-            mise config set --file "$override_dir/mise.toml" --type string \
-                'bootstrap.packages."snap:juju".channel' "$JUJU_CHANNEL"
-            export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
-            mise bootstrap packages upgrade --yes snap:juju
-            mise bootstrap packages apply --yes
-        )
-    else
-        mise bootstrap packages apply --yes
-    fi
 fi

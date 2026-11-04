@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#MISE description="Show, select or reset this machine's Juju client channel"
+#MISE alias="juju:channel"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
+case "$saved_config" in
+    "$project_root"/*) echo "Juju selection must be stored outside the checkout" >&2; exit 1 ;;
+esac
+export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$saved_config"
+
+if (( $# == 0 )); then
+    if [[ -f "$saved_config" ]]; then
+        printf 'Saved Juju channel: '
+        mise config get --file "$saved_config" 'bootstrap.packages."snap:juju".channel'
+        printf 'Configuration: %s\n' "$saved_config"
+    else
+        printf 'Repository Juju channel: '
+        mise config get --file "$project_root/mise.toml" 'bootstrap.packages."snap:juju".channel'
+    fi
+elif (( $# == 1 )) && [[ "$1" == "--reset" ]]; then
+    rm -f "$saved_config"
+    env -u JUJU_CHANNEL mise run bootstrap-packages -- snap:juju
+elif (( $# == 1 )) && [[ -n "$1" && "$1" != -* ]]; then
+    JUJU_CHANNEL="$1" mise run bootstrap-packages -- snap:juju
+    mkdir -p "$(dirname "$saved_config")"
+    pending_config="$(mktemp "$(dirname "$saved_config")/juju.XXXXXX.toml")"
+    trap 'rm -f "$pending_config"' EXIT
+    export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$pending_config"
+    mise config set --file "$pending_config" --type string \
+        'bootstrap.packages."snap:juju".channel' "$1"
+    mv "$pending_config" "$saved_config"
+    printf 'Saved Juju channel %s in %s\n' "$1" "$saved_config"
+else
+    echo "Usage: mise run juju:channel -- [CHANNEL|--reset]" >&2
+    exit 1
+fi

@@ -9,7 +9,8 @@ inputs:
     description: Apply all declared system packages
     default: "true"
   juju-channel:
-    description: Override the shared Juju snap channel during bootstrap
+    description: Override the Juju client channel for this setup only; empty uses
+      the saved selection or repository default
     default: ""
 runs:
   using: composite
