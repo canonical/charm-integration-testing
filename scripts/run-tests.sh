@@ -2,7 +2,7 @@
 #MISE description="Run charm integration suite tests"
 #MISE raw_args=true
 #MISE alias="test:suite"
-#MISE depends=["setup-project"]
+#MISE depends=["ensure-project"]
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

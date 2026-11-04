@@ -2,7 +2,7 @@
 #MISE description="Run validator unit tests"
 #MISE raw_args=true
 #MISE alias="test:validators"
-#MISE depends=["setup-project"]
+#MISE depends=["ensure-project"]
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 

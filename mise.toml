@@ -1,6 +1,6 @@
 [task_config]
 includes = ["scripts", "mise-tasks"]
-excludes = ["scripts/*.py"]
+excludes = ["scripts/*.py", "scripts/lint.sh", "scripts/format.sh"]
 
 [settings]
 lockfile = true
@@ -22,8 +22,22 @@ pipx = "1.18.8"
 "aqua:jqlang/jq" = { version = "1.8.2", lazy = true, lazy_bins = ["jq"] }
 "aqua:mikefarah/yq" = { version = "4.54.1", lazy = true, lazy_bins = ["yq"] }
 "aqua:trufflesecurity/trufflehog" = { version = "3.56.0", lazy = true, lazy_bins = ["trufflehog"] }
-"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12", lazy = true, lazy_bins = ["juju-crashdump", "ssh-agent-setup"], depends = ["python", "uv"] }
-"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "22ef04caaeeb94ad6ed49f8392b6bada65184569", uvx = false, python = "3.12.12", lazy = true, lazy_bins = ["juju-k8s-crashdump"], depends = ["python", "uv"] }
+
+[tools."pypi:git+https://github.com/juju/juju-crashdump.git"]
+version = "bde242ccfdd91cb2372f26d41d62d7b230660c08"
+with = ["ssh-agent-setup==2.0.1"]
+python = "3.12.12"
+lazy = true
+lazy_bins = ["juju-crashdump", "ssh-agent-setup"]
+depends = ["python", "uv"]
+
+[tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]
+version = "22ef04caaeeb94ad6ed49f8392b6bada65184569"
+uvx = false
+python = "3.12.12"
+lazy = true
+lazy_bins = ["juju-k8s-crashdump"]
+depends = ["python", "uv"]
 
 [tasks."setup:workstation"]
 description = "Prepare project dependencies and on-demand development tools, without system packages"
@@ -45,9 +59,14 @@ raw_args = true
 
 [tasks.lint]
 description = "Run repository linters with on-demand development tools"
-depends = ["setup-project"]
+depends = ["ensure-project"]
 run = "mise -E development exec -- scripts/lint.sh"
 raw_args = true
+
+[tasks.ensure-project]
+description = "Prepare project dependencies only when their inputs or environment changed"
+file = "mise-tasks/setup-project"
+env = { SETUP_ENSURE_PROJECT = "true" }
 
 [tasks.format]
 description = "Format repository files with on-demand development tools"

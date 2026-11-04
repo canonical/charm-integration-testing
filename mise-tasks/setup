@@ -49,7 +49,3 @@ else
     [[ "$eager" == false ]] || install_args+=(--include-lazy)
     mise install "${install_args[@]}"
 fi
-
-if [[ -n "${GITHUB_ENV:-}" && -n "${SETUP_PROFILE:-}" ]]; then
-    printf 'MISE_ENV=%s\n' "$MISE_ENV" >> "$GITHUB_ENV"
-fi

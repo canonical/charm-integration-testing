@@ -49,8 +49,12 @@ prevents first-use installation from rewriting committed locks.
 
 `mise run lint` and `mise run format` select development tools themselves, so a
 separate shell export is unnecessary. Project-dependent test tasks and lint share
-`setup-project`, which ensures the Poetry environment before running. This does
-not bootstrap system packages. For direct development commands outside tasks,
+`ensure-project`, which skips Poetry installation when dependency manifests and
+tool identities match the last successful default install in the actual virtual
+environment. Deleting the environment or changing a manifest triggers setup.
+Explicit setup always runs Poetry; use it to repair manually altered packages.
+Installs with extra Poetry arguments invalidate the default-install marker.
+This does not bootstrap system packages. For direct development commands outside tasks,
 use `mise -E development exec -- <command>` or select `MISE_ENV=development` in
 your interactive shell.
 
@@ -111,9 +115,10 @@ CI runs the same lint checks.
 
 ### Mise tasks
 
-Existing shell scripts are discovered directly from `scripts/`
-using their `#MISE` headers. `mise-tasks/` contains
-only additional commands without an existing shell entry point.
+File tasks own their `#MISE` metadata. Tasks that select an environment or reuse
+an implementation are defined only in `mise.toml`; their scripts are excluded
+from file-task discovery and have no duplicate metadata. `mise-tasks/` contains
+shared setup and package operations.
 
 | Task | Purpose |
 |---|---|

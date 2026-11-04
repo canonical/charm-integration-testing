@@ -1,6 +1,4 @@
 #!/bin/bash
-#MISE description="Run repository linters"
-#MISE raw_args=true
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

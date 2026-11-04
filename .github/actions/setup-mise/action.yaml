@@ -40,4 +40,11 @@ runs:
         SETUP_INSTALL_PROJECT: ${{ inputs.install-project }}
         SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
-      run: mise run setup
+      run: |-
+        mise run setup
+        case "$SETUP_PROFILE" in
+          workstation) echo 'MISE_ENV=development' >> "$GITHUB_ENV" ;;
+          ci) echo 'MISE_ENV=provisioning' >> "$GITHUB_ENV" ;;
+          sandbox) echo 'MISE_ENV=development,provisioning,sandbox' >> "$GITHUB_ENV" ;;
+          *) echo "Unknown setup profile: $SETUP_PROFILE" >&2; exit 1 ;;
+        esac
