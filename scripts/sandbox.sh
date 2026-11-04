@@ -61,9 +61,9 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
-VM_CPUS="${SANDBOX_CPUS:-4}"
-VM_MEMORY="${SANDBOX_MEMORY:-8G}"
-VM_DISK="${SANDBOX_DISK:-40G}"
+VM_CPUS="${SANDBOX_CPUS:-8}"
+VM_MEMORY="${SANDBOX_MEMORY:-16G}"
+VM_DISK="${SANDBOX_DISK:-80G}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -252,9 +252,9 @@ Usage:
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
   SANDBOX_MOUNT          VM-side mount path (default: /project)
-  SANDBOX_CPUS           vCPU count for new VMs (default: 4)
-  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
-  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
+  SANDBOX_CPUS           vCPU count for new VMs (default: 8)
+  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 16G)
+  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 80G)
   GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
                          when provisioning the VM (default: gh auth token)
   SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
@@ -273,9 +273,9 @@ Inside an interactive session use skill slash commands:
   /setup-lxd             Set up LXD substrate
 
 VM resource flags (only applied when the VM does not yet exist):
-  --cpus N               vCPU count (default: SANDBOX_CPUS or 4)
-  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 8G)
-  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 40G)
+  --cpus N               vCPU count (default: SANDBOX_CPUS or 8)
+  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 16G)
+  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 80G)
 EOF
 }
 
