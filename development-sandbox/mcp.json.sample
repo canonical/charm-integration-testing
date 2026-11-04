@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "Jira (SQA)": {
+      "command": "uvx",
+      "args": ["mcp-atlassian"],
+      "env": {
+        "JIRA_URL": "https://warthogs.atlassian.net",
+        "JIRA_USERNAME": "YOUR_ATLASSIAN_EMAIL",
+        "JIRA_API_TOKEN": "YOUR_JIRA_API_TOKEN"
+      }
+    },
+    "Test Observer MCP (local, prod)": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-euc",
+        "dir=\"$HOME/.cache/test-observer-mcp\"; mkdir -p \"$(dirname \"$dir\")\"; if [ ! -d \"$dir/.git\" ]; then GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' clone https://github.com/canonical/test-observer-mcp.git \"$dir\" >&2; fi; cd \"$dir\"; exec go run ./cmd/server --transport stdio"
+      ],
+      "env": {
+        "TEST_OBSERVER_API_URL": "https://test-observer-api.canonical.com",
+        "TEST_OBSERVER_API_KEY": "YOUR_TEST_OBSERVER_PROD_API_TOKEN"
+      }
+    }
+  }
+}
