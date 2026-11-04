@@ -49,11 +49,8 @@ prevents first-use installation from rewriting committed locks.
 
 `mise run lint` and `mise run format` select development tools themselves, so a
 separate shell export is unnecessary. Project-dependent test tasks and lint share
-`ensure-project`, which skips Poetry installation when dependency manifests and
-tool identities match the last successful default install in the actual virtual
-environment. Deleting the environment or changing a manifest triggers setup.
-Explicit setup always runs Poetry; use it to repair manually altered packages.
-Installs with extra Poetry arguments invalidate the default-install marker.
+`setup-project`, which runs Poetry installation before the task. Poetry owns
+dependency reconciliation; there is no additional readiness cache.
 This does not bootstrap system packages. For direct development commands outside tasks,
 use `mise -E development exec -- <command>` or select `MISE_ENV=development` in
 your interactive shell.

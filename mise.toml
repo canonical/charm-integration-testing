@@ -59,14 +59,9 @@ raw_args = true
 
 [tasks.lint]
 description = "Run repository linters with on-demand development tools"
-depends = ["ensure-project"]
+depends = ["setup-project"]
 run = "mise -E development exec -- scripts/lint.sh"
 raw_args = true
-
-[tasks.ensure-project]
-description = "Prepare project dependencies only when their inputs or environment changed"
-file = "mise-tasks/setup-project"
-env = { SETUP_ENSURE_PROJECT = "true" }
 
 [tasks.format]
 description = "Format repository files with on-demand development tools"

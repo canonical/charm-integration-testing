@@ -11,37 +11,5 @@ case "${SETUP_EAGER:-false}" in
     false) ;;
     *) echo "SETUP_EAGER must be true or false" >&2; exit 1 ;;
 esac
-[[ "${SETUP_ENSURE_PROJECT:-false}" != true ]] || install_args+=(--quiet)
 mise install "${install_args[@]}"
-
-project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$project_root"
-shopt -s nullglob
-fingerprint="$(
-    {
-        sha256sum pyproject.toml poetry.lock charm_integration_testing/pyproject.toml \
-            bundle_builder_x/pyproject.toml validators/*/pyproject.toml \
-            mise-tasks/setup-project
-        mise which python
-        mise which poetry
-    } | sha256sum
-)"
-
-if environment="$(mise exec -- poetry env info --path)"; then
-    if [[ "${SETUP_ENSURE_PROJECT:-false}" == true ]] \
-        && [[ -x "$environment/bin/python" && -f "$environment/.cit-project-dependencies" ]] \
-        && [[ "$(<"$environment/.cit-project-dependencies")" == "$fingerprint" ]]; then
-        exit 0
-    fi
-    rm -f "$environment/.cit-project-dependencies"
-fi
-
 mise exec -- poetry install "$@"
-
-# Only the default install can satisfy a later task's default dependency check.
-environment="$(mise exec -- poetry env info --path)"
-if (( $# == 0 )); then
-    printf '%s\n' "$fingerprint" > "$environment/.cit-project-dependencies"
-else
-    rm -f "$environment/.cit-project-dependencies"
-fi
