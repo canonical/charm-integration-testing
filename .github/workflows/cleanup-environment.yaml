@@ -660,30 +660,16 @@ jobs:
             [[ "$name" == S3_* ]] && config["$name"]="$value"
           done <<< "${!S3_STORAGE_SECRET_NAME}"
           endpoint="${config[S3_ENDPOINT]:?Missing S3_ENDPOINT}"
-          while [[ "$endpoint" == */ ]]; do
-            endpoint="${endpoint%/}"
-          done
           namespace="${config[S3_BUCKET_NAMESPACE]:-local}"
-          region="${config[S3_REGION]:-us-east-1}"
-          access_key="${config[S3_ACCESS_KEY]:?Missing S3_ACCESS_KEY}"
-          secret_key="${config[S3_SECRET_KEY]:?Missing S3_SECRET_KEY}"
           namespace_hash="$(printf '%s' "$namespace" | sha256sum | cut -c1-8)"
           bucket_prefix="charmqa-s3-${namespace_hash}-"
-          # Existing shared-key bucket tags encode the key in both identity slots.
-          owner_tag="$(jq -acn \
-            --arg endpoint "$endpoint" \
-            --arg namespace "$namespace" \
-            --arg region "$region" \
-            --arg access_key "$access_key" \
-            '["static", $endpoint, $namespace, $region, $access_key, $access_key]' \
-            | tr -d '\n' | sha256sum | cut -c1-32)"
           aws_config="${RUNNER_TEMP}/aws-config"
           printf '[default]\ns3 =\n    addressing_style = path\n' > "$aws_config"
           chmod 600 "$aws_config"
           export AWS_CONFIG_FILE="$aws_config"
-          export AWS_ACCESS_KEY_ID="$access_key"
-          export AWS_SECRET_ACCESS_KEY="$secret_key"
-          export AWS_DEFAULT_REGION="$region"
+          export AWS_ACCESS_KEY_ID="${config[S3_ACCESS_KEY]:?Missing S3_ACCESS_KEY}"
+          export AWS_SECRET_ACCESS_KEY="${config[S3_SECRET_KEY]:?Missing S3_SECRET_KEY}"
+          export AWS_DEFAULT_REGION="${config[S3_REGION]:-us-east-1}"
           export AWS_EC2_METADATA_DISABLED=true
           aws="${RUNNER_TEMP}/s3-cleanup/bin/aws"
           remove_bucket() {
@@ -719,18 +705,6 @@ jobs:
             created="${BASH_REMATCH[1]}"
             if ! awk -v now="$now" -v created="$created" -v age="$AGE_THRESHOLD" \
               'BEGIN { exit !(now - created > age * 60) }'; then
-              continue
-            fi
-            if ! tags="$("$aws" s3api get-bucket-tagging --bucket "$bucket" --endpoint-url "$endpoint" --output json)"; then
-              echo "::warning::Could not read S3 ownership tag; retaining bucket $bucket"
-              continue
-            fi
-            owner="$(jq -r '.TagSet[]? | select(.Key == "charmqa-storage-owner") | .Value' <<< "$tags")"
-            if [[ -z "$owner" ]]; then
-              echo "::warning::Missing S3 ownership tag; retaining bucket $bucket"
-              continue
-            fi
-            if [[ "$owner" != "$owner_tag" ]]; then
               continue
             fi
             if [[ "$DRY_RUN" == "true" ]]; then
