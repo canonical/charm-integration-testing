@@ -83,9 +83,9 @@ unit tests, lint or formatting, and the integration group before live tests.
 Poetry owns dependency reconciliation; there is no additional readiness cache.
 
 The CI setup action wraps the same task. Lint and unit-test jobs use
-`groups: development`; live tests use `groups: integration`; cleanup uses
-`groups: workflow`. Workflow/security checks request only their individual
-catalogue `tools`, without installing the project. Its `packages` input also
+`groups: development`; live tests use `groups: integration`. Cleanup requests
+only `aqua:jqlang/jq`; workflow/security checks likewise request their individual
+catalogue `tools`, without installing the project. The action's `packages` input
 supports explicit snap requests. Installed tools are available in later steps through
 mise's activation, without exporting a profile. The test workflow supplies
 `JUJU_CHANNEL` at job scope for cloud setup.
