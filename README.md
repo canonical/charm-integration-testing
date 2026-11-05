@@ -5,7 +5,12 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Prepare the development environment with Mise and uv:
+For local charm testing, use the [development sandbox](development-sandbox/README.md).
+It mounts your checkout and installs the tools inside a VM.
+
+To install directly on your machine, install
+[mise](https://mise.jdx.dev/getting-started.html), then prepare the development
+environment:
 
 ```bash
 mise run setup -- --group development
