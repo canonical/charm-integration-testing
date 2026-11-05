@@ -8,12 +8,11 @@ a Z3 constraint solver to produce minimal, valid bundles.
 Prerequisites
 -------------
 
-Complete the `repository setup
-<https://github.com/canonical/charm-integration-testing#getting-started>`_
-or use the development sandbox. Run the bundle-builder task from the repository
-root::
+The tool is installed as part of the monorepo Poetry environment::
 
-    mise run bundle:build-x -- --help
+    poetry install
+
+This makes the ``bundle-builder-x`` CLI available inside the Poetry shell.
 
 Writing a spec file
 -------------------
@@ -40,7 +39,7 @@ Running the CLI
 
 .. code-block:: bash
 
-   mise run bundle:build-x -- \
+   poetry run bundle-builder-x \
        --spec my-spec.yaml \
        --overrides static/charm-overrides \
        --output-bundles output/ \

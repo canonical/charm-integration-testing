@@ -67,18 +67,104 @@ Do not use the manual controller bootstrap steps when the test suite manages it.
 
 ---
 
-## Setup
+## What Gets Installed
+
+### Logging & Debugging Tools (Always Installed)
+
+Always install these regardless of platform, since log collection needs both tools:
+
+- **juju-crashdump** (snap)
+  - Collects logs from machine/LXD controllers
+  - Captures unit logs, charm output, and Juju internals
+
+- **juju-k8s-crashdump** (git+pip)
+  - Collects logs from Kubernetes controllers
+  - Captures pod logs, statefulset events, and K8s-specific state
+  - **Required for reproducing issue #693** (mixed-cloud CMR logging)
+
+- **kubectl** (snap)
+  - Inspect Kubernetes pods and events
+  - Used by juju-k8s-crashdump
+
+### Cloud Substrates (Optional based on `--platform`)
+
+**LXD** (when `--platform machine` or `--platform mixed`)
+
+- Juju cloud name: `localhost`
+- Platform: machine (LXD containers)
+- Use for: Traditional machine charms
+
+**Canonical Kubernetes** (when `--platform kubernetes` or `--platform mixed`)
+
+- Juju cloud name: `local-k8s`
+- Platform: Kubernetes (pod-based)
+- Use for: Kubernetes-native charms
+- Kubeconfig: `/home/ubuntu/k8s.yaml`
+
+---
+
+## Step-by-Step Setup
+
+### Option 1: Machine Charms Only (LXD)
 
 ```bash
-mise run setup -- --group integration
-/setup-lxd  # machine charms
-/setup-k8s  # Kubernetes charms
+# 1. Install logging tools
+sudo snap install juju-crashdump --classic
+sudo snap install kubectl --classic
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+
+# 2. Setup LXD only
+$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+
+# That's it! Test suite will bootstrap controller when you run tests with --current-state
 ```
 
-Run both substrate skills for mixed-cloud tests. They use the `local-lxd` and
-`local-k8s` Mise groups for declared tools and packages, then provision the
-substrates. The integration group installs test and logging tools; the test
-suite bootstraps controllers when needed.
+### Option 2: Kubernetes Charms Only
+
+```bash
+# 1. Install logging tools
+sudo snap install juju-crashdump --classic
+sudo snap install kubectl --classic
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+
+# 2. Setup K8s only
+$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+
+# That's it! Test suite will bootstrap controller when you run tests with --current-state
+```
+
+### Option 3: Mixed-Cloud CMR Tests (LXD + K8s)
+
+```bash
+# 1. Install logging tools
+sudo snap install juju-crashdump --classic
+sudo snap install kubectl --classic
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+
+# 2. Setup both substrates
+$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+
+# That's it! Test suite will bootstrap both controllers when you run tests with --current-state
+```
+
+### Installing Logging Tools Details
+
+All three tools should be installed regardless of which clouds you're using, since you might need both for log collection in mixed-cloud scenarios.
+
+```bash
+# juju-crashdump: For machine/LXD controllers
+sudo snap install juju-crashdump --classic
+
+# kubectl: For Kubernetes inspection and juju-k8s-crashdump support
+sudo snap install kubectl --classic
+
+# juju-k8s-crashdump: For Kubernetes controllers
+# Using specific commit hash from charm-testing.yaml workflow
+pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
+```
+
+**Note**: If installation fails, see Troubleshooting section below.
 
 ---
 
@@ -130,12 +216,10 @@ See the `run-charm-tests` skill for full test execution documentation.
 ### Check Logging Tools
 
 ```bash
-mise exec -- juju-crashdump --version
-mise exec -- juju-k8s-crashdump --help
+juju-crashdump --version
+juju-k8s-crashdump --help  # Should show help without errors
+kubectl version --client
 ```
-
-Check `kubectl version --client` only for Kubernetes or mixed-platform tests.
-The `local-k8s` setup group installs it; it is not required for LXD-only tests.
 
 ### Check Cloud Setup (after running tests)
 
@@ -155,11 +239,25 @@ juju controllers
 
 ### Problem: "LXD is already installed"
 
-This is fine. `/setup-lxd` is idempotent:
+This is fine! The setup scripts are idempotent:
 
 ```bash
-/setup-lxd
+$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
 # Output: LXD substrate ready (or already configured)
+```
+
+### Problem: "Cannot install juju-k8s-crashdump"
+
+The tool is in a private repository. If you encounter issues:
+
+```bash
+# Try with git+https instead of git+ssh
+git clone https://github.com/canonical/juju-k8s-crashdump.git
+cd juju-k8s-crashdump
+pip install .
+
+# Or use the commit hash from charm-testing.yaml
+pip install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
 ```
 
 ### Problem: "kubeconfig not found"
@@ -168,7 +266,7 @@ If `/home/ubuntu/k8s.yaml` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-/setup-k8s
+$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
@@ -179,9 +277,10 @@ ls -la /home/ubuntu/k8s.yaml
 If snap installation failed:
 
 ```bash
-# Reconcile the test tool environment
-mise run setup -- --group integration
-mise exec -- juju-crashdump --version
+# Try reinstalling
+sudo snap remove juju-crashdump
+sudo snap install juju-crashdump --classic
+juju-crashdump --version
 ```
 
 ### Problem: "Controller bootstrap timeout"
@@ -240,8 +339,8 @@ See the `run-charm-tests` skill for full documentation.
 ## Key References
 
 - **charm-testing.yaml**: Official workflow that shows the canonical setup process
-- **setup-lxd**: `/setup-lxd` skill
-- **setup-k8s**: `/setup-k8s` skill
+- **setup-lxd.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh`
+- **setup-k8s.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh`
 - **Issue #693**: Mixed-cloud CMR logging (requires juju-k8s-crashdump)
 
 ---

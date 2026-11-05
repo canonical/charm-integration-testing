@@ -1,7 +1,4 @@
 #!/bin/bash
-#MISE description="Build a bundle-builder-x bundle"
-#MISE raw_args=true
-#MISE alias="bundle:build-x"
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

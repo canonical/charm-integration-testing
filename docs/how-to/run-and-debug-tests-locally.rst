@@ -49,12 +49,20 @@ The following environment variables are optional and only needed when testing sp
 
 Set up Juju and k8s
 -------------------
-Juju and k8s will be needed to run the tests. Install Juju, k8s, kubectl,
-and the local substrate tools from the repository catalogue:
+Juju and k8s will be needed to run the tests.
+
+To install Juju, run:
 
 .. code:: bash
 
-   mise run setup -- --group local-k8s
+  sudo snap install juju
+
+To install ``k8s`` and ``kubectl``, run:
+
+.. code:: bash
+
+   sudo snap install k8s --classic --channel latest/edge
+   sudo snap install kubectl --classic --channel 1.30
 
 Next, bootstrap ``k8s`` and configure ``kubectl``:
 
@@ -188,11 +196,14 @@ Select ``-k test_live_memory_stress_moderate`` to run it.
 Install the repository dependencies
 -----------------------------------
 
-Next, install the Python dependencies and integration tools:
+Next, install the Python dependencies to run the repository code:
 
 .. code:: bash
 
-   mise run setup -- --group integration
+   sudo apt-get update
+   sudo apt-get install pipx
+   pipx install poetry==2.0
+   poetry install
 
 Generate dynamic bundles
 ------------------------
