@@ -31,6 +31,7 @@ overrides:
   - criteria:
       - track: '25.11'
       - ubuntu_version: '26.04'
+    requires:
       # No charm on Charmhub provides sackd interface; only used in event handler (charm.py)
       sackd:
         optional: true
