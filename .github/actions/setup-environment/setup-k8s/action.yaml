@@ -27,7 +27,7 @@ runs:
   steps:
     - name: Ensure Kubernetes tools
       shell: bash
-      run: mise run bootstrap-packages -- snap:juju snap:kubectl
+      run: mise run setup -- --packages snap:juju snap:kubectl
     - name: Choose kubeconfig path
       id: paths
       env:

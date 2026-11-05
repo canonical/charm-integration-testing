@@ -1,75 +1,155 @@
 #!/usr/bin/env bash
-#MISE description="Install named tool selections and project dependencies"
+#MISE description="Prepare setup groups, catalogue tools and system packages"
 #MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 set -euo pipefail
 
 usage() {
-    echo "Usage: mise run setup -- [--tools-only] [python|development|workflow|integration|local-k8s|local-lxd ...] [-- poetry-install-args...]"
+    cat <<'EOF'
+Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
+                        [--no-packages] [--dry-run]
+
+Groups: python, development, workflow, integration, local-k8s, local-lxd
+Tools and packages must be named exactly as declared in mise.toml.
+Groups include their tools, packages and project dependencies where applicable.
+--no-packages skips group packages; it cannot be combined with --packages.
+--dry-run previews package-only requests, without installing anything.
+EOF
 }
 
-install_project="${SETUP_INSTALL_PROJECT-true}"
-case "$install_project" in
-    true|false) ;;
-    *) echo "SETUP_INSTALL_PROJECT must be true or false" >&2; exit 1 ;;
-esac
-selections=()
-if [[ "${SETUP_TOOLS:-}" == *$'\n'* || "${SETUP_TOOLS:-}" == *$'\r'* ]]; then
-    echo "SETUP_TOOLS must be a single space-separated line" >&2
+die() {
+    echo "$*" >&2
     exit 1
-fi
-read -r -a selections <<< "${SETUP_TOOLS:-}"
+}
+
+groups=()
+tools=()
+packages=()
+no_packages=false
+explicit_packages=false
+dry_run=()
+project=none
 while (( $# )); do
     case "$1" in
-        --tools-only) install_project=false ;;
-        --) shift; break ;;
+        --group|--tools|--packages)
+            option="$1"
+            shift
+            (( $# )) && [[ "$1" != -* ]] || die "$option requires at least one name"
+            while (( $# )) && [[ "$1" != -* ]]; do
+                case "$option" in
+                    --group) groups+=("$1") ;;
+                    --tools) tools+=("$1") ;;
+                    --packages) packages+=("$1"); explicit_packages=true ;;
+                esac
+                shift
+            done
+            continue
+            ;;
+        --no-packages) no_packages=true ;;
+        --dry-run|-n) dry_run=(--dry-run) ;;
         --help|-h) usage; exit 0 ;;
-        -*) usage >&2; echo "Unknown setup option: $1" >&2; exit 1 ;;
-        *) selections+=("$1") ;;
+        *) usage >&2; die "Unknown setup argument: $1" ;;
     esac
     shift
 done
 
-(( ${#selections[@]} )) || selections=(python)
-tools=()
-packages=()
-for selection in "${selections[@]}"; do
-    case "$selection" in
-        python) tools+=(python uv pypi:poetry) ;;
-        development)
-            tools+=(python uv pypi:poetry node npm:markdownlint-cli2 pypi:ruff pypi:bandit
-                pypi:yamlfix pypi:zizmor aqua:gitleaks/gitleaks aqua:mpalmer/action-validator)
+if [[ "$no_packages" == true && "$explicit_packages" == true ]]; then
+    die "--no-packages cannot be combined with --packages"
+fi
+
+for group in "${groups[@]}"; do
+    case "$group" in
+        python)
+            [[ "$project" == dev ]] || project=main
             ;;
-        workflow) tools+=(aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli) ;;
+        development)
+            project=dev
+            tools+=(
+                node
+                npm:markdownlint-cli2
+                pypi:ruff
+                pypi:bandit
+                pypi:yamlfix
+                pypi:zizmor
+                aqua:gitleaks/gitleaks
+                aqua:mpalmer/action-validator
+            )
+            ;;
+        workflow)
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+                aqua:cli/cli
+            )
+            ;;
         integration)
-            tools+=(python uv aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli
+            [[ "$project" == dev ]] || project=main
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+                aqua:cli/cli
                 aqua:trufflesecurity/trufflehog
                 pypi:git+https://github.com/juju/juju-crashdump.git
-                pypi:git+https://github.com/canonical/juju-k8s-crashdump.git)
+                pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
+            )
             ;;
         local-k8s)
-            tools+=(aqua:helm/helm aqua:jqlang/jq)
-            packages+=(snap:k8s snap:kubectl snap:juju)
+            tools+=(
+                aqua:helm/helm
+                aqua:jqlang/jq
+            )
+            packages+=(
+                snap:k8s
+                snap:kubectl
+                snap:juju
+            )
             ;;
-        local-lxd) packages+=(snap:lxd snap:juju) ;;
-        *) usage >&2; echo "Unknown tool selection: $selection" >&2; exit 1 ;;
+        local-lxd)
+            packages+=(
+                snap:lxd
+                snap:juju
+            )
+            ;;
+        *) die "Unknown setup group: $group" ;;
     esac
 done
 
-if [[ "$install_project" == true ]]; then
+if [[ "$project" != none ]]; then
     tools+=(python uv pypi:poetry)
-elif (( $# )); then
-    echo "Poetry arguments cannot be used with --tools-only" >&2
-    exit 1
 fi
+[[ "$no_packages" == false ]] || packages=()
+
+if (( ${#groups[@]} + ${#tools[@]} + ${#packages[@]} == 0 )); then
+    usage >&2
+    die "Specify at least one group, tool or package"
+fi
+if (( ${#dry_run[@]} )); then
+    (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
+        die "--dry-run requires a package-only request"
+fi
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$project_root"
+for tool in "${tools[@]}"; do
+    [[ "$tool" =~ ^[A-Za-z0-9:@+._/-]+$ ]] || die "Invalid catalogue tool name: $tool"
+    mise config get --file "$project_root/mise.toml" "tools.\"$tool\"" >/dev/null ||
+        die "Unknown catalogue tool: $tool"
+done
+for package in "${packages[@]}"; do
+    [[ "$package" =~ ^snap:[a-z0-9-]+$ ]] || die "Invalid package name: $package"
+    mise config get --file "$project_root/mise.toml" "bootstrap.packages.\"$package\"" >/dev/null ||
+        die "Unknown catalogue package: $package"
+done
 
 if (( ${#tools[@]} )); then
     mise install --locked "${tools[@]}"
 fi
 if (( ${#packages[@]} )); then
-    mise run bootstrap-packages -- "${packages[@]}"
+    source "$project_root/scripts/helpers/setup-packages.sh"
+    setup_packages "${dry_run[@]}" "${packages[@]}"
 fi
-if [[ "$install_project" == true ]]; then
-    mise exec -- poetry install "$@"
-fi
+case "$project" in
+    main) mise exec -- poetry install --only main ;;
+    dev) mise exec -- poetry install --with dev ;;
+esac

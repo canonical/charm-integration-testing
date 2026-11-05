@@ -11,7 +11,7 @@ Install mise as described in the [README](README.md#getting-started), then
 prepare a workstation:
 
 ```bash
-mise run setup -- development
+mise run setup -- --group development
 ```
 
 ### What goes where
@@ -19,7 +19,7 @@ mise run setup -- development
 | File | Owns |
 |---|---|
 | `mise.toml` / `mise.lock` / `.mise/locks/` | One executable catalogue, artifact/dependency locks, and snap channels |
-| `mise-tasks/setup` | Named selections of tools and host packages; no duplicated versions |
+| `mise-tasks/setup` | Setup groups, explicit tool/package requests and project installation |
 | `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
 
 `[tools]` declares isolated, locked executables;
@@ -36,42 +36,57 @@ Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
 | Command | Prepares |
 |---|---|
-| `mise run setup` | Python, uv, Poetry and project dependencies |
-| `mise run setup -- development` | Repository checkers, Node and project dependencies |
-| `mise run setup -- integration` | Test utilities, TruffleHog, crashdump tools and project dependencies |
-| `mise run setup -- --tools-only workflow` | jq, yq and gh without project dependencies |
-| `mise run setup -- --tools-only local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
-| `mise run setup -- --tools-only local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group python` | Python, uv, Poetry and runtime project dependencies |
+| `mise run setup -- --group development` | Repository checkers, Node and development project dependencies |
+| `mise run setup -- --group integration` | Test utilities, TruffleHog, crashdump tools and runtime project dependencies |
+| `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
+| `mise run setup -- --group local-lxd` | LXD and Juju snaps |
 
-Selections compose: `mise run setup -- development integration` prepares both.
-`--tools-only` skips project installation and its implicit Python tool selection.
-Pass Poetry installation arguments after another `--`, for example
-`mise run setup -- python -- --only main`. The root Poetry dependency groups and
-validator extras are unchanged; selecting Python tools does not itself separate
-the project's runtime and development dependencies.
+Groups compose: `mise run setup -- --group development integration` prepares both.
+Each group declares tools, packages and whether project dependencies are needed.
+Runtime groups run `poetry install --only main`; development runs
+`poetry install --with dev`. Combined groups install project dependencies once,
+with development taking precedence. The optional Poetry `dev` group contains
+coverage, mypy, type stubs, validator test utilities and validator development extras.
+Runtime dependencies retain pytest (the integration runner) and tracing's deep
+validation dependencies. No package versions change between these environments.
 
-Versions appear only in the catalogue. Selections explicitly include installation
+Poetry installation does not remove previously installed development dependencies.
+Use a fresh virtual environment for a lean runtime installation, or explicitly run
+`poetry sync --only main` to remove development dependencies from an existing one.
+
+Use `--no-packages` to skip group snaps without skipping its tools or project
+dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
+Explicit requests also compose with groups:
+`mise run setup -- --group python --tools aqua:jqlang/jq --packages snap:juju`.
+`--tools` and `--packages` alone do not install project dependencies.
+`--no-packages` cannot be combined with explicit `--packages`.
+`--dry-run` previews package-only requests; it cannot be used with tool or project
+installation. No arguments is an error; `--help` lists the interface.
+
+Versions appear only in the catalogue. Groups explicitly include installation
 prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
 installation is disabled, including during task execution; no first-use installer
-or additional environment selection is needed.
+or additional environment selection is needed. With `--tools`, explicitly name
+those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
+Tool and package names must match the catalogue; version overrides are rejected.
 Bare `mise install` intentionally still installs the entire catalogue; use setup
 instead. Strict locking preserves managed versions and artifact checksums.
 
-Selections control installation, not PATH isolation. Installed catalogue tools
+Groups control installation, not PATH isolation. Installed catalogue tools
 are available together. A missing executable can fall back to a host installation;
 run setup before executing an operation rather than relying on host tools.
 
-Project-dependent test tasks and lint share
-`setup-project`, which prepares only Python tools and runs Poetry installation
-before the task. Poetry owns
-dependency reconciliation; there is no additional readiness cache.
-This does not bootstrap system packages.
+Execution tasks do not install dependencies. Prepare the development group before
+unit tests, lint or formatting, and the integration group before live tests.
+Poetry owns dependency reconciliation; there is no additional readiness cache.
 
-The CI setup action wraps the same task. Lint and workflow/security checks select
-`tools: development`; unit-test jobs use the default `tools: python`.
-Live integration jobs select `tools: integration`; cleanup uses `tools: workflow`.
-Jobs without project dependencies set
-`install-project: "false"`. Installed tools are available in later steps through
+The CI setup action wraps the same task. Lint and unit-test jobs use
+`groups: development`; live tests use `groups: integration`; cleanup uses
+`groups: workflow`. Workflow/security checks request only their individual
+catalogue `tools`, without installing the project. Its `packages` input also
+supports explicit snap requests. Installed tools are available in later steps through
 mise's activation, without exporting a profile. The test workflow supplies
 `JUJU_CHANNEL` at job scope for cloud setup.
 Mise-action caching remains disabled.
@@ -87,8 +102,8 @@ Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Snapd can auto-refresh them; applying a changed channel can also refresh an
 existing daemon. Preview changes with
-`mise run bootstrap-packages -- --dry-run snap:juju` on an existing machine.
-The wrapper requires named packages rather than implicitly applying the catalogue.
+`mise run setup -- --packages snap:juju --dry-run` on an existing machine.
+Explicit package requests never implicitly apply the whole catalogue.
 
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
@@ -111,9 +126,9 @@ and is shared by checkouts in the same VM. A failed channel install does not rep
 the previous selection. Reset removes the selection before applying the default;
 if installation fails, fix the reported error and retry.
 
-`mise run bootstrap-packages` owns channel selection for setup and substrate tasks.
+`mise run setup` applies channel selection to requested Juju packages.
 Precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
-`JUJU_CHANNEL=4/edge mise run bootstrap-packages -- snap:juju` overrides one invocation without changing the
+`JUJU_CHANNEL=4/edge mise run setup -- --packages snap:juju` overrides one invocation without changing the
 saved selection. The setup action's `juju-channel` input and test workflow's
 `juju_channel` input use this temporary path; an empty input uses the saved selection
 or repository default.

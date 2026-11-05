@@ -29,7 +29,7 @@ runs:
   steps:
     - name: Ensure OpenStack tools
       shell: bash
-      run: mise run bootstrap-packages -- snap:juju snap:openstackclients
+      run: mise run setup -- --packages snap:juju snap:openstackclients
     - name: Report file paths
       id: paths
       env:

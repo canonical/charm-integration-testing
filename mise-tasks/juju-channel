@@ -24,9 +24,9 @@ if (( $# == 0 )); then
     fi
 elif (( $# == 1 )) && [[ "$1" == "--reset" ]]; then
     rm -f "$saved_config"
-    env -u JUJU_CHANNEL mise run bootstrap-packages -- snap:juju
+    env -u JUJU_CHANNEL mise run setup -- --packages snap:juju
 elif (( $# == 1 )) && [[ -n "$1" && "$1" != -* ]]; then
-    JUJU_CHANNEL="$1" mise run bootstrap-packages -- snap:juju
+    JUJU_CHANNEL="$1" mise run setup -- --packages snap:juju
     mkdir -p "$(dirname "$saved_config")"
     pending_config="$(mktemp "$(dirname "$saved_config")/juju.XXXXXX.toml")"
     trap 'rm -f "$pending_config"' EXIT

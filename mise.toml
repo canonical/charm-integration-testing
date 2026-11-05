@@ -1,6 +1,6 @@
 [task_config]
 includes = ["scripts", "mise-tasks"]
-excludes = ["scripts/*.py"]
+excludes = ["scripts/*.py", "scripts/helpers/**"]
 
 [settings]
 lockfile = true

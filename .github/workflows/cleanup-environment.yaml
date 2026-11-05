@@ -82,8 +82,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          tools: workflow
-          install-project: "false"
+          groups: workflow
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
@@ -133,11 +132,11 @@ jobs:
       - name: Ensure Kubernetes client
         if: ${{ steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
-        run: mise run bootstrap-packages -- snap:kubectl
+        run: mise run setup -- --packages snap:kubectl
       - name: Ensure OpenStack client
         if: ${{ steps.creds.outputs.openstack == 'true' }}
         shell: bash
-        run: mise run bootstrap-packages -- snap:openstackclients
+        run: mise run setup -- --packages snap:openstackclients
 
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 

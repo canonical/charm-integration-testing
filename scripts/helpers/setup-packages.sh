@@ -1,0 +1,40 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+setup_packages() (
+    set -euo pipefail
+    dry_run=()
+    if [[ "${1:-}" == --dry-run ]]; then
+        dry_run=(--dry-run)
+        shift
+    fi
+
+    if [[ " $* " == *" snap:juju "* ]]; then
+        saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
+        case "$saved_config" in
+            "$project_root"/*) echo "Juju selection must be stored outside the checkout" >&2; exit 1 ;;
+        esac
+        channel="${JUJU_CHANNEL:-}"
+        if [[ -z "$channel" && -f "$saved_config" ]]; then
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$saved_config"
+            channel="$(mise config get --file "$saved_config" 'bootstrap.packages."snap:juju".channel')"
+        fi
+        if [[ -n "$channel" || -f "$saved_config" ]]; then
+            component='[A-Za-z0-9._][A-Za-z0-9._-]*'
+            if [[ ! "$channel" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
+                echo "Invalid Juju channel: expected a track or [track/]risk[/branch]" >&2
+                exit 1
+            fi
+            override_dir="$(mktemp -d)"
+            trap 'rm -f "$override_dir/mise.toml"; rmdir "$override_dir"' EXIT
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$override_dir"
+            touch "$override_dir/mise.toml"
+            mise config set --file "$override_dir/mise.toml" --type string \
+                'bootstrap.packages."snap:juju".channel' "$channel"
+            export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
+            mise bootstrap packages upgrade --yes "${dry_run[@]}" snap:juju
+        fi
+    fi
+
+    mise bootstrap packages apply --yes "${dry_run[@]}" "$@"
+)

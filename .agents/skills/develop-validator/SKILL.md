@@ -159,7 +159,7 @@ under `validators/<name>/` with passing `dev-validate` output.
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
    - Add `validators-<name> = { path = "./validators/<name>", develop = true }`
      to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
-   - Run `poetry install` from `$PROJECT_ROOT` so the new package is available.
+   - Run `poetry install --with dev` from `$PROJECT_ROOT` so the new package is available.
 
 8. Run and iterate:
    ```

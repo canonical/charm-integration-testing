@@ -18,8 +18,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          tools: development
-          install-project: "false"
+          tools: aqua:mpalmer/action-validator
       - name: Lint Actions
         run: |
           find .github/workflows -type f \( -iname \*.yaml -o -iname \*.yml \) \
@@ -37,8 +36,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          tools: development
-          install-project: "false"
+          tools: python uv pypi:zizmor
       - name: Scan all workflows
         run: |-
           zizmor --pedantic .github

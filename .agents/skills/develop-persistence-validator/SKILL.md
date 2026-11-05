@@ -368,7 +368,7 @@ rather than registering multiple entry points for the same interface.
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `poetry install` (or `poetry update <package>` for a single
+   way, run `poetry install --with dev` (or `poetry update <package>` for a single
    path dependency) after *any* change to a package's `pyproject.toml` made
    in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
@@ -379,9 +379,9 @@ rather than registering multiple entry points for the same interface.
    though the source file itself is present. Do this before running the
    tests below. In the development sandbox this matters especially for a
    long-lived `scripts/sandbox.sh run --interactive` session: `poetry
-   install` runs once at `sandbox.sh up` time, so the VM's venv reflects the
+   install --with dev` runs once at `sandbox.sh up` time, so the VM's venv reflects the
    `pyproject.toml` as of `up` and goes stale for any change made mid-session
-   - re-run `poetry install` inside the VM after editing a `pyproject.toml`,
+   - re-run `poetry install --with dev` inside the VM after editing a `pyproject.toml`,
    or the runner won't discover the new/changed entry point until the next
    `up`.
 

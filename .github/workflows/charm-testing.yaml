@@ -147,7 +147,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          tools: integration
+          groups: integration
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session

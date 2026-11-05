@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Ensure the project's Python tools and Poetry dependencies"
-#MISE raw_args=true
-# Copyright 2026 Canonical Ltd.
-# See LICENSE file for licensing details.
-set -euo pipefail
-
-exec mise run setup -- python -- "$@"

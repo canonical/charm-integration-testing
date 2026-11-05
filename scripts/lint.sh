@@ -1,7 +1,6 @@
 #!/bin/bash
 #MISE description="Run repository linters"
 #MISE raw_args=true
-#MISE depends=["setup-project"]
 # Copyright 2024-2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -16,14 +15,14 @@ cd "$(dirname "$0")/.."
 set -e
 
 # Check for prerequisites as appropriate.
-which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise run setup -- development"'
+which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise run setup -- --group development"'
 
 # Actual lint checks begin here.
 ruff check || die 'Failed "ruff check"'
 ruff format --check || die 'Failed on "ruff format --check"; consider running: mise run format'
 
 # Collect local package paths declared in pyproject.toml, plus scripts/
-mapfile -t _bandit_paths < <(grep -oP '(?<=path = "\./)[^"]+' pyproject.toml)
+mapfile -t _bandit_paths < <(grep -oP '(?<=path = "\./)[^"]+' pyproject.toml | sort -u)
 bandit \
     --configfile pyproject.toml \
     --quiet \
