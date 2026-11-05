@@ -43,7 +43,7 @@ for selection in "${selections[@]}"; do
             ;;
         workflow) tools+=(aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli) ;;
         integration)
-            tools+=(python uv pypi:pipx aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli
+            tools+=(python uv aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli
                 aqua:trufflesecurity/trufflehog
                 pypi:git+https://github.com/juju/juju-crashdump.git
                 pypi:git+https://github.com/canonical/juju-k8s-crashdump.git)

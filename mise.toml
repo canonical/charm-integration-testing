@@ -19,8 +19,6 @@ task.run_auto_install = false
 python = "3.12.12"
 # Installs isolated Python tools; Poetry owns project dependencies.
 uv = "0.13.6"
-# Temporary until canonical/juju-k8s-crashdump#21 lands.
-"pypi:pipx" = { version = "1.18.8", depends = ["python", "uv"] }
 "pypi:poetry" = { version = "2.3.0", depends = ["python", "uv"] }
 "aqua:jqlang/jq" = "1.8.2"
 "aqua:mikefarah/yq" = "4.54.1"
@@ -59,7 +57,7 @@ python = "3.12.12"
 depends = ["python", "uv"]
 
 [tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]
-version = "22ef04caaeeb94ad6ed49f8392b6bada65184569"
-uvx = false
+# Packaging fix from canonical/juju-k8s-crashdump#21.
+version = "b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"
 python = "3.12.12"
-depends = ["python", "pypi:pipx"]
+depends = ["python", "uv"]

@@ -24,12 +24,9 @@ mise run setup -- development
 
 `[tools]` declares isolated, locked executables;
 `[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
-and Poetry are installed by uv in isolated environments. Only the pinned
-`juju-k8s-crashdump` temporarily uses pipx because its upstream package metadata
-is rejected by uv; the integration selection alone includes pipx.
-The prerequisite fix is
+and Poetry are installed by uv in isolated environments. `juju-k8s-crashdump` is
+pinned to the packaging-fix commit from
 [canonical/juju-k8s-crashdump#21](https://github.com/canonical/juju-k8s-crashdump/pull/21).
-After it lands, update that Git pin and remove its pipx-only installer selection.
 Both crashdump tools remain Git-commit-pinned with version-only dependency locking.
 Uv bootstraps tools, while Poetry manages project dependencies.
 Mypy stays with Poetry because it uses the project's

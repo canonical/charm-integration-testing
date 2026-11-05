@@ -142,13 +142,12 @@ uv = { path = ".mise/locks/pypi-bandit/1.9.4~f22a104d", digest = "sha256:9fd698d
 extras = "toml"
 
 [[tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]]
-version = "22ef04caaeeb94ad6ed49f8392b6bada65184569"
+version = "b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"
 backend = "pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"
-specifiers = ["22ef04caaeeb94ad6ed49f8392b6bada65184569"]
+specifiers = ["b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"]
 
 [tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git".options]
 python = "3.12.12"
-uvx = "false"
 
 [[tools."pypi:git+https://github.com/juju/juju-crashdump.git"]]
 version = "bde242ccfdd91cb2372f26d41d62d7b230660c08"
@@ -158,12 +157,6 @@ specifiers = ["bde242ccfdd91cb2372f26d41d62d7b230660c08"]
 [tools."pypi:git+https://github.com/juju/juju-crashdump.git".options]
 python = "3.12.12"
 with = '["ssh-agent-setup==2.0.1"]'
-
-[[tools."pypi:pipx"]]
-version = "1.18.8"
-backend = "pypi:pipx"
-specifiers = ["1.18.8"]
-uv = { path = ".mise/locks/pypi-pipx/1.18.8", digest = "sha256:7442368d4847da9b09d88901539ea339e3565a22d7ee331cf21f85f3df0942a1" }
 
 [[tools."pypi:poetry"]]
 version = "2.3.0"

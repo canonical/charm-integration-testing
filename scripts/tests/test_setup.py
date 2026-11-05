@@ -73,7 +73,7 @@ def test_composed_setup_preserves_poetry_arguments(setup_runner: SetupRunner) ->
     tools = set(calls[0][2:])
     assert PYTHON_TOOLS | {"node", "npm:markdownlint-cli2", "aqua:trufflesecurity/trufflehog"} <= tools
     assert "aqua:helm/helm" not in tools
-    assert "pypi:pipx" in tools
+    assert "pypi:pipx" not in tools
     assert not any(tool.startswith("pipx:") for tool in tools)
     assert calls[1:] == [["exec", "--", "poetry", "install", "--only", "main"]]
 
