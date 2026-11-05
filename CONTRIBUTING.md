@@ -51,8 +51,9 @@ This does not bootstrap system packages.
 The CI setup action wraps the same task. Lint and workflow/security checks select
 `environment: development`; runtime and unit-test jobs use the base inventory.
 Jobs without project dependencies set
-`install-project: "false"`. The action carries the environment and temporary Juju
-channel selection into later job steps. Mise-action caching remains disabled.
+`install-project: "false"`. The action carries the environment into later job
+steps. The test workflow supplies `JUJU_CHANNEL` at job scope for cloud setup.
+Mise-action caching remains disabled.
 
 System-package installation is explicit and operation-owned: OpenStack cloud
 setup ensures Juju and `openstackclients`; Kubernetes cloud setup ensures Juju

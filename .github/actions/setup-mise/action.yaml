@@ -13,8 +13,8 @@ inputs:
     description: Opt in to installing the declared system packages
     default: "false"
   juju-channel:
-    description: Override the Juju client channel for this job; empty uses the saved
-      selection or repository default
+    description: Override the Juju client channel for this setup only; empty uses
+      the saved selection or repository default
     default: ""
 runs:
   using: composite
@@ -37,6 +37,9 @@ runs:
         SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
       run: |-
+        case "$MISE_ENV" in
+          "") echo 'MISE_ENV=' >> "$GITHUB_ENV" ;;
+          development) echo 'MISE_ENV=development' >> "$GITHUB_ENV" ;;
+          *) echo "Unsupported mise environment: $MISE_ENV" >&2; exit 1 ;;
+        esac
         mise run setup
-        echo "MISE_ENV=$MISE_ENV" >> "$GITHUB_ENV"
-        echo "JUJU_CHANNEL=$JUJU_CHANNEL" >> "$GITHUB_ENV"

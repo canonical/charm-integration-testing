@@ -113,6 +113,7 @@ jobs:
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
+      JUJU_CHANNEL: ${{ inputs.juju_channel }}
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
       UV_FILE: ${{ github.workspace }}/static/uv
@@ -145,8 +146,6 @@ jobs:
           fi
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
-        with:
-          juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
