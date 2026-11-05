@@ -25,6 +25,7 @@ def sandbox(tmp_path: Path) -> Path:
     tools.mkdir()
     stubs = {
         "gh": "#!/bin/sh\nexit 0\n",
+        "realpath": "#!/bin/sh\necho 'GNU realpath must not be required' >&2\nexit 1\n",
         "multipass": """#!/usr/bin/env python3
 import json
 import os
@@ -96,10 +97,13 @@ def run_sandbox(
 
 @pytest.mark.parametrize("interactive", [False, True], ids=["autonomous", "interactive"])
 @pytest.mark.parametrize("absolute", [False, True], ids=["relative", "absolute"])
-def test_extra_skills_reach_copilot(sandbox: Path, interactive: bool, absolute: bool) -> None:
-    name = "custom skills ' $literal"
+@pytest.mark.parametrize("config_kind", ["skills", "agents"])
+def test_extra_configuration_reaches_copilot(
+    sandbox: Path, interactive: bool, absolute: bool, config_kind: str
+) -> None:
+    name = "custom configuration ' $literal"
     config = sandbox / name
-    (config / ".github/skills/example").mkdir(parents=True)
+    (config / ".github" / config_kind / "example").mkdir(parents=True)
     result = run_sandbox(sandbox, str(config) if absolute else name, interactive)
     assert result.returncode == 0, result.stderr
     args = json.loads((sandbox / "copilot-args.json").read_text())
@@ -114,10 +118,10 @@ def test_default_does_not_add_directory(sandbox: Path) -> None:
     assert (sandbox / "copilot-prompt.txt").read_text() == "Test context\n\n\n---\n\nTask: test task"
 
 
-@pytest.mark.parametrize("kind", ["missing", "no-skills", "outside", "symlink-outside"])
+@pytest.mark.parametrize("kind", ["missing", "no-config", "outside", "symlink-outside"])
 def test_invalid_config_fails_before_copilot(sandbox: Path, kind: str) -> None:
     config = sandbox / "custom"
-    if kind == "no-skills":
+    if kind == "no-config":
         config.mkdir()
     elif kind in {"outside", "symlink-outside"}:
         outside = sandbox.parent / "outside"

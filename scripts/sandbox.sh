@@ -30,7 +30,7 @@
 #                              as <NAME> (prefix stripped), e.g.
 #                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
 #                              inside the VM.
-#   SANDBOX_EXTRA_CONFIG_DIR   Project-local directory containing .github/skills
+#   SANDBOX_EXTRA_CONFIG_DIR   Project-local directory containing .github/skills or agents
 #   SANDBOX_PROMPT_FILE        Initial context file (defaults to .agents/skills/system.md)
 
 set -euo pipefail
@@ -266,7 +266,7 @@ Environment (.env keys):
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
-  SANDBOX_EXTRA_CONFIG_DIR  Project-local directory containing .github/skills
+  SANDBOX_EXTRA_CONFIG_DIR  Project-local directory containing .github/skills or agents
   SANDBOX_PROMPT_FILE     Initial context file (default: .agents/skills/system.md)
 
 Inside an interactive session use skill slash commands:
@@ -670,8 +670,8 @@ EOF
     if [ -n "${SANDBOX_EXTRA_CONFIG_DIR:-}" ]; then
         local _extra_config_dir="$SANDBOX_EXTRA_CONFIG_DIR"
         [[ "$_extra_config_dir" = /* ]] || _extra_config_dir="$PROJECT_DIR/$_extra_config_dir"
-        _extra_config_dir=$(realpath -e -- "$_extra_config_dir") || {
-            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR does not exist." >&2
+        _extra_config_dir=$(cd -- "$_extra_config_dir" && pwd -P) || {
+            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR is not an accessible directory." >&2
             return 1
         }
         case "$_extra_config_dir" in
@@ -681,8 +681,8 @@ EOF
                 return 1
                 ;;
         esac
-        if [ ! -d "$_extra_config_dir/.github/skills" ]; then
-            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR must contain a .github/skills directory." >&2
+        if [ ! -d "$_extra_config_dir/.github/skills" ] && [ ! -d "$_extra_config_dir/.github/agents" ]; then
+            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR must contain .github/skills or .github/agents." >&2
             return 1
         fi
         _extra_config_vm_dir="$VM_MOUNT/${_extra_config_dir#"$PROJECT_DIR"/}"

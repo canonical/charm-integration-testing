@@ -56,9 +56,10 @@ Without dedicated tokens, the script asks before using your host `gh` token in t
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
 Declining leaves the corresponding tools unauthenticated.
 
-## Local custom skills
+## Local custom skills and agents
 
 Put personal skills in `sandbox-local/.github/skills/<skill-name>/SKILL.md`.
+Custom agents can go in `sandbox-local/.github/agents/`; either directory is sufficient.
 The `sandbox-local/` directory is gitignored. Set this in
 `development-sandbox/.env`, or prefix a single `run` invocation with it:
 
