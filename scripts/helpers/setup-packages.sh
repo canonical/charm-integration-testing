@@ -36,5 +36,13 @@ setup_packages() (
         fi
     fi
 
+    if [[ " $* " == *" snap:openstackclients "* ]] &&
+        (( ${#dry_run[@]} == 0 )) &&
+        command -v snap >/dev/null 2>&1 &&
+        snap list openstack >/dev/null 2>&1; then
+        echo "Removing the conflicting openstack snap before installing openstackclients"
+        sudo snap remove openstack
+    fi
+
     mise bootstrap packages apply --yes "${dry_run[@]}" "$@"
 )
