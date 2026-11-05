@@ -405,7 +405,7 @@ jobs:
       #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
       #
       - name: Ensure OpenStack client
-        if: ${{ steps.creds.outputs.openstack == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
         run: mise run setup -- --packages snap:openstackclients
       - name: Find and delete servers older than age threshold
