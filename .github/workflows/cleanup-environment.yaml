@@ -636,7 +636,7 @@ jobs:
       # S3 cleanup is independent of substrate cleanup.
       - name: Install S3 cleanup dependencies
         id: s3_dependencies
-        if: ${{ !cancelled() && steps.creds.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
+        if: ${{ !cancelled() && steps.creds.outcome == 'success' && steps.env_info.outputs.s3-secret-name != '' }}
         uses: ./.github/actions/install-with-retry
         with:
           command: sudo apt-get update && sudo apt-get install -y python3-venv jq
@@ -646,7 +646,7 @@ jobs:
         if: ${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}
         shell: bash
         env:
-          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
+          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret-name }}
           S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
           S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
           S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
