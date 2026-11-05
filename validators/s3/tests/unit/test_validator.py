@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import os
+from dataclasses import dataclass
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +43,94 @@ VALID_DATABAG: dict[str, str] = {
     "endpoint": "http://s3.example.com",
     "region": "us-east-1",
 }
+
+
+@dataclass(frozen=True)
+class ProxyParams:
+    environment: dict[str, str]
+    endpoint: str
+    expected: dict[str, str] | None
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(
+            ProxyParams({"HTTPS_PROXY": "http://standard:3128"}, "https://s3.example.com", None),
+            id="standard-environment-unchanged",
+        ),
+        pytest.param(
+            ProxyParams(
+                {
+                    "HTTP_PROXY": "http://standard:3128",
+                    "HTTPS_PROXY": "http://standard:3128",
+                    "JUJU_CHARM_HTTP_PROXY": "http://juju:3128",
+                    "JUJU_CHARM_HTTPS_PROXY": "http://juju:3128",
+                },
+                "https://s3.example.com",
+                {"http": "http://juju:3128", "https": "http://juju:3128"},
+            ),
+            id="juju-overrides-standard",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"HTTPS_PROXY": "http://standard:3128", "JUJU_CHARM_HTTPS_PROXY": ""},
+                "https://s3.example.com",
+                {},
+            ),
+            id="empty-juju-proxy-disables-standard",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": ".canonical.com"},
+                "https://radosgw.ps7.canonical.com:443",
+                {},
+            ),
+            id="juju-domain-bypass-with-port",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "NO_PROXY": "s3.example.com"},
+                "https://s3.example.com",
+                {},
+            ),
+            id="standard-bypass-fallback",
+        ),
+        pytest.param(
+            ProxyParams(
+                {
+                    "JUJU_CHARM_HTTPS_PROXY": "http://juju:3128",
+                    "NO_PROXY": "*",
+                    "JUJU_CHARM_NO_PROXY": "",
+                },
+                "https://s3.example.com",
+                {"https": "http://juju:3128"},
+            ),
+            id="empty-juju-bypass-overrides-standard",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "*"},
+                "",
+                {},
+            ),
+            id="default-aws-endpoint-wildcard-bypass",
+        ),
+    ],
+)
+def test_client_uses_juju_proxy_settings(params: ProxyParams) -> None:
+    # GIVEN a charm execution environment and an S3 endpoint
+    validator = _make_validator(VALID_DATABAG | {"endpoint": params.endpoint})
+    with patch.dict(os.environ, params.environment, clear=True):
+        before = dict(os.environ)
+        with patch("validators.s3.validator.boto3.client", return_value=MagicMock()) as create_client:
+            # WHEN validation creates the client
+            validator.validate(level="simple")
+
+        # THEN proxy routing respects Juju settings without mutating the charm environment
+        assert create_client.call_args.kwargs["config"].proxies == params.expected
+        assert dict(os.environ) == before
+
 
 # ---------------------------------------------------------------------------
 # Tests: simple level

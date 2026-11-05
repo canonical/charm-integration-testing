@@ -306,6 +306,15 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ### HTTP API helpers and canary resources
 
+- For outbound HTTP/S clients, consider `JUJU_CHARM_HTTP_PROXY`,
+  `JUJU_CHARM_HTTPS_PROXY`, and `JUJU_CHARM_NO_PROXY`: client libraries may only
+  recognize standard proxy variables. Resolve Juju settings at client creation,
+  honor no-proxy exclusions, and preserve standard behavior outside Juju without
+  mutating the hosting charm's environment. Keep transport-specific handling in
+  the interface validator rather than `BaseValidator`. Explicitly decide whether
+  a probe should use proxies or test direct ingress/mesh connectivity. Test both
+  proxied and bypassed requests; a runner-side connection does not prove unit-side
+  connectivity.
 - When decoding HTTP response bodies as JSON, wrap `json.loads()` in a
   `try`/`except json.JSONDecodeError` on **every** response path (success and
   error) — don't assume a 2xx response always has a JSON body.
