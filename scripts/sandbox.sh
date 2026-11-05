@@ -386,17 +386,6 @@ _cmd_up() {
             ;;
     esac
 
-    echo "==> Checking bootstrap prerequisites..."
-    multipass exec "$VM_NAME" -- bash -c '
-        set -euo pipefail
-        if ! command -v curl >/dev/null 2>&1 \
-            || ! command -v git >/dev/null 2>&1 \
-            || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
-            sudo apt-get update --quiet
-            sudo apt-get install --assume-yes --quiet curl ca-certificates git
-        fi
-    '
-
     # Mount project if not already mounted
     echo "==> Checking project mount..."
     if ! _is_mounted; then
@@ -405,13 +394,20 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Keep the existing sandbox compatible with the shared development tools.
-    echo "==> Installing the mise toolchain and Python dependencies..."
-    multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
+    # Set up Python venv with project packages (poetry manages the venv)
+    echo "==> Installing Python dependencies via poetry..."
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
+        if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
+            if ! command -v pipx &>/dev/null; then
+                sudo apt-get install -y -q pipx
+            fi
+            pipx install 'poetry==2.*'
+            pipx ensurepath
+            export PATH=\"\$HOME/.local/bin:\$PATH\"
+        fi
         cd '$VM_MOUNT'
-        mise run setup -- --group development integration
+        poetry install
     "
 
     # Install node-based tools used by the sandbox if not present
@@ -424,7 +420,7 @@ _cmd_up() {
 
         if ! command -v copilot &>/dev/null; then
             echo '==> Installing @github/copilot...'
-            npm install --global --prefix \"\$HOME/.local\" @github/copilot
+            sudo npm install -g @github/copilot
         else
             echo '==> @github/copilot: found.'
         fi
@@ -432,7 +428,7 @@ _cmd_up() {
 
         if ! command -v markdownlint-cli2 &>/dev/null; then
             echo '==> Installing markdownlint-cli2...'
-            npm install --global --prefix \"\$HOME/.local\" markdownlint-cli2
+            sudo npm install -g markdownlint-cli2
         else
             echo '==> markdownlint-cli2: found.'
         fi

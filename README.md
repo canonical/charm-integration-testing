@@ -5,41 +5,25 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-For local charm testing, use the [development sandbox](development-sandbox/README.md).
-It mounts your checkout and installs the tools inside a VM.
-
-To install directly on your machine, install
-[mise](https://mise.jdx.dev/getting-started.html), then run:
+Python dependencies are managed through poetry.
 
 ```bash
-mise run setup -- --group runtime
+pipx install poetry==2.0
+poetry install
 ```
-
-Setup installs Python, uv, Poetry and project dependencies without changing system
-packages. For development tools and dependencies, use `mise run setup -- --group development`.
-For live charm testing, use `mise run setup -- --group integration`.
-Cloud setup and Swift upload ensure their own system packages.
-Local substrate preparation uses the `local-k8s` and `local-lxd` groups.
-Use `--no-packages` to skip a group's snaps.
-
-See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
-machine-wide snap channels, and Python dependencies.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, linters, and tests.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
+best practices.
 
 ## Usage
 
 ```bash
-mise run test:suite -- \
-    --target-cloud "{juju_cloud}" \
-    --target-charm "{target_charm}" \
-    --target-application "{target_application}" \
-    --target-endpoint "{target_endpoint}" \
-    --neighbor-charm "{neighbor_charm}" \
-    --neighbor-application "{neighbor_application}" \
-    --neighbor-endpoint "{neighbor_endpoint}"
+./scripts/run-test-suite.sh \ 
+    --model {juju_model} \
+    --requirer {application}:{endpoint} \
+    --provider {application}:{endpoint}
 ```
 
 ### Optional Environment Variables

@@ -1,7 +1,4 @@
 #!/bin/bash
-#MISE description="Run bundle-builder-x tests"
-#MISE raw_args=true
-#MISE alias="test:bundle-builder-x"
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 

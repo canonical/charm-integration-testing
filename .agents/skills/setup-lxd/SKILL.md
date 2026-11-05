@@ -13,13 +13,12 @@ charm deployments.
 
 ## Steps
 
-1. Install the local substrate tools, then run the setup script:
+1. Run the setup script:
    ```
-   mise run setup -- --group local-lxd
    $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
    ```
-   Mise installs the declared packages. The script provisions and registers
-   LXD, and is idempotent. Wait for it to complete before proceeding.
+   This is idempotent. Each step checks whether it has already been done.
+   Wait for it to complete before proceeding.
 
 2. Bootstrap a Juju controller. Use a descriptive controller name and a 5 GB
    root disk for test controllers in the VM:
