@@ -191,11 +191,11 @@ Select ``-k test_live_memory_stress_moderate`` to run it.
 Install the repository dependencies
 -----------------------------------
 
-Next, install the Python dependencies and integration tools:
+Next, install the Python development dependencies and integration tools:
 
 .. code:: bash
 
-   mise run setup -- --group integration
+   mise run setup -- --group development integration
 
 Generate dynamic bundles
 ------------------------
