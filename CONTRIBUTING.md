@@ -68,11 +68,10 @@ requests alone do not install project dependencies. Automatic installation is
 disabled, and a bare `mise install` intentionally installs the full catalogue.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 
-CI still installs project dependencies directly with uv in this layer, so its
-jobs explicitly include the development extras and group. The CI adoption layer
-will switch those jobs to the shared setup task. OpenStack operations and Swift
-uploads share `openstackclients`; remove a conflicting `openstack` snap
-manually.
+CI uses the same setup task: development and test jobs select `development` or
+`integration`, while cloud actions and cleanup select only their needed clients.
+OpenStack operations and Swift uploads share `openstackclients`; remove a
+conflicting `openstack` snap manually.
 
 ### Selecting the Juju client
 

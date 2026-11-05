@@ -49,15 +49,15 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Ensure Swift client
+      shell: bash
+      run: mise run setup -- --packages snap:openstackclients
     - name: Setup
       shell: bash
       env:
         JOB_UUID: ${{ inputs.job_uuid }}
         LOG_PATH: ${{ inputs.log_path }}
       run: |
-        # openstack and openstackclients use the same name space `openstack` so we need to remove the openstack snap if it is installed before installing openstackclients snap
-        sudo snap remove openstack --purge || echo "Openstack snap was not installed"
-        sudo snap install openstackclients || echo "Openstackclients snap was already installed"
         mkdir -p ${JOB_UUID}
         cp -r ${LOG_PATH}/* ${JOB_UUID}
     - name: Create index.html

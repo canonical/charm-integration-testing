@@ -1,0 +1,51 @@
+---
+name: Set up mise
+description: Prepare repository setup groups, catalogue tools and system packages
+inputs:
+  groups:
+    description: Space-separated setup groups from mise-tasks/setup
+    default: ""
+  tools:
+    description: Space-separated executable names from the mise catalogue
+    default: ""
+  packages:
+    description: Space-separated package names from the mise catalogue
+    default: ""
+  juju-channel:
+    description: Override the Juju client channel for this setup only; empty uses
+      the saved selection or repository default
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Read pinned mise version
+      id: version
+      shell: bash
+      run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.version.outputs.version }}
+        install: false
+        cache: false
+    - name: Set up environment
+      shell: bash
+      env:
+        SETUP_GROUPS: ${{ inputs.groups }}
+        SETUP_TOOLS: ${{ inputs.tools }}
+        SETUP_PACKAGES: ${{ inputs.packages }}
+        JUJU_CHANNEL: ${{ inputs.juju-channel }}
+      run: |-
+        setup_inputs="$SETUP_GROUPS$SETUP_TOOLS$SETUP_PACKAGES"
+        if [[ "$setup_inputs" == *$'\n'* || "$setup_inputs" == *$'\r'* ]]; then
+          echo "Setup inputs must be single space-separated lines" >&2
+          exit 1
+        fi
+        read -r -a groups <<< "$SETUP_GROUPS"
+        read -r -a tools <<< "$SETUP_TOOLS"
+        read -r -a packages <<< "$SETUP_PACKAGES"
+        arguments=()
+        if (( ${#groups[@]} )); then arguments+=(--group "${groups[@]}"); fi
+        if (( ${#tools[@]} )); then arguments+=(--tools "${tools[@]}"); fi
+        if (( ${#packages[@]} )); then arguments+=(--packages "${packages[@]}"); fi
+        mise run setup -- "${arguments[@]}"
