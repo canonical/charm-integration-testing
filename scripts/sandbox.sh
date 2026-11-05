@@ -1,4 +1,6 @@
 #!/bin/bash
+#MISE description="Manage the development sandbox"
+#MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.
@@ -144,10 +146,10 @@ _vm_exec_with_env() {
 # credentials are checked.
 _vm_gh_logged_in() {
     [ "$(_vm_state)" = "Running" ] || return 1
-    multipass exec "$VM_NAME" -- bash -lc '
+    multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
         gh auth status --hostname github.com
-    ' &>/dev/null
+    " &>/dev/null
 }
 
 # Resolved GitHub credentials, populated by _require_github_auth.
@@ -261,10 +263,10 @@ _vm_gh_auth_login() {
         return 0
     fi
     echo "==> Authenticating gh inside the VM..."
-    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc '
+    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
-        gh auth login --hostname github.com --with-token
-    '; then
+        cd '$VM_MOUNT' && gh auth login --hostname github.com --with-token
+    "; then
         {
             echo "ERROR: 'gh auth login' failed inside the VM; the token is likely invalid or expired."
             echo "       Set SANDBOX_VAR_GITHUB_TOKEN in $DEV_DIR/.env, or re-run 'gh auth login' on the host."
@@ -370,7 +372,6 @@ _cmd_up() {
                 --cpus "$cpus" \
                 --memory "$memory" \
                 --disk "$disk" \
-                --cloud-init "$DEV_DIR/substrate.yaml" \
                 --timeout 1800
             ;;
         Stopped)
@@ -386,6 +387,17 @@ _cmd_up() {
             ;;
     esac
 
+    echo "==> Checking bootstrap prerequisites..."
+    multipass exec "$VM_NAME" -- bash -c '
+        set -euo pipefail
+        if ! command -v curl >/dev/null 2>&1 \
+            || ! command -v git >/dev/null 2>&1 \
+            || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+            sudo apt-get update --quiet
+            sudo apt-get install --assume-yes --quiet curl ca-certificates git
+        fi
+    '
+
     # Mount project if not already mounted
     echo "==> Checking project mount..."
     if ! _is_mounted; then
@@ -394,51 +406,12 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Set up the project environment with uv.
-    echo "==> Installing Python dependencies via uv..."
+    echo "==> Setting up the sandbox environment..."
+    multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
-        if ! command -v uv &>/dev/null && ! test -f ~/.local/bin/uv; then
-            if ! command -v pipx &>/dev/null; then
-                sudo apt-get install -y -q pipx
-            fi
-            pipx install 'uv==0.13.6'
-            pipx ensurepath
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
-        fi
         cd '$VM_MOUNT'
-        uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras --group dev --locked
-    "
-
-    # Install node-based tools used by the sandbox if not present
-    echo "==> Checking for node-based tools..."
-    multipass exec "$VM_NAME" -- bash -lc "
-        set -euo pipefail
-        if ! command -v node &>/dev/null; then
-            sudo snap install node --classic
-        fi
-
-        if ! command -v copilot &>/dev/null; then
-            echo '==> Installing @github/copilot...'
-            sudo npm install -g @github/copilot
-        else
-            echo '==> @github/copilot: found.'
-        fi
-
-
-        if ! command -v markdownlint-cli2 &>/dev/null; then
-            echo '==> Installing markdownlint-cli2...'
-            sudo npm install -g markdownlint-cli2
-        else
-            echo '==> markdownlint-cli2: found.'
-        fi
-
-        if ! command -v gh &>/dev/null; then
-            echo '==> Installing gh (GitHub CLI)...'
-            sudo snap install gh --classic
-        else
-            echo '==> gh: found.'
-        fi
+        mise run setup -- --group development integration agent
     "
 
     _vm_gh_auth_login

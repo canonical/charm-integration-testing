@@ -28,8 +28,8 @@ machine-wide snap channels, and Python dependencies.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
-best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, linters, and tests.
+The sandbox composes development, integration and agent groups, including Copilot.
 
 ## Usage
 

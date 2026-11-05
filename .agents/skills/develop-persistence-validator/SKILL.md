@@ -349,35 +349,40 @@ rather than registering multiple entry points for the same interface.
 4. Register the `endpoint_persistence_validators` entry point in the
    package's `pyproject.toml` (see above). If the package already existed
    with a functional validator, the package itself is already registered as
-   a Poetry dependency in the root `pyproject.toml` and in
-   `validators/runner/pyproject.toml` - the only entry-point registration
+   a workspace member and is registered in `validators/runner/pyproject.toml`
+   - the only entry-point registration
    needed is the new table above. This does not mean no other package
    metadata can change: persistence support may need its own runtime
    dependency (e.g. a client library the functional validator doesn't use)
    or dev dependency (e.g. a test double), which must still be added to the
    package's own `pyproject.toml` under `[project].dependencies` /
-   `[project.optional-dependencies].dev` (the PEP 621 format used by
-   `validators/<name>/pyproject.toml`). Workspace members are mapped through
-   `[tool.uv.sources]` in the root `pyproject.toml`. Development extras are
-   selected across workspace members by the development setup command, so no
-   separate root dependency entry is needed. If
+   `[project.optional-dependencies].dev` (matching the PEP 621 format
+   `validators/<name>/pyproject.toml` already uses). The development workspace
+   sync installs member `dev` extras, so no root dev dependency entry is needed.
+   If
    you just created the package from scratch in step 1, make sure the
-   root workspace/`validators/runner` registrations are also done (per
+   root workspace source mapping and `validators/runner` registration are also
+   done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `uv lock` and `mise run setup -- --group development` after *any*
-   change to a package's `pyproject.toml` made in this step - not just a
-   new/changed dependency or extra - including
+   way, run `uv lock` if dependencies changed, then
+   `mise run setup -- --group development` after *any* change to a package's
+   `pyproject.toml` made
+   in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
    itself. The runner discovers entry points through installed package
    metadata, so leaving the environment stale after any such change (a new
-   package, a new runtime/dev dependency, an extra change, or only a new
+   package, a new runtime/dev dependency, an `extras` change, or only a new
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
-   tests below. For a long-lived sandbox session, run `uv lock` and
-   `uv sync --all-packages --no-default-groups --all-extras --group dev --locked`
-   inside the VM after editing a `pyproject.toml`, so its installed metadata
-   reflects the change.
+   tests below. In the development sandbox this matters especially for a
+   long-lived `scripts/sandbox.sh run --interactive` session: the uv sync
+   runs once at `sandbox.sh up` time, so the VM's venv
+   reflects the `pyproject.toml` as of `up` and goes stale for any change made
+   mid-session
+   - re-run `mise run setup -- --group development` inside the VM after editing a `pyproject.toml`,
+   or the runner won't discover the new/changed entry point until the next
+   `up`.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
@@ -465,10 +470,10 @@ rather than registering multiple entry points for the same interface.
    ```
    uv run --no-sync --all-packages pytest validators/<name>
    uv run --no-sync --all-packages pytest validators/runner    # confirm discovery/wiring still passes
-   ./scripts/format.sh
-   ./scripts/lint.sh
+   mise run format
+   mise run lint
    ```
-   `scripts/lint.sh` is the same check the repository CI/reviewers require -
+   `mise run lint` is the same check the repository CI/reviewers require -
    beyond ruff/mypy it also runs bandit, yamlfix, and markdownlint-cli2, so
    running only a subset (e.g. just `ruff check`/`mypy`) can pass locally
    while still failing the established repository checks. Fix any issues
@@ -554,14 +559,14 @@ rather than registering multiple entry points for the same interface.
    commands) and confirm the canary resource is gone.
 
 9. Capture verification evidence with
-   `development-sandbox/bin/verify-persistence-validator.sh`. This is the
+   `mise run sandbox:verify-persistence-validator --`. This is the
    persistence counterpart of `verify-validator.sh`: it runs the quality and
    wiring gates, then drives the full `prepare -> disrupt -> checkpoint ->
    cleanup` lifecycle against a live model and writes a `summary.txt` +
    `report.json` evidence bundle. Run it after step 8 has injected the
    validators venv onto the units (a plain `juju deploy` does not create it):
    ```
-   $PROJECT_ROOT/development-sandbox/bin/verify-persistence-validator.sh \
+   mise run sandbox:verify-persistence-validator -- \
      --model <interface>-test \
      --app <requirer> \
      --provider <provider> \
@@ -577,7 +582,7 @@ rather than registering multiple entry points for the same interface.
    databag retains credentials at zero units), pass `--down-cmd`/`--restore-cmd`
    instead (e.g. `kubectl scale deployment ... --replicas=0` / `--replicas=1`).
    The script drives the lifecycle through
-   `development-sandbox/bin/dev-persistence.py`, which uses
+   `mise run sandbox:dev-persistence`, which uses
    `ValidatorInjectorExtension` and so handles the `--operator` flag for
    Kubernetes charms automatically. The script exits non-zero unless every
    gate passes, and `checkpoint_pass` requires a `PASS` result for the
@@ -738,11 +743,11 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
 - Unit tests cover role gating, prepare, checkpoint (pass and fail), and
   cleanup (including the no-canary-resources case).
 - `uv run --no-sync --all-packages pytest validators/<name> validators/runner` passes.
-- `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
+- `mise run format` and `mise run lint` pass (ruff, mypy, bandit,
   yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
   includes nested markdown documentation, run markdownlint-cli2 explicitly on
   those files).
-- `development-sandbox/bin/verify-persistence-validator.sh` produces a
+- `mise run sandbox:verify-persistence-validator --` produces a
   `summary.txt` + `report.json` evidence bundle (in
   `development-sandbox/reports/` when run as documented in step 9) with
   `checkpoint_pass=true` for the interface.

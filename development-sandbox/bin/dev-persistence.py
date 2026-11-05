@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# MISE description="Run persistence validation against a deployed charm"
+# MISE raw_args=true
+# MISE alias="sandbox:dev-persistence"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 # Drive the persistence lifecycle (prepare/checkpoint/cleanup) against a deployed Juju application.
 #
 # This script is designed to run INSIDE the sandbox VM.
@@ -179,7 +184,7 @@ def main() -> None:
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
         print(f"ERROR: Could not import project packages: {exc}", file=sys.stderr)
-        print("Run 'scripts/sandbox.sh up' to set up the Python venv.", file=sys.stderr)
+        print("Run 'mise run setup -- --group development' to set up the Python environment.", file=sys.stderr)
         sys.exit(1)
 
     backend = JubilantBackend()
