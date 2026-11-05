@@ -792,6 +792,8 @@ class BundleBuilder:
         revision: int | None = None,
         branch: str | None = None,
         preserve_application_pins: bool = False,
+        base: str | None = None,
+        connect_to_interface: str | None = None,
     ) -> bool:
         """Fetch `charm_name` on the given channel and add it to the domain for `charm_id`.
 
@@ -804,14 +806,15 @@ class BundleBuilder:
         ]
         # Try each application's selectors: a channel's default release may not satisfy its pins.
         selectors = [
-            (app.revision if app.revision is not None else revision, app.base)
+            (app.revision if app.revision is not None else revision, app.base if app.base is not None else base)
             for app in applications
-            if revision is None or app.revision is None or app.revision == revision
+            if (revision is None or app.revision is None or app.revision == revision)
+            and (base is None or app.base is None or app.base == base)
         ]
         if not applications:
-            selectors.append((revision, None))
+            selectors.append((revision, base))
         expanded = False
-        for selected_revision, base in dict.fromkeys(selectors):
+        for selected_revision, selected_base in dict.fromkeys(selectors):
             try:
                 charm = self.charmhub_client.charm_from_store(
                     charm_name=charm_name,
@@ -822,7 +825,7 @@ class BundleBuilder:
                     charm_risk=risk,
                     charm_revision=selected_revision,
                     charm_branch=branch,
-                    ubuntu_version=base,
+                    ubuntu_version=selected_base,
                 )
             except CharmReleaseNotFoundException:
                 self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
@@ -837,6 +840,7 @@ class BundleBuilder:
                 model_key,
                 connect_to_id=connect_to_id,
                 connect_to_neighbors=True,
+                connect_to_interface=connect_to_interface,
             )
         return expanded
 
@@ -986,31 +990,20 @@ class BundleBuilder:
 
         # Also try fetching the principal at the subordinate's base, in case
         # the principal has a variant that matches.
-        try:
-            principal_spec = domain.charms[tag.principal_charm_id].spec
-            principal_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.principal_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=principal_spec.channel.track or None,
-                charm_risk=principal_spec.channel.risk or None,
-                charm_branch=principal_spec.channel.branch or None,
-                ubuntu_version=tag.subordinate_base,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                principal_charm,
-                tag.principal_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.subordinate_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
-            )
+        principal_spec = domain.charms[tag.principal_charm_id].spec
+        expanded |= self._fetch_and_add_charm_variant(
+            charm_id=tag.principal_charm_id,
+            charm_name=tag.principal_charm_name,
+            domain=domain,
+            model_key=model_ref,
+            track=principal_spec.channel.explicit_track,
+            risk=principal_spec.channel.risk or None,
+            branch=principal_spec.channel.branch or None,
+            base=tag.subordinate_base,
+            connect_to_id=tag.subordinate_charm_id,
+            connect_to_interface=interface,
+            preserve_application_pins=True,
+        )
 
         return expanded
 

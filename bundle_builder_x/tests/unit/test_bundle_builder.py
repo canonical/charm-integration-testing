@@ -227,8 +227,10 @@ class TestHandleSubordinateBaseMismatch:
             for integration in domain.charm_integrations
         )
 
-    def test_returns_true_and_expands_when_principal_variant_found(self) -> None:
+    @pytest.mark.parametrize("revision", [None, 1], ids=["unpinned", "pinned-revision"])
+    def test_returns_true_and_expands_when_principal_variant_found(self, revision: int | None) -> None:
         domain = _domain_with_base_mismatch()
+        domain.models[ModelRef(name="m")].applications["ubuntu"].revision = revision
         ubuntu_2404 = _make_charm(
             "ubuntu",
             {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
@@ -249,10 +251,37 @@ class TestHandleSubordinateBaseMismatch:
         assert len(domain.charms) == 3
         assert domain.charms[2].spec.name == "ubuntu"
         assert domain.charms[2].spec.ubuntu_version == "24.04"
+        assert fake.charm_from_store_calls[-1]["charm_revision"] == revision
+        assert fake.charm_from_store_calls[-1]["ubuntu_version"] == "24.04"
         assert any(
             {integration.requires_charm_id, integration.provides_charm_id} == {1, 2}
             for integration in domain.charm_integrations
         )
+
+    @pytest.mark.parametrize("pin", ["base", "revision", "channel"])
+    def test_principal_base_expansion_does_not_add_a_variant_that_bypasses_pins(self, pin: str) -> None:
+        domain = _domain_with_base_mismatch()
+        principal = domain.charms[0].spec
+        application = domain.models[ModelRef(name="m")].applications["ubuntu"]
+        variant = principal.model_copy(update={"ubuntu_version": "24.04"})
+        if pin == "base":
+            application.base = principal.ubuntu_version
+        elif pin == "revision":
+            application.revision = principal.revision
+            variant = variant.model_copy(update={"revision": principal.revision + 1})
+        else:
+            application.channel = principal.channel
+            variant = variant.model_copy(update={"channel": CharmChannel.model_validate("latest/edge")})
+        fake = _FakeCharmhubClient(
+            charm_responses=[CharmReleaseNotFoundException("nrpe"), CharmReleaseNotFoundException("nrpe"), variant]
+        )
+
+        expanded = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert expanded is False
+        assert len(domain.charms) == 2
+        if pin == "base":
+            assert all(call["charm_name"] != "ubuntu" for call in fake.charm_from_store_calls)
 
     def test_returns_false_when_no_variant_found(self) -> None:
         domain = _domain_with_base_mismatch()
