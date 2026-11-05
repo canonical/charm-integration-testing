@@ -56,6 +56,40 @@ Without dedicated tokens, the script asks before using your host `gh` token in t
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
 Declining leaves the corresponding tools unauthenticated.
 
+## Local custom skills
+
+Put personal skills in `sandbox-local/.github/skills/<skill-name>/SKILL.md`.
+The `sandbox-local/` directory is gitignored. Set this in
+`development-sandbox/.env`, or prefix a single `run` invocation with it:
+
+```bash
+SANDBOX_EXTRA_CONFIG_DIR=sandbox-local scripts/sandbox.sh run --interactive
+```
+
+The directory must be inside the checkout so the existing project mount makes
+it available in the VM. Relative paths resolve against the project root.
+Both interactive and autonomous runs pass the directory to Copilot's
+`--add-dir`; skills are not installed into the VM's global configuration.
+This also trusts `.github/agents` in that directory if present, so load only
+configuration you trust. Skills do not override existing instruction policies.
+Use `/skills` to inspect loaded skills; loading a skill does not guarantee its
+invocation for every task.
+
+## Custom initial context
+
+Set `SANDBOX_PROMPT_FILE` to replace the default `.agents/skills/system.md`
+context for both interactive and autonomous runs:
+
+```bash
+SANDBOX_PROMPT_FILE=sandbox-local/system.md scripts/sandbox.sh run --interactive
+```
+
+Relative paths resolve against the project root; absolute host paths are also
+supported. The launcher copies the file into the VM's temporary session prompt
+and appends the task, if supplied. This replaces the entire default context,
+not Copilot's system instructions or other repository instructions. Leave it
+unset to retain the default.
+
 ## Recommended MCP servers
 
 Copy the optional [sample](mcp.json.sample), replace the credential placeholders,
