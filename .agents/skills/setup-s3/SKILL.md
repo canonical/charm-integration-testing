@@ -20,7 +20,7 @@ systemd service. No charm, Docker daemon, or shared QA storage access is needed.
    ```
 
 3. The server configuration file contains one identity limited to harness buckets.
-   The script verifies bucket creation, tagging, read/write and deletion with
+   The script verifies bucket creation, read/write and deletion with
    those credentials, and checks that out-of-scope bucket creation is denied.
    It writes the mode-0600
    `s3.conf` credential file only after that probe succeeds; the server configuration

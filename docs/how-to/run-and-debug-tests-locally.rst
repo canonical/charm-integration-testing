@@ -63,10 +63,12 @@ The file contains unquoted ``KEY=value`` entries:
    S3_SECRET_KEY=...
    S3_BUCKET_NAMESPACE=local
 
-``S3_REGION`` defaults to ``us-east-1``. The namespace scopes stale-bucket cleanup,
-so use a dedicated S3 project/account for test buckets. The integrator receives
+``S3_REGION`` defaults to ``us-east-1``. Use a namespace dedicated to disposable test
+buckets: scheduled cleanup removes matching harness buckets older than four hours,
+regardless of which credentials created them. Use a dedicated S3 project/account
+for test buckets. The integrator receives
 ``S3_ACCESS_KEY`` and ``S3_SECRET_KEY``. These same credentials must permit
-bucket creation, tagging and deletion, as well as workload access.
+bucket creation and deletion, as well as workload access.
 
 For the local sandbox service, run setup and load its config path:
 
