@@ -26,6 +26,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Set up LXD cloud tools
+      shell: bash
+      run: mise run setup -- --group cloud-lxd
     - name: Prepare LXD cloud files
       id: register
       env:

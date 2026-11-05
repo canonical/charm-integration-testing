@@ -18,99 +18,51 @@ mise run setup -- --group development
 
 | File | Owns |
 |---|---|
-| `mise.toml` / `mise.lock` / `.mise/locks/` | One executable catalogue, artifact/dependency locks, and snap channels |
-| `mise-tasks/setup` | Setup groups, explicit tool/package requests and project installation |
-| `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
+| `mise.toml`, `mise.lock`, `.mise/locks/` | Tool catalogue, locks and snap channels |
+| `mise-tasks/setup` | Setup groups and explicit tool, package and project installation |
+| `pyproject.toml`, `poetry.lock` | Project Python dependencies and development extras |
 
-`[tools]` declares isolated, locked executables;
-`[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
-and Poetry are installed by uv in isolated environments. `juju-k8s-crashdump` is
-pinned to the main-branch commit containing
+Version-only tools are listed under `[tools]`; per-tool tables hold provider
+metadata such as npm/PyPI dependencies. `[bootstrap.packages]` declares
+machine-wide packages. Mise and uv install standalone tools; Poetry manages
+project dependencies. Mypy stays in Poetry because it uses the project's
+Pydantic plugin. The `juju-k8s-crashdump` tool is pinned to the commit containing
 [canonical/juju-k8s-crashdump#21](https://github.com/canonical/juju-k8s-crashdump/pull/21).
-Both crashdump tools remain Git-commit-pinned with version-only dependency locking.
-Uv bootstraps tools, while Poetry manages project dependencies.
-Mypy stays with Poetry because it uses the project's
-Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-### Explicit setup
+### Setup groups
 
 | Command | Prepares |
 |---|---|
 | `mise run setup -- --group runtime` | Python, uv, Poetry and runtime project dependencies |
-| `mise run setup -- --group development` | Repository checkers, Node and development project dependencies |
+| `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
 | `mise run setup -- --group integration` | Test utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
 | `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
+| `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
+| `mise run setup -- --group cloud-lxd` | Juju and yq clients |
 
-Groups compose: `mise run setup -- --group development integration` prepares both.
-Each group declares tools, packages and whether project dependencies are needed.
-Runtime groups run `poetry install --only main`; development runs
-`poetry install --with dev`. Combined groups install project dependencies once,
-with development taking precedence. The optional Poetry `dev` group contains
-coverage, mypy, type stubs, validator test utilities and validator development extras.
-Runtime dependencies retain pytest (the integration runner) and tracing's deep
-validation dependencies. No package versions change between these environments.
+Groups compose, for example `mise run setup -- --group development integration`.
+Runtime selects `poetry install --only main`; development selects `poetry install
+--with dev` and takes precedence when groups are combined. Execution tasks do not
+install dependencies, and installed tools are not PATH-isolated by group.
 
-Poetry installation does not remove previously installed development dependencies.
-Use a fresh virtual environment for a lean runtime installation, or explicitly run
-`poetry sync --only main` to remove development dependencies from an existing one.
-
-Use `--no-packages` to skip group snaps without skipping its tools or project
-dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
-Explicit requests also compose with groups:
-`mise run setup -- --group runtime --tools aqua:jqlang/jq --packages snap:juju`.
-`--tools` and `--packages` alone do not install project dependencies.
-`--no-packages` cannot be combined with explicit `--packages`.
-`--dry-run` previews package-only requests; it cannot be used with tool or project
-installation. No arguments is an error; `--help` lists the interface.
-
-Versions appear only in the catalogue. Groups explicitly include installation
-prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
-installation is disabled, including during task execution; no first-use installer
-or additional environment selection is needed. With `--tools`, explicitly name
-those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
-Tool and package names must match the catalogue; version overrides are rejected.
-Bare `mise install` intentionally still installs the entire catalogue; use setup
-instead. Strict locking preserves managed versions and artifact checksums.
-
-Groups control installation, not PATH isolation. Installed catalogue tools
-are available together. A missing executable can fall back to a host installation;
-run setup before executing an operation rather than relying on host tools.
-
-Execution tasks do not install dependencies. Prepare the development group before
-unit tests, lint or formatting, and the integration group before live tests.
-Poetry owns dependency reconciliation; there is no additional readiness cache.
-
-The CI setup action wraps the same task. Lint and unit-test jobs use
-`groups: development`; live tests use `groups: integration`. Cleanup requests
-only `aqua:jqlang/jq`; workflow/security checks likewise request their individual
-catalogue `tools`, without installing the project. The action's `packages` input
-supports explicit snap requests. Installed tools are available in later steps through
-mise's activation, without exporting a profile. The test workflow supplies
-`JUJU_CHANNEL` at job scope for cloud setup.
-Mise-action caching remains disabled.
-
-System-package installation is explicit and operation-owned: OpenStack cloud
-setup ensures Juju and `openstackclients`; Kubernetes cloud setup ensures Juju
-and kubectl; Swift uploads independently ensure `openstackclients`. Cleanup
-selects clients for its environment. A satisfied snap/channel is checked locally
-and skipped; repeat calls do not force a refresh. Kubernetes-only cloud access
-does not install OpenStack clients, although Swift reporting still requires them.
-
-Installing system packages does not initialize substrates or register clouds.
+Use `--no-packages` to skip group snaps or `--dry-run` to preview package-only
+requests. Explicit `--tools` and `--packages` must match the catalogue; those
+requests alone do not install project dependencies. Automatic installation is
+disabled, and a bare `mise install` intentionally installs the full catalogue.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
-Snapd can auto-refresh them; applying a changed channel can also refresh an
-existing daemon. Preview changes with
-`mise run setup -- --packages snap:juju --dry-run` on an existing machine.
-Explicit package requests never implicitly apply the whole catalogue.
 
-OpenStack operations and Swift uploads share `openstackclients`; remove any
+CI uses the same setup task: development and test jobs select `development` or
+`integration`, while cloud actions and cleanup select only their needed clients.
+OpenStack operations and Swift uploads share `openstackclients`; remove a
 conflicting `openstack` snap manually.
 
 ### Selecting the Juju client
 
-For a persistent selection on this machine:
+To select a persistent Juju client channel on this machine:
 
 ```bash
 mise run juju:channel -- 4/stable
@@ -119,24 +71,15 @@ juju version                          # Check the actual installed client
 mise run juju:channel -- --reset       # Remove the selection and apply the default
 ```
 
-The task saves only the channel in
-`${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml`, outside
-the checkout. In the sandbox this is VM-local, survives new shells and VM restarts,
-and is shared by checkouts in the same VM. A failed channel install does not replace
-the previous selection. Reset removes the selection before applying the default;
-if installation fails, fix the reported error and retry.
+The selection is saved outside the checkout at
+`${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml`.
+In the sandbox it persists across shells and VM restarts. A failed install does
+not replace the previous selection.
 
-`mise run setup` applies channel selection to requested Juju packages.
-Precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
-`JUJU_CHANNEL=4/edge mise run setup -- --packages snap:juju` overrides one invocation without changing the
-saved selection. The setup action's `juju-channel` input and test workflow's
-`juju_channel` input use this temporary path; an empty input uses the saved selection
-or repository default.
-
-Selected channels refresh installed Juju before applying packages, including branch
-changes hidden by snap's installed-state listing. Channels are not revision pins.
-This changes only the client, not controllers or model agents; use fresh test
-controllers when experimenting with another major version.
+Setup precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
+Use `JUJU_CHANNEL=4/edge mise run setup -- --packages snap:juju` for a temporary
+override. Channels are not revision pins and do not change controllers or agents;
+use fresh test controllers when trying another major version.
 
 ## Linting and Formatting
 

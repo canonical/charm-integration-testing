@@ -13,11 +13,13 @@ clusters. Setup does not create chaos experiments.
 
 ## Set up Kubernetes
 
-1. Run the setup script:
+1. Install the local substrate tools, then run the setup script:
    ```
+   mise run setup -- --group local-k8s
    $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
    ```
-   This also runs the Chaos Mesh setup. Do not run it separately afterward.
+   Mise installs the declared tools and packages. The script provisions the
+   substrate and installs Chaos Mesh. Do not run Chaos Mesh separately afterward.
    Wait for the script to finish successfully before proceeding.
 
 2. For manual charm work, bootstrap a controller and create a model only
@@ -41,7 +43,9 @@ clusters. Setup does not create chaos experiments.
 Use this path when Kubernetes is already ready and only Chaos Mesh setup
 or verification is needed. Do not bootstrap another controller or model.
 
-1. Ensure Helm 3, jq, and a readable Kubernetes configuration are available.
+1. Ensure local Kubernetes tools are installed with
+   `mise run setup -- --group local-k8s`, and a readable Kubernetes
+   configuration is available.
    The script uses kubectl, or `sudo -n k8s kubectl` if kubectl is absent.
 2. Run:
    ```bash
