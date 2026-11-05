@@ -1,4 +1,6 @@
 ---
+# Unsupported pending a safe Istio deployment and testing approach.
+# https://github.com/canonical/charm-integration-testing/issues/1219
 # https://github.com/canonical/istio-operators/issues/672
 # metrics-endpoint was added to provides in track 1.22; tracks 1.16-1.21 have empty provides.
 # The fallback block (no criteria) covers 1.22+, latest, and any future tracks automatically.
@@ -12,6 +14,7 @@ overrides:
           - track: '1.19'
           - track: '1.20'
           - track: '1.21'
+    assumes: [unsupported-istio]
     requires:
       istio-pilot:
         features: [istio-pilot]
@@ -20,7 +23,8 @@ overrides:
     constraints:
       - 'set(config[kind])'
       - '"istio-pilot" in features(endpoint[istio-pilot])'
-  - provides:
+  - assumes: [unsupported-istio]
+    provides:
       metrics-endpoint:
         optional: true
     requires:
