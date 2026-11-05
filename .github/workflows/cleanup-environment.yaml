@@ -65,7 +65,8 @@ jobs:
       - name: Install AWS CLI
         uses: ./.github/actions/install-with-retry
         with:
-          command: python3 -m venv "${{ runner.temp }}/s3-list" && "${{ runner.temp }}/s3-list/bin/pip"
+          command: sudo apt-get update --quiet && sudo apt-get install --quiet --assume-yes
+            python3-venv jq && python3 -m venv "${{ runner.temp }}/s3-list" && "${{ runner.temp }}/s3-list/bin/pip"
             install 'awscli>=1.40,<2'
       - name: List buckets and check the completed test bucket
         shell: bash
