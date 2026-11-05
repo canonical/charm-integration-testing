@@ -1,63 +1,41 @@
 ---
 name: Clean up environment
-run-name: Clean up ${{ inputs.environment }} environment
-concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}${{ inputs.dry_run && '-dry-run'
-    || '' }}
-  cancel-in-progress: true
+run-name: List S3 buckets for ${{ inputs.environment }} (read-only)
 permissions:
-  contents: read  # only needed for private repos
+  contents: read
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: Environment to clean.
+        description: Environment whose S3 buckets should be listed.
         type: choice
-        default: ps6-sqa-stg_charm_qa_kubernetes-1
+        default: ps7-sqa-prod_charm_qa_kubernetes-1
         options:
-          - ps6-sqa-stg_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_kubernetes-1
-          - ps6-sqa-prod_charm_qa_openstack-1
           - ps7-sqa-prod_charm_qa_kubernetes-1
-          - ps7-sqa-prod_charm_qa_openstack-1
-          - ps7-sqa-prod_charm_qa_lxd-1
-      age_threshold:
-        description: Age threshold in minutes (resources older than this will be deleted)
-        type: number
-        default: 240
-      dry_run:
-        description: Preview cleanup without deleting resources or rawfile data (creates
-          temporary debug pods).
-        type: boolean
-        default: false
   workflow_call:
     inputs:
       environment:
-        description: Environment to clean.
         type: string
         required: true
       age_threshold:
-        description: Age threshold in minutes (resources older than this will be deleted)
         type: number
         default: 240
       dry_run:
-        description: Preview cleanup without deleting resources or rawfile data (creates
-          temporary debug pods).
         type: boolean
-        default: false
+        default: true
     secrets:
       PROD_SQA_KUBECONFIG:
-        required: true
+        required: false
       STG_SQA_KUBECONFIG:
-        required: true
+        required: false
       PROD_SQA_NOVARC:
-        required: true
+        required: false
       PROD_PS7_KUBECONFIG:
-        required: true
+        required: false
       PROD_PS7_NOVARC:
-        required: true
+        required: false
       PROD_PS7_LXD:
-        required: true
+        required: false
       S3_PS6_SQA_STG_CHARM_QA_KUBERNETES:
         required: false
       S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES:
@@ -71,22 +49,10 @@ on:
       S3_PS7_SQA_PROD_CHARM_QA_LXD:
         required: false
 jobs:
-  cleanup-environment:
-    name: Clean up any leftover artifacts from old Charm QA environments
+  list-buckets:
+    name: List buckets without changing any cloud resources
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
-    env:
-      AGE_THRESHOLD: ${{ inputs.age_threshold }}
-      DRY_RUN: ${{ inputs.dry_run }}
     steps:
-
-      ##################################################################################
-      # _____ ______ _______ _    _ _____  
-      #  / ____|  ____|__   __| |  | |  __ \ 
-      # | (___ | |__     | |  | |  | | |__) |
-      #  \___ \|  __|    | |  | |  | |  ___/ 
-      #  ____) | |____   | |  | |__| | |     
-      # |_____/|______|  |_|   \____/|_|     
-      #                                      
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -96,657 +62,38 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.environment }}
-      - name: Resolve credentials
-        id: creds
-        shell: bash
-        env:
-          CREDENTIALS_SECRET_NAME: ${{ steps.env_info.outputs.credentials-secret }}
-          CLOUD_TYPE: ${{ steps.env_info.outputs.cloud-type }}
-          STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
-          PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
-          PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
-          PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
-          PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
-          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
-        run: |
-          if ! awk -v age="$AGE_THRESHOLD" 'BEGIN { exit !(age > 0) }'; then
-            echo "::error::AGE_THRESHOLD must be greater than zero"
-            exit 1
-          fi
-          if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "kubernetes=true" >> $GITHUB_OUTPUT
-            echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
-            echo "KUBECONFIG=$(realpath kubeconfig)" >> $GITHUB_ENV
-          elif [[ "${CLOUD_TYPE}" == "o7k" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "openstack=true" >> $GITHUB_OUTPUT
-            # Extract environment variables from the RC file
-            while IFS= read -r line; do
-              # Only process lines that look like they set OpenStack variables
-              # This beast of a regex matches an optional leading 'export' with whitespace,
-              # followed by an OS_ variable name, an equals sign, and a value that may be
-              # unquoted, single-quoted, or double-quoted.
-              # Only one of the unquoted, single-quoted, or double-quoted groups will match
-              if [[ "$line" =~ ^(export[[:space:]]+)?(OS_[A-Z_]+)=(\"([^\"]*)\"|\'([^\']*)\'|([^[:space:]]*))$ ]]; then
-                  key="${BASH_REMATCH[2]}"
-                  value="${BASH_REMATCH[4]}${BASH_REMATCH[5]}${BASH_REMATCH[6]}"
-                  echo "::add-mask::$value"
-                  echo "$key=$value" >> $GITHUB_ENV
-                fi
-            done <<< "${!CREDENTIALS_SECRET_NAME}"
-          elif [[ "${CLOUD_TYPE}" == "lxd" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
-            echo "lxd=true" >> "$GITHUB_OUTPUT"
-            umask 077
-            LXD_CREDENTIALS_DIR="${RUNNER_TEMP}/lxd-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            mkdir -p "$LXD_CREDENTIALS_DIR"
-            printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
-            echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
-          fi
-      ##################################################################################
-      #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
-      # | |/ / |  | |  _ \|  ____|  __ \| \ | |  ____|__   __|  ____|/ ____|
-      # | ' /| |  | | |_) | |__  | |__) |  \| | |__     | |  | |__  | (___  
-      # |  < | |  | |  _ <|  __| |  _  /| . ` |  __|    | |  |  __|  \___ \ 
-      # | . \| |__| | |_) | |____| | \ \| |\  | |____   | |  | |____ ____) |
-      # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
-      #
-      - name: Install kubectl
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
+      - name: Install AWS CLI
         uses: ./.github/actions/install-with-retry
         with:
-          command: sudo snap install kubectl --classic
-      - name: Remove orphaned rawfile PV directories from nodes
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # On Juju 4 with K8s, destroy-controller --destroy-storage can leave workload PVCs
-          # undeleted. Because the PVC remains Bound, the PV never transitions to Released, the
-          # rawfile CSI external-provisioner never calls DeleteVolume, and the on-disk directory
-          # under /var/snap/k8s/common/rawfile-storage is never removed. This step iterates over
-          # every node and deletes any on-disk rawfile directory that has no corresponding PV
-          # still known to k8s.
-          # Related: https://github.com/juju/juju/issues/22309
-          STORAGE_PATH="/var/snap/k8s/common/rawfile-storage"
-
-          # Collect names of all PVs still known to k8s after the deletions above.
-          # Any on-disk directory not in this list is an orphan and should be removed.
-          if ! KNOWN_PVS_RAW=$(kubectl get pv \
-            --output jsonpath='{range .items[*]}{.metadata.name}{" "}{end}'); then
-            echo "Failed to retrieve PersistentVolumes; aborting orphan cleanup"
-            exit 1
-          fi
-          KNOWN_PVS=$(xargs <<< "$KNOWN_PVS_RAW")
-          echo "Known PVs: ${KNOWN_PVS:-none}"
-          NODES=$(kubectl get nodes \
-            --output jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
-          if [[ -z "$NODES" ]]; then
-            echo "No nodes found, skipping orphan cleanup"
-            exit 0
-          fi
-          while IFS= read -r node; do
-            echo "==> Checking node: $node"
-            debug_status=0
-            debug_output=$(kubectl debug "node/$node" \
-              --image=ubuntu:24.04 \
-              --profile=sysadmin \
-              -- env DRY_RUN="$DRY_RUN" bash -c "
-                storage=\"/host${STORAGE_PATH}\"
-                known_pvs='${KNOWN_PVS}'
-                [[ -d \"\$storage\" ]] || { echo '  (no rawfile-storage directory)'; exit 0; }
-                for dir in \$(ls \"\$storage\" 2>/dev/null); do
-                  found=false
-                  for pv in \$known_pvs; do
-                    [[ \"\$dir\" == \"\$pv\" ]] && found=true && break
-                  done
-                  if \$found; then
-                    echo \"  OK: \$dir\"
-                  else
-                    size=\$(stat --format='%s' \"\$storage/\$dir/disk.img\" 2>/dev/null || echo 0)
-                    human=\$(numfmt --to=iec \"\$size\" 2>/dev/null || echo \"\${size}B\")
-                    if [[ \"\$DRY_RUN\" == \"true\" ]]; then
-                      echo \"  Dry run: would delete orphan: \$dir (apparent: \$human)\"
-                    else
-                      echo \"  DELETING orphan: \$dir (apparent: \$human)\"
-                      rm -rf \"\$storage/\$dir\"
-                    fi
-                  fi
-                done
-              " 2>&1) || debug_status=$?
-            printf '%s\n' "$debug_output"
-            if (( debug_status != 0 )); then
-              echo "::error::kubectl debug failed for $node (exit status: $debug_status)"
-              exit "$debug_status"
-            fi
-            if [[ "$debug_output" =~ (node-debugger-[a-z0-9.-]*[a-z0-9]) ]]; then
-              pod_name="${BASH_REMATCH[1]}"
-            else
-              echo "::error::Could not determine the debug pod name for $node"
-              exit 1
-            fi
-
-            # Wait up to 5 minutes for the pod to finish, then print its logs
-            kubectl wait "pod/$pod_name" \
-              --for=jsonpath='{.status.phase}'=Succeeded \
-              --timeout=5m 2>/dev/null \
-              || kubectl wait "pod/$pod_name" \
-                   --for=jsonpath='{.status.phase}'=Failed \
-                   --timeout=10s 2>/dev/null \
-              || true
-            kubectl logs "pod/$pod_name" || echo "  Warning: could not retrieve logs for $pod_name"
-            kubectl delete "pod/$pod_name" --ignore-not-found=true --timeout=2m
-          done <<< "$NODES"
-      - name: Find all model and controller namespaces older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          kubectl get namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .items[] |
-            select(.metadata.name | test("^(controller-|log-scraper-)?charmqa-")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Find all webhook configurations older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          namespaces=$(mktemp)
-          trap 'rm -f "$namespaces"' EXIT
-          kubectl get namespaces --output json | jq '[.items[].metadata.name]' > "$namespaces"
-
-          # Helm ownership does not protect webhooks whose QA target namespaces are gone.
-          kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces "$namespaces" '
-            def orphaned_qa_webhook:
-              (.webhooks | length > 0) and
-              all(.webhooks[];
-                (.clientConfig.service.namespace // "") as $namespace |
-                ($namespace | test("^(controller-)?charmqa-")) and
-                (($namespaces[0] | index($namespace)) == null)
-              );
-            def helm_managed:
-              .metadata.labels["app.kubernetes.io/managed-by"] == "Helm"
-              or (
-                (.metadata.annotations["meta.helm.sh/release-name"] // "") != ""
-                and (.metadata.annotations["meta.helm.sh/release-namespace"] // "") != ""
-              );
-            .items[] |
-            select((helm_managed | not) or orphaned_qa_webhook) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Find all juju-credential service accounts older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          kubectl get serviceaccounts --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .items[] |
-            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            .metadata.namespace + ":" + .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Find all juju-credential secrets older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          kubectl get secrets --all-namespaces --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .items[] |
-            select(.type == "kubernetes.io/service-account-token") |
-            select(.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            .metadata.namespace + ":" + .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Find released rawfile PersistentVolumes older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          # Released rawfile PVs should be cleaned up by the CSI driver automatically, but
-          # will get stuck if the node they were provisioned on no longer exists. Add them to
-          # the delete list
-          kubectl get pv --output json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .items[] |
-            select(.status.phase == "Released") |
-            select(.spec.storageClassName == "csi-rawfile-default") |
-            select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-            .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Find QA cluster RBAC older than the age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        shell: bash
-        run: |
-          # Select old RBAC with QA/credential names or QA model labels, only when any
-          # model and Helm owner namespaces are absent. Except for credential bindings,
-          # subjects must all be ServiceAccounts in absent QA namespaces. Keep roles
-          # referenced by surviving cluster bindings or any namespaced RoleBinding.
-          set -euo pipefail
-          kubectl get namespaces --output json > namespaces.json
-          kubectl get clusterroles,clusterrolebindings,rolebindings --all-namespaces --output json |
-            jq --raw-output --argjson age "$AGE_THRESHOLD" --slurpfile namespaces namespaces.json '
-            [$namespaces[0].items[].metadata.name] as $namespaces |
-            def candidate:
-              select((now - (.metadata.creationTimestamp | fromdateiso8601)) > ($age * 60)) |
-              select(
-                (.metadata.name | test("^(controller-)?charmqa-|^juju-credentials?-[a-zA-Z0-9]{8}$")) or
-                (.metadata.labels["model.juju.is/name"] // "" | test("^(controller-)?charmqa-"))
-              ) |
-              select(all(
-                [.metadata.labels["model.juju.is/name"], .metadata.annotations["meta.helm.sh/release-namespace"]][];
-                . == null or (. as $namespace | $namespaces | index($namespace) == null)
-              ));
-            .items as $resources |
-            [$resources[] | select(.kind == "ClusterRole" or .kind == "ClusterRoleBinding") |
-              candidate] as $candidates |
-            [$candidates[] | select(.kind == "ClusterRoleBinding") |
-              select(
-                (.metadata.name | test("^juju-credentials?-[a-zA-Z0-9]{8}$")) or
-                all(.subjects[]?; .kind == "ServiceAccount" and
-                  ((.namespace // "") | test("^(controller-)?charmqa-")) and
-                  (.namespace as $namespace | $namespaces | index($namespace) == null))
-              )] as $bindings |
-            [$bindings[].metadata.name] as $binding_names |
-            # A ClusterRole may also be used by a namespaced RoleBinding.
-            [$resources[] |
-              select(.kind == "RoleBinding" or
-                (.kind == "ClusterRoleBinding" and
-                  (.metadata.name as $name | $binding_names | index($name) == null))) |
-              select(.roleRef.kind == "ClusterRole") | .roleRef.name] as $retained_roles |
-            ($bindings[], ($candidates[] |
-              select(.kind == "ClusterRole") |
-              select(.metadata.name as $name | $retained_roles | index($name) == null))) |
-            .kind + "/" + .metadata.name
-          ' >> resources_to_remove.txt
-      - name: Remove all resources
-        shell: bash
-        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        run: |-
-          set -uo pipefail
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "Dry run: Kubernetes resources that would be deleted:"
-            cat resources_to_remove.txt || exit 1
-            exit 0
-          fi
-
-          # Group resources by namespace
-          declare -A namespaced_resources
-          cluster_resources=()
-          while IFS= read -r line; do 
-            if [[ "$line" == *:* ]]; then
-              namespace="${line%%:*}"
-              resource="${line#*:}"
-              namespaced_resources["$namespace"]+="$resource "
-            else
-              cluster_resources+=("$line")
-            fi
-          done < resources_to_remove.txt
-          failed=0
-          pids=()
-          descriptions=()
-
-          # Delete cluster-scoped resources
-          if [ ${#cluster_resources[@]} -gt 0 ]; then
-            printf '%s\n' "${cluster_resources[@]}" |
-              xargs --no-run-if-empty --max-args=100 kubectl delete --ignore-not-found=true --timeout=25m &
-            pids+=("$!")
-            descriptions+=("cluster-scoped resources")
-          fi
-
-          # Delete namespaced resources (one command per namespace)
-          for namespace in "${!namespaced_resources[@]}"; do
-            read -r -a resources <<< "${namespaced_resources[$namespace]}"
-            printf '%s\n' "${resources[@]}" |
-              xargs --no-run-if-empty --max-args=100 kubectl delete --namespace="$namespace" --ignore-not-found=true --timeout=25m &
-            pids+=("$!")
-            descriptions+=("resources in namespace $namespace")
-          done
-          for i in "${!pids[@]}"; do
-            if wait "${pids[$i]}"; then
-              echo "Cleanup succeeded for ${descriptions[$i]}"
-            else
-              status=$?
-              echo "Cleanup failed for ${descriptions[$i]} (exit status: $status)" >&2
-              failed=1
-            fi
-          done
-          exit "$failed"
-
-      ##################################################################################
-      #   ____  _____  ______ _   _  _____ _______       _____ _  __
-      #  / __ \|  __ \|  ____| \ | |/ ____|__   __|/\   / ____| |/ /
-      # | |  | | |__) | |__  |  \| | (___    | |  /  \ | |    | ' / 
-      # | |  | |  ___/|  __| | . ` |\___ \   | | / /\ \| |    |  <  
-      # | |__| | |    | |____| |\  |____) |  | |/ ____ \ |____| . \ 
-      #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
-      #
-      - name: Install openstack client
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install openstackclients
-      - name: Find and delete servers older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |
-          openstack server list --format json | jq --raw-output '.[].ID' | while read -r server_id; do
-            created=$(openstack server show "$server_id" --format json | jq -r '.created')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete server: $server_id (age: $age_minutes minutes)"
-                continue
-              fi
-              echo "Deleting server: $server_id (age: $age_minutes minutes)"
-              openstack server delete "$server_id" || true
-            fi
-          done
-      - name: Find and delete security groups older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |
-          openstack security group list --format json | jq --raw-output '.[] | select(.Name != "default") | .ID' | while read -r sg_id; do
-            created=$(openstack security group show "$sg_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete security group: $sg_id (age: $age_minutes minutes)"
-                continue
-              fi
-              echo "Deleting security group: $sg_id (age: $age_minutes minutes)"
-              openstack security group delete "$sg_id" || true
-            fi
-          done
-      - name: Find and delete load balancers older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |
-          openstack loadbalancer list --format json | jq --raw-output '.[].id' | while read -r lb_id; do
-            created=$(openstack loadbalancer show "$lb_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete load balancer: $lb_id and its pools (age: $age_minutes minutes)"
-                continue
-              fi
-              echo "Deleting load balancer: $lb_id (age: $age_minutes minutes)"
-              # Delete pools first
-              openstack loadbalancer pool list --loadbalancer "$lb_id" --format json | jq --raw-output '.[].id' | while read -r pool_id; do
-                echo "  Deleting pool: $pool_id"
-                openstack loadbalancer pool delete "$pool_id" || true
-              done
-              # Then delete the load balancer
-              openstack loadbalancer delete "$lb_id" || true
-            fi
-          done
-      - name: Find and delete volumes older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |
-          openstack volume list --format json | jq --raw-output '.[].ID' | while read -r volume_id; do
-            created=$(openstack volume show "$volume_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete volume: $volume_id (age: $age_minutes minutes)"
-                continue
-              fi
-              echo "Deleting volume: $volume_id (age: $age_minutes minutes)"
-              openstack volume delete "$volume_id" || true
-            fi
-          done
-      - name: Find and delete floating IPs older than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |-
-          openstack floating ip list --format json | jq --raw-output '.[].ID' | while read -r fip_id; do
-            created=$(openstack floating ip show "$fip_id" --format json | jq -r '.created_at')
-            age_minutes=$(( ($(date +%s) - $(date -d "$created" +%s)) / 60 ))
-            if [[ $age_minutes -gt $AGE_THRESHOLD ]]; then
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete floating IP: $fip_id (age: $age_minutes minutes)"
-                continue
-              fi
-              echo "Deleting floating IP: $fip_id (age: $age_minutes minutes)"
-              openstack floating ip delete "$fip_id" || true
-            fi
-          done
-      - name: Find and delete orphaned ports that are in the DOWN state and older
-          than age threshold
-        if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        shell: bash
-        run: |-
-          lb_output=$(openstack loadbalancer list -f value -c id) || {
-            echo "Failed to read active load balancers; refusing to delete orphaned ports"
-            exit 1
-          }
-          active_lbs=()
-          if [[ -n $lb_output ]]; then
-            mapfile -t active_lbs <<<"$lb_output"
-          fi
-          is_active_lb() {
-            local id=$1
-            for lb in "${active_lbs[@]}"; do
-              [[ $lb == "$id" ]] && return 0
-            done
-            return 1
-          }
-          port_ids_output=$(openstack port list --format json | jq -r '.[] | select(.Status == "DOWN") | .ID') || {
-            echo "Failed to list DOWN ports; refusing to continue orphaned port cleanup"
-            exit 1
-          }
-          down_port_ids=()
-          if [[ -n $port_ids_output ]]; then
-            mapfile -t down_port_ids <<<"$port_ids_output"
-          fi
-          for port_id in "${down_port_ids[@]}"; do
-            port_data=$(openstack port show "$port_id" --format json) || {
-              echo "Failed to read port $port_id; refusing to continue orphaned port cleanup"
-              exit 1
-            }
-            device_owner=$(jq -r '.device_owner' <<<"$port_data")
-            device_id=$(jq -r '.device_id' <<<"$port_data")
-            created=$(jq -r '.created_at' <<<"$port_data")
-            created_ts=$(date -d "$created" +%s) || {
-              echo "Failed to parse port $port_id created_at timestamp; refusing to continue orphaned port cleanup"
-              exit 1
-            }
-            age_minutes=$(( ($(date +%s) - created_ts) / 60 ))
-            [[ $device_owner != "Octavia" ]] && continue
-            [[ $age_minutes -le $AGE_THRESHOLD ]] && continue
-            lb_id=${device_id#lb-}
-            if is_active_lb "$lb_id"; then
-              echo "Skipping port $port_id — still used by load balancer $lb_id"
-            else
-              if [[ "$DRY_RUN" == "true" ]]; then
-                echo "Dry run: would delete orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
-                continue
-              fi
-              echo "Deleting orphaned port: $port_id (age: $age_minutes minutes, lb $lb_id not found)"
-              openstack port delete "$port_id" || true
-            fi
-          done
-      ##################################################################################
-      #  _     __   _______
-      # | |    \ \ / /  __ \
-      # | |     \ V /| |  | |
-      # | |      > < | |  | |
-      # | |____ / . \| |__| |
-      # |______/_/ \_\_____/
-      #
-      - name: Install lxd client
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install lxd
-      - name: Set up LXD remote
-        id: lxd-remote
-        if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          umask 077
-          endpoint=$(yq '.endpoint' "$LXD_CREDENTIALS_DIR/creds.yaml")
-          server_cert=$(yq '.server-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
-          client_cert=$(yq '.client-cert' "$LXD_CREDENTIALS_DIR/creds.yaml")
-          client_key=$(yq '.client-key' "$LXD_CREDENTIALS_DIR/creds.yaml")
-          LXC_BINARY="/snap/lxd/current/bin/lxc"
-          if [[ ! -x "$LXC_BINARY" ]]; then
-            echo "::error::LXD client binary not found at $LXC_BINARY"
-            exit 1
-          fi
-          export LXD_CONF="$LXD_CREDENTIALS_DIR/config"
-          mkdir -p "${LXD_CONF}/servercerts"
-          printf '%s\n' "${server_cert}" > "${LXD_CONF}/servercerts/charmqa.crt"
-          echo "${client_cert}" > "${LXD_CONF}/client.crt"
-          echo "${client_key}" > "${LXD_CONF}/client.key"
-          chmod 600 "${LXD_CONF}/client.key"
-          cat > "${LXD_CONF}/config.yml" <<EOF
-          default-remote: local
-          remotes:
-            charmqa:
-              addr: ${endpoint}
-              auth_type: tls
-          EOF
-          "$LXC_BINARY" remote list --format json | jq -e 'has("charmqa")' >/dev/null
-          echo "LXD_CONF=${LXD_CONF}" >> "$GITHUB_ENV"
-          echo "LXC_BINARY=${LXC_BINARY}" >> "$GITHUB_ENV"
-      - name: Find and delete instances older than age threshold
-        if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
-        shell: bash
-        run: |-
-          "$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
-            select(.name | test("^juju-")) |
-            select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
-            .name
-          ' | while read -r name; do
-            if [[ "$DRY_RUN" == "true" ]]; then
-              echo "Dry run: would delete instance: $name"
-              continue
-            fi
-            echo "Deleting instance: $name"
-            "$LXC_BINARY" delete --force "charmqa:${name}"
-          done
-      ###################################################################################
-      #   _________________
-      #  /   _____/\_____  \
-      #  \_____  \   _(__  <
-      #  /        \ /       \
-      # /_______  //______  /
-      #         \/        \/
-      #
-      # S3 cleanup is independent of substrate cleanup.
-      - name: Install S3 cleanup dependencies
-        id: s3_dependencies
-        if: ${{ !cancelled() && steps.env_info.outcome == 'success' && steps.env_info.outputs.s3-secret != '' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
+          command: python3 -m venv "${{ runner.temp }}/s3-list" && "${{ runner.temp }}/s3-list/bin/pip"
             install 'awscli>=1.40,<2'
-      - name: Remove stale harness S3 buckets
-        if: ${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}
+      - name: List buckets and check the completed test bucket
         shell: bash
         env:
           S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret }}
-          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
           S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
-          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
-          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
         run: |-
           set -euo pipefail
-          if [[ ! "$S3_STORAGE_SECRET_NAME" =~ ^S3_(PS6_SQA_STG_CHARM_QA_KUBERNETES|PS[67]_SQA_PROD_CHARM_QA_(KUBERNETES|OPENSTACK)|PS7_SQA_PROD_CHARM_QA_LXD)$ ]]; then
-            echo "::error::S3 config secret is not allowed for cleanup"
+          if [[ "$S3_STORAGE_SECRET_NAME" != S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES ]]; then
+            echo "::error::This temporary diagnostic only supports PS7 Kubernetes"
             exit 1
           fi
-          export S3_STORAGE_CONFIG="${!S3_STORAGE_SECRET_NAME}"
           declare -A config=()
           while IFS='=' read -r name value; do
             [[ "$name" == S3_* ]] && config["$name"]="$value"
-          done <<< "$S3_STORAGE_CONFIG"
-          endpoint="${config[S3_ENDPOINT]}"
-          while [[ "$endpoint" == */ ]]; do
-            endpoint="${endpoint%/}"
-          done
-          namespace="${config[S3_BUCKET_NAMESPACE]}"
-          region="${config[S3_REGION]:-us-east-1}"
-          cleanup_access_key="${config[S3_CLEANUP_ACCESS_KEY]:-}"
-          cleanup_secret_key="${config[S3_CLEANUP_SECRET_KEY]:-}"
-          if [[ -n "$cleanup_access_key" && -n "$cleanup_secret_key" ]]; then
-            access_key="$cleanup_access_key"
-            secret_key="$cleanup_secret_key"
-          elif [[ -z "$cleanup_access_key" && -z "$cleanup_secret_key" ]]; then
-            access_key="${config[S3_ACCESS_KEY]}"
-            secret_key="${config[S3_SECRET_KEY]}"
-          else
-            echo "::error::S3 cleanup credentials must be provided together"
+          done <<< "$S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES"
+          export AWS_ACCESS_KEY_ID="${config[S3_CLEANUP_ACCESS_KEY]:-${config[S3_ACCESS_KEY]}}"
+          export AWS_SECRET_ACCESS_KEY="${config[S3_CLEANUP_SECRET_KEY]:-${config[S3_SECRET_KEY]}}"
+          export AWS_DEFAULT_REGION="${config[S3_REGION]:-us-east-1}"
+          export AWS_EC2_METADATA_DISABLED=true
+          "${RUNNER_TEMP}/s3-list/bin/aws" s3api list-buckets \
+            --endpoint-url "${config[S3_ENDPOINT]}" --output json > "${RUNNER_TEMP}/s3-buckets.json"
+          jq -e '.Buckets | type == "array"' "${RUNNER_TEMP}/s3-buckets.json" >/dev/null
+          jq -r '.Buckets[] | [.Name, .CreationDate] | @tsv' "${RUNNER_TEMP}/s3-buckets.json"
+          bucket=charmqa-s3-9eda5e77-1793895512-bcefce5abcda4609
+          if jq -e --arg bucket "$bucket" '.Buckets[] | select(.Name == $bucket)' \
+            "${RUNNER_TEMP}/s3-buckets.json"; then
+            echo "::error::Test bucket still exists: $bucket"
             exit 1
           fi
-          owner_access_key="$access_key"
-          namespace_hash="$(printf '%s' "$namespace" | sha256sum | cut -c1-8)"
-          bucket_prefix="charmqa-s3-${namespace_hash}-"
-          owner_tag="$(jq -acn \
-            --arg endpoint "$endpoint" \
-            --arg namespace "$namespace" \
-            --arg region "$region" \
-            --arg access_key "${config[S3_ACCESS_KEY]}" \
-            --arg cleanup_access_key "$owner_access_key" \
-            '["static", $endpoint, $namespace, $region, $access_key, $cleanup_access_key]' \
-            | tr -d '\n' | sha256sum | cut -c1-32)"
-          aws_config="${RUNNER_TEMP}/aws-config"
-          printf '[default]\ns3 =\n    addressing_style = path\n' > "$aws_config"
-          chmod 600 "$aws_config"
-          export AWS_CONFIG_FILE="$aws_config"
-          export AWS_ACCESS_KEY_ID="$access_key"
-          export AWS_SECRET_ACCESS_KEY="$secret_key"
-          export AWS_DEFAULT_REGION="$region"
-          export AWS_EC2_METADATA_DISABLED=true
-          aws="${RUNNER_TEMP}/s3-cleanup/bin/aws"
-          now="$(date +%s)"
-          buckets="$("$aws" s3api list-buckets --endpoint-url "$endpoint" --query 'Buckets[].Name' --output text | tr '\t' '\n')"
-          while IFS= read -r bucket; do
-            if [[ ! "$bucket" =~ ^${bucket_prefix}([0-9]{10})-[0-9a-f]{16}$ ]]; then
-              continue
-            fi
-            created="${BASH_REMATCH[1]}"
-            if ! awk -v now="$now" -v created="$created" -v age="$AGE_THRESHOLD" \
-              'BEGIN { exit !(now - created > age * 60) }'; then
-              continue
-            fi
-            if ! tags="$("$aws" s3api get-bucket-tagging --bucket "$bucket" --endpoint-url "$endpoint" --output json)"; then
-              echo "::warning::Could not read S3 ownership tag; retaining bucket $bucket"
-              continue
-            fi
-            owner="$(jq -r '.TagSet[]? | select(.Key == "charmqa-storage-owner") | .Value' <<< "$tags")"
-            if [[ -z "$owner" ]]; then
-              echo "::warning::Missing S3 ownership tag; retaining bucket $bucket"
-              continue
-            fi
-            if [[ "$owner" != "$owner_tag" ]]; then
-              continue
-            fi
-            if [[ "$DRY_RUN" == "true" ]]; then
-              echo "Dry run: would remove S3 bucket $bucket"
-            else
-              uploads="$("$aws" s3api list-multipart-uploads --bucket "$bucket" --endpoint-url "$endpoint" --output json)"
-              while IFS= read -r upload; do
-                key="$(jq -r '.Key' <<< "$upload")"
-                upload_id="$(jq -r '.UploadId' <<< "$upload")"
-                "$aws" s3api abort-multipart-upload \
-                  --bucket "$bucket" --key "$key" --upload-id "$upload_id" --endpoint-url "$endpoint"
-              done < <(jq -c '.Uploads[]?' <<< "$uploads")
-              versions="$("$aws" s3api list-object-versions --bucket "$bucket" --endpoint-url "$endpoint" --output json)"
-              objects="$(jq -c '[.Versions[]?, .DeleteMarkers[]? | {Key, VersionId}]' <<< "$versions")"
-              while [[ "$(jq 'length' <<< "$objects")" -gt 0 ]]; do
-                batch="$(jq -c '.[0:1000]' <<< "$objects")"
-                delete_result="$("$aws" s3api delete-objects --bucket "$bucket" \
-                  --delete "{\"Objects\":${batch},\"Quiet\":true}" --endpoint-url "$endpoint" --output json)"
-                if jq -e '.Errors | length > 0' <<< "$delete_result" >/dev/null; then
-                  echo "::error::Failed to remove objects from S3 bucket $bucket"
-                  exit 1
-                fi
-                objects="$(jq -c '.[1000:]' <<< "$objects")"
-              done
-              "$aws" s3api delete-bucket --bucket "$bucket" --endpoint-url "$endpoint"
-              echo "Removed S3 bucket $bucket"
-            fi
-          done <<< "$buckets"
+          echo "Verified: test bucket is absent: $bucket"
