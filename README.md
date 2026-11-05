@@ -15,9 +15,11 @@ To install directly on your machine, install
 mise run setup
 ```
 
-Workstation setup installs project dependencies without changing system packages.
-Optional tools install on first use. Use `mise run setup --bootstrap` to also
-install the declared system packages.
+Setup installs runtime tools and project dependencies without changing system
+packages. For development tools, use `mise -E development run setup` and select
+the same environment for lint/format commands (or export `MISE_ENV=development`).
+Cloud setup and Swift upload ensure their own system packages.
+Use `mise run setup --bootstrap` to explicitly install all declared system packages.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.

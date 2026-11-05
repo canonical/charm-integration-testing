@@ -2,6 +2,10 @@
 name: Set up mise
 description: Install the repository's tools, project dependencies and system packages
 inputs:
+  environment:
+    description: Additive mise environment; use development for linters and development
+      tools
+    default: ""
   install-project:
     description: Install project Python dependencies after the tools
     default: "true"
@@ -9,8 +13,8 @@ inputs:
     description: Opt in to installing the declared system packages
     default: "false"
   juju-channel:
-    description: Override the Juju client channel for this setup only; empty uses
-      the saved selection or repository default
+    description: Override the Juju client channel for this job; empty uses the saved
+      selection or repository default
     default: ""
 runs:
   using: composite
@@ -28,7 +32,11 @@ runs:
     - name: Set up environment
       shell: bash
       env:
+        MISE_ENV: ${{ inputs.environment }}
         SETUP_INSTALL_PROJECT: ${{ inputs.install-project }}
         SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
-      run: mise run setup
+      run: |-
+        mise run setup
+        echo "MISE_ENV=$MISE_ENV" >> "$GITHUB_ENV"
+        echo "JUJU_CHANNEL=$JUJU_CHANNEL" >> "$GITHUB_ENV"

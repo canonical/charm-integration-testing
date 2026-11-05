@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 set -e
 
 # Check for prerequisites as appropriate.
-which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise run setup"'
+which markdownlint-cli2 || die 'markdownlint-cli2 missing; run "mise -E development run setup" and "mise -E development run lint"'
 
 # Actual lint checks begin here.
 ruff check || die 'Failed "ruff check"'

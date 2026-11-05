@@ -18,6 +18,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          environment: development
           install-project: "false"
           bootstrap: "false"
       - name: Lint Actions
@@ -37,6 +38,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          environment: development
           install-project: "false"
           bootstrap: "false"
       - name: Scan all workflows

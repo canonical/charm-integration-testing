@@ -83,7 +83,6 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           install-project: "false"
-          bootstrap: "true"
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
@@ -130,6 +129,14 @@ jobs:
             printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
             echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
+      - name: Ensure Kubernetes client
+        if: ${{ steps.creds.outputs.kubernetes == 'true' }}
+        shell: bash
+        run: mise run bootstrap-packages -- snap:kubectl
+      - name: Ensure OpenStack client
+        if: ${{ steps.creds.outputs.openstack == 'true' }}
+        shell: bash
+        run: mise run bootstrap-packages -- snap:openstackclients
 
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 

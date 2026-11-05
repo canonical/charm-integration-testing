@@ -11,6 +11,7 @@ Install mise as described in the [README](README.md#getting-started), then
 prepare a workstation:
 
 ```bash
+export MISE_ENV=development
 mise run setup
 ```
 
@@ -19,47 +20,48 @@ mise run setup
 | File | Owns |
 |---|---|
 | `mise.toml` | Shared locked tools and snap channels for Juju, kubectl, OpenStack clients, and LXD |
+| `mise.development.toml` | Additional development tools, including linters and Node |
 | `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
 
-One shared inventory serves development and CI.
+Development adds tools to the shared runtime inventory.
 `[tools]` declares isolated, locked executables;
 `[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
 run in isolated environments. Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
-### Setup and first-use installation
+### Explicit setup
 
 | Command | Prepares |
 |---|---|
-| `mise run setup` | Project dependencies and on-demand tools; leaves system packages untouched |
+| `mise run setup` | All selected tools and project dependencies; leaves system packages untouched |
+| `mise -E development run setup` | Also installs the development tools |
 | `mise run setup --bootstrap` | Also installs the declared system packages |
 | `mise run setup --tools-only` | Prepares executable tools without project dependencies or system packages |
 
-System-package installation is opt-in. To preload every optional executable for
-offline work, run `mise install --locked --include-lazy`.
+All tools in the selected inventory install during setup; there is no first-use
+installer. Select development with `MISE_ENV=development` for the shell or
+`mise -E development` for one command. Runtime CI uses only the base inventory.
+Strict locking preserves committed versions and artifact checksums.
 
-Python, uv, pipx and Poetry are installed during setup. Other executables declare
-`lazy = true` and their command names (`lazy_bins`) beside their pinned versions.
-Mise creates launchers that install the locked tool on first use, including its
-declared runtime dependencies. Unused tools stay uninstalled. Strict locking
-prevents first-use installation from rewriting committed locks.
-
-All tasks and direct `mise exec -- <command>` invocations use the same inventory;
-no environment selection is required. Project-dependent test tasks and lint share
+Project-dependent test tasks and lint share
 `setup-project`, which runs Poetry installation before the task. Poetry owns
 dependency reconciliation; there is no additional readiness cache.
 This does not bootstrap system packages.
 
-The CI setup action wraps the same task. Integration and cleanup jobs opt in with
-`bootstrap: "true"`; lint, unit and security jobs leave system packages untouched.
+The CI setup action wraps the same task. Lint and workflow/security checks select
+`environment: development`; runtime and unit-test jobs use the base inventory.
 Jobs without project dependencies set
-`install-project: "false"`. Cloud setup, reporting and upload actions consume
-the prepared environment; their optional executables install on demand.
-Mise-action caching remains disabled; enabling it later should save after the job
-and use job-specific keys so immutable caches can reflect different tool usage.
-The pinned mise action must have `install: true` to schedule its post-job cache save;
-the initial locked install still skips lazy executables.
+`install-project: "false"`. The action carries the environment and temporary Juju
+channel selection into later job steps. Mise-action caching remains disabled.
 
+System-package installation is explicit and operation-owned: OpenStack cloud
+setup ensures Juju and `openstackclients`; Kubernetes cloud setup ensures Juju
+and kubectl; Swift uploads independently ensure `openstackclients`. Cleanup
+selects clients for its environment. A satisfied snap/channel is checked locally
+and skipped; repeat calls do not force a refresh. Kubernetes-only cloud access
+does not install OpenStack clients, although Swift reporting still requires them.
+
+`mise run setup --bootstrap` is an opt-in full system-package preparation.
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Snapd can auto-refresh them; applying a changed channel can also refresh an
@@ -89,7 +91,7 @@ if installation fails, fix the reported error and retry.
 
 `mise run bootstrap-packages` owns channel selection for setup and substrate tasks.
 Precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
-`JUJU_CHANNEL=4/edge mise run setup` overrides one invocation without changing the
+`JUJU_CHANNEL=4/edge mise run bootstrap-packages -- snap:juju` overrides one invocation without changing the
 saved selection. The setup action's `juju-channel` input and test workflow's
 `juju_channel` input use this temporary path; an empty input uses the saved selection
 or repository default.
@@ -108,9 +110,7 @@ CI runs the same lint checks.
 
 ### Mise tasks
 
-File tasks own their `#MISE` metadata. Tasks that select an environment or reuse
-an implementation are defined only in `mise.toml`; their scripts are excluded
-from file-task discovery and have no duplicate metadata. `mise-tasks/` contains
+File tasks own their `#MISE` metadata. `mise-tasks/` contains
 shared setup and package operations.
 
 | Task | Purpose |

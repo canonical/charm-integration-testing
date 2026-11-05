@@ -21,6 +21,7 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           install-project: "false"
+          environment: development
           bootstrap: "false"
       - name: Scan git history for secrets
         env:
@@ -39,6 +40,7 @@ jobs:
       - name: Set up mise
         uses: ./.github/actions/setup-mise
         with:
+          environment: development
           bootstrap: "false"
       - name: Run linter
         run: mise run lint

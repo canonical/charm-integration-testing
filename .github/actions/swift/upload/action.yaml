@@ -49,6 +49,9 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Ensure Swift client
+      shell: bash
+      run: mise run bootstrap-packages -- snap:openstackclients
     - name: Setup
       shell: bash
       env:

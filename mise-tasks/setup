@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Prepare project dependencies and lazy tools; optionally bootstrap system packages"
+#MISE description="Install selected tools and project dependencies; optionally bootstrap system packages"
 #MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
