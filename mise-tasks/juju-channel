@@ -23,8 +23,9 @@ if (( $# == 0 )); then
         mise config get --file "$project_root/mise.toml" 'bootstrap.packages."snap:juju".channel'
     fi
 elif (( $# == 1 )) && [[ "$1" == "--reset" ]]; then
+    default_channel="$(mise config get --file "$project_root/mise.toml" 'bootstrap.packages."snap:juju".channel')"
+    JUJU_CHANNEL="$default_channel" mise run setup -- --packages snap:juju
     rm -f "$saved_config"
-    env -u JUJU_CHANNEL mise run setup -- --packages snap:juju
 elif (( $# == 1 )) && [[ -n "$1" && "$1" != -* ]]; then
     JUJU_CHANNEL="$1" mise run setup -- --packages snap:juju
     mkdir -p "$(dirname "$saved_config")"
