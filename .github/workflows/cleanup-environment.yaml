@@ -642,7 +642,8 @@ jobs:
           command: sudo apt-get update && sudo apt-get install -y python3-venv jq
             && python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
             install 'awscli>=1.40,<2'
-      - name: Remove stale harness S3 buckets
+      - name: Set up S3 client
+        id: s3-client
         if: ${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}
         shell: bash
         env:
@@ -659,63 +660,78 @@ jobs:
           while IFS='=' read -r name value; do
             [[ "$name" == S3_* ]] && config["$name"]="$value"
           done <<< "${!S3_STORAGE_SECRET_NAME}"
-          endpoint="${config[S3_ENDPOINT]:?Missing S3_ENDPOINT}"
           namespace="${config[S3_BUCKET_NAMESPACE]:-local}"
           namespace_hash="$(printf '%s' "$namespace" | sha256sum | cut -c1-8)"
-          bucket_prefix="charmqa-s3-${namespace_hash}-"
           aws_config="${RUNNER_TEMP}/aws-config"
           printf '[default]\ns3 =\n    addressing_style = path\n' > "$aws_config"
           chmod 600 "$aws_config"
-          export AWS_CONFIG_FILE="$aws_config"
-          export AWS_ACCESS_KEY_ID="${config[S3_ACCESS_KEY]:?Missing S3_ACCESS_KEY}"
-          export AWS_SECRET_ACCESS_KEY="${config[S3_SECRET_KEY]:?Missing S3_SECRET_KEY}"
-          export AWS_DEFAULT_REGION="${config[S3_REGION]:-us-east-1}"
-          export AWS_EC2_METADATA_DISABLED=true
-          aws="${RUNNER_TEMP}/s3-cleanup/bin/aws"
-          remove_bucket() {
-            local bucket="$1" uploads upload key upload_id versions objects batch delete_result
-            uploads="$("$aws" s3api list-multipart-uploads --bucket "$bucket" --endpoint-url "$endpoint" --output json)" || return
-            while IFS= read -r upload; do
-              key="$(jq -r '.Key' <<< "$upload")" || return
-              upload_id="$(jq -r '.UploadId' <<< "$upload")" || return
-              "$aws" s3api abort-multipart-upload \
-                --bucket "$bucket" --key "$key" --upload-id "$upload_id" --endpoint-url "$endpoint" || return
-            done < <(jq -c '.Uploads[]?' <<< "$uploads")
-            versions="$("$aws" s3api list-object-versions --bucket "$bucket" --endpoint-url "$endpoint" --output json)" || return
-            objects="$(jq -c '[.Versions[]?, .DeleteMarkers[]? | {Key, VersionId}]' <<< "$versions")" || return
-            while [[ "$(jq 'length' <<< "$objects")" -gt 0 ]]; do
-              batch="$(jq -c '.[0:1000]' <<< "$objects")" || return
-              delete_result="$("$aws" s3api delete-objects --bucket "$bucket" \
-                --delete "{\"Objects\":${batch},\"Quiet\":true}" --endpoint-url "$endpoint" --output json)" || return
-              if jq -e '.Errors | length > 0' <<< "$delete_result" >/dev/null; then
-                echo "::error::Failed to remove objects from S3 bucket $bucket"
-                return 1
-              fi
-              objects="$(jq -c '.[1000:]' <<< "$objects")" || return
-            done
-            "$aws" s3api delete-bucket --bucket "$bucket" --endpoint-url "$endpoint"
-          }
-          failed=false
-          now="$(date +%s)"
-          buckets="$("$aws" s3api list-buckets --endpoint-url "$endpoint" --query 'Buckets[].Name' --output text | tr '\t' '\n')"
+          {
+            echo "AWS_CONFIG_FILE=$aws_config"
+            echo "AWS_ACCESS_KEY_ID=${config[S3_ACCESS_KEY]:?Missing S3_ACCESS_KEY}"
+            echo "AWS_SECRET_ACCESS_KEY=${config[S3_SECRET_KEY]:?Missing S3_SECRET_KEY}"
+            echo "AWS_DEFAULT_REGION=${config[S3_REGION]:-us-east-1}"
+            echo "AWS_EC2_METADATA_DISABLED=true"
+            echo "S3_ENDPOINT=${config[S3_ENDPOINT]:?Missing S3_ENDPOINT}"
+            echo "S3_BUCKET_PREFIX=charmqa-s3-${namespace_hash}-"
+          } >> "$GITHUB_ENV"
+          echo "${RUNNER_TEMP}/s3-cleanup/bin" >> "$GITHUB_PATH"
+      - name: Find S3 buckets older than the age threshold
+        id: s3-buckets
+        if: ${{ !cancelled() && steps.s3-client.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api list-buckets --endpoint-url "$S3_ENDPOINT" --output json |
+            jq --raw-output --arg prefix "$S3_BUCKET_PREFIX" --argjson age "$AGE_THRESHOLD" '
+              .Buckets[].Name |
+              capture("^(?<name>" + $prefix + "(?<created>[0-9]{10})-[0-9a-f]{16})$") |
+              select((now - (.created | tonumber)) > ($age * 60)) |
+              .name
+            ' > s3_buckets_to_remove.txt
+      - name: Remove S3 buckets
+        if: ${{ !cancelled() && steps.s3-buckets.outcome == 'success' }}
+        shell: bash
+        run: |-
+          set -uo pipefail
+          set +e
+          failed=0
           while IFS= read -r bucket; do
-            if [[ ! "$bucket" =~ ^${bucket_prefix}([0-9]{10})-[0-9a-f]{16}$ ]]; then
-              continue
-            fi
-            created="${BASH_REMATCH[1]}"
-            if ! awk -v now="$now" -v created="$created" -v age="$AGE_THRESHOLD" \
-              'BEGIN { exit !(now - created > age * 60) }'; then
-              continue
-            fi
             if [[ "$DRY_RUN" == "true" ]]; then
-              echo "Dry run: would remove S3 bucket $bucket"
-            elif remove_bucket "$bucket"; then
-              echo "Removed S3 bucket $bucket"
-            else
-              echo "::error::Failed to remove S3 bucket $bucket"
-              failed=true
+              echo "Dry run: would delete S3 bucket: $bucket"
+              continue
             fi
-          done <<< "$buckets"
-          if [[ "$failed" == true ]]; then
-            exit 1
-          fi
+            echo "Deleting S3 bucket: $bucket"
+
+            # Stop on failure within a bucket, but still process the remaining buckets.
+            (
+              set -e
+              uploads=$(aws s3api list-multipart-uploads --bucket "$bucket" --endpoint-url "$S3_ENDPOINT" \
+                --output json | jq -c '.Uploads[]?')
+              while IFS= read -r upload; do
+                [[ -z "$upload" ]] && continue
+                key=$(jq -r '.Key' <<< "$upload")
+                upload_id=$(jq -r '.UploadId' <<< "$upload")
+                aws s3api abort-multipart-upload --bucket "$bucket" --key "$key" \
+                  --upload-id "$upload_id" --endpoint-url "$S3_ENDPOINT"
+              done <<< "$uploads"
+              objects=$(aws s3api list-object-versions --bucket "$bucket" --endpoint-url "$S3_ENDPOINT" \
+                --output json | jq -c '[.Versions[]?, .DeleteMarkers[]? | {Key, VersionId}]')
+              while [[ "$(jq 'length' <<< "$objects")" -gt 0 ]]; do
+                batch=$(jq -c '{Objects: .[0:1000], Quiet: true}' <<< "$objects")
+                delete_result=$(aws s3api delete-objects --bucket "$bucket" --delete "$batch" \
+                  --endpoint-url "$S3_ENDPOINT" --output json)
+                if jq -e '.Errors | length > 0' <<< "$delete_result" >/dev/null; then
+                  echo "::error::Failed to remove objects from S3 bucket $bucket"
+                  exit 1
+                fi
+                objects=$(jq -c '.[1000:]' <<< "$objects")
+              done
+              aws s3api delete-bucket --bucket "$bucket" --endpoint-url "$S3_ENDPOINT"
+            )
+            status=$?
+            if (( status != 0 )); then
+              echo "::error::Failed to remove S3 bucket $bucket"
+              failed=1
+            fi
+          done < s3_buckets_to_remove.txt
+          exit "$failed"
