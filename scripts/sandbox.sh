@@ -85,7 +85,7 @@ _is_mounted() {
 
 # Ingest every host env var prefixed with SANDBOX_VAR_, strip the prefix, and
 # append "NAME=value" entries onto the array named by $1 (nameref) for
-# passthrough into the VM via `multipass exec ... env ...`.
+# passthrough into the VM via _vm_exec_with_env.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
 # GITHUB_TOKEN, COPILOT_GITHUB_TOKEN and COPILOT_MODEL are excluded here since
 # they need special-cased handling (dual GH_TOKEN/GITHUB_TOKEN mapping and
@@ -101,6 +101,42 @@ _collect_sandbox_vars() {
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
+}
+
+_vm_temp_files=()
+
+_cleanup_vm_temp_files() {
+    local _status=$?
+    if [ "${#_vm_temp_files[@]}" -gt 0 ]; then
+        if ! multipass exec "$VM_NAME" -- rm -f -- "${_vm_temp_files[@]}"; then
+            echo "WARNING: could not remove temporary files inside '$VM_NAME'." >&2
+        fi
+    fi
+    return "$_status"
+}
+
+# Ensure temporary files created inside the VM are cleaned up on exit.
+# This trap will invoke _cleanup_vm_temp_files when the script exits, regardless
+# of whether it exits normally or due to an error.
+trap _cleanup_vm_temp_files EXIT
+
+# Transfer shell-quoted exports over stdin in a separate call so the session
+# keeps its terminal. Only the private file's path is passed in argv.
+_vm_exec_with_env() {
+    local -n _env="$1"
+    shift
+    local _env_file
+    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX)
+    _vm_temp_files+=("$_env_file")
+    printf 'export %q\n' "${_env[@]}" \
+        | multipass exec "$VM_NAME" -- bash -c 'cat > "$1"' bash "$_env_file"
+    multipass exec "$VM_NAME" -- bash -c '
+        set -e
+        source "$1"
+        rm -f -- "$1"
+        shift
+        exec "$@"
+    ' bash "$_env_file" "$@"
 }
 
 # True if the VM is running and its gh CLI already holds a valid login (e.g.
@@ -612,7 +648,7 @@ _cmd_shell() {
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
-    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+    _vm_exec_with_env _env_args bash -lc "
         cd '$VM_MOUNT' && exec bash -l
     "
 }
@@ -686,18 +722,13 @@ EOF
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        # Install a preliminary trap for the MCP file in case PROMPT_FILE creation fails.
-        # shellcheck disable=SC2064
-        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
+        _vm_temp_files+=("$_mcp_vm_file")
         # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
         cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    # Update the EXIT trap to cover PROMPT_FILE as well. This replaces the MCP-only
-    # trap (if set) so both files are removed on any early exit due to set -euo pipefail.
-    # shellcheck disable=SC2064
-    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true" EXIT
+    _vm_temp_files+=("$PROMPT_FILE")
 
     {
         cat "$PROJECT_DIR/.agents/skills/system.md"
@@ -714,7 +745,7 @@ EOF
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _vm_exec_with_env _env_args bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
@@ -730,7 +761,7 @@ EOF
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         _collect_sandbox_vars _env_args
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _vm_exec_with_env _env_args bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
