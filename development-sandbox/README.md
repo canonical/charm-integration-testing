@@ -27,6 +27,18 @@ handle substrate setup and testing.
 | `scripts/sandbox.sh up` | Create or resume the VM and install dependencies |
 | `scripts/sandbox.sh destroy` | Permanently delete the VM |
 
+## S3 storage
+
+For tests whose bundles include s3-integrator, use the
+[setup-s3 skill](../.agents/skills/setup-s3/SKILL.md) and load
+`$HOME/.local/share/charmqa-s3/s3.env` before running the suite. This exports only
+`S3_CONFIG_localhost`, pointing to the protected `s3.conf` file; credentials are
+not exported. For another logical cloud, set `S3_CONFIG_<cloud>` to its config
+path, replacing hyphens with underscores in the variable name. The endpoint must
+be reachable from deployed units, not just from the VM. Local S3 uses generated
+credentials scoped to harness buckets for both workload access and bucket
+management; it does not need shared QA storage credentials.
+
 ## Configuration
 
 Set options in `development-sandbox/.env` (gitignored). See
