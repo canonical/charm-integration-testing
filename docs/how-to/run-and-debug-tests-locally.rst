@@ -50,7 +50,7 @@ The following environment variables are optional and only needed when testing sp
 S3 storage
 ~~~~~~~~~~
 
-For bundles with an unconfigured ``s3-integrator``, provide an S3 configuration
+For bundles whose ``s3-integrator`` has no endpoint configured, provide an S3 configuration
 file via ``S3_CONFIG_<cloud>``. For example, ``S3_CONFIG_target_cloud`` points to
 the config for Juju cloud ``target-cloud``. Use one config per logical cloud.
 
@@ -74,6 +74,13 @@ For the local sandbox service, run setup and load its config path:
 
    bash development-sandbox/bin/setup-s3.sh
    source "$HOME/.local/share/charmqa-s3/s3.env"
+
+For Kubernetes, also map this config to the selected Juju cloud in the same Bash
+shell before starting tests:
+
+.. code:: bash
+
+   export "S3_CONFIG_${K8S_CLOUD_NAME//-/_}=$S3_CONFIG_localhost"
 
 Set up Juju and k8s
 -------------------
