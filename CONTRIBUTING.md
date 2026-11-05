@@ -36,7 +36,7 @@ Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
 | Command | Prepares |
 |---|---|
-| `mise run setup -- --group python` | Python, uv, Poetry and runtime project dependencies |
+| `mise run setup -- --group runtime` | Python, uv, Poetry and runtime project dependencies |
 | `mise run setup -- --group development` | Repository checkers, Node and development project dependencies |
 | `mise run setup -- --group integration` | Test utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
@@ -59,7 +59,7 @@ Use a fresh virtual environment for a lean runtime installation, or explicitly r
 Use `--no-packages` to skip group snaps without skipping its tools or project
 dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
 Explicit requests also compose with groups:
-`mise run setup -- --group python --tools aqua:jqlang/jq --packages snap:juju`.
+`mise run setup -- --group runtime --tools aqua:jqlang/jq --packages snap:juju`.
 `--tools` and `--packages` alone do not install project dependencies.
 `--no-packages` cannot be combined with explicit `--packages`.
 `--dry-run` previews package-only requests; it cannot be used with tool or project

@@ -12,7 +12,7 @@ To install directly on your machine, install
 [mise](https://mise.jdx.dev/getting-started.html), then run:
 
 ```bash
-mise run setup -- --group python
+mise run setup -- --group runtime
 ```
 
 Setup installs Python, uv, Poetry and project dependencies without changing system

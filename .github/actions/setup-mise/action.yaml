@@ -3,7 +3,7 @@ name: Set up mise
 description: Prepare repository setup groups, catalogue tools and system packages
 inputs:
   groups:
-    description: Space-separated setup groups (python, development, workflow, integration,
+    description: Space-separated setup groups (runtime, development, workflow, integration,
       local-k8s, local-lxd)
     default: ""
   tools:
