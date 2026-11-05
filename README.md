@@ -5,11 +5,15 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Python dependencies are managed through poetry.
+For local charm testing, use the [development sandbox](development-sandbox/README.md).
+It mounts your checkout and installs the tools inside a VM.
+
+To install directly on your machine, install
+[mise](https://mise.jdx.dev/getting-started.html), then prepare the development
+environment:
 
 ```bash
-pipx install poetry==2.0
-poetry install
+mise run setup -- --group development
 ```
 
 ## Development
