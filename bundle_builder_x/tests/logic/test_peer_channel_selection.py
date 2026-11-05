@@ -111,6 +111,43 @@ class TestFirstReportedPeerHasNoCompatibleRelease:
             _build(catalog)
 
 
+@pytest.mark.parametrize(
+    "pin",
+    [
+        AppSpec(charm="owner", channel="1/stable"),
+        AppSpec(charm="owner", revision=1),
+        AppSpec(charm="owner", base="22.04"),
+    ],
+    ids=["channel", "revision", "base"],
+)
+def test_reverse_fallback_does_not_add_an_owner_that_bypasses_pins(pin: AppSpec) -> None:
+    def owner(channel: str, revision: int, base: str) -> Charm:
+        return make_charm(
+            "owner",
+            channel=channel,
+            revision=revision,
+            ubuntu_version=base,
+            constraint_strs=["tracks(charms(endpoint[mesh])) <= tracks({self})"],
+            endpoints={"mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh", optional=True)},
+        )
+
+    peer = make_charm(
+        "peer",
+        channel="2/stable",
+        endpoints={"mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh", optional=False)},
+    )
+    catalog = StrictChannelCatalog(owner("1/stable", 1, "22.04"), owner("2/stable", 2, "24.04"), peer)
+
+    # The owner's optional endpoint allows a duplicate owner to satisfy the peer while
+    # leaving the pinned owner disconnected. Reject that bypass instead of emitting owner-a.
+    with pytest.raises(UncompletableBundleError):
+        build_single_model(
+            BundleBuilder(charmhub_client=catalog),
+            applications={"owner": pin, "peer": AppSpec(charm="peer", channel="2/stable")},
+            platform="machine",
+        )
+
+
 class TestPrincipalMovesToALaterPeersChannel:
     """When no peer can reach the principal's track, the principal may follow any peer, not only the first reported."""
 

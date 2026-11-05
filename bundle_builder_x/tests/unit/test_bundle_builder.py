@@ -6,6 +6,7 @@
 from itertools import repeat
 from typing import Iterator
 
+import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x import CharmReleaseNotFoundException
@@ -275,15 +276,22 @@ class TestHandleSubordinateBaseMismatch:
             ubuntu_version="22.04",
         ).model_copy(update={"channel": CharmChannel(track="latest", risk="edge", branch="br")})
 
-    def test_subordinate_retries_same_track_with_risk_unset_when_current_risk_lacks_base(self) -> None:
+    @pytest.mark.parametrize("revision", [None, 1], ids=["unpinned", "pinned-revision"])
+    @pytest.mark.parametrize("channel", ["latest/stable/br", "stable/br", "stable"])
+    def test_subordinate_retries_same_track_with_risk_unset_when_current_risk_lacks_base(
+        self, revision: int | None, channel: str
+    ) -> None:
         domain = _domain_with_base_mismatch()
-        domain.charms[1].spec = domain.charms[1].spec.model_copy(
-            update={"channel": CharmChannel(track="latest", risk="stable", branch="br")}
+        domain.models[ModelRef(name="m")].applications["nrpe"].revision = revision
+        resolved_channel = CharmChannel.model_validate(channel)
+        domain.charms[1].spec = domain.charms[1].spec.model_copy(update={"channel": resolved_channel})
+        edge_variant = self._edge_variant().model_copy(
+            update={"channel": CharmChannel(track="latest", risk="edge", branch=resolved_channel.branch)}
         )
         fake = _FakeCharmhubClient(
             charm_responses=[
                 CharmReleaseNotFoundException("nrpe", "No stable on 22.04"),
-                self._edge_variant(),
+                edge_variant,
                 CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
             ]
         )
@@ -293,10 +301,30 @@ class TestHandleSubordinateBaseMismatch:
         assert result is True
         assert domain.charms[2].spec.channel.risk == "edge"
         exact, retry = fake.charm_from_store_calls[:2]
-        assert (exact["charm_track"], exact["charm_risk"], exact["charm_branch"]) == ("latest", "stable", "br")
-        assert (retry["charm_track"], retry["charm_risk"], retry["charm_branch"]) == ("latest", None, "br")
+        branch = resolved_channel.branch or None
+        assert (exact["charm_track"], exact["charm_risk"], exact["charm_branch"]) == ("latest", "stable", branch)
+        assert (retry["charm_track"], retry["charm_risk"], retry["charm_branch"]) == ("latest", None, branch)
         assert retry["ubuntu_version"] == "22.04"
-        assert retry["charm_revision"] is None
+        assert exact["charm_revision"] == retry["charm_revision"] == revision
+
+    @pytest.mark.parametrize("risk", ["", "stable"], ids=["track-only", "pinned-risk"])
+    def test_subordinate_retry_respects_application_risk(self, risk: str) -> None:
+        domain = _domain_with_base_mismatch()
+        model = domain.models[ModelRef(name="m")]
+        model.applications["nrpe"].channel = CharmChannel(track="latest", risk=risk, branch="")
+        fake = _FakeCharmhubClient(
+            charm_responses=[CharmReleaseNotFoundException("nrpe", "No stable build"), self._edge_variant()]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+
+        if risk:
+            with pytest.raises(CharmReleaseNotFoundException):
+                builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
+            assert len(fake.charm_from_store_calls) == 1
+        else:
+            charm = builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
+            assert charm.channel.risk == "edge"
+            assert fake.charm_from_store_calls[-1]["charm_risk"] is None
 
     def test_subordinate_does_not_retry_when_current_risk_has_base(self) -> None:
         domain = _domain_with_base_mismatch()

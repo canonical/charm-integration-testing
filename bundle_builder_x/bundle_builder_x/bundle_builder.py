@@ -791,6 +791,7 @@ class BundleBuilder:
         connect_to_id: int,
         revision: int | None = None,
         branch: str | None = None,
+        preserve_application_pins: bool = False,
     ) -> bool:
         """Fetch `charm_name` on the given channel and add it to the domain for `charm_id`.
 
@@ -812,6 +813,11 @@ class BundleBuilder:
         except CharmReleaseNotFoundException:
             self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
             return False
+        if preserve_application_pins:
+            applications = [app for app in model_spec.applications.values() if charm_id in app.charm_ids]
+            if applications and not any(app.matches_charm(charm) for app in applications):
+                # An unmapped owner variant could bypass pins by becoming a separate application.
+                return False
         return self._add_charm_for_charm_id(
             charm,
             charm_id,
@@ -877,6 +883,7 @@ class BundleBuilder:
                 risk=peer_channel.risk,
                 connect_to_id=peer_id,
                 branch=peer_channel.branch or None,
+                preserve_application_pins=True,
             )
         return expanded
 
@@ -890,15 +897,19 @@ class BundleBuilder:
         """Fetch the subordinate on its current channel at `base`.
 
         The mismatch tag requires only a base, so when the current risk has no build for it,
-        retry on the same track with the risk unset, as the peer-channel handler does.
-        Explicit application channels remain enforced by the solver's application mapping.
+        retry on the same track with the risk unset unless an application explicitly pins it.
+        Explicit application revisions are preserved in both lookups.
         """
-        track = sub_charm_spec.channel.track or None
+        track = sub_charm_spec.channel.explicit_track
         risk = sub_charm_spec.channel.risk or None
         branch = sub_charm_spec.channel.branch or None
+        applications = [app for app in model.applications.values() if tag.subordinate_charm_id in app.charm_ids]
+        revision = next((app.revision for app in applications if app.revision is not None), None)
+        risk_pinned = any(app.channel is not None and bool(app.channel.risk) for app in applications)
         try:
             return self.charmhub_client.charm_from_store(
                 charm_name=tag.subordinate_charm_name,
+                charm_revision=revision,
                 ubuntu_arch=model.arch,
                 juju_version=model.juju_version,
                 platform=model.platform,
@@ -908,10 +919,11 @@ class BundleBuilder:
                 ubuntu_version=base,
             )
         except CharmReleaseNotFoundException:
-            if track is None or risk is None:
+            if risk is None or risk_pinned:
                 raise
         return self.charmhub_client.charm_from_store(
             charm_name=tag.subordinate_charm_name,
+            charm_revision=revision,
             ubuntu_arch=model.arch,
             juju_version=model.juju_version,
             platform=model.platform,
