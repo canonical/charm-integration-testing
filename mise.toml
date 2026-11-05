@@ -1,6 +1,10 @@
 [task_config]
-includes = ["scripts", "mise-tasks"]
-excludes = ["scripts/*.py", "scripts/helpers/**"]
+includes = ["scripts", "development-sandbox/bin", "mise-tasks"]
+excludes = [
+    "scripts/*.py",
+    "scripts/helpers/**",
+    "development-sandbox/bin/install-mise.sh",
+]
 
 [settings]
 lockfile = true
@@ -36,3 +40,4 @@ node = "24.22.0"
 "pypi:yamlfix" = { version = "1.19.1" }
 "pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
 "pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "ee228d66ba8a238b5adfd07397bfc030178aedcd", python = "3.12.12" }
+"npm:@github/copilot" = { version = "1.0.105", depends = ["node"] }

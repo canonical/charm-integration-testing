@@ -16,11 +16,11 @@ Understand the goal, constraints, and expected outcomes before implementing. Ask
 When the user explicitly authorizes a push, use the GitHub CLI credential helper with the GitHub token over HTTPS, for example:
 
 ```bash
-GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
+git -c credential.helper='!gh auth git-credential' \
   push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
 ```
 
-Use the repository and branch the user authorized. Setting `GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (for example, HTTPS-to-SSH) from changing the transport for this command; it does not modify Git configuration. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
+Use the repository and branch the user authorized. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
 
 ## Tone and Style
 
@@ -35,9 +35,20 @@ Note: This applies to your chat output, not to repository documentation or skill
 ## Environment
 
 - Project: `$PROJECT_ROOT` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install` from `$PROJECT_ROOT`)
+- Python venv: managed by uv; run `mise run setup -- --group development` from `$PROJECT_ROOT`
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
+- Setup explicitly prepares named groups from one catalogue; no mise
+  profile is required. Do not edit tool pins or add ad hoc installers when a tool is missing.
+
+To change the Juju client, run `mise run juju:channel -- 4/stable` from
+`$PROJECT_ROOT` (choose an available channel with `snap info juju`). Show the saved
+choice with `mise run juju:channel`, verify the installed client with `juju version`,
+and restore the repository default with `mise run juju:channel -- --reset`.
+The selection is VM-local and survives later setup/tool calls; do not edit shared
+mise declarations or rely on exporting a variable in a single shell.
+Client selection does not upgrade controllers; use fresh test controllers for
+another major version. See [channel selection](../../CONTRIBUTING.md#selecting-the-juju-client).
 
 ---
 
@@ -50,33 +61,144 @@ $PROJECT_ROOT/
   bundle_builder_x/           # Build Juju bundles from CharmHub specs
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
-  development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
-  pyproject.toml              # Root Poetry project (aggregates all subpackages)
+  development-sandbox/        # Sandbox tooling and configuration
+  pyproject.toml              # Root uv workspace and tooling configuration
 ```
 
 ---
 
-## Task-specific workflows
+## Tools
 
-Use the matching skill for detailed procedures and commands:
+### 0. `gh` — read GitHub PR review comments
 
-- Reproduce or fix a live charm bug: `reproduce-charm-bug`, `fix-charm-bug`.
-- Recreate a Test Observer charm run: `run-charm-tests`.
-- Test or develop an endpoint validator: `test-validator`, `develop-validator`.
-- Set up a test substrate: `setup-charm-tests`, `setup-k8s`, `setup-lxd`.
-- File an issue or PR: `file-issue`, `file-pr`, with shared rules in
-  `file-as-agent`.
-- Review PR feedback: `review-pr`.
+`GH_TOKEN` is injected at runtime. No separate login is required.
 
-For any GitHub content filed or posted on the user's behalf, follow
-`file-as-agent` for identity and AI disclosure. For PR review comments and
-replies, use the footer wording in `review-pr`.
+```bash
+# List open review comments on a PR
+gh pr view <number> --repo canonical/charm-integration-testing --comments
+
+# Show only review thread comments (inline code review)
+gh api repos/canonical/charm-integration-testing/pulls/<number>/comments \
+  | python3 -c "
+import sys, json
+for c in json.load(sys.stdin):
+    print(f\"{c['path']}:{c.get('line','?')} [{c['user']['login']}] (id:{c['id']})\")
+    print(c['body'])
+    print('---')
+"
+```
+
+Use this to read Copilot or human reviewer feedback before or during development.
+
+**When filing or posting anything on the user's behalf** (issues, comments, PR descriptions,
+reviews, commit messages, or any other GitHub content) using their `GH_TOKEN` or git identity,
+include a brief AI disclaimer noting the content was generated by an AI assistant, e.g.
+"_Generated by an AI assistant on behalf of @<user>._" Keep it short. Prepend it at the top
+of the body/message by default. **Exception:** for PR review comments and replies (inline or
+general), follow the footer-style placement and exact wording defined in the `review-pr` skill
+instead, since that convention is already established there.
+
+### 1. `dev-validate` — run validators on a deployed application
+
+```bash
+# Basic usage
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --app postgresql-k8s --level simple
+
+# After editing validator source code, force reinstall:
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --app postgresql-k8s --level simple --reinstall
+
+# Different model
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --model testing --app mongodb-k8s --level deep --verbose
+```
+
+The `--reinstall` flag deletes `/var/lib/validators` on each unit, then rebuilds and
+re-injects the wheels. Always use it after editing validator code.
+
+### 2. `bundle-builder-x` — generate a Juju bundle from a spec
+
+Write a spec YAML, then generate and deploy:
+
+```bash
+# Generate bundle into ./bundles/
+mise run bundle:build-x -- --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
+
+# Deploy
+juju deploy /tmp/bundles/testing.yaml -m testing
+```
+
+Spec format (`/tmp/spec.yaml`):
+
+```yaml
+models:
+  - name: testing
+    platform: kubernetes
+    applications:
+      postgresql-k8s:
+        charm: postgresql-k8s
+        channel: 14/stable
+      data-integrator:
+        charm: data-integrator
+        channel: latest/stable
+    integrations:
+      - application: data-integrator
+        endpoint: postgresql
+        remote_application: postgresql-k8s
+        remote_endpoint: database
+```
+
+### 3. CharmHub API — find charms by interface
+
+Use the Python API to discover which charms provide or require a given interface:
+
+```python
+from bundle_builder_x.charmhub_http import CharmhubHttpClient
+from bundle_builder_x.charmhub import CharmhubClient
+
+http = CharmhubHttpClient()
+client = CharmhubClient(http)
+
+# Search for charms that use a given interface
+charms = client.search("postgresql")
+for charm in charms:
+    print(charm.name, charm.summary)
+```
+
+### 4. `juju` CLI — standard operations
+
+```bash
+# Watch status
+juju status -m testing --watch 2s
+
+# Wait for active/idle
+juju wait-for application postgresql-k8s -m testing --timeout 10m
+
+# Run a command on a unit
+juju exec -m testing --unit postgresql-k8s/0 -- pebble services
+
+# Stream logs
+juju debug-log -m testing --include-module juju.worker --limit 50
+
+# Remove everything and start fresh
+juju remove-application -m testing --force postgresql-k8s data-integrator
+```
+
+### 5. `kubectl` — pod/container inspection
+
+`kubectl` is installed from the shared mise snap declaration. Canonical k8s also
+provides `sudo k8s kubectl`:
+
+```bash
+sudo k8s kubectl get pods -n testing
+sudo k8s kubectl describe pod postgresql-k8s-0 -n testing
+sudo k8s kubectl logs postgresql-k8s-0 -n testing -c postgresql
+sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
+```
 
 ---
 
 ## Important notes
 
-- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
+- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts can break subsequent runs.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
