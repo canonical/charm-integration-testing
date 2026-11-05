@@ -867,6 +867,7 @@ class BundleBuilder:
                 revision=tag.required_revision,
                 branch=branch,
                 connect_to_id=tag.charm.charm_id,
+                preserve_application_pins=True,
             )
         if expanded:
             return True
@@ -954,15 +955,17 @@ class BundleBuilder:
         # Try fetching the subordinate charm at the principal's base.
         try:
             sub_charm = self._fetch_subordinate_at_base(tag, sub_charm_spec, model, principal_base)
-            expanded |= self._add_charm_for_charm_id(
-                sub_charm,
-                tag.subordinate_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.principal_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
+            applications = [app for app in model.applications.values() if tag.subordinate_charm_id in app.charm_ids]
+            if not applications or any(app.matches_charm(sub_charm) for app in applications):
+                expanded |= self._add_charm_for_charm_id(
+                    sub_charm,
+                    tag.subordinate_charm_id,
+                    domain,
+                    model_ref,
+                    connect_to_id=tag.principal_charm_id,
+                    connect_to_neighbors=True,
+                    connect_to_interface=interface,
+                )
         except CharmReleaseNotFoundException:
             self.logger.debug(
                 f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"

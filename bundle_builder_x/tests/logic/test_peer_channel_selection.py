@@ -120,26 +120,28 @@ class TestFirstReportedPeerHasNoCompatibleRelease:
     ],
     ids=["channel", "revision", "base"],
 )
-def test_reverse_fallback_does_not_add_an_owner_that_bypasses_pins(pin: AppSpec) -> None:
+@pytest.mark.parametrize("forward", [False, True], ids=["owner-fallback", "peer-fallback"])
+def test_fallback_does_not_add_an_application_that_bypasses_pins(pin: AppSpec, forward: bool) -> None:
     def owner(channel: str, revision: int, base: str) -> Charm:
         return make_charm(
             "owner",
             channel=channel,
             revision=revision,
             ubuntu_version=base,
-            constraint_strs=["tracks(charms(endpoint[mesh])) <= tracks({self})"],
+            constraint_strs=[] if forward else ["tracks(charms(endpoint[mesh])) <= tracks({self})"],
             endpoints={"mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh", optional=True)},
         )
 
     peer = make_charm(
         "peer",
         channel="2/stable",
+        constraint_strs=["tracks(charms(endpoint[mesh])) <= tracks({self})"] if forward else [],
         endpoints={"mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh", optional=False)},
     )
     catalog = StrictChannelCatalog(owner("1/stable", 1, "22.04"), owner("2/stable", 2, "24.04"), peer)
 
-    # The owner's optional endpoint allows a duplicate owner to satisfy the peer while
-    # leaving the pinned owner disconnected. Reject that bypass instead of emitting owner-a.
+    # The optional endpoint lets a duplicate satisfy the mandatory endpoint while the
+    # pinned application stays disconnected. Exercise both directions of the fallback.
     with pytest.raises(UncompletableBundleError):
         build_single_model(
             BundleBuilder(charmhub_client=catalog),

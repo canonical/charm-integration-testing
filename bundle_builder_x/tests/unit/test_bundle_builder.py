@@ -264,6 +264,23 @@ class TestHandleSubordinateBaseMismatch:
         assert result is False
         assert len(domain.charms) == 2
 
+    @pytest.mark.parametrize("base", [None, "24.04"], ids=["unpinned-base", "pinned-base"])
+    def test_subordinate_same_revision_on_another_base_respects_application_pin(self, base: str | None) -> None:
+        domain = _domain_with_base_mismatch()
+        application = domain.models[ModelRef(name="m")].applications["nrpe"]
+        application.base = base
+        application.revision = domain.charms[1].spec.revision
+        variant = domain.charms[1].spec.model_copy(update={"ubuntu_version": "22.04"})
+        fake = _FakeCharmhubClient(
+            charm_responses=[variant, CharmReleaseNotFoundException("ubuntu", "No release on 24.04")]
+        )
+
+        expanded = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert expanded is (base is None)
+        assert len(domain.charms) == (3 if base is None else 2)
+        assert fake.charm_from_store_calls[0]["charm_revision"] == application.revision
+
     @staticmethod
     def _edge_variant() -> Charm:
         return _make_charm(
