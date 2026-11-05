@@ -20,6 +20,10 @@ outputs:
     description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
       for k8s, novarc for o7k, LXD credentials YAML for lxd).
     value: ${{ steps.lookup.outputs.credentials-secret }}
+  s3-secret-name:
+    description: Optional name of the GitHub Actions secret holding the shared S3
+      storage configuration for this environment.
+    value: ${{ steps.lookup.outputs.s3-secret-name }}
   bootstrap-config:
     description: Path to a temporary file containing the Juju bootstrap config as
       JSON.
@@ -67,6 +71,7 @@ runs:
             ;;
         esac
         remote_logging=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"remote-logging\"] // \"\"" "${table}")
+        s3_secret_name=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"s3-secret-name\"] // \"\"" "${table}")
 
         # Write Juju config objects to per-environment temp files so that
         # multiple calls (e.g. target + neighbor) don't overwrite each other.
@@ -81,6 +86,7 @@ runs:
         echo "arch=${arch}" >> "${GITHUB_OUTPUT}"
         echo "cloud-type=${cloud_type}" >> "${GITHUB_OUTPUT}"
         echo "credentials-secret=${credentials_secret}" >> "${GITHUB_OUTPUT}"
+        echo "s3-secret-name=${s3_secret_name}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-config=${bootstrap_config_file}" >> "${GITHUB_OUTPUT}"
         echo "bootstrap-constraints=${bootstrap_constraints_file}" >> "${GITHUB_OUTPUT}"
         echo "model-config=${model_config_file}" >> "${GITHUB_OUTPUT}"
