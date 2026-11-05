@@ -150,6 +150,32 @@ def test_fallback_does_not_add_an_application_that_bypasses_pins(pin: AppSpec, f
         )
 
 
+@pytest.mark.parametrize("pin", [AppSpec(charm="peer", revision=1), AppSpec(charm="peer", base="22.04")])
+def test_peer_lookup_finds_pinned_release_instead_of_channel_default(pin: AppSpec) -> None:
+    owner = make_charm(
+        "owner",
+        channel="2/stable",
+        constraint_strs=["tracks(charms(endpoint[mesh])) <= tracks({self})"],
+        endpoints={"mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
+    )
+    initial = make_charm(
+        "peer",
+        channel="1/stable",
+        revision=1,
+        endpoints={"mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh", optional=True)},
+    )
+    compatible = initial.model_copy(update={"channel": owner.channel})
+    default = compatible.model_copy(update={"revision": 2, "ubuntu_version": "24.04"})
+    bundle = build_single_model(
+        BundleBuilder(charmhub_client=StrictChannelCatalog(owner, initial, default, compatible)),
+        applications={"owner": AppSpec(charm="owner", channel="2/stable"), "peer": pin},
+        platform="machine",
+    )
+    assert set(bundle.applications) == {"owner", "peer"}
+    chosen = bundle.applications["peer"].charm
+    assert (str(chosen.channel), chosen.revision, chosen.ubuntu_version) == ("2/stable", 1, "22.04")
+
+
 class TestPrincipalMovesToALaterPeersChannel:
     """When no peer can reach the principal's track, the principal may follow any peer, not only the first reported."""
 

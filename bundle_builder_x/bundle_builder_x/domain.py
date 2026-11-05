@@ -79,7 +79,14 @@ class DomainApplication(BaseModel):
         """Whether the charm satisfies this application's name and explicit selectors."""
         return (
             self.charm == charm.name
-            and (self.channel is None or self.channel == charm.channel)
+            and (
+                self.channel is None
+                or (
+                    self.channel.explicit_track == charm.channel.explicit_track
+                    and (not self.channel.risk or self.channel.risk == charm.channel.risk)
+                    and self.channel.branch == charm.channel.branch
+                )
+            )
             and (self.revision is None or self.revision == charm.revision)
             and (self.base is None or self.base == charm.ubuntu_version)
         )

@@ -799,33 +799,46 @@ class BundleBuilder:
         exists on that channel, rather than raising, so callers can try a fallback.
         """
         model_spec = domain.models[model_key]
-        try:
-            charm = self.charmhub_client.charm_from_store(
-                charm_name=charm_name,
-                ubuntu_arch=model_spec.arch,
-                juju_version=model_spec.juju_version,
-                platform=model_spec.platform,
-                charm_track=track,
-                charm_risk=risk,
-                charm_revision=revision,
-                charm_branch=branch,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
-            return False
-        if preserve_application_pins:
-            applications = [app for app in model_spec.applications.values() if charm_id in app.charm_ids]
+        applications = [
+            app for app in model_spec.applications.values() if preserve_application_pins and charm_id in app.charm_ids
+        ]
+        # Try each application's selectors: a channel's default release may not satisfy its pins.
+        selectors = [
+            (app.revision if app.revision is not None else revision, app.base)
+            for app in applications
+            if revision is None or app.revision is None or app.revision == revision
+        ]
+        if not applications:
+            selectors.append((revision, None))
+        expanded = False
+        for selected_revision, base in dict.fromkeys(selectors):
+            try:
+                charm = self.charmhub_client.charm_from_store(
+                    charm_name=charm_name,
+                    ubuntu_arch=model_spec.arch,
+                    juju_version=model_spec.juju_version,
+                    platform=model_spec.platform,
+                    charm_track=track,
+                    charm_risk=risk,
+                    charm_revision=selected_revision,
+                    charm_branch=branch,
+                    ubuntu_version=base,
+                )
+            except CharmReleaseNotFoundException:
+                self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
+                continue
             if applications and not any(app.matches_charm(charm) for app in applications):
-                # An unmapped owner variant could bypass pins by becoming a separate application.
-                return False
-        return self._add_charm_for_charm_id(
-            charm,
-            charm_id,
-            domain,
-            model_key,
-            connect_to_id=connect_to_id,
-            connect_to_neighbors=True,
-        )
+                # An unmapped variant could bypass pins by becoming a separate application.
+                continue
+            expanded |= self._add_charm_for_charm_id(
+                charm,
+                charm_id,
+                domain,
+                model_key,
+                connect_to_id=connect_to_id,
+                connect_to_neighbors=True,
+            )
+        return expanded
 
     def _handle_peer_channel_mismatch(
         self,
