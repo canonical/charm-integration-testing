@@ -10,7 +10,7 @@ usage() {
 Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
                         [--no-packages] [--dry-run]
 
-Groups: runtime, development, workflow, integration, local-k8s, local-lxd
+Groups: runtime, development, workflow, integration, agent, local-k8s, local-lxd, chaos-mesh
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
 --no-packages skips group packages; it cannot be combined with --packages.
@@ -83,6 +83,13 @@ for group in "${groups[@]}"; do
                 aqua:cli/cli
             )
             ;;
+        agent)
+            tools+=(
+                node
+                npm:@github/copilot
+                aqua:cli/cli
+            )
+            ;;
         integration)
             [[ "$project" == dev ]] || project=main
             tools+=(
@@ -110,6 +117,13 @@ for group in "${groups[@]}"; do
                 snap:lxd
                 snap:juju
             )
+            ;;
+        chaos-mesh)
+            tools+=(
+                aqua:helm/helm
+                aqua:jqlang/jq
+            )
+            packages+=(snap:kubectl)
             ;;
         *) die "Unknown setup group: $group" ;;
     esac

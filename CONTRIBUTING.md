@@ -7,8 +7,9 @@ Testing.
 
 ## General recommendations
 
-Install mise as described in the [README](README.md#getting-started), then
-prepare a workstation:
+The [development sandbox](development-sandbox/README.md) includes development
+tools. For direct host setup, install mise as described in the
+[README](README.md#getting-started), then prepare a workstation:
 
 ```bash
 mise run setup -- --group development
@@ -40,8 +41,10 @@ Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 | `mise run setup -- --group development` | Repository checkers, Node and development project dependencies |
 | `mise run setup -- --group integration` | Test utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --group agent` | Node, Copilot and gh without project dependencies |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
 | `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group chaos-mesh` | Helm, jq and kubectl for an existing cluster |
 
 Groups compose: `mise run setup -- --group development integration` prepares both.
 Each group declares tools, packages and whether project dependencies are needed.
@@ -99,6 +102,8 @@ and skipped; repeat calls do not force a refresh. Kubernetes-only cloud access
 does not install OpenStack clients, although Swift reporting still requires them.
 
 Installing system packages does not initialize substrates or register clouds.
+Run the relevant setup group first; sandbox substrate tasks only initialize and
+configure the prepared services. They do not install prerequisites.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Snapd can auto-refresh them; applying a changed channel can also refresh an
 existing daemon. Preview changes with

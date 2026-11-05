@@ -1,11 +1,16 @@
 #!/bin/bash
+#MISE description="Set up the sandbox LXD substrate"
+#MISE raw_args=true
+#MISE alias="sandbox:setup-lxd"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 # Set up LXD and register it as a Juju cloud.
 #
 # Run this inside the sandbox VM before bootstrapping a Juju controller.
 # This script is idempotent: each step checks whether it has already been done.
 #
-# Usage (from inside the VM):
-#   /project/development-sandbox/bin/setup-lxd.sh
+# Usage (from the project root inside the VM):
+#   mise run sandbox:setup-lxd
 #
 # After this script completes, bootstrap a controller:
 #   juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
@@ -13,15 +18,12 @@
 
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Install LXD snap
-# ---------------------------------------------------------------------------
-if snap list lxd &>/dev/null; then
-    echo "==> lxd snap already installed."
-else
-    echo "==> Installing lxd snap..."
-    sudo snap install lxd
-fi
+for tool in lxd lxc juju; do
+    if ! command -v "$tool" >/dev/null; then
+        echo "Missing $tool; run: mise run setup -- --group local-lxd" >&2
+        exit 1
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Initialize LXD
@@ -38,16 +40,6 @@ if ! groups ubuntu | grep -q '\blxd\b'; then
     echo "==> Adding ubuntu user to lxd group..."
     sudo usermod -aG lxd ubuntu
     echo "==> Note: group membership takes effect in new shells."
-fi
-
-# ---------------------------------------------------------------------------
-# Install Juju snap
-# ---------------------------------------------------------------------------
-if snap list juju &>/dev/null; then
-    echo "==> juju snap already installed."
-else
-    echo "==> Installing juju snap..."
-    sudo snap install --channel=3/stable juju
 fi
 
 echo ""

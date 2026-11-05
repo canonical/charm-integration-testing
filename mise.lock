@@ -126,6 +126,12 @@ url = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-arm64.tar.gz"
 checksum = "sha256:28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c"
 url = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.gz"
 
+[[tools."npm:@github/copilot"]]
+version = "1.0.105"
+aube = { path = ".mise/locks/npm-github-copilot/1.0.105", digest = "sha256:698221ce60bdf2a02aca99ca2f18c2dd87fb4b1ad087dcd98f1357a21ce50d1b" }
+backend = "npm:@github/copilot"
+specifiers = ["1.0.105"]
+
 [[tools."npm:markdownlint-cli2"]]
 version = "0.24.0"
 aube = { path = ".mise/locks/npm-markdownlint-cli2/0.24.0", digest = "sha256:d76beb6e3aac6ad55a254433b35509683547147e7a20f0217eda5a784f0c2e34" }

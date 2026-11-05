@@ -13,9 +13,11 @@ charm deployments.
 
 ## Steps
 
-1. Run the setup script:
+1. Install prerequisites, then run the provisioning script:
    ```
-   $PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+   cd "$PROJECT_ROOT"
+   mise run setup -- --group local-lxd
+   mise run sandbox:setup-lxd
    ```
    This is idempotent. Each step checks whether it has already been done.
    Wait for it to complete before proceeding.

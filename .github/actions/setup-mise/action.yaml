@@ -4,7 +4,7 @@ description: Prepare repository setup groups, catalogue tools and system package
 inputs:
   groups:
     description: Space-separated setup groups (runtime, development, workflow, integration,
-      local-k8s, local-lxd)
+      agent, local-k8s, local-lxd, chaos-mesh)
     default: ""
   tools:
     description: Space-separated executable names from the mise catalogue

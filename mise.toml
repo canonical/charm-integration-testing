@@ -1,6 +1,10 @@
 [task_config]
-includes = ["scripts", "mise-tasks"]
-excludes = ["scripts/*.py", "scripts/helpers/**"]
+includes = ["scripts", "development-sandbox/bin", "mise-tasks"]
+excludes = [
+    "scripts/*.py",
+    "scripts/helpers/**",
+    "development-sandbox/bin/install-mise.sh",
+]
 
 [settings]
 lockfile = true
@@ -31,6 +35,10 @@ node = "24.22.0"
 
 [tools."npm:markdownlint-cli2"]
 version = "0.24.0"
+depends = ["node"]
+
+[tools."npm:@github/copilot"]
+version = "1.0.105"
 depends = ["node"]
 
 [tools."pypi:zizmor"]

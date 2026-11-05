@@ -16,11 +16,11 @@ Understand the goal, constraints, and expected outcomes before implementing. Ask
 When the user explicitly authorizes a push, use the GitHub CLI credential helper with the GitHub token over HTTPS, for example:
 
 ```bash
-GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
+git -c credential.helper='!gh auth git-credential' \
   push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
 ```
 
-Use the repository and branch the user authorized. Setting `GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (for example, HTTPS-to-SSH) from changing the transport for this command; it does not modify Git configuration. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
+Use the repository and branch the user authorized. The command uses `gh`'s existing authentication, including `GH_TOKEN`/`GITHUB_TOKEN`, for HTTPS without persisting credentials or changing the configured remote. If the HTTPS push returns a permission or authorization error, treat it as a signal that the push may not be wanted or permitted. Stop and report the failure; do not retry with another credential, remote, protocol, or force. Do not infer that the user wants a different authentication route just because a token is available.
 
 ## Tone and Style
 
@@ -35,9 +35,21 @@ Note: This applies to your chat output, not to repository documentation or skill
 ## Environment
 
 - Project: `$PROJECT_ROOT` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install --with dev` from `$PROJECT_ROOT`)
+- Tool versions: pinned by mise; Python dependencies are installed by Poetry
+  (`mise run setup -- --group development integration agent` from `$PROJECT_ROOT`)
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
+- Setup explicitly prepares named groups from one catalogue; no mise
+  profile is required. Do not edit tool pins or add ad hoc installers when a tool is missing.
+
+To change the Juju client, run `mise run juju:channel -- 4/stable` from
+`$PROJECT_ROOT` (choose an available channel with `snap info juju`). Show the saved
+choice with `mise run juju:channel`, verify the installed client with `juju version`,
+and restore the repository default with `mise run juju:channel -- --reset`.
+The selection is VM-local and survives later setup/tool calls; do not edit shared
+mise declarations or rely on exporting a variable in a single shell.
+Client selection does not upgrade controllers; use fresh test controllers for
+another major version. See [channel selection](../../CONTRIBUTING.md#selecting-the-juju-client).
 
 ---
 
@@ -50,7 +62,7 @@ $PROJECT_ROOT/
   bundle_builder_x/           # Build Juju bundles from CharmHub specs
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
-  development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
+  development-sandbox/        # Sandbox tooling and configuration
   pyproject.toml              # Root Poetry project (aggregates all subpackages)
 ```
 
@@ -91,13 +103,13 @@ instead, since that convention is already established there.
 
 ```bash
 # Basic usage
-$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --app postgresql-k8s --level simple
 
 # After editing validator source code, force reinstall:
-$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --app postgresql-k8s --level simple --reinstall
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --app postgresql-k8s --level simple --reinstall
 
 # Different model
-$PROJECT_ROOT/development-sandbox/bin/dev-validate.py --model testing --app mongodb-k8s --level deep --verbose
+cd "$PROJECT_ROOT" && mise run sandbox:dev-validate -- --model testing --app mongodb-k8s --level deep --verbose
 ```
 
 The `--reinstall` flag deletes `/var/lib/validators` on each unit, then rebuilds and
@@ -109,7 +121,7 @@ Write a spec YAML, then generate and deploy:
 
 ```bash
 # Generate bundle into ./bundles/
-bundle-builder-x --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
+mise run bundle:build-x -- --spec /tmp/spec.yaml --output-bundles /tmp/bundles/
 
 # Deploy
 juju deploy /tmp/bundles/testing.yaml -m testing
@@ -173,7 +185,8 @@ juju remove-application -m testing --force postgresql-k8s data-integrator
 
 ### 5. `kubectl` — pod/container inspection
 
-`kubectl` is not available directly; use `sudo k8s kubectl` instead:
+`kubectl` is installed from the shared mise snap declaration. Canonical k8s also
+provides `sudo k8s kubectl`:
 
 ```bash
 sudo k8s kubectl get pods -n testing
@@ -186,7 +199,7 @@ sudo k8s kubectl scale deployment minio -n s3-test --replicas=0
 
 ## Important notes
 
-- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
+- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts can break subsequent runs.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
