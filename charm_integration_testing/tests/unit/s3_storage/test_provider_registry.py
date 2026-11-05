@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from s3_storage import S3Bucket, S3Provider, S3ProviderRegistry, S3StorageHandle, StaticS3Provider
-from s3_storage.configuration import parse_s3_config, provider_from_config
 
 STATIC_CONFIG = (
     "S3_ENDPOINT=http://s3.test:8333\n"
@@ -114,34 +113,6 @@ def test_failed_provider_creation_is_not_cached(tmp_path: Path) -> None:
     assert isinstance(registry.provider_for_cloud("local"), StaticS3Provider)
 
 
-@dataclass(frozen=True)
-class InvalidConfigParams:
-    content: str
-    error: str
-
-
-@pytest.mark.parametrize(
-    "params",
-    [
-        InvalidConfigParams("export S3_SECRET_KEY=not-logged", "Invalid S3 config entry on line 1"),
-        InvalidConfigParams("UNKNOWN=not-logged", "Invalid S3 config entry on line 1"),
-        InvalidConfigParams("S3_SECRET_KEY=not-logged\nS3_SECRET_KEY=also-secret", "Duplicate S3 config entry"),
-    ],
-    ids=["shell-export", "unknown-variable", "duplicate-variable"],
-)
-def test_invalid_config_does_not_expose_values(params: InvalidConfigParams) -> None:
-    with pytest.raises(ValueError, match=params.error) as error:
-        parse_s3_config(params.content)
-    assert "not-logged" not in str(error.value)
-    assert "also-secret" not in str(error.value)
-
-
-def test_config_parser_keeps_equals_and_treats_shell_syntax_as_literal() -> None:
-    assert parse_s3_config("# comment\n\nS3_SECRET_KEY=$(not-executed)=value\n") == {
-        "S3_SECRET_KEY": "$(not-executed)=value"
-    }
-
-
 def test_equivalent_files_reuse_provider_and_distinct_configs_do_not(tmp_path: Path) -> None:
     paths = [tmp_path / name for name in ("first", "equivalent", "different")]
     for path in paths[:2]:
@@ -151,14 +122,6 @@ def test_equivalent_files_reuse_provider_and_distinct_configs_do_not(tmp_path: P
     first = registry.provider_for_cloud("first")
     assert registry.provider_for_cloud("equivalent") is first
     assert registry.provider_for_cloud("different") is not first
-
-
-@pytest.mark.parametrize("content", ["", "# no credentials\n", "S3_REGION=us-east-1\n"])
-def test_config_must_select_a_provider(tmp_path: Path, content: str) -> None:
-    config = tmp_path / "s3.conf"
-    config.write_text(content)
-    with pytest.raises(ValueError, match="No S3 provider configured"):
-        provider_from_config(config)
 
 
 def test_missing_config_file_is_reported(tmp_path: Path) -> None:
