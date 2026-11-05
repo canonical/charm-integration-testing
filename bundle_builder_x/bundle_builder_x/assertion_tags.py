@@ -182,6 +182,8 @@ class PeerChannelMismatchTag(AssertionTag):
     required_risk: str | None = None
     required_channel: str | None = None
     required_revision: int | None = None
+    # Other mismatched peers of the same anchor/endpoint, filled in when tags are merged
+    other_peers: tuple[CharmPayload, ...] = ()
 
 
 class CharmConfigIndexInRangeTag(AssertionTag):

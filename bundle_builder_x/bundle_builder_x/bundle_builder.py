@@ -15,6 +15,7 @@ from .assertion_tags import (
     Assertions,
     AssertionTag,
     CharmEndpointNonOptionalTag,
+    CharmPayload,
     CrossModelEndpointCountMatchesIntegrationsTag,
     EndpointCountMatchesIntegrationsTag,
     IntegrationFeatureMismatchTag,
@@ -41,6 +42,7 @@ from .charmhub import CharmhubClient
 from .constraints import add_constraints
 from .domain import (
     Domain,
+    DomainModel,
     ModelRef,
     add_charm_to_domain,
     pair_charms_in_domain,
@@ -338,6 +340,11 @@ class BundleBuilder:
                 key = (tag.charm.charm_id, tag.endpoint)
                 if key in seen:
                     existing = cast(PeerChannelMismatchTag, merged[seen[key]])
+                    other_peers = existing.other_peers
+                    if tag.peer_charm_id != existing.peer_charm_id and all(
+                        p.charm_id != tag.peer_charm_id for p in other_peers
+                    ):
+                        other_peers += (CharmPayload(charm_name=tag.peer_charm_name, charm_id=tag.peer_charm_id),)
                     merged[seen[key]] = PeerChannelMismatchTag(
                         charm=existing.charm,
                         endpoint=existing.endpoint,
@@ -347,6 +354,7 @@ class BundleBuilder:
                         required_risk=existing.required_risk or tag.required_risk,
                         required_channel=existing.required_channel or tag.required_channel,
                         required_revision=existing.required_revision or tag.required_revision,
+                        other_peers=other_peers,
                     )
                 else:
                     seen[key] = len(merged)
@@ -820,15 +828,13 @@ class BundleBuilder:
     ) -> bool:
         """Expand the domain by moving one side of a peer relation onto a shared channel.
 
-        Tries moving the peer to the tag's required channel first. If no release exists
-        there, falls back to moving the owning charm onto the peer's own (already-verified)
-        channel instead - the only remaining way to satisfy the constraint when the peer
-        itself can't be moved. The peer may live in a different model when the relation is
+        Tries moving each mismatched peer to the tag's required channel first. If no release exists
+        there, falls back to moving the owning charm onto each peer's own (already-verified)
+        channel instead - the only remaining way to satisfy the constraint when the peers
+        themselves can't be moved. The peer may live in a different model when the relation is
         cross-model (CMR), so each candidate is placed in its own owner's model.
         """
         owning_model = domain.charms[tag.charm.charm_id].model
-        peer_model = domain.charms[tag.peer_charm_id].model
-        peer_channel = domain.charms[tag.peer_charm_id].spec.channel
 
         if tag.required_channel is not None:
             resolved = CharmChannel.model_validate(tag.required_channel)
@@ -840,28 +846,78 @@ class BundleBuilder:
             risk = tag.required_risk or None
             branch = None
 
-        if self._fetch_and_add_charm_variant(
-            charm_id=tag.peer_charm_id,
-            charm_name=tag.peer_charm_name,
-            domain=domain,
-            model_key=peer_model,
-            track=track,
-            risk=risk,
-            revision=tag.required_revision,
-            branch=branch,
-            connect_to_id=tag.charm.charm_id,
-        ):
+        # Try every peer represented by the merged tags, so a peer with no release on the
+        # required channel does not hide another compatible candidate.
+        peers = ((tag.peer_charm_name, tag.peer_charm_id), *((p.charm_name, p.charm_id) for p in tag.other_peers))
+        expanded = False
+        for peer_name, peer_id in peers:
+            expanded |= self._fetch_and_add_charm_variant(
+                charm_id=peer_id,
+                charm_name=peer_name,
+                domain=domain,
+                model_key=domain.charms[peer_id].model,
+                track=track,
+                risk=risk,
+                revision=tag.required_revision,
+                branch=branch,
+                connect_to_id=tag.charm.charm_id,
+            )
+        if expanded:
             return True
 
-        return self._fetch_and_add_charm_variant(
-            charm_id=tag.charm.charm_id,
-            charm_name=tag.charm.charm_name,
-            domain=domain,
-            model_key=owning_model,
-            track=peer_channel.track,
-            risk=peer_channel.risk,
-            connect_to_id=tag.peer_charm_id,
-            branch=peer_channel.branch or None,
+        # Likewise the owner may only have a release on some peers' channels, so try each of them.
+        for _, peer_id in peers:
+            peer_channel = domain.charms[peer_id].spec.channel
+            expanded |= self._fetch_and_add_charm_variant(
+                charm_id=tag.charm.charm_id,
+                charm_name=tag.charm.charm_name,
+                domain=domain,
+                model_key=owning_model,
+                track=peer_channel.track,
+                risk=peer_channel.risk,
+                connect_to_id=peer_id,
+                branch=peer_channel.branch or None,
+            )
+        return expanded
+
+    def _fetch_subordinate_at_base(
+        self,
+        tag: SubordinateBaseMismatchTag,
+        sub_charm_spec: Charm,
+        model: DomainModel,
+        base: str,
+    ) -> Charm:
+        """Fetch the subordinate on its current channel at `base`.
+
+        The mismatch tag requires only a base, so when the current risk has no build for it,
+        retry on the same track with the risk unset, as the peer-channel handler does.
+        Explicit application channels remain enforced by the solver's application mapping.
+        """
+        track = sub_charm_spec.channel.track or None
+        risk = sub_charm_spec.channel.risk or None
+        branch = sub_charm_spec.channel.branch or None
+        try:
+            return self.charmhub_client.charm_from_store(
+                charm_name=tag.subordinate_charm_name,
+                ubuntu_arch=model.arch,
+                juju_version=model.juju_version,
+                platform=model.platform,
+                charm_track=track,
+                charm_risk=risk,
+                charm_branch=branch,
+                ubuntu_version=base,
+            )
+        except CharmReleaseNotFoundException:
+            if track is None or risk is None:
+                raise
+        return self.charmhub_client.charm_from_store(
+            charm_name=tag.subordinate_charm_name,
+            ubuntu_arch=model.arch,
+            juju_version=model.juju_version,
+            platform=model.platform,
+            charm_track=track,
+            charm_branch=branch,
+            ubuntu_version=base,
         )
 
     def _handle_subordinate_base_mismatch(
@@ -885,16 +941,7 @@ class BundleBuilder:
 
         # Try fetching the subordinate charm at the principal's base.
         try:
-            sub_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.subordinate_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=sub_charm_spec.channel.track or None,
-                charm_risk=sub_charm_spec.channel.risk or None,
-                charm_branch=sub_charm_spec.channel.branch or None,
-                ubuntu_version=principal_base,
-            )
+            sub_charm = self._fetch_subordinate_at_base(tag, sub_charm_spec, model, principal_base)
             expanded |= self._add_charm_for_charm_id(
                 sub_charm,
                 tag.subordinate_charm_id,
