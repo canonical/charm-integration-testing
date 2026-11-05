@@ -14,6 +14,11 @@ for argument in "$@"; do
     esac
 done
 
+if (( ${#packages[@]} == 0 )); then
+    echo "Usage: mise run bootstrap-packages -- [--dry-run] snap:PACKAGE [...]" >&2
+    exit 1
+fi
+
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
 case "$saved_config" in
@@ -39,7 +44,7 @@ if [[ -n "$channel" || -f "$saved_config" ]]; then
     mise config set --file "$override_dir/mise.toml" --type string \
         'bootstrap.packages."snap:juju".channel' "$channel"
     export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
-    if (( ${#packages[@]} == 0 )) || [[ " ${packages[*]} " == *" snap:juju "* ]]; then
+    if [[ " ${packages[*]} " == *" snap:juju "* ]]; then
         mise bootstrap packages upgrade --yes "${dry_run[@]}" snap:juju
     fi
 fi

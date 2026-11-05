@@ -7,7 +7,7 @@
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
-poetry run -- pytest "./charm_integration_testing/tests/unit" \
+poetry run -- pytest "./charm_integration_testing/tests/unit" "./scripts/tests" \
     --cov=./charm_integration_testing/extensions \
     --cov=./charm_integration_testing/juju \
     --cov=./charm_integration_testing/juju_cmd \

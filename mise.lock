@@ -2,6 +2,53 @@
 
 lockfile_version = 3
 
+[[tools."aqua:cli/cli"]]
+version = "2.103.3"
+backend = "aqua:cli/cli"
+specifiers = ["2.103.3"]
+
+[tools."aqua:cli/cli"."platforms.linux-arm64"]
+checksum = "sha256:ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63"
+url = "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/cli/cli/releases/assets/679195636"
+provenance = "github-attestations"
+
+[tools."aqua:cli/cli"."platforms.linux-x64"]
+checksum = "sha256:4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d"
+url = "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/cli/cli/releases/assets/679195621"
+provenance = "github-attestations"
+
+[[tools."aqua:gitleaks/gitleaks"]]
+version = "8.30.1"
+backend = "aqua:gitleaks/gitleaks"
+specifiers = ["8.30.1"]
+
+[tools."aqua:gitleaks/gitleaks"."platforms.linux-arm64"]
+checksum = "sha256:e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080"
+checksum_source = "mise-versions"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/378332057"
+
+[tools."aqua:gitleaks/gitleaks"."platforms.linux-x64"]
+checksum = "sha256:551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+checksum_source = "mise-versions"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
+url_api = "https://api.github.com/repos/gitleaks/gitleaks/releases/assets/378332058"
+
+[[tools."aqua:helm/helm"]]
+version = "3.21.4"
+backend = "aqua:helm/helm"
+specifiers = ["3.21.4"]
+
+[tools."aqua:helm/helm"."platforms.linux-arm64"]
+checksum = "sha256:b54c04b4e0b2540bbdc08c17a121dab70e9a2ed0de5705528fec68a5fd3b85a7"
+url = "https://get.helm.sh/helm-v3.21.4-linux-arm64.tar.gz"
+
+[tools."aqua:helm/helm"."platforms.linux-x64"]
+checksum = "sha256:61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14"
+url = "https://get.helm.sh/helm-v3.21.4-linux-amd64.tar.gz"
+
 [[tools."aqua:jqlang/jq"]]
 version = "1.8.2"
 backend = "aqua:jqlang/jq"
@@ -36,6 +83,21 @@ url = "https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64"
 url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/597222595"
 provenance = "cosign"
 
+[[tools."aqua:mpalmer/action-validator"]]
+version = "0.6.0"
+backend = "aqua:mpalmer/action-validator"
+specifiers = ["0.6.0"]
+
+[tools."aqua:mpalmer/action-validator"."platforms.linux-arm64"]
+checksum = "sha256:38a582690ab7e64ba33b4c29eaf16979ed116d4daf40fde39ec18992c475c0b1"
+url = "https://github.com/mpalmer/action-validator/releases/download/v0.6.0/action-validator_linux_arm64"
+url_api = "https://api.github.com/repos/mpalmer/action-validator/releases/assets/153122332"
+
+[tools."aqua:mpalmer/action-validator"."platforms.linux-x64"]
+checksum = "sha256:fa61521913ee4cf5de7e4d5b803741b2c60ebde447ee38e2b71abbd213d3354a"
+url = "https://github.com/mpalmer/action-validator/releases/download/v0.6.0/action-validator_linux_amd64"
+url_api = "https://api.github.com/repos/mpalmer/action-validator/releases/assets/153122329"
+
 [[tools."aqua:trufflesecurity/trufflehog"]]
 version = "3.56.0"
 backend = "aqua:trufflesecurity/trufflehog"
@@ -51,28 +113,33 @@ checksum = "sha256:1fd2d0e9f2387d74187b19fbdbad9d4ec3bb905c8cbe1c6fd1cc864070655
 url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.56.0/trufflehog_3.56.0_linux_amd64.tar.gz"
 url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/126074149"
 
-[[tools.pipx]]
-version = "1.18.8"
-backend = "aqua:pypa/pipx"
-specifiers = ["1.18.8"]
+[[tools.node]]
+version = "24.22.0"
+backend = "core:node"
+specifiers = ["24.22.0"]
 
-[tools.pipx."platforms.linux-arm64"]
-checksum = "sha256:32cac6916e60d49307121cdf3e447f0b55696af03a7d7a0e0b43677299b147c2"
-checksum_source = "mise-versions"
-url = "https://github.com/pypa/pipx/releases/download/1.18.8/pipx.pyz"
-url_api = "https://api.github.com/repos/pypa/pipx/releases/assets/687022449"
+[tools.node."platforms.linux-arm64"]
+checksum = "sha256:b7e7991d5407815adfa74a2a9cd4db683552c8ce32ff4a295c22e972849c3f5d"
+url = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-arm64.tar.gz"
 
-[tools.pipx."platforms.linux-x64"]
-checksum = "sha256:32cac6916e60d49307121cdf3e447f0b55696af03a7d7a0e0b43677299b147c2"
-checksum_source = "mise-versions"
-url = "https://github.com/pypa/pipx/releases/download/1.18.8/pipx.pyz"
-url_api = "https://api.github.com/repos/pypa/pipx/releases/assets/687022449"
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c"
+url = "https://nodejs.org/dist/v24.22.0/node-v24.22.0-linux-x64.tar.gz"
 
-[[tools."pipx:poetry"]]
-version = "2.3.0"
-backend = "pipx:poetry"
-specifiers = ["2.3.0"]
-uv = { path = ".mise/locks/pipx-poetry/2.3.0", digest = "sha256:10adbc3fe6d6e5b859d333810b1a188bcbb076d69f3cb4912c71be6fe58e12f2" }
+[[tools."npm:markdownlint-cli2"]]
+version = "0.24.0"
+aube = { path = ".mise/locks/npm-markdownlint-cli2/0.24.0", digest = "sha256:d76beb6e3aac6ad55a254433b35509683547147e7a20f0217eda5a784f0c2e34" }
+backend = "npm:markdownlint-cli2"
+specifiers = ["0.24.0"]
+
+[[tools."pypi:bandit"]]
+version = "1.9.4"
+backend = "pypi:bandit"
+specifiers = ["1.9.4"]
+uv = { path = ".mise/locks/pypi-bandit/1.9.4~f22a104d", digest = "sha256:9fd698dc584fb906890182afb9fd6379b597f205adbdc13cdf8eef74b0cd9d5b" }
+
+[tools."pypi:bandit".options]
+extras = "toml"
 
 [[tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]]
 version = "22ef04caaeeb94ad6ed49f8392b6bada65184569"
@@ -91,6 +158,36 @@ specifiers = ["bde242ccfdd91cb2372f26d41d62d7b230660c08"]
 [tools."pypi:git+https://github.com/juju/juju-crashdump.git".options]
 python = "3.12.12"
 with = '["ssh-agent-setup==2.0.1"]'
+
+[[tools."pypi:pipx"]]
+version = "1.18.8"
+backend = "pypi:pipx"
+specifiers = ["1.18.8"]
+uv = { path = ".mise/locks/pypi-pipx/1.18.8", digest = "sha256:7442368d4847da9b09d88901539ea339e3565a22d7ee331cf21f85f3df0942a1" }
+
+[[tools."pypi:poetry"]]
+version = "2.3.0"
+backend = "pypi:poetry"
+specifiers = ["2.3.0"]
+uv = { path = ".mise/locks/pypi-poetry/2.3.0", digest = "sha256:10adbc3fe6d6e5b859d333810b1a188bcbb076d69f3cb4912c71be6fe58e12f2" }
+
+[[tools."pypi:ruff"]]
+version = "0.5.7"
+backend = "pypi:ruff"
+specifiers = ["0.5.7"]
+uv = { path = ".mise/locks/pypi-ruff/0.5.7", digest = "sha256:54909b7b34c50cf45ee082b9598bfabb1cb97e49da2096e4b24d75b2608e4a02" }
+
+[[tools."pypi:yamlfix"]]
+version = "1.19.1"
+backend = "pypi:yamlfix"
+specifiers = ["1.19.1"]
+uv = { path = ".mise/locks/pypi-yamlfix/1.19.1", digest = "sha256:43ca0ee88ee2521671ab6b71e0ee6641a05bab810370f0e381739ac7a16f96eb" }
+
+[[tools."pypi:zizmor"]]
+version = "1.5.1"
+backend = "pypi:zizmor"
+specifiers = ["1.5.1"]
+uv = { path = ".mise/locks/pypi-zizmor/1.5.1", digest = "sha256:99fc391efa72a9849266efef72be3326d1e13af034d44d37488be7a8017071e7" }
 
 [[tools.python]]
 version = "3.12.12"
@@ -123,33 +220,3 @@ checksum = "sha256:f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3
 url = "https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-unknown-linux-gnu.tar.gz"
 url_api = "https://api.github.com/repos/astral-sh/uv/releases/assets/679980644"
 provenance = "github-attestations"
-
-[[tools."aqua:cli/cli"]]
-version = "2.103.3"
-backend = "aqua:cli/cli"
-specifiers = ["2.103.3"]
-
-[tools."aqua:cli/cli"."platforms.linux-arm64"]
-checksum = "sha256:ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63"
-url = "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/cli/cli/releases/assets/679195636"
-provenance = "github-attestations"
-
-[tools."aqua:cli/cli"."platforms.linux-x64"]
-checksum = "sha256:4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d"
-url = "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/cli/cli/releases/assets/679195621"
-provenance = "github-attestations"
-
-[[tools."aqua:helm/helm"]]
-version = "3.21.4"
-backend = "aqua:helm/helm"
-specifiers = ["3.21.4"]
-
-[tools."aqua:helm/helm"."platforms.linux-arm64"]
-checksum = "sha256:b54c04b4e0b2540bbdc08c17a121dab70e9a2ed0de5705528fec68a5fd3b85a7"
-url = "https://get.helm.sh/helm-v3.21.4-linux-arm64.tar.gz"
-
-[tools."aqua:helm/helm"."platforms.linux-x64"]
-checksum = "sha256:61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14"
-url = "https://get.helm.sh/helm-v3.21.4-linux-amd64.tar.gz"

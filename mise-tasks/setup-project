@@ -5,5 +5,4 @@
 # See LICENSE file for licensing details.
 set -euo pipefail
 
-mise install --locked
-mise exec -- poetry install "$@"
+exec mise run setup -- python -- "$@"

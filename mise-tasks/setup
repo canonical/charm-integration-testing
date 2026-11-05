@@ -1,35 +1,75 @@
 #!/usr/bin/env bash
-#MISE description="Install selected tools and project dependencies; optionally bootstrap system packages"
+#MISE description="Install named tool selections and project dependencies"
 #MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 set -euo pipefail
 
-install_project="${SETUP_INSTALL_PROJECT-true}"
-bootstrap="${SETUP_BOOTSTRAP:-false}"
-for setting in "$install_project" "$bootstrap"; do
-    case "$setting" in
-        true|false) ;;
-        *) echo "Setup boolean settings must be true or false" >&2; exit 1 ;;
-    esac
-done
+usage() {
+    echo "Usage: mise run setup -- [--tools-only] [python|development|workflow|integration|local-k8s|local-lxd ...] [-- poetry-install-args...]"
+}
 
+install_project="${SETUP_INSTALL_PROJECT-true}"
+case "$install_project" in
+    true|false) ;;
+    *) echo "SETUP_INSTALL_PROJECT must be true or false" >&2; exit 1 ;;
+esac
+selections=()
+if [[ "${SETUP_TOOLS:-}" == *$'\n'* || "${SETUP_TOOLS:-}" == *$'\r'* ]]; then
+    echo "SETUP_TOOLS must be a single space-separated line" >&2
+    exit 1
+fi
+read -r -a selections <<< "${SETUP_TOOLS:-}"
 while (( $# )); do
     case "$1" in
         --tools-only) install_project=false ;;
-        --bootstrap) bootstrap=true ;;
         --) shift; break ;;
-        *) break ;;
+        --help|-h) usage; exit 0 ;;
+        -*) usage >&2; echo "Unknown setup option: $1" >&2; exit 1 ;;
+        *) selections+=("$1") ;;
     esac
     shift
 done
 
-if [[ "$bootstrap" == true ]]; then
-    mise run bootstrap-packages
-fi
+(( ${#selections[@]} )) || selections=(python)
+tools=()
+packages=()
+for selection in "${selections[@]}"; do
+    case "$selection" in
+        python) tools+=(python uv pypi:poetry) ;;
+        development)
+            tools+=(python uv pypi:poetry node npm:markdownlint-cli2 pypi:ruff pypi:bandit
+                pypi:yamlfix pypi:zizmor aqua:gitleaks/gitleaks aqua:mpalmer/action-validator)
+            ;;
+        workflow) tools+=(aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli) ;;
+        integration)
+            tools+=(python uv pypi:pipx aqua:jqlang/jq aqua:mikefarah/yq aqua:cli/cli
+                aqua:trufflesecurity/trufflehog
+                pypi:git+https://github.com/juju/juju-crashdump.git
+                pypi:git+https://github.com/canonical/juju-k8s-crashdump.git)
+            ;;
+        local-k8s)
+            tools+=(aqua:helm/helm aqua:jqlang/jq)
+            packages+=(snap:k8s snap:kubectl snap:juju)
+            ;;
+        local-lxd) packages+=(snap:lxd snap:juju) ;;
+        *) usage >&2; echo "Unknown tool selection: $selection" >&2; exit 1 ;;
+    esac
+done
 
 if [[ "$install_project" == true ]]; then
-    mise run setup-project -- "$@"
-else
-    mise install --locked
+    tools+=(python uv pypi:poetry)
+elif (( $# )); then
+    echo "Poetry arguments cannot be used with --tools-only" >&2
+    exit 1
+fi
+
+if (( ${#tools[@]} )); then
+    mise install --locked "${tools[@]}"
+fi
+if (( ${#packages[@]} )); then
+    mise run bootstrap-packages -- "${packages[@]}"
+fi
+if [[ "$install_project" == true ]]; then
+    mise exec -- poetry install "$@"
 fi

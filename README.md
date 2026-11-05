@@ -15,11 +15,11 @@ To install directly on your machine, install
 mise run setup
 ```
 
-Setup installs runtime tools and project dependencies without changing system
-packages. For development tools, use `mise -E development run setup` and select
-the same environment for lint/format commands (or export `MISE_ENV=development`).
+Setup installs Python, uv, Poetry and project dependencies without changing system
+packages. For development tools, use `mise run setup -- development`.
+For live charm testing, use `mise run setup -- integration`.
 Cloud setup and Swift upload ensure their own system packages.
-Use `mise run setup --bootstrap` to explicitly install all declared system packages.
+Local substrate preparation uses the explicit `local-k8s` and `local-lxd` selections.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.

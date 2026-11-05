@@ -15,13 +15,15 @@ curl --fail --silent --show-error --location \
 
 for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
     if [[ -f "$startup_file" ]]; then
-        sed -i 's/^export MISE_ENV=sandbox$/export MISE_ENV=development/' "$startup_file"
+        sed -i \
+            -e '/^export MISE_ENV=\(sandbox\|development\|development,provisioning,sandbox\)$/d' \
+            -e '\|^export MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml$|d' \
+            "$startup_file"
     fi
     if ! grep -Fq '# mise sandbox environment' "$startup_file" 2>/dev/null; then
         cat >> "$startup_file" <<'EOF'
 
 # mise sandbox environment
-export MISE_ENV=development
 eval "$(~/.local/bin/mise activate bash)"
 EOF
     fi

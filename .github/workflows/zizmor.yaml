@@ -18,9 +18,8 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          environment: development
+          tools: development
           install-project: "false"
-          bootstrap: "false"
       - name: Lint Actions
         run: |
           find .github/workflows -type f \( -iname \*.yaml -o -iname \*.yml \) \
@@ -38,9 +37,8 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          environment: development
+          tools: development
           install-project: "false"
-          bootstrap: "false"
       - name: Scan all workflows
         run: |-
           zizmor --pedantic .github

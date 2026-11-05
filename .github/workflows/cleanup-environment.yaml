@@ -82,6 +82,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
+          tools: workflow
           install-project: "false"
       - name: Get environment info
         id: env_info

@@ -1,17 +1,14 @@
 ---
 name: Set up mise
-description: Install the repository's tools, project dependencies and system packages
+description: Install named repository tool selections and optional project dependencies
 inputs:
-  environment:
-    description: Additive mise environment; use development for linters and development
-      tools
-    default: ""
+  tools:
+    description: Space-separated tool selections (python, development, workflow, integration,
+      local-k8s, local-lxd)
+    default: python
   install-project:
     description: Install project Python dependencies after the tools
     default: "true"
-  bootstrap:
-    description: Opt in to installing the declared system packages
-    default: "false"
   juju-channel:
     description: Override the Juju client channel for this setup only; empty uses
       the saved selection or repository default
@@ -32,14 +29,7 @@ runs:
     - name: Set up environment
       shell: bash
       env:
-        MISE_ENV: ${{ inputs.environment }}
+        SETUP_TOOLS: ${{ inputs.tools }}
         SETUP_INSTALL_PROJECT: ${{ inputs.install-project }}
-        SETUP_BOOTSTRAP: ${{ inputs.bootstrap }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
-      run: |-
-        case "$MISE_ENV" in
-          "") echo 'MISE_ENV=' >> "$GITHUB_ENV" ;;
-          development) echo 'MISE_ENV=development' >> "$GITHUB_ENV" ;;
-          *) echo "Unsupported mise environment: $MISE_ENV" >&2; exit 1 ;;
-        esac
-        mise run setup
+      run: mise run setup

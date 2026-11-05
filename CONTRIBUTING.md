@@ -11,48 +11,72 @@ Install mise as described in the [README](README.md#getting-started), then
 prepare a workstation:
 
 ```bash
-export MISE_ENV=development
-mise run setup
+mise run setup -- development
 ```
 
 ### What goes where
 
 | File | Owns |
 |---|---|
-| `mise.toml` | Shared locked tools and snap channels for Juju, kubectl, OpenStack clients, and LXD |
-| `mise.development.toml` | Additional development tools, including linters and Node |
+| `mise.toml` / `mise.lock` / `.mise/locks/` | One executable catalogue, artifact/dependency locks, and snap channels |
+| `mise-tasks/setup` | Named selections of tools and host packages; no duplicated versions |
 | `pyproject.toml` / `poetry.lock` | Project Python dependencies, pytest plugins, mypy, and type stubs |
 
-Development adds tools to the shared runtime inventory.
 `[tools]` declares isolated, locked executables;
 `[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
-run in isolated environments. Mypy stays with Poetry because it uses the project's
+and Poetry are installed by uv in isolated environments. Only the pinned
+`juju-k8s-crashdump` temporarily uses pipx because its upstream package metadata
+is rejected by uv; the integration selection alone includes pipx.
+The prerequisite fix is
+[canonical/juju-k8s-crashdump#21](https://github.com/canonical/juju-k8s-crashdump/pull/21).
+After it lands, update that Git pin and remove its pipx-only installer selection.
+Both crashdump tools remain Git-commit-pinned with version-only dependency locking.
+Uv bootstraps tools, while Poetry manages project dependencies.
+Mypy stays with Poetry because it uses the project's
 Pydantic plugin and dependencies; linter settings remain in `pyproject.toml`.
 
 ### Explicit setup
 
 | Command | Prepares |
 |---|---|
-| `mise run setup` | All selected tools and project dependencies; leaves system packages untouched |
-| `mise -E development run setup` | Also installs the development tools |
-| `mise run setup --bootstrap` | Also installs the declared system packages |
-| `mise run setup --tools-only` | Prepares executable tools without project dependencies or system packages |
+| `mise run setup` | Python, uv, Poetry and project dependencies |
+| `mise run setup -- development` | Repository checkers, Node and project dependencies |
+| `mise run setup -- integration` | Test utilities, TruffleHog, crashdump tools and project dependencies |
+| `mise run setup -- --tools-only workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --tools-only local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
+| `mise run setup -- --tools-only local-lxd` | LXD and Juju snaps |
 
-All tools in the selected inventory install during setup; there is no first-use
-installer. Select development with `MISE_ENV=development` for the shell or
-`mise -E development` for one command. Runtime CI uses only the base inventory.
-Strict locking preserves committed versions and artifact checksums.
+Selections compose: `mise run setup -- development integration` prepares both.
+`--tools-only` skips project installation and its implicit Python tool selection.
+Pass Poetry installation arguments after another `--`, for example
+`mise run setup -- python -- --only main`. The root Poetry dependency groups and
+validator extras are unchanged; selecting Python tools does not itself separate
+the project's runtime and development dependencies.
+
+Versions appear only in the catalogue. Selections explicitly include installation
+prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
+installation is disabled, including during task execution; no first-use installer
+or additional environment selection is needed.
+Bare `mise install` intentionally still installs the entire catalogue; use setup
+instead. Strict locking preserves managed versions and artifact checksums.
+
+Selections control installation, not PATH isolation. Installed catalogue tools
+are available together. A missing executable can fall back to a host installation;
+run setup before executing an operation rather than relying on host tools.
 
 Project-dependent test tasks and lint share
-`setup-project`, which runs Poetry installation before the task. Poetry owns
+`setup-project`, which prepares only Python tools and runs Poetry installation
+before the task. Poetry owns
 dependency reconciliation; there is no additional readiness cache.
 This does not bootstrap system packages.
 
 The CI setup action wraps the same task. Lint and workflow/security checks select
-`environment: development`; runtime and unit-test jobs use the base inventory.
+`tools: development`; unit-test jobs use the default `tools: python`.
+Live integration jobs select `tools: integration`; cleanup uses `tools: workflow`.
 Jobs without project dependencies set
-`install-project: "false"`. The action carries the environment into later job
-steps. The test workflow supplies `JUJU_CHANNEL` at job scope for cloud setup.
+`install-project: "false"`. Installed tools are available in later steps through
+mise's activation, without exporting a profile. The test workflow supplies
+`JUJU_CHANNEL` at job scope for cloud setup.
 Mise-action caching remains disabled.
 
 System-package installation is explicit and operation-owned: OpenStack cloud
@@ -62,12 +86,12 @@ selects clients for its environment. A satisfied snap/channel is checked locally
 and skipped; repeat calls do not force a refresh. Kubernetes-only cloud access
 does not install OpenStack clients, although Swift reporting still requires them.
 
-`mise run setup --bootstrap` is an opt-in full system-package preparation.
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Snapd can auto-refresh them; applying a changed channel can also refresh an
 existing daemon. Preview changes with
-`mise run bootstrap-packages -- --dry-run` on an existing machine.
+`mise run bootstrap-packages -- --dry-run snap:juju` on an existing machine.
+The wrapper requires named packages rather than implicitly applying the catalogue.
 
 OpenStack operations and Swift uploads share `openstackclients`; remove any
 conflicting `openstack` snap manually.
