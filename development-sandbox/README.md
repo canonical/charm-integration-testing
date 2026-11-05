@@ -56,6 +56,10 @@ Without dedicated tokens, the script asks before using your host `gh` token in t
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
 Declining leaves the corresponding tools unauthenticated.
 
+Session environment variables are transferred over stdin into a mode-600 file
+in the VM, not command-line arguments. The file is deleted before the shell or
+Copilot starts; the variables remain available to processes running as your VM user.
+
 ## Recommended MCP servers
 
 Copy the optional [sample](mcp.json.sample), replace the credential placeholders,
