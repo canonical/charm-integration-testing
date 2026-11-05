@@ -30,6 +30,7 @@ uv = "0.13.6"
 "aqua:cli/cli" = "2.103.3"
 "aqua:helm/helm" = "3.21.4"
 node = "24.22.0"
+go = "1.26.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:mpalmer/action-validator" = "0.6.0"
 

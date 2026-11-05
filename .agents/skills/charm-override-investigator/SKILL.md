@@ -335,7 +335,7 @@ add the override, validate with and without it, and confirm the expected result.
 
    Only continue with the rest of this step if the user picks `Run validation on sandbox`:
    - *Prepare a clean test environment.* Follow the
-     [development sandbox guide](../../../development-sandbox/README.md#host-side)
+     [development sandbox guide](../../../development-sandbox/README.md#quick-start)
      for VM lifecycle and entry commands. Obtain explicit approval before destroying an
      existing VM; do not assume it is disposable.
    - *Install substrates and logging tools (inside the VM).* Run the `/setup-charm-tests`

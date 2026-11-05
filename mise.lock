@@ -113,6 +113,19 @@ checksum = "sha256:1fd2d0e9f2387d74187b19fbdbad9d4ec3bb905c8cbe1c6fd1cc864070655
 url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.56.0/trufflehog_3.56.0_linux_amd64.tar.gz"
 url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/126074149"
 
+[[tools.go]]
+version = "1.26.0"
+backend = "core:go"
+specifiers = ["1.26.0"]
+
+[tools.go."platforms.linux-arm64"]
+checksum = "sha256:bd03b743eb6eb4193ea3c3fd3956546bf0e3ca5b7076c8226334afe6b75704cd"
+url = "https://dl.google.com/go/go1.26.0.linux-arm64.tar.gz"
+
+[tools.go."platforms.linux-x64"]
+checksum = "sha256:aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235"
+url = "https://dl.google.com/go/go1.26.0.linux-amd64.tar.gz"
+
 [[tools.node]]
 version = "24.22.0"
 backend = "core:node"
