@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
+import secrets
 from contextlib import closing
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, cast
@@ -14,17 +17,16 @@ import boto3  # type: ignore[import-untyped]
 from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from .identity import bucket_owner_identity, provider_identity
 from .provider import S3Bucket, S3Credentials, S3Provider
 from .provider import S3BucketHandle as S3BucketHandle
 from .provider import S3StorageHandle as S3StorageHandle
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
-    from mypy_boto3_s3.type_defs import ObjectIdentifierTypeDef, TagTypeDef
+    from mypy_boto3_s3.type_defs import ObjectIdentifierTypeDef
 
 S3_PATH = "charmqa"
-S3_OWNER_TAG = "charmqa-storage-owner"
+_IDENTITY_KEY = secrets.token_bytes(32)
 
 
 class StaticS3Provider(S3Provider):
@@ -47,12 +49,11 @@ class StaticS3Provider(S3Provider):
         self._endpoint = endpoint.rstrip("/")
         self._region = region
         self._credentials = credentials
-        attributes = ("static", self._endpoint, namespace, region, credentials.access_key)
-        # Preserve tags already written when the shared key filled both identity slots.
-        self._bucket_owner = bucket_owner_identity(*attributes, credentials.access_key)
-        self._handle = S3StorageHandle(
-            namespace, identity if identity is not None else provider_identity(*attributes, credentials.secret_key)
-        )
+        if identity is None:
+            attributes = ("static", self._endpoint, namespace, region, credentials.access_key, credentials.secret_key)
+            serialized = json.dumps(attributes, separators=(",", ":"))
+            identity = hmac.new(_IDENTITY_KEY, serialized.encode(), hashlib.sha256).hexdigest()
+        self._handle = S3StorageHandle(namespace, identity)
         self._prefix = f"charmqa-s3-{hashlib.sha256(namespace.encode()).hexdigest()[:8]}-"
         self._client_factory = client_factory or self._make_client
 
@@ -94,7 +95,6 @@ class StaticS3Provider(S3Provider):
             self._credentials,
             self._client_factory,
             self._region,
-            self._bucket_owner,
         )
 
     @staticmethod
@@ -126,13 +126,11 @@ class _S3Bucket(S3Bucket):
         credentials: S3Credentials,
         client_factory: Callable[[S3Credentials], S3Client],
         region: str,
-        bucket_owner: str,
     ) -> None:
         self._handle = handle
         self._credentials = credentials
         self._client_factory = client_factory
         self._region = region
-        self._bucket_owner = bucket_owner
         self._create_attempted = False
 
     @property
@@ -154,8 +152,6 @@ class _S3Bucket(S3Bucket):
                 self._create_attempted = True
                 self._create_bucket(client)
 
-            tags: list[TagTypeDef] = [{"Key": S3_OWNER_TAG, "Value": self._bucket_owner}]
-            client.put_bucket_tagging(Bucket=self._handle.name, Tagging={"TagSet": tags})
             client.put_object(Bucket=self._handle.name, Key=f"{S3_PATH}/", Body=b"")
             client.head_bucket(Bucket=self._handle.name)
         return self._handle.name, self._credentials

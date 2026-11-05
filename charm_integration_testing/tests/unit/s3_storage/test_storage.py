@@ -4,7 +4,7 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator, get_type_hints
+from typing import Iterator, get_type_hints
 from unittest.mock import patch
 
 import boto3  # type: ignore[import-untyped]
@@ -57,10 +57,6 @@ def empty_bucket(stubber: Stubber, name: str = ANY) -> None:
     stubber.add_response("delete_bucket", {}, {"Bucket": name})
 
 
-def expected_tagging() -> dict[str, Any]:
-    return {"TagSet": [{"Key": "charmqa-storage-owner", "Value": ANY}]}
-
-
 def test_provision_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:
     storage = StaticS3Provider(
         "https://s3.test",
@@ -76,28 +72,12 @@ def test_provision_sets_location_constraint_for_nondefault_region(client: S3Clie
     }
     with Stubber(client) as stubber:
         stubber.add_response("create_bucket", {}, create_params)
-        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
         stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
         bucket.provision()
         empty_bucket(stubber, bucket.handle.name)
         bucket.cleanup()
         stubber.assert_no_pending_responses()
-
-
-def test_storage_owner_includes_application_identity() -> None:
-    first_storage = StaticS3Provider(
-        "https://s3.test",
-        NAMESPACE,
-        S3Credentials("application-one", "secret-one"),
-    )
-    second_storage = StaticS3Provider(
-        "https://s3.test",
-        NAMESPACE,
-        S3Credentials("application-two", "secret-two"),
-    )
-
-    assert first_storage._bucket_owner != second_storage._bucket_owner
 
 
 def test_retry_creation_sets_location_constraint_for_nondefault_region(client: S3Client) -> None:
@@ -125,7 +105,6 @@ def test_retry_creation_sets_location_constraint_for_nondefault_region(client: S
             expected_params={"Bucket": bucket.handle.name},
         )
         stubber.add_response("create_bucket", {}, create_params)
-        stubber.add_response("put_bucket_tagging", {}, {"Bucket": bucket.handle.name, "Tagging": expected_tagging()})
         stubber.add_response("put_object", {}, {"Bucket": bucket.handle.name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": bucket.handle.name})
         bucket.provision()
@@ -205,7 +184,6 @@ def test_registry_tears_down_each_bucket_and_continues_after_failure(client: S3C
         for bucket in buckets:
             name = bucket.handle.name
             stubber.add_response("create_bucket", {}, {"Bucket": name})
-            stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
             stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
             stubber.add_response("head_bucket", {}, {"Bucket": name})
             bucket.provision()
@@ -228,7 +206,6 @@ def test_bucket_cleanup_closes_client_even_when_deletion_fails(client: S3Client)
     with patch.object(client, "close", wraps=client.close) as close, Stubber(client) as stubber:
         name = bucket.handle.name
         stubber.add_response("create_bucket", {}, {"Bucket": name})
-        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
         stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": name})
         bucket.provision()
@@ -259,15 +236,6 @@ def test_static_provider_uses_same_credentials_for_bucket_lifecycle_and_integrat
     with Stubber(client) as stubber:
         name = bucket.handle.name
         stubber.add_response("create_bucket", {}, {"Bucket": name})
-        # Existing shared-key buckets must remain discoverable by scheduled cleanup.
-        stubber.add_response(
-            "put_bucket_tagging",
-            {},
-            {
-                "Bucket": name,
-                "Tagging": {"TagSet": [{"Key": "charmqa-storage-owner", "Value": "c2e84753f62c40532c8c0caa38f6cdab"}]},
-            },
-        )
         stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": name})
         assert bucket.provision() == (name, CREDS)
@@ -285,7 +253,6 @@ def test_bucket_cleanup_propagates_client_close_failure_without_retry(client: S3
     with Stubber(client) as stubber:
         name = bucket.handle.name
         stubber.add_response("create_bucket", {}, {"Bucket": name})
-        stubber.add_response("put_bucket_tagging", {}, {"Bucket": name, "Tagging": expected_tagging()})
         stubber.add_response("put_object", {}, {"Bucket": name, "Key": "charmqa/", "Body": b""})
         stubber.add_response("head_bucket", {}, {"Bucket": name})
         bucket.provision()
@@ -308,15 +275,14 @@ def test_direct_provider_handles_distinguish_endpoints_and_credentials() -> None
     assert len({provider.handle.resource_id for provider in providers}) == len(providers)
 
 
-def test_direct_static_handles_include_secrets_without_changing_ownership() -> None:
+def test_direct_static_handles_distinguish_secrets_without_exposing_them() -> None:
     # GIVEN matching non-secret identities but different effective secrets
     original = StaticS3Provider("https://s3.test", NAMESPACE, CREDS)
     credentials = S3Credentials(CREDS.access_key, "different-secret")
 
-    # WHEN constructed directly, THEN credential configurations differ but persistent ownership is unchanged
+    # WHEN constructed directly, THEN credential configurations have distinct opaque handles
     other = StaticS3Provider("https://s3.test", NAMESPACE, credentials)
     assert original.handle.resource_id != other.handle.resource_id
-    assert original._bucket_owner == other._bucket_owner
     assert credentials.secret_key not in other.handle.resource_id
 
 
