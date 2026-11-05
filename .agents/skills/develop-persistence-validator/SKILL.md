@@ -359,16 +359,18 @@ rather than registering multiple entry points for the same interface.
    `[project.optional-dependencies].dev` (matching the PEP 621 format
    `validators/<name>/pyproject.toml` already uses - not the root project's
    `[tool.poetry.dependencies]` format). A new dev dependency there is only
-   installed if the root `pyproject.toml`'s path dependency for this package
-   already lists `extras = ["dev"]` (e.g. `validators-postgresql-client = {
+   installed if the root `pyproject.toml`'s development-group path dependency
+   under `[tool.poetry.group.dev.dependencies]` lists `extras = ["dev"]`
+   (e.g. `validators-postgresql-client = {
    path = "./validators/postgresql_client", develop = true, extras = ["dev"]
    }` - preserve any other existing extras already listed alongside `"dev"`)
-   - if it's missing `"dev"`, add it. If
+   - add this development-group entry if missing; keep dev extras out of main. If
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `poetry install` (or `poetry update <package>` for a single
+   way, run `mise run setup -- --group development` (or
+   `mise exec -- poetry update <package>` for a single
    path dependency) after *any* change to a package's `pyproject.toml` made
    in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
@@ -379,9 +381,9 @@ rather than registering multiple entry points for the same interface.
    though the source file itself is present. Do this before running the
    tests below. In the development sandbox this matters especially for a
    long-lived `scripts/sandbox.sh run --interactive` session: `poetry
-   install` runs once at `sandbox.sh up` time, so the VM's venv reflects the
+   install --with dev` runs once at `sandbox.sh up` time, so the VM's venv reflects the
    `pyproject.toml` as of `up` and goes stale for any change made mid-session
-   - re-run `poetry install` inside the VM after editing a `pyproject.toml`,
+   - re-run `mise run setup -- --group development` inside the VM after editing a `pyproject.toml`,
    or the runner won't discover the new/changed entry point until the next
    `up`.
 
@@ -469,10 +471,10 @@ rather than registering multiple entry points for the same interface.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
-   poetry run pytest validators/<name>
-   poetry run pytest validators/runner    # confirm discovery/wiring still passes
-   ./scripts/format.sh
-   ./scripts/lint.sh
+   mise exec -- poetry run pytest validators/<name>
+   mise exec -- poetry run pytest validators/runner    # confirm discovery/wiring still passes
+   mise exec -- ./scripts/format.sh
+   mise exec -- ./scripts/lint.sh
    ```
    `scripts/lint.sh` is the same check the repository CI/reviewers require -
    beyond ruff/mypy it also runs bandit, yamlfix, and markdownlint-cli2, so
@@ -743,7 +745,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
   Juju interface name.
 - Unit tests cover role gating, prepare, checkpoint (pass and fail), and
   cleanup (including the no-canary-resources case).
-- `poetry run pytest validators/<name> validators/runner` passes.
+- `mise exec -- poetry run pytest validators/<name> validators/runner` passes.
 - `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
   yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
   includes nested markdown documentation, run markdownlint-cli2 explicitly on

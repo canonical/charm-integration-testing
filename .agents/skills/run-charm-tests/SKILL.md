@@ -721,8 +721,7 @@ K8s cloud setup might be incomplete. Before running tests:
 juju clouds | grep local-k8s
 
 # If not found, install and configure K8s
-# (See setup-k8s skill documentation)
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+/setup-k8s
 
 # Bootstrap a K8s controller
 juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G

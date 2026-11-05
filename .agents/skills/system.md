@@ -35,7 +35,7 @@ Note: This applies to your chat output, not to repository documentation or skill
 ## Environment
 
 - Project: `$PROJECT_ROOT` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install` from `$PROJECT_ROOT`)
+- Python dependencies: managed by Poetry through `mise run setup -- --group development`
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
 

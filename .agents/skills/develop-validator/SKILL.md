@@ -159,7 +159,9 @@ under `validators/<name>/` with passing `dev-validate` output.
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
    - Add `validators-<name> = { path = "./validators/<name>", develop = true }`
      to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
-   - Run `poetry install` from `$PROJECT_ROOT` so the new package is available.
+   - If the package declares a `dev` extra, add its editable path dependency with
+     `extras = ["dev"]` under `[tool.poetry.group.dev.dependencies]`, not main.
+   - Run `mise run setup -- --group development` from `$PROJECT_ROOT` so the new package is available.
 
 8. Run and iterate:
    ```
@@ -317,7 +319,7 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ## Validator-specific notes
 
-- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
+- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv. Prepare dependencies with `mise run setup -- --group development`, then call it directly; do not wrap it in `poetry run` or `mise exec`.
 - If a relation has no remote app (`relation.app is None`), return an `ERROR` result immediately.
 - Keep validators focused on a single interface. Do not add cross-interface logic.
 - Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
