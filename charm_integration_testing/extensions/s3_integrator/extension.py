@@ -31,9 +31,9 @@ class S3IntegratorExtension(JujuExtension):
         for application, info in self.juju.list_applications(model).items():
             self._configure_integrator(model, application, info.charm)
 
-    def post_scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+    def post_scale(self, model: JujuModelHandle, application: str, num: int | None) -> None:
         # A zero-unit deployment has no leader to configure; finish setup when it is scaled up.
-        if num <= 0:
+        if num is None or num <= 0:
             return
         app_info = self.juju.list_applications(model).get(application)
         if app_info is not None:

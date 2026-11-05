@@ -50,6 +50,9 @@ class JujuStub(JujuStubBase):
     def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
         self.scale_target = num
 
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.unit_count -= 1
+
     def num_units(self, model: JujuModelHandle, application: str) -> int:
         if self.scale_target is not None:
             self.num_units_calls += 1
@@ -311,6 +314,22 @@ def test_scaling_integrator_to_zero_does_not_reconcile() -> None:
 
     assert storage.buckets == []
     assert backend.waited_scaled == []
+    assert backend.waited_settled == []
+
+
+def test_removing_integrator_unit_does_not_reconcile() -> None:
+    # GIVEN an integrator without an endpoint
+    backend = JujuStub()
+    storage = StorageStub()
+    client = make_integrator_client(backend, {TARGET_CLOUD: storage}, make_registry())
+
+    # WHEN removing its unit, THEN the scale hook does not provision storage
+    client.remove_unit("storage/0", MODEL)
+
+    assert backend.unit_count == 0
+    assert storage.buckets == []
+    assert backend.num_units_calls == 0
+    assert backend.cloud_lookups == []
     assert backend.waited_settled == []
 
 

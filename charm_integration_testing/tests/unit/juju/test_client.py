@@ -178,10 +178,10 @@ class RestartLifecycleExtension(JujuExtension):
     def __init__(self) -> None:
         self.restarted_units: list[tuple[JujuModelHandle, str]] = []
         self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
-        self.scaled_models: list[JujuModelHandle] = []
+        self.scaled_applications: list[tuple[JujuModelHandle, str, int | None]] = []
 
-    def post_scale(self, model: JujuModelHandle) -> None:
-        self.scaled_models.append(model)
+    def post_scale(self, model: JujuModelHandle, application: str, num: int | None) -> None:
+        self.scaled_applications.append((model, application, num))
 
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         self.restarted_units.append((model, unit))
@@ -450,8 +450,8 @@ class TestApplicationHealth:
 
 
 class TestJujuClientUnitOperations:
-    def test_scaling_delegates_once_to_the_legacy_post_scale_hook(self) -> None:
-        # GIVEN an extension implementing only the model-wide scale hook
+    def test_scaling_passes_application_and_target_to_post_scale_once(self) -> None:
+        # GIVEN an extension recording scale callbacks
         model = JujuModelHandle(controller="controller", model="model")
         backend = UnitOperationsBackendStub()
         extension = RestartLifecycleExtension()
@@ -460,9 +460,9 @@ class TestJujuClientUnitOperations:
         # WHEN the client dispatches an application-specific scale request
         client.scale_application("app", 3, model)
 
-        # THEN the backend runs once and default delegation preserves the legacy callback
+        # THEN the backend and hook each receive the application and requested target once
         assert backend.scaled_applications == [(model, "app", 3)]
-        assert extension.scaled_models == [model]
+        assert extension.scaled_applications == [(model, "app", 3)]
 
     def test_lists_application_units_and_removes_specific_unit(self) -> None:
         # GIVEN a backend with two units
@@ -486,7 +486,7 @@ class TestJujuClientUnitOperations:
 
         client.remove_unit("app/0", model)
 
-        assert extension.scaled_models == [model]
+        assert extension.scaled_applications == [(model, "app", None)]
 
 
 class TestJujuClientWorkloadInstanceOperations:
