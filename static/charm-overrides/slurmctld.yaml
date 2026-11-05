@@ -5,11 +5,34 @@
 # Tracked under https://github.com/canonical/charm-integration-testing/issues/642
 listed: true
 overrides:
+  # 24.04 revisions (rev 143) still have login-node; 26.04 revisions (rev 168) replaced it with sackd
   - criteria:
       - track: '25.11'
+      - ubuntu_version: '24.04'
     requires:
       # No charm on Charmhub provides login-node interface
       login-node:
+        optional: true
+      # No charm on Charmhub provides oci-runtime interface
+      oci-runtime:
+        optional: true
+      # influxdb and smtp are supplementary integrations (not primary purpose)
+      influxdb:
+        optional: true
+      smtp:
+        optional: true
+    provides:
+      # cos-agent is observability integration - supplementary
+      cos-agent:
+        optional: true
+      # mount provides filesystem mounts; no charm on Charmhub consumes this
+      mount:
+        optional: true
+  - criteria:
+      - track: '25.11'
+    requires:
+      # No charm on Charmhub provides sackd interface; only used in event handler (charm.py)
+      sackd:
         optional: true
       # No charm on Charmhub provides oci-runtime interface
       oci-runtime:
