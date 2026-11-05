@@ -5,10 +5,14 @@ import os
 import tempfile
 import uuid
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import getproxies, proxy_bypass_environment  # type: ignore[attr-defined]
 
 import boto3  # type: ignore[import-untyped]
 from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
+from botocore.regions import EndpointResolver  # type: ignore[import-untyped]
+from botocore.session import get_session  # type: ignore[import-untyped]
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -22,6 +26,27 @@ _REQUIRED_FIELDS = ("bucket", "access-key", "secret-key")
 _CONNECT_TIMEOUT = 5
 _READ_TIMEOUT = 10
 _MAX_RETRY_ATTEMPTS = 1
+
+
+def _s3_proxies(endpoint_url: str | None, region: str) -> dict[str, str] | None:
+    """Resolve Juju proxy settings without changing the hosting charm's environment."""
+    variables = {"http": "JUJU_CHARM_HTTP_PROXY", "https": "JUJU_CHARM_HTTPS_PROXY", "no": "JUJU_CHARM_NO_PROXY"}
+    if not any(variable in os.environ for variable in variables.values()):
+        return None  # Preserve Botocore's standard environment handling outside Juju.
+    proxies = getproxies()
+    for scheme, variable in variables.items():
+        if variable in os.environ:
+            proxies[scheme] = os.environ[variable]
+    if endpoint_url is None:
+        endpoint = EndpointResolver(get_session().get_data("endpoints")).construct_endpoint("s3", region)
+        if endpoint is None:
+            raise ValueError(f"Cannot resolve the S3 endpoint for region '{region}'")
+        host = endpoint["hostname"]
+    else:
+        host = urlparse(endpoint_url).netloc
+    if proxy_bypass_environment(host, proxies):
+        return {}
+    return {scheme: proxies[scheme] for scheme in ("http", "https") if proxies.get(scheme)}
 
 
 class S3Validator(BaseValidator):
@@ -200,6 +225,7 @@ class S3Validator(BaseValidator):
                 connect_timeout=_CONNECT_TIMEOUT,
                 read_timeout=_READ_TIMEOUT,
                 retries={"max_attempts": _MAX_RETRY_ATTEMPTS},
+                proxies=_s3_proxies(endpoint_url, region),
             ),
         }
 
