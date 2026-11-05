@@ -82,7 +82,7 @@ jobs:
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
-          groups: workflow
+          tools: aqua:jqlang/jq
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
