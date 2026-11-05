@@ -411,7 +411,7 @@ _cmd_up() {
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
         cd '$VM_MOUNT'
-        mise run setup
+        mise run setup -- --group development integration
     "
 
     # Install node-based tools used by the sandbox if not present
