@@ -10,7 +10,8 @@ usage() {
 Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
                         [--no-packages] [--dry-run]
 
-Groups: runtime, development, workflow, integration, agent, local-k8s, local-lxd, chaos-mesh
+Groups: runtime, development, workflow, integration, cleanup, agent, local-k8s, local-lxd,
+        chaos-mesh, cloud-k8s, cloud-openstack, cloud-lxd
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
 --no-packages skips group packages; it cannot be combined with --packages.
@@ -101,6 +102,12 @@ for group in "${groups[@]}"; do
                 pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
             )
             ;;
+        cleanup)
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+            )
+            ;;
         local-k8s)
             tools+=(
                 aqua:helm/helm
@@ -124,6 +131,22 @@ for group in "${groups[@]}"; do
                 aqua:jqlang/jq
             )
             packages+=(snap:kubectl)
+            ;;
+        cloud-k8s)
+            packages+=(
+                snap:juju
+                snap:kubectl
+            )
+            ;;
+        cloud-openstack)
+            packages+=(
+                snap:juju
+                snap:openstackclients
+            )
+            ;;
+        cloud-lxd)
+            tools+=(aqua:mikefarah/yq)
+            packages+=(snap:juju)
             ;;
         *) die "Unknown setup group: $group" ;;
     esac

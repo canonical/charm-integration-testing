@@ -302,7 +302,7 @@ a skip must not hide.
 Run the self-validation checklist, then run the overrides pytest suite to validate all criteria blocks against real published channels:
 
 ```bash
-poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels --overrides ./static/charm-overrides/ -v
+mise exec -- poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels --overrides ./static/charm-overrides/ -v
 ```
 
 `--all-channels` tests every channel that matches each criteria block, catching track-specific mistakes (wrong endpoint names, missing criteria coverage) that a single solver run would miss.

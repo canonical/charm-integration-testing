@@ -369,7 +369,8 @@ rather than registering multiple entry points for the same interface.
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `mise exec -- poetry install --with dev` (or `poetry update <package>` for a single
+   way, run `mise run setup -- --group development` (or
+   `mise exec -- poetry update <package>` for a single
    path dependency) after *any* change to a package's `pyproject.toml` made
    in this step - not just a new/changed dependency or `extras` - including
    just adding the `endpoint_persistence_validators` entry-point table
@@ -378,8 +379,13 @@ rather than registering multiple entry points for the same interface.
    package, a new runtime/dev dependency, an `extras` change, or only a new
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
-   tests below. Sandbox startup installs dependencies once; repeat the Poetry
-   install with `--with dev` inside the VM after changing package metadata during a session.
+   tests below. In the development sandbox this matters especially for a
+   long-lived `scripts/sandbox.sh run --interactive` session: setup runs once
+   at `sandbox.sh up` time, so the VM's venv reflects the `pyproject.toml` as
+   of `up` and goes stale for any change made mid-session. Re-run
+   `mise run setup -- --group development` inside the VM after editing a
+   `pyproject.toml`, or the runner will not discover the new/changed entry point
+   until the next `up`.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
@@ -465,8 +471,8 @@ rather than registering multiple entry points for the same interface.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
-   poetry run pytest validators/<name>
-   poetry run pytest validators/runner    # confirm discovery/wiring still passes
+   mise exec -- poetry run pytest validators/<name>
+   mise exec -- poetry run pytest validators/runner    # confirm discovery/wiring still passes
    mise run format
    mise run lint
    ```

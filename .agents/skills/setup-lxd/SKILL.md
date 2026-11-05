@@ -19,8 +19,8 @@ charm deployments.
    mise run setup -- --group local-lxd
    mise run sandbox:setup-lxd
    ```
-   This is idempotent. Each step checks whether it has already been done.
-   Wait for it to complete before proceeding.
+   Mise installs the declared packages. The script provisions and registers
+   LXD, and is idempotent. Wait for it to complete before proceeding.
 
 2. Bootstrap a Juju controller. Use a descriptive controller name and a 5 GB
    root disk for test controllers in the VM:

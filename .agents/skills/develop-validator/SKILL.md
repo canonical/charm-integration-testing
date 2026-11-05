@@ -161,7 +161,7 @@ under `validators/<name>/` with passing `dev-validate` output.
      to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
    - If the package declares a `dev` extra, add its editable path dependency with
      `extras = ["dev"]` under `[tool.poetry.group.dev.dependencies]`, not main.
-   - Run `mise exec -- poetry install --with dev` from `$PROJECT_ROOT` to register the new package.
+   - Run `mise run setup -- --group development` from `$PROJECT_ROOT` so the new package is available.
 
 8. Run and iterate:
    ```

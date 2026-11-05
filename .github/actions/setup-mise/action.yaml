@@ -3,8 +3,7 @@ name: Set up mise
 description: Prepare repository setup groups, catalogue tools and system packages
 inputs:
   groups:
-    description: Space-separated setup groups (runtime, development, workflow, integration,
-      agent, local-k8s, local-lxd, chaos-mesh)
+    description: Space-separated setup groups from mise-tasks/setup
     default: ""
   tools:
     description: Space-separated executable names from the mise catalogue
@@ -37,12 +36,11 @@ runs:
         SETUP_PACKAGES: ${{ inputs.packages }}
         JUJU_CHANNEL: ${{ inputs.juju-channel }}
       run: |-
-        for value in "$SETUP_GROUPS" "$SETUP_TOOLS" "$SETUP_PACKAGES"; do
-          if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
-            echo "Setup inputs must be single space-separated lines" >&2
-            exit 1
-          fi
-        done
+        setup_inputs="$SETUP_GROUPS$SETUP_TOOLS$SETUP_PACKAGES"
+        if [[ "$setup_inputs" == *$'\n'* || "$setup_inputs" == *$'\r'* ]]; then
+          echo "Setup inputs must be single space-separated lines" >&2
+          exit 1
+        fi
         read -r -a groups <<< "$SETUP_GROUPS"
         read -r -a tools <<< "$SETUP_TOOLS"
         read -r -a packages <<< "$SETUP_PACKAGES"

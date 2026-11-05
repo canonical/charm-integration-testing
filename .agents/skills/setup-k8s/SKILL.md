@@ -19,7 +19,8 @@ clusters. Setup does not create chaos experiments.
    mise run setup -- --group local-k8s
    mise run sandbox:setup-k8s
    ```
-   This also runs the Chaos Mesh setup. Do not run it separately afterward.
+   Mise installs the declared tools and packages. The script provisions the
+   substrate and installs Chaos Mesh. Do not run Chaos Mesh separately afterward.
    Wait for the script to finish successfully before proceeding.
 
 2. For manual charm work, bootstrap a controller and create a model only

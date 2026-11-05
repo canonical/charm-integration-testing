@@ -165,6 +165,9 @@ juju-k8s-crashdump --help  # Should show help without errors
 kubectl version --client
 ```
 
+Check `kubectl version --client` only for Kubernetes or mixed-platform tests.
+The `local-k8s` setup group installs it; it is not required for LXD-only tests.
+
 ### Check Cloud Setup (after running tests)
 
 Once you run tests, controllers will be created and you can verify:
@@ -183,7 +186,7 @@ juju controllers
 
 ### Problem: "LXD is already installed"
 
-This is fine! The setup scripts are idempotent:
+This is fine. `/setup-lxd` is idempotent:
 
 ```bash
 cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
@@ -198,7 +201,6 @@ Check access to the pinned source repository, then rerun the shared setup:
 git ls-remote https://github.com/canonical/juju-k8s-crashdump.git HEAD
 mise run setup -- --group integration
 ```
-
 ### Problem: "kubeconfig not found"
 
 If `/home/ubuntu/k8s.yaml` doesn't exist:
