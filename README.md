@@ -16,6 +16,16 @@ environment:
 mise run setup -- --group development
 ```
 
+Setup installs Python, uv and project dependencies without changing system
+packages. For live charm testing, include the integration tools with
+`mise run setup -- --group development integration`.
+Cloud setup and Swift upload ensure their own system packages.
+Local substrate preparation uses the `local-k8s` and `local-lxd` groups.
+Use `--no-packages` to skip a group's snaps.
+
+See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
+machine-wide snap channels, and Python dependencies.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development

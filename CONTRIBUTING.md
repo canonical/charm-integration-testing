@@ -34,7 +34,7 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 |---|---|
 | `mise run setup -- --group runtime` | Python, uv and runtime project dependencies |
 | `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
-| `mise run setup -- --group integration` | Test utilities, TruffleHog, crashdump tools and runtime project dependencies |
+| `mise run setup -- --group integration` | CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
 | `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
