@@ -4,7 +4,7 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterator
+from typing import Any, Iterator, get_type_hints
 from unittest.mock import patch
 
 import boto3  # type: ignore[import-untyped]
@@ -13,7 +13,11 @@ from botocore.stub import ANY, Stubber  # type: ignore[import-untyped]
 from mypy_boto3_s3 import S3Client
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from s3_storage import (
+    S3Bucket,
+    S3BucketHandle,
     S3Credentials,
+    S3Provider,
+    S3StorageHandle,
     StaticS3Provider,
 )
 
@@ -22,6 +26,20 @@ NAMESPACE = "test-environment"
 PREFIX = f"charmqa-s3-{hashlib.sha256(NAMESPACE.encode()).hexdigest()[:8]}-"
 NOW = datetime(2026, 10, 12, tzinfo=timezone.utc)
 OLD_BUCKET = f"{PREFIX}{int((NOW - timedelta(hours=5)).timestamp())}-{'a' * 16}"
+
+
+@pytest.mark.parametrize(
+    ("contract", "handle"),
+    [(S3Provider, S3StorageHandle), (S3Bucket, S3BucketHandle)],
+    ids=["provider", "bucket"],
+)
+def test_public_contract_handle_annotations_resolve_at_runtime(
+    contract: type[S3Provider] | type[S3Bucket], handle: type[S3StorageHandle] | type[S3BucketHandle]
+) -> None:
+    # GIVEN a public contract exposing resource handle metadata
+    annotation = vars(contract)["handle"].fget
+    # WHEN introspected at runtime, THEN the handle type is available without concrete implementation globals
+    assert get_type_hints(annotation)["return"] is handle
 
 
 @pytest.fixture

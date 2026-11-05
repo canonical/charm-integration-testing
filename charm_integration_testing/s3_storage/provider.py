@@ -3,12 +3,52 @@
 
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .storage import S3BucketHandle, S3StorageHandle
+
+@dataclass(frozen=True)
+class S3StorageHandle:
+    namespace: str
+    identity: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.identity == "":
+            raise ValueError("S3 storage identity must not be empty")
+
+    @property
+    def resource_id(self) -> str:
+        if self.identity is None:
+            return f"s3:storage:{self.path_segment}"
+        return f"s3:storage:{self.identity}"
+
+    @property
+    def resource_type(self) -> str:
+        return "s3:storage"
+
+    @property
+    def path_segment(self) -> str:
+        identity = self.identity or self.namespace
+        return f"s3-{hashlib.sha256(identity.encode()).hexdigest()[:12]}"
+
+
+@dataclass(frozen=True)
+class S3BucketHandle:
+    namespace: str
+    name: str
+
+    @property
+    def resource_id(self) -> str:
+        return f"s3:bucket:{self.name}"
+
+    @property
+    def resource_type(self) -> str:
+        return "s3:bucket"
+
+    @property
+    def path_segment(self) -> str:
+        return f"s3-bucket-{hashlib.sha256(self.name.encode()).hexdigest()[:12]}"
 
 
 @dataclass(frozen=True)
