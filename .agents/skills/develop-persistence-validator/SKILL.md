@@ -359,11 +359,12 @@ rather than registering multiple entry points for the same interface.
    `[project.optional-dependencies].dev` (matching the PEP 621 format
    `validators/<name>/pyproject.toml` already uses - not the root project's
    `[tool.poetry.dependencies]` format). A new dev dependency there is only
-   installed if the root `pyproject.toml`'s path dependency for this package
-   already lists `extras = ["dev"]` (e.g. `validators-postgresql-client = {
+   installed if the root `pyproject.toml`'s development-group path dependency
+   under `[tool.poetry.group.dev.dependencies]` lists `extras = ["dev"]`
+   (e.g. `validators-postgresql-client = {
    path = "./validators/postgresql_client", develop = true, extras = ["dev"]
    }` - preserve any other existing extras already listed alongside `"dev"`)
-   - if it's missing `"dev"`, add it. If
+   - add this development-group entry if missing; keep dev extras out of main. If
    you just created the package from scratch in step 1, make sure the
    root/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
