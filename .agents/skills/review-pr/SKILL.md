@@ -225,7 +225,7 @@ confirmed write access is not permission by itself. If the user has not authoriz
 push, leave the commit local and report that it was not pushed.
 
 ```bash
-git -c credential.helper='!gh auth git-credential' \
+GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
   push https://github.com/canonical/charm-integration-testing.git HEAD:refs/heads/<branch>
 ```
 

@@ -757,7 +757,7 @@ juju ssh -m target/mymodel 0 "sudo grep -i relation /var/log/juju/unit*.log"
 1. **Start Simple**: Begin with single-cloud tests before CMR
 2. **Narrow Scope**: Run individual test modules before full suite
 3. **Preserve Models**: Use `--current-state` to skip teardown for debugging
-4. **Sandbox lifecycle**: Follow the [sandbox guide](../../../development-sandbox/README.md#host-side); obtain approval before destroying an existing VM.
+4. **Sandbox lifecycle**: Follow the [sandbox guide](../../../development-sandbox/README.md#quick-start); obtain approval before destroying an existing VM.
 5. **Check Prerequisites**: Verify LXD/K8s available before running with `/setup-lxd` or `/setup-k8s`
 6. **Capture Output**: Logs are automatically collected into the log directory specified by `--log-dir`
 

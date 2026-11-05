@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# MISE description="Run development validation against a deployed charm"
-# MISE raw_args=true
-# MISE alias="sandbox:dev-validate"
+# fmt: off
+#MISE description="Run development validation against a deployed charm"
+#MISE raw_args=true
+#MISE alias="sandbox:dev-validate"
+# fmt: on
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Inject and run validators against a deployed Juju application.

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# MISE description="Run persistence validation against a deployed charm"
-# MISE raw_args=true
-# MISE alias="sandbox:dev-persistence"
+# fmt: off
+#MISE description="Run persistence validation against a deployed charm"
+#MISE raw_args=true
+#MISE alias="sandbox:dev-persistence"
+# fmt: on
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Drive the persistence lifecycle (prepare/checkpoint/cleanup) against a deployed Juju application.

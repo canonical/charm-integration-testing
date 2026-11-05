@@ -16,7 +16,7 @@ Understand the goal, constraints, and expected outcomes before implementing. Ask
 When the user explicitly authorizes a push, use the GitHub CLI credential helper with the GitHub token over HTTPS, for example:
 
 ```bash
-git -c credential.helper='!gh auth git-credential' \
+GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
   push https://github.com/OWNER/REPO.git HEAD:refs/heads/BRANCH
 ```
 

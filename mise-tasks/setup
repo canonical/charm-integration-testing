@@ -87,6 +87,7 @@ for group in "${groups[@]}"; do
         agent)
             tools+=(
                 node
+                go
                 npm:@github/copilot
                 aqua:cli/cli
             )
