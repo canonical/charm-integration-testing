@@ -142,9 +142,9 @@ uv = { path = ".mise/locks/pypi-bandit/1.9.4~f22a104d", digest = "sha256:9fd698d
 extras = "toml"
 
 [[tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]]
-version = "b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"
+version = "ee228d66ba8a238b5adfd07397bfc030178aedcd"
 backend = "pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"
-specifiers = ["b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"]
+specifiers = ["ee228d66ba8a238b5adfd07397bfc030178aedcd"]
 
 [tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git".options]
 python = "3.12.12"

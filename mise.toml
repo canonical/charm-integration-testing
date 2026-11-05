@@ -57,7 +57,6 @@ python = "3.12.12"
 depends = ["python", "uv"]
 
 [tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]
-# Packaging fix from canonical/juju-k8s-crashdump#21.
-version = "b56c31a3f37f997bd64f03db9b86123e2ff6e5cb"
+version = "ee228d66ba8a238b5adfd07397bfc030178aedcd"
 python = "3.12.12"
 depends = ["python", "uv"]

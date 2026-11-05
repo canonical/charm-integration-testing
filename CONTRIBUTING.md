@@ -25,7 +25,7 @@ mise run setup -- --group development
 `[tools]` declares isolated, locked executables;
 `[bootstrap.packages]` declares machine-wide packages. Python tools such as Ruff
 and Poetry are installed by uv in isolated environments. `juju-k8s-crashdump` is
-pinned to the packaging-fix commit from
+pinned to the main-branch commit containing
 [canonical/juju-k8s-crashdump#21](https://github.com/canonical/juju-k8s-crashdump/pull/21).
 Both crashdump tools remain Git-commit-pinned with version-only dependency locking.
 Uv bootstraps tools, while Poetry manages project dependencies.
