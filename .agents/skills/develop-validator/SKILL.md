@@ -103,12 +103,10 @@ The runner discovers validators by this key and matches them to charm relations.
 import stubs and helpers from `validators.test_utils` (`make_charm_from_relation`,
 `ApplicationStub`, `RelationRoleStub`, `RelationStub`, etc.) — when
 `tests/unit/test_validator.py` does this, declare `validators-test-utils` under
-`[project.optional-dependencies].dev`, and add `extras = ["dev"]` (or extend an
-existing `extras` list) to the package's entry in the root
-`$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`. Forgetting
-this when the tests do use it is a recurring mistake — tests still pass locally
-because `validators-test-utils` is already installed elsewhere in the monorepo
-venv, masking that the package's own dependency graph is incomplete.
+`[project.optional-dependencies].dev` in that validator's own `pyproject.toml`.
+The development workspace sync installs member dev dependencies. The runner
+must still declare each validator it loads in
+`validators/runner/pyproject.toml`.
 
 **Naming convention:** the `[project] name` field always uses dashes, even when the
 directory or module uses underscores. For example, a validator in
@@ -157,9 +155,12 @@ under `validators/<name>/` with passing `dev-validate` output.
 
 7. Wire the new validator package into project dependencies:
    - Add `validators-<name>` to `validators/runner/pyproject.toml` dependencies.
-   - Add `validators-<name> = { path = "./validators/<name>", develop = true }`
-     to the root `$PROJECT_ROOT/pyproject.toml` under `[tool.poetry.dependencies]`.
-   - Run `poetry install` from `$PROJECT_ROOT` so the new package is available.
+   - Add `"validators-<name>" = { workspace = true }` to `[tool.uv.sources]`
+     in the root `$PROJECT_ROOT/pyproject.toml` if it is not already listed.
+   - Keep runtime and optional `dev` dependencies in the validator's own
+     `pyproject.toml`; do not add them to the root project.
+   - Run `uv lock` and `mise run setup -- --group development` from
+     `$PROJECT_ROOT` so the workspace and installed environment are current.
 
 8. Run and iterate:
    ```
@@ -317,7 +318,8 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ## Validator-specific notes
 
-- **`dev-validate.py` auto-reexecs via `poetry run`** if invoked outside the Poetry venv, so you can call it directly without any manual prefix. Do not wrap it in `poetry run` yourself.
+- **`dev-validate.py` auto-reexecs through uv** if invoked outside the project
+  environment, so call it directly without a manual environment prefix.
 - If a relation has no remote app (`relation.app is None`), return an `ERROR` result immediately.
 - Keep validators focused on a single interface. Do not add cross-interface logic.
 - Add client library dependencies (e.g. `psycopg2-binary`) to the validator's `pyproject.toml` `dependencies`.
@@ -328,10 +330,10 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 - The validator package has correct `pyproject.toml` with entry point.
 - If the unit tests import from `validators.test_utils`, `validators-test-utils`
   is declared under `[project.optional-dependencies].dev` in the validator's own
-  `pyproject.toml`, and the root `pyproject.toml` entry includes `extras = ["dev"]`.
+  `pyproject.toml`.
 - `validators/runner/pyproject.toml` includes `validators-<name>`.
-- Root `$PROJECT_ROOT/pyproject.toml` includes `validators-<name>` as a Poetry
-  develop dependency.
+- Root `$PROJECT_ROOT/pyproject.toml` maps local packages through
+  `[tool.uv.sources]`.
 - `./scripts/format.sh` exits 0 after all changes.
 - `./scripts/lint.sh` exits 0 after all changes.
 - Self-review complete: all structure, license, naming, and test coverage criteria met.
