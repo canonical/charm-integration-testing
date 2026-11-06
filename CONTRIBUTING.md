@@ -87,13 +87,12 @@ mise run juju:channel -- --reset       # Remove the selection and apply the defa
 
 The selection is saved outside the checkout at
 `${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml`.
-In the sandbox it persists across shells and VM restarts. A failed install does
-not replace the previous selection.
+Later setup runs on that machine, including jobs on persistent CI runners, use
+the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
+install does not replace the previous selection.
 
-Setup precedence is `JUJU_CHANNEL`, then the saved selection, then `mise.toml`.
-Use `JUJU_CHANNEL=4/edge mise run setup -- --packages snap:juju` for a temporary
-override. Channels are not revision pins and do not change controllers or agents;
-use fresh test controllers when trying another major version.
+Channels are not revision pins and do not change controllers or agents; use fresh
+test controllers when trying another major version.
 
 ## Linting and Formatting
 

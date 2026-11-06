@@ -277,7 +277,6 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 | `series` | `--target-series` | Ubuntu series (20.04, 22.04, etc.) |
 | `revision` | `--target-revision` | Charm revision to test |
 | `channel` | `--target-channel` | Charm channel (edge, beta, stable) |
-| `juju_channel` | (Juju version) | Juju version (3/stable, 4/edge) |
 | `execution_id` | N/A | Used for logging/tracking |
 
 ### 2. Setup Phase
