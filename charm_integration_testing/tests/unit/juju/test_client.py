@@ -119,6 +119,10 @@ class WaitIdleBackendStub(NullJujuBackend):
 class UnitOperationsBackendStub(NullJujuBackend):
     units: list[str] = field(default_factory=list)
     removed_units: list[str] = field(default_factory=list)
+    scaled_applications: list[tuple[JujuModelHandle, str, int]] = field(default_factory=list)
+
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        self.scaled_applications.append((model, application, num))
 
     def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
         return list(self.units)
@@ -174,10 +178,10 @@ class RestartLifecycleExtension(JujuExtension):
     def __init__(self) -> None:
         self.restarted_units: list[tuple[JujuModelHandle, str]] = []
         self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
-        self.scaled_models: list[JujuModelHandle] = []
+        self.scaled_applications: list[tuple[JujuModelHandle, str, int | None]] = []
 
-    def post_scale(self, model: JujuModelHandle) -> None:
-        self.scaled_models.append(model)
+    def post_scale(self, model: JujuModelHandle, application: str, num: int | None) -> None:
+        self.scaled_applications.append((model, application, num))
 
     def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
         self.restarted_units.append((model, unit))
@@ -446,6 +450,20 @@ class TestApplicationHealth:
 
 
 class TestJujuClientUnitOperations:
+    def test_scaling_passes_application_and_target_to_post_scale_once(self) -> None:
+        # GIVEN an extension recording scale callbacks
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = UnitOperationsBackendStub()
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+        # WHEN the client dispatches an application-specific scale request
+        client.scale_application("app", 3, model)
+
+        # THEN the backend and hook each receive the application and requested target once
+        assert backend.scaled_applications == [(model, "app", 3)]
+        assert extension.scaled_applications == [(model, "app", 3)]
+
     def test_lists_application_units_and_removes_specific_unit(self) -> None:
         # GIVEN a backend with two units
         backend = UnitOperationsBackendStub(units=["app/0", "app/1"])
@@ -468,7 +486,7 @@ class TestJujuClientUnitOperations:
 
         client.remove_unit("app/0", model)
 
-        assert extension.scaled_models == [model]
+        assert extension.scaled_applications == [(model, "app", None)]
 
 
 class TestJujuClientWorkloadInstanceOperations:

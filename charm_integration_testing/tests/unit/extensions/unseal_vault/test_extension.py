@@ -4,6 +4,7 @@
 import logging
 from datetime import timedelta
 
+import pytest
 from extensions.unseal_vault.extensions import GenericUnsealVaultJujuExtension, UnsealVaultK8sJujuExtension
 from extensions.unseal_vault.vault_unsealer import VaultUnsealer
 from juju import JujuModelHandle
@@ -47,13 +48,14 @@ class TestGenericUnsealVaultJujuExtension:
         # THEN the unsealer is invoked with authorization enabled
         assert unsealer.calls == [(TEST_MODEL, True)]
 
-    def test_post_scale_unseals_without_reauthorizing(self) -> None:
+    @pytest.mark.parametrize("num", [3, None], ids=["scale-request", "unit-removal"])
+    def test_post_scale_unseals_without_reauthorizing(self, num: int | None) -> None:
         # GIVEN an extension wrapping a stub unsealer
         unsealer = VaultUnsealerStub()
         extension = GenericUnsealVaultJujuExtension(unsealer)
 
         # WHEN post_scale is called
-        extension.post_scale(TEST_MODEL)
+        extension.post_scale(TEST_MODEL, "vault", num)
 
         # THEN the unsealer is invoked without re-authorizing
         assert unsealer.calls == [(TEST_MODEL, False)]
@@ -92,7 +94,7 @@ class TestUnsealVaultK8sJujuExtension:
         assert isinstance(unsealer, VaultUnsealerStub)
 
         extension.post_deploy(TEST_MODEL)
-        extension.post_scale(TEST_MODEL)
+        extension.post_scale(TEST_MODEL, "vault-k8s", 3)
         extension.post_restart_unit(TEST_MODEL, "vault-k8s/0")
         extension.post_migrate_model("test-model", "source-controller", "target-controller")
 
