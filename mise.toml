@@ -30,7 +30,7 @@ node = "24.22.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:mpalmer/action-validator" = "0.6.0"
 
-"npm:markdownlint-cli2" = { version = "0.24.0", depends = ["node"] }
+"npm:markdownlint-cli2" = { version = "0.24.0" }
 "pypi:zizmor" = { version = "1.5.1" }
 "pypi:ruff" = { version = "0.5.7" }
 "pypi:bandit" = { version = "1.9.4", extras = "toml" }
