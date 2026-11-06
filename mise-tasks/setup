@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+#MISE description="Prepare setup groups, catalogue tools and system packages"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
+                        [--no-packages] [--dry-run]
+
+Groups: runtime, development, workflow, integration, cleanup, local-k8s, local-lxd,
+        cloud-k8s, cloud-openstack, cloud-lxd
+Tools and packages must be named exactly as declared in mise.toml.
+Groups include their tools, packages and project dependencies where applicable.
+--no-packages skips group packages; it cannot be combined with --packages.
+--dry-run previews package-only requests, without installing anything.
+EOF
+}
+
+die() {
+    echo "$*" >&2
+    exit 1
+}
+
+groups=()
+tools=()
+packages=()
+no_packages=false
+explicit_packages=false
+dry_run=()
+project=none
+while (( $# )); do
+    case "$1" in
+        --group|--tools|--packages)
+            option="$1"
+            shift
+            (( $# )) && [[ "$1" != -* ]] || die "$option requires at least one name"
+            while (( $# )) && [[ "$1" != -* ]]; do
+                case "$option" in
+                    --group) groups+=("$1") ;;
+                    --tools) tools+=("$1") ;;
+                    --packages) packages+=("$1"); explicit_packages=true ;;
+                esac
+                shift
+            done
+            continue
+            ;;
+        --no-packages) no_packages=true ;;
+        --dry-run|-n) dry_run=(--dry-run) ;;
+        --help|-h) usage; exit 0 ;;
+        *) usage >&2; die "Unknown setup argument: $1" ;;
+    esac
+    shift
+done
+
+if [[ "$no_packages" == true && "$explicit_packages" == true ]]; then
+    die "--no-packages cannot be combined with --packages"
+fi
+
+for group in "${groups[@]}"; do
+    case "$group" in
+        runtime)
+            [[ "$project" == dev ]] || project=main
+            ;;
+        development)
+            project=dev
+            tools+=(
+                node
+                npm:markdownlint-cli2
+                pypi:ruff
+                pypi:bandit
+                pypi:yamlfix
+                pypi:zizmor
+                aqua:gitleaks/gitleaks
+                aqua:mpalmer/action-validator
+            )
+            ;;
+        workflow)
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+                aqua:cli/cli
+            )
+            ;;
+        integration)
+            [[ "$project" == dev ]] || project=main
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+                aqua:cli/cli
+                aqua:trufflesecurity/trufflehog
+                pypi:git+https://github.com/juju/juju-crashdump.git
+                pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
+            )
+            ;;
+        cleanup)
+            tools+=(
+                aqua:jqlang/jq
+                aqua:mikefarah/yq
+            )
+            ;;
+        local-k8s)
+            tools+=(
+                aqua:helm/helm
+                aqua:jqlang/jq
+            )
+            packages+=(
+                snap:k8s
+                snap:kubectl
+                snap:juju
+            )
+            ;;
+        local-lxd)
+            packages+=(
+                snap:lxd
+                snap:juju
+            )
+            ;;
+        cloud-k8s)
+            packages+=(
+                snap:juju
+                snap:kubectl
+            )
+            ;;
+        cloud-openstack)
+            packages+=(
+                snap:juju
+                snap:openstackclients
+            )
+            ;;
+        cloud-lxd)
+            tools+=(aqua:mikefarah/yq)
+            packages+=(snap:juju)
+            ;;
+        *) die "Unknown setup group: $group" ;;
+    esac
+done
+
+if [[ "$project" != none ]]; then
+    tools+=(python uv pypi:poetry)
+fi
+[[ "$no_packages" == false ]] || packages=()
+
+if (( ${#groups[@]} + ${#tools[@]} + ${#packages[@]} == 0 )); then
+    usage >&2
+    die "Specify at least one group, tool or package"
+fi
+if (( ${#dry_run[@]} )); then
+    (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
+        die "--dry-run requires a package-only request"
+fi
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$project_root"
+for tool in "${tools[@]}"; do
+    [[ "$tool" =~ ^[A-Za-z0-9:@+._/-]+$ ]] || die "Invalid catalogue tool name: $tool"
+    mise config get --file "$project_root/mise.toml" "tools.\"$tool\"" >/dev/null ||
+        die "Unknown catalogue tool: $tool"
+done
+for package in "${packages[@]}"; do
+    [[ "$package" =~ ^snap:[a-z0-9-]+$ ]] || die "Invalid package name: $package"
+    mise config get --file "$project_root/mise.toml" "bootstrap.packages.\"$package\"" >/dev/null ||
+        die "Unknown catalogue package: $package"
+done
+
+if (( ${#tools[@]} )); then
+    mise install --locked "${tools[@]}"
+fi
+if (( ${#packages[@]} )); then
+    if [[ " ${packages[*]} " == *" snap:juju "* ]]; then
+        saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
+        case "$saved_config" in
+            "$project_root"/*) die "Juju selection must be stored outside the checkout" ;;
+        esac
+        if [[ -f "$saved_config" ]]; then
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$saved_config"
+            channel="$(mise config get --file "$saved_config" 'bootstrap.packages."snap:juju".channel')"
+            component='[A-Za-z0-9._][A-Za-z0-9._-]*'
+            if [[ ! "$channel" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
+                die "Invalid Juju channel: expected a track or [track/]risk[/branch]"
+            fi
+            override_dir="$(mktemp -d)"
+            trap 'rm -f "$override_dir/mise.toml"; rmdir "$override_dir"' EXIT
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$override_dir"
+            touch "$override_dir/mise.toml"
+            mise config set --file "$override_dir/mise.toml" --type string \
+                'bootstrap.packages."snap:juju".channel' "$channel"
+            export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
+            mise bootstrap packages upgrade --yes "${dry_run[@]}" snap:juju
+        fi
+    fi
+
+    mise bootstrap packages apply --yes "${dry_run[@]}" "${packages[@]}"
+fi
+case "$project" in
+    main) mise exec -- poetry install --only main ;;
+    dev) mise exec -- poetry install --with dev ;;
+esac

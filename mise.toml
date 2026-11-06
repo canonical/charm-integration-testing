@@ -1,0 +1,39 @@
+[task_config]
+includes = ["scripts", "mise-tasks"]
+excludes = ["scripts/*.py", "scripts/helpers/**"]
+
+[settings]
+lockfile = true
+locked = true
+auto_install = false
+task.run_auto_install = false
+
+[bootstrap.packages]
+"snap:juju" = { channel = "3/stable" }
+"snap:kubectl" = { channel = "1.32/stable", classic = true }
+"snap:openstackclients" = { channel = "latest/stable" }
+"snap:lxd" = { channel = "latest/stable" }
+"snap:k8s" = { channel = "1.32-classic/stable", classic = true }
+
+[tools]
+python = "3.12.12"
+# Installs isolated Python tools; Poetry owns project dependencies.
+uv = "0.13.6"
+# PyPI tools use the Python and uv declared above; Mise installs them first.
+"pypi:poetry" = { version = "2.3.0" }
+"aqua:jqlang/jq" = "1.8.2"
+"aqua:mikefarah/yq" = "4.54.1"
+"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"aqua:cli/cli" = "2.103.3"
+"aqua:helm/helm" = "3.21.4"
+node = "24.22.0"
+"aqua:gitleaks/gitleaks" = "8.30.1"
+"aqua:mpalmer/action-validator" = "0.6.0"
+
+"npm:markdownlint-cli2" = { version = "0.24.0" }
+"pypi:zizmor" = { version = "1.5.1" }
+"pypi:ruff" = { version = "0.5.7" }
+"pypi:bandit" = { version = "1.9.4", extras = "toml" }
+"pypi:yamlfix" = { version = "1.19.1" }
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "ee228d66ba8a238b5adfd07397bfc030178aedcd", python = "3.12.12" }
