@@ -29,34 +29,10 @@ node = "24.22.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:mpalmer/action-validator" = "0.6.0"
 
-[tools."npm:markdownlint-cli2"]
-version = "0.24.0"
-depends = ["node"]
-
-[tools."pypi:zizmor"]
-version = "1.5.1"
-depends = ["python", "uv"]
-
-[tools."pypi:ruff"]
-version = "0.5.7"
-depends = ["python", "uv"]
-
-[tools."pypi:bandit"]
-version = "1.9.4"
-extras = "toml"
-depends = ["python", "uv"]
-
-[tools."pypi:yamlfix"]
-version = "1.19.1"
-depends = ["python", "uv"]
-
-[tools."pypi:git+https://github.com/juju/juju-crashdump.git"]
-version = "bde242ccfdd91cb2372f26d41d62d7b230660c08"
-with = ["ssh-agent-setup==2.0.1"]
-python = "3.12.12"
-depends = ["python", "uv"]
-
-[tools."pypi:git+https://github.com/canonical/juju-k8s-crashdump.git"]
-version = "ee228d66ba8a238b5adfd07397bfc030178aedcd"
-python = "3.12.12"
-depends = ["python", "uv"]
+"npm:markdownlint-cli2" = { version = "0.24.0", depends = ["node"] }
+"pypi:zizmor" = { version = "1.5.1", depends = ["python", "uv"] }
+"pypi:ruff" = { version = "0.5.7", depends = ["python", "uv"] }
+"pypi:bandit" = { version = "1.9.4", extras = "toml", depends = ["python", "uv"] }
+"pypi:yamlfix" = { version = "1.19.1", depends = ["python", "uv"] }
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12", depends = ["python", "uv"] }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "ee228d66ba8a238b5adfd07397bfc030178aedcd", python = "3.12.12", depends = ["python", "uv"] }
