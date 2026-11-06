@@ -101,8 +101,7 @@ The CI setup action wraps the same task. Lint and unit-test jobs use
 `cleanup` group. Workflow/security checks likewise request their individual
 catalogue `tools`, without installing the project. The action's `packages` input
 supports explicit snap requests. Installed tools are available in later steps through
-mise's activation, without exporting a profile. The test workflow supplies
-`JUJU_CHANNEL` at job scope for cloud setup.
+mise's activation, without exporting a profile.
 Mise-action caching remains disabled.
 
 System-package installation is explicit and operation-owned: OpenStack cloud
