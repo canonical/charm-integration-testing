@@ -65,7 +65,9 @@ The file contains unquoted ``KEY=value`` entries:
 
 ``S3_REGION`` defaults to ``us-east-1``. Use a namespace dedicated to disposable test
 buckets: scheduled cleanup removes matching harness buckets older than four hours,
-regardless of which credentials created them. Use a dedicated S3 project/account
+regardless of which credentials created them. Cleanup secrets must explicitly set
+``S3_BUCKET_NAMESPACE``; the workflow rejects missing or empty namespaces.
+Use a dedicated S3 project/account
 for test buckets. The integrator receives
 ``S3_ACCESS_KEY`` and ``S3_SECRET_KEY``. These same credentials must permit
 bucket creation and deletion, as well as workload access.
