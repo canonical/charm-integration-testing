@@ -7,8 +7,9 @@ Testing.
 
 ## General recommendations
 
-Install Mise as described in the [README](README.md#getting-started), then
-prepare a workstation:
+The [development sandbox](development-sandbox/README.md) includes development
+tools. For direct host setup, install mise as described in the
+[README](README.md#getting-started), then prepare a workstation:
 
 ```bash
 mise run setup -- --group development
@@ -36,9 +37,11 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 | `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
 | `mise run setup -- --group integration` | Juju, CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
-| `mise run setup -- --group cleanup` | jq and yq |
+| `mise run setup -- --group agent` | Node, Copilot and gh without project dependencies |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
 | `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group chaos-mesh` | Helm, jq and kubectl for an existing cluster |
+| `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
 | `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
 | `mise run setup -- --group cloud-lxd` | Juju and yq clients |
@@ -62,10 +65,56 @@ metadata; the root `dev` group contains shared repository tooling. Execution
 tasks do not install dependencies, and installed tools are not PATH-isolated by
 group.
 
-Use `--no-packages` to skip group snaps or `--dry-run` to preview package-only
-requests. Explicit `--tools` and `--packages` must match the catalogue; those
-requests alone do not install project dependencies. Automatic installation is
-disabled, and a bare `mise install` intentionally installs the full catalogue.
+`uv sync` reconciles the environment with the selected workspace dependencies.
+Use the `runtime` group for runtime dependencies only or `development` for the
+development extras and shared tooling.
+
+Use `--no-packages` to skip group snaps without skipping its tools or project
+dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
+Explicit requests also compose with groups:
+`mise run setup -- --group runtime --tools aqua:jqlang/jq --packages snap:juju`.
+`--tools` and `--packages` alone do not install project dependencies.
+`--no-packages` cannot be combined with explicit `--packages`.
+`--dry-run` previews package-only requests; it cannot be used with tool or project
+installation. No arguments is an error; `--help` lists the interface.
+
+Versions appear only in the catalogue. Groups explicitly include installation
+prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
+installation is disabled, including during task execution; no first-use installer
+or additional environment selection is needed. With `--tools`, explicitly name
+those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
+Tool and package names must match the catalogue; version overrides are rejected.
+Bare `mise install` intentionally still installs the entire catalogue; use setup
+instead. Strict locking preserves managed versions and artifact checksums.
+
+Groups control installation, not PATH isolation. Installed catalogue tools
+are available together. A missing executable can fall back to a host installation;
+run setup before executing an operation rather than relying on host tools.
+
+Execution tasks do not install dependencies. Prepare the development group before
+unit tests, lint or formatting, and the integration group before live tests.
+uv reconciles project dependencies during setup; there is no additional
+readiness cache.
+
+The CI setup action wraps the same task. Lint and unit-test jobs use
+`groups: development`; live tests use `groups: integration`; cleanup uses the
+`cleanup` group. Workflow/security checks likewise request their individual
+catalogue `tools`, without installing the project. The action's `packages` input
+supports explicit snap requests. Installed tools are available in later steps through
+mise's activation, without exporting a profile.
+Mise-action caching remains disabled.
+
+System-package installation is explicit and operation-owned: OpenStack cloud
+setup ensures Juju and `openstackclients`; Kubernetes cloud setup ensures Juju
+and kubectl; Swift uploads independently ensure `openstackclients`. Cleanup
+selects clients for its environment. Catalogue-default installation skips satisfied
+snaps; applying a saved Juju selection explicitly refreshes the client.
+Kubernetes-only cloud access does not install OpenStack clients, although Swift
+reporting still requires them.
+
+Installing system packages does not initialize substrates or register clouds.
+Run the relevant setup group first; sandbox substrate tasks only initialize and
+configure the prepared services. They do not install prerequisites.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 
 CI uses the same setup task: development and test jobs select `development` or

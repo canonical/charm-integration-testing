@@ -27,6 +27,32 @@ handle substrate setup and testing.
 | `scripts/sandbox.sh up` | Create or resume the VM and install dependencies |
 | `scripts/sandbox.sh destroy` | Permanently delete the VM |
 
+## VM setup
+
+`up` installs the development, integration, and agent tool groups. For a runner
+or an existing VM, install the same tools with:
+
+```bash
+mise run setup -- --group development integration agent
+```
+
+Install substrate prerequisites separately, then run the provisioning task.
+Provisioning does not install or refresh packages.
+
+| Command | Purpose |
+|---|---|
+| `mise run setup -- --group local-k8s` | Install Kubernetes prerequisites |
+| `mise run setup -- --group local-lxd` | Install LXD prerequisites |
+| `mise run setup -- --group chaos-mesh` | Install prerequisites for an existing cluster |
+| `mise run sandbox:setup-k8s` | Provision Canonical k8s and register it as a Juju cloud |
+| `mise run sandbox:setup-chaos-mesh` | Install or verify Chaos Mesh |
+| `mise run sandbox:setup-lxd` | Initialize LXD for Juju's `localhost` cloud |
+
+To select another Juju client, run `mise run juju:channel -- 4/stable`.
+The selection is saved outside the checkout and respected by substrate setup.
+See [Juju client selection](../CONTRIBUTING.md#selecting-the-juju-client)
+for reset commands and controller-version cautions.
+
 ## Configuration
 
 Set options in `development-sandbox/.env` (gitignored). See
@@ -56,6 +82,23 @@ Without dedicated tokens, the script asks before using your host `gh` token in t
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
 Declining leaves the corresponding tools unauthenticated.
 
+Host-side GitHub API calls use `GITHUB_TOKEN` or the host's `gh` token. Automatic
+SSH signing-key registration requires the `write:ssh_signing_key` scope.
+
+## Test controller disks
+
+Sandbox test controllers should use a 5 GB root disk (`root-disk=5G`), matching
+the Kubernetes and PS7 OpenStack environments in
+[`static/environments.yaml`](../static/environments.yaml). For suite-managed
+controllers, pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`
+and, for a separate neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
+
+## Chaos Mesh
+
+Sandbox Kubernetes setup installs Chaos Mesh components but does not run chaos
+experiments. Shared CI clusters are provisioned separately.
+
 ## Recommended MCP servers
 
 Copy the optional [sample](mcp.json.sample), replace the credential placeholders,
@@ -75,6 +118,9 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 
 This applies to both interactive and autonomous `run` sessions.
 New sandboxes include Go and uvx; install them manually in older VMs.
+
+Any host environment variable prefixed with `SANDBOX_VAR_` is passed into the VM
+with that prefix removed. API overrides must be reachable from inside the VM.
 
 The root `.copilotignore` uses path-independent patterns for local credential
 files. It does not protect process

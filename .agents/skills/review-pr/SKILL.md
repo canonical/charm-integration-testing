@@ -229,8 +229,6 @@ GIT_CONFIG_GLOBAL=/dev/null git -c credential.helper='!gh auth git-credential' \
   push https://github.com/canonical/charm-integration-testing.git HEAD:refs/heads/<branch>
 ```
 
-`GIT_CONFIG_GLOBAL=/dev/null` prevents user-level URL rewrites (such as HTTPS-to-SSH)
-from changing the transport for this command; it does not modify Git configuration.
 This uses `gh` authentication (including `GH_TOKEN`/`GITHUB_TOKEN`) for HTTPS without
 persisting credentials or changing the remote. If the HTTPS push returns an authentication
 or authorization error, stop and report it. A permission error may indicate the push is
