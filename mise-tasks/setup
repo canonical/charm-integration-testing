@@ -174,12 +174,9 @@ if (( ${#packages[@]} )); then
         case "$saved_config" in
             "$project_root"/*) die "Juju selection must be stored outside the checkout" ;;
         esac
-        channel="${JUJU_CHANNEL:-}"
-        if [[ -z "$channel" && -f "$saved_config" ]]; then
+        if [[ -f "$saved_config" ]]; then
             export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$saved_config"
             channel="$(mise config get --file "$saved_config" 'bootstrap.packages."snap:juju".channel')"
-        fi
-        if [[ -n "$channel" || -f "$saved_config" ]]; then
             component='[A-Za-z0-9._][A-Za-z0-9._-]*'
             if [[ ! "$channel" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
                 die "Invalid Juju channel: expected a track or [track/]risk[/branch]"
