@@ -270,9 +270,9 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 | `juju_channel` | `mise run juju:channel` | Select the client before provisioning; not a pytest option |
 
 Before provisioning the local substrate, select the execution's `juju_channel`
-and verify the installed client. The workflow defaults to `3/stable`; for older
-executions without a recorded channel, consult the logs rather than assuming
-that default:
+and verify the installed client. If the input is absent or empty, consult the
+execution logs for the effective saved or catalogue channel and installed version;
+the workflow does not impose a fixed default:
 
 ```bash
 mise run juju:channel -- <juju_channel>

@@ -107,9 +107,10 @@ Mise-action caching remains disabled.
 System-package installation is explicit and operation-owned: OpenStack cloud
 setup ensures Juju and `openstackclients`; Kubernetes cloud setup ensures Juju
 and kubectl; Swift uploads independently ensure `openstackclients`. Cleanup
-selects clients for its environment. A satisfied snap/channel is checked locally
-and skipped; repeat calls do not force a refresh. Kubernetes-only cloud access
-does not install OpenStack clients, although Swift reporting still requires them.
+selects clients for its environment. Catalogue-default installation skips satisfied
+snaps; applying a saved Juju selection explicitly refreshes the client.
+Kubernetes-only cloud access does not install OpenStack clients, although Swift
+reporting still requires them.
 
 Installing system packages does not initialize substrates or register clouds.
 Run the relevant setup group first; sandbox substrate tasks only initialize and
