@@ -169,8 +169,41 @@ if (( ${#tools[@]} )); then
     mise install --locked "${tools[@]}"
 fi
 if (( ${#packages[@]} )); then
-    source "$project_root/scripts/helpers/setup-packages.sh"
-    setup_packages "${dry_run[@]}" "${packages[@]}"
+    if [[ " ${packages[*]} " == *" snap:juju "* ]]; then
+        saved_config="$(realpath -m "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml")"
+        case "$saved_config" in
+            "$project_root"/*) die "Juju selection must be stored outside the checkout" ;;
+        esac
+        channel="${JUJU_CHANNEL:-}"
+        if [[ -z "$channel" && -f "$saved_config" ]]; then
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$saved_config"
+            channel="$(mise config get --file "$saved_config" 'bootstrap.packages."snap:juju".channel')"
+        fi
+        if [[ -n "$channel" || -f "$saved_config" ]]; then
+            component='[A-Za-z0-9._][A-Za-z0-9._-]*'
+            if [[ ! "$channel" =~ ^($component|($component/)?(stable|candidate|beta|edge)(/$component)?)$ ]]; then
+                die "Invalid Juju channel: expected a track or [track/]risk[/branch]"
+            fi
+            override_dir="$(mktemp -d)"
+            trap 'rm -f "$override_dir/mise.toml"; rmdir "$override_dir"' EXIT
+            export MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$override_dir"
+            touch "$override_dir/mise.toml"
+            mise config set --file "$override_dir/mise.toml" --type string \
+                'bootstrap.packages."snap:juju".channel' "$channel"
+            export MISE_OVERRIDE_CONFIG_FILENAMES="${MISE_OVERRIDE_CONFIG_FILENAMES:-mise.toml}:$override_dir/mise.toml"
+            mise bootstrap packages upgrade --yes "${dry_run[@]}" snap:juju
+        fi
+    fi
+
+    if [[ " ${packages[*]} " == *" snap:openstackclients "* ]] &&
+        (( ${#dry_run[@]} == 0 )) &&
+        command -v snap >/dev/null 2>&1 &&
+        snap list openstack >/dev/null 2>&1; then
+        echo "Removing the conflicting openstack snap before installing openstackclients"
+        sudo snap remove openstack
+    fi
+
+    mise bootstrap packages apply --yes "${dry_run[@]}" "${packages[@]}"
 fi
 case "$project" in
     main) mise exec -- poetry install --only main ;;
