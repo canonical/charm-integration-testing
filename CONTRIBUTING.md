@@ -119,7 +119,9 @@ Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 
 CI uses the same setup task: development and test jobs select `development` or
 `integration`, while cloud actions and cleanup select only their needed clients.
-OpenStack operations and Swift uploads share `openstackclients`.
+OpenStack operations and Swift uploads share `openstackclients`. Remove a
+conflicting legacy `openstack` snap manually before installing `openstackclients`;
+the shared setup does not remove it automatically.
 
 ### Selecting the Juju client
 

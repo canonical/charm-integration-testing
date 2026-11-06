@@ -141,14 +141,13 @@ _vm_exec_with_env() {
     ' bash "$_env_file" "$@"
 }
 
-# True if the VM is running and its gh CLI already holds a valid login (e.g.
-# from a previous `up`/`run`). GH_TOKEN/GITHUB_TOKEN are unset so only stored
-# credentials are checked.
+# Check stored credentials after mounting the project and preparing its tools,
+# so Mise can resolve gh. Unset GH_TOKEN/GITHUB_TOKEN to ignore environment tokens.
 _vm_gh_logged_in() {
     [ "$(_vm_state)" = "Running" ] || return 1
     multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
-        gh auth status --hostname github.com
+        cd '$VM_MOUNT' && gh auth status --hostname github.com
     " &>/dev/null
 }
 
@@ -359,8 +358,6 @@ _cmd_up() {
         esac
     done
 
-    _require_github_auth
-
     echo "==> Checking VM state..."
     state=$(_vm_state)
 
@@ -414,6 +411,7 @@ _cmd_up() {
         mise run setup -- --group development integration agent
     "
 
+    _require_github_auth
     _vm_gh_auth_login
 
     # Trust all folders in Copilot so it never prompts for folder confirmation.
@@ -664,8 +662,6 @@ EOF
 
     TASK="${*:-}"
 
-    _require_github_auth
-
     # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         # Resolve relative paths against the project root for consistency.
@@ -688,6 +684,7 @@ EOF
         exit 1
     fi
 
+    _require_github_auth
     _vm_gh_auth_login
 
     # All prerequisites met. Copy MCP config into the VM now.

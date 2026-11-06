@@ -128,6 +128,19 @@ under `validators/<name>/` with passing `dev-validate` output.
 2. Search CharmHub for a charm that **provides** the interface and one that
    **requires** it. Prefer widely-used charms on `stable` channels.
 
+   Use the repository client when it is available:
+
+   ```python
+   from bundle_builder_x.charmhub import CharmhubClient
+   from bundle_builder_x.charmhub_http import CharmhubHttpClient
+
+   client = CharmhubClient(CharmhubHttpClient())
+   providers = client.find_charms(provides="<interface>")
+   requirers = client.find_charms(requires="<interface>")
+   print("Providers:", sorted(providers))
+   print("Requirers:", sorted(requirers))
+   ```
+
 3. Write `/tmp/spec.yaml` describing a minimal two-charm deployment. Use a
    dedicated model name like `<interface>-test` (not `testing`) so the
    deployment is isolated and easy to clean up.
