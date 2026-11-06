@@ -75,6 +75,22 @@ class DomainApplication(BaseModel):
     # Dedup tracking: charm IDs already added for this application
     charms_added: list[int] = Field(default_factory=list)
 
+    def matches_charm(self, charm: Charm) -> bool:
+        """Whether the charm satisfies this application's name and explicit selectors."""
+        return (
+            self.charm == charm.name
+            and (
+                self.channel is None
+                or (
+                    self.channel.explicit_track == charm.channel.explicit_track
+                    and (not self.channel.risk or self.channel.risk == charm.channel.risk)
+                    and self.channel.branch == charm.channel.branch
+                )
+            )
+            and (self.revision is None or self.revision == charm.revision)
+            and (self.base is None or self.base == charm.ubuntu_version)
+        )
+
 
 class DomainModel(BaseModel):
     """Per-model metadata and user constraints within a global domain."""
@@ -591,12 +607,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
 
     # Create application-to-charm mappings for this model's constraints
     for application, domain_app in model.applications.items():
-        if (
-            domain_app.charm != charm.name
-            or (domain_app.channel is not None and domain_app.channel != charm.channel)
-            or (domain_app.revision is not None and domain_app.revision != charm.revision)
-            or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
-        ):
+        if not domain_app.matches_charm(charm):
             continue
         domain_app.charm_ids[charm_id] = z3.Bool(f"app_{application}_maps_to_charm_{charm.name}_{charm_id}")
 

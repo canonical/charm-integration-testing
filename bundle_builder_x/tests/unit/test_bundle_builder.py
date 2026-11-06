@@ -6,6 +6,7 @@
 from itertools import repeat
 from typing import Iterator
 
+import pytest
 import z3  # type: ignore[import-untyped]
 
 from bundle_builder_x import CharmReleaseNotFoundException
@@ -226,8 +227,10 @@ class TestHandleSubordinateBaseMismatch:
             for integration in domain.charm_integrations
         )
 
-    def test_returns_true_and_expands_when_principal_variant_found(self) -> None:
+    @pytest.mark.parametrize("revision", [None, 1], ids=["unpinned", "pinned-revision"])
+    def test_returns_true_and_expands_when_principal_variant_found(self, revision: int | None) -> None:
         domain = _domain_with_base_mismatch()
+        domain.models[ModelRef(name="m")].applications["ubuntu"].revision = revision
         ubuntu_2404 = _make_charm(
             "ubuntu",
             {"juju-info": CharmEndpoint(type=EndpointType.PROVIDES, interface="juju-info", scope=EndpointScope.GLOBAL)},
@@ -236,6 +239,7 @@ class TestHandleSubordinateBaseMismatch:
         fake = _FakeCharmhubClient(
             charm_responses=[
                 CharmReleaseNotFoundException("nrpe", "No release on 22.04"),
+                CharmReleaseNotFoundException("nrpe", "No release on 22.04 on any risk"),
                 ubuntu_2404,
             ]
         )
@@ -247,10 +251,37 @@ class TestHandleSubordinateBaseMismatch:
         assert len(domain.charms) == 3
         assert domain.charms[2].spec.name == "ubuntu"
         assert domain.charms[2].spec.ubuntu_version == "24.04"
+        assert fake.charm_from_store_calls[-1]["charm_revision"] == revision
+        assert fake.charm_from_store_calls[-1]["ubuntu_version"] == "24.04"
         assert any(
             {integration.requires_charm_id, integration.provides_charm_id} == {1, 2}
             for integration in domain.charm_integrations
         )
+
+    @pytest.mark.parametrize("pin", ["base", "revision", "channel"])
+    def test_principal_base_expansion_does_not_add_a_variant_that_bypasses_pins(self, pin: str) -> None:
+        domain = _domain_with_base_mismatch()
+        principal = domain.charms[0].spec
+        application = domain.models[ModelRef(name="m")].applications["ubuntu"]
+        variant = principal.model_copy(update={"ubuntu_version": "24.04"})
+        if pin == "base":
+            application.base = principal.ubuntu_version
+        elif pin == "revision":
+            application.revision = principal.revision
+            variant = variant.model_copy(update={"revision": principal.revision + 1})
+        else:
+            application.channel = principal.channel
+            variant = variant.model_copy(update={"channel": CharmChannel.model_validate("latest/edge")})
+        fake = _FakeCharmhubClient(
+            charm_responses=[CharmReleaseNotFoundException("nrpe"), CharmReleaseNotFoundException("nrpe"), variant]
+        )
+
+        expanded = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert expanded is False
+        assert len(domain.charms) == 2
+        if pin == "base":
+            assert all(call["charm_name"] != "ubuntu" for call in fake.charm_from_store_calls)
 
     def test_returns_false_when_no_variant_found(self) -> None:
         domain = _domain_with_base_mismatch()
@@ -261,6 +292,107 @@ class TestHandleSubordinateBaseMismatch:
 
         assert result is False
         assert len(domain.charms) == 2
+
+    @pytest.mark.parametrize("base", [None, "24.04"], ids=["unpinned-base", "pinned-base"])
+    def test_subordinate_same_revision_on_another_base_respects_application_pin(self, base: str | None) -> None:
+        domain = _domain_with_base_mismatch()
+        application = domain.models[ModelRef(name="m")].applications["nrpe"]
+        application.base = base
+        application.revision = domain.charms[1].spec.revision
+        variant = domain.charms[1].spec.model_copy(update={"ubuntu_version": "22.04"})
+        fake = _FakeCharmhubClient(
+            charm_responses=[variant, CharmReleaseNotFoundException("ubuntu", "No release on 24.04")]
+        )
+
+        expanded = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert expanded is (base is None)
+        assert len(domain.charms) == (3 if base is None else 2)
+        assert fake.charm_from_store_calls[0]["charm_revision"] == application.revision
+
+    @staticmethod
+    def _edge_variant() -> Charm:
+        return _make_charm(
+            "nrpe",
+            {
+                "general-info": CharmEndpoint(
+                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                )
+            },
+            ubuntu_version="22.04",
+        ).model_copy(update={"channel": CharmChannel(track="latest", risk="edge", branch="br")})
+
+    @pytest.mark.parametrize("revision", [None, 1], ids=["unpinned", "pinned-revision"])
+    @pytest.mark.parametrize("channel", ["latest/stable/br", "stable/br", "stable"])
+    def test_subordinate_retries_same_track_with_risk_unset_when_current_risk_lacks_base(
+        self, revision: int | None, channel: str
+    ) -> None:
+        domain = _domain_with_base_mismatch()
+        domain.models[ModelRef(name="m")].applications["nrpe"].revision = revision
+        resolved_channel = CharmChannel.model_validate(channel)
+        domain.charms[1].spec = domain.charms[1].spec.model_copy(update={"channel": resolved_channel})
+        edge_variant = self._edge_variant().model_copy(
+            update={"channel": CharmChannel(track="latest", risk="edge", branch=resolved_channel.branch)}
+        )
+        fake = _FakeCharmhubClient(
+            charm_responses=[
+                CharmReleaseNotFoundException("nrpe", "No stable on 22.04"),
+                edge_variant,
+                CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
+            ]
+        )
+
+        result = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert result is True
+        assert domain.charms[2].spec.channel.risk == "edge"
+        exact, retry = fake.charm_from_store_calls[:2]
+        branch = resolved_channel.branch or None
+        assert (exact["charm_track"], exact["charm_risk"], exact["charm_branch"]) == ("latest", "stable", branch)
+        assert (retry["charm_track"], retry["charm_risk"], retry["charm_branch"]) == ("latest", None, branch)
+        assert retry["ubuntu_version"] == "22.04"
+        assert exact["charm_revision"] == retry["charm_revision"] == revision
+
+    @pytest.mark.parametrize("risk", ["", "stable"], ids=["track-only", "pinned-risk"])
+    def test_subordinate_retry_respects_application_risk(self, risk: str) -> None:
+        domain = _domain_with_base_mismatch()
+        model = domain.models[ModelRef(name="m")]
+        model.applications["nrpe"].channel = CharmChannel(track="latest", risk=risk, branch="")
+        fake = _FakeCharmhubClient(
+            charm_responses=[CharmReleaseNotFoundException("nrpe", "No stable build"), self._edge_variant()]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+
+        if risk:
+            with pytest.raises(CharmReleaseNotFoundException):
+                builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
+            assert len(fake.charm_from_store_calls) == 1
+        else:
+            charm = builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
+            assert charm.channel.risk == "edge"
+            assert fake.charm_from_store_calls[-1]["charm_risk"] is None
+
+    def test_subordinate_does_not_retry_when_current_risk_has_base(self) -> None:
+        domain = _domain_with_base_mismatch()
+        fake = _FakeCharmhubClient(
+            charm_responses=[
+                _make_charm(
+                    "nrpe",
+                    {
+                        "general-info": CharmEndpoint(
+                            type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
+                        )
+                    },
+                    ubuntu_version="22.04",
+                ),
+                CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
+            ]
+        )
+
+        BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+
+        assert [c["charm_name"] for c in fake.charm_from_store_calls] == ["nrpe", "ubuntu"]
+        assert fake.charm_from_store_calls[0]["charm_risk"] == "stable"
 
 
 class TestGetCharmsForEndpoint:
@@ -1106,6 +1238,44 @@ class TestHandlePeerChannelMismatch:
         assert frozenset((0, 2)) in pairs
         assert len(fake.charm_from_store_calls) == 1
 
+    def test_peer_without_a_release_does_not_hide_other_mismatched_peers(self) -> None:
+        # GIVEN two mismatched peers merged into one tag, where the solver's core happened
+        # to name the first one (it has no release on the required track) and the second does
+        domain = Domain()
+        model_ref = ModelRef(name="m")
+        domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
+        endpoints_provides = {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")}
+        endpoints_requires = {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")}
+        add_charm_to_domain(_make_charm("anchor", endpoints_provides), domain, model_ref)
+        add_charm_to_domain(_make_charm("peer-a", endpoints_requires), domain, model_ref)
+        peer_b = _make_charm("peer-b", endpoints_requires)
+        add_charm_to_domain(peer_b, domain, model_ref)
+        fake = _FakeCharmhubClient(
+            charm_responses=[CharmReleaseNotFoundException("no match"), peer_b.model_copy(update={"revision": 2})]
+        )
+        builder = BundleBuilder(charmhub_client=fake)
+        tag = PeerChannelMismatchTag(
+            charm=CharmPayload(charm_name="anchor", charm_id=0),
+            endpoint="ep",
+            peer_charm_name="peer-a",
+            peer_charm_id=1,
+            required_track="latest",
+            other_peers=(CharmPayload(charm_name="peer-b", charm_id=2),),
+        )
+
+        # WHEN resolving the mismatch
+        result = builder._handle_peer_channel_mismatch(tag, domain)
+
+        # THEN the second peer's variant is added and paired with the anchor, and the
+        # owning charm is not moved
+        assert result is True
+        assert [call["charm_name"] for call in fake.charm_from_store_calls] == ["peer-a", "peer-b"]
+        pairs = {
+            frozenset((integration.requires_charm_id, integration.provides_charm_id))
+            for integration in domain.charm_integrations
+        }
+        assert frozenset((0, 3)) in pairs
+
     def test_owning_charm_adapts_only_when_no_release_exists_for_the_peer(self) -> None:
         # GIVEN a store with no release for the peer's required channel, but one for the
         # owning charm at the peer's actual (mismatched) channel
@@ -1480,6 +1650,25 @@ class TestMergeMismatchTags:
         assert isinstance(merged, PeerChannelMismatchTag)
         assert merged.required_track == "zed"
         assert merged.required_risk == "edge"
+
+    def test_merged_tag_names_every_mismatched_peer(self) -> None:
+        # GIVEN three mismatch tags for the same anchor+endpoint, two of them for the same peer
+        tags: list[AssertionTag] = [
+            _mismatch(anchor_id=0, peer_id=1, track="zed"),
+            _mismatch(anchor_id=0, peer_id=2, track="zed"),
+            _mismatch(anchor_id=0, peer_id=1, risk="edge"),
+            _mismatch(anchor_id=0, peer_id=3, track="zed"),
+        ]
+
+        # WHEN merged
+        result = BundleBuilder._merge_mismatch_tags(tags)
+
+        # THEN the first peer stays primary and each other distinct peer is listed once
+        assert len(result) == 1
+        merged = result[0]
+        assert isinstance(merged, PeerChannelMismatchTag)
+        assert merged.peer_charm_id == 1
+        assert [p.charm_id for p in merged.other_peers] == [2, 3]
 
     def test_insertion_order_preserved(self) -> None:
         # GIVEN a mix: non-mismatch, mismatch pair A, non-mismatch, mismatch for a

@@ -106,6 +106,37 @@ class CharmhubClientStub(CharmhubClient):
         return result
 
 
+class StrictChannelCatalog(CharmhubClientStub):
+    """Filter a synthetic catalog by channel, revision and base for solver tests."""
+
+    _RISKS = ("stable", "candidate", "beta", "edge")
+
+    def charm_from_store(
+        self,
+        charm_name: str,
+        ubuntu_arch: str,
+        juju_version: JujuVersion | None = None,
+        platform: str | None = None,
+        charm_track: str | None = None,
+        charm_risk: str | None = None,
+        charm_revision: int | None = None,
+        ubuntu_version: str | None = None,
+        charm_branch: str | None = None,
+    ) -> Charm:
+        matches = [
+            c
+            for c in self._by_name.get(charm_name, [])
+            if (charm_track is None or c.channel.explicit_track == charm_track)
+            and (charm_risk is None or c.channel.risk == charm_risk)
+            and c.channel.branch == (charm_branch or "")
+            and (charm_revision is None or c.revision == charm_revision)
+            and (ubuntu_version is None or c.ubuntu_version == ubuntu_version)
+        ]
+        if not matches:
+            raise CharmReleaseNotFoundException(f"No {charm_name} on {charm_track}/{charm_risk} for {ubuntu_version}")
+        return min(matches, key=lambda c: self._RISKS.index(c.channel.risk))
+
+
 def make_charm(
     name: str,
     endpoints: dict[str, CharmEndpoint] | None = None,
