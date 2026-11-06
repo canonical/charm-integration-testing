@@ -7,16 +7,37 @@
 #   "Missing controller integration"), so it is not optional.
 #
 # latest/ and 0.14/: only nginx-route is present, so ingress is not overridden.
+# 0.15/stable and 0.15/candidate on 22.04 (rev 55) also lack ingress; on 24.04 (rev 72) and
+# 0.15/beta 22.04 (rev 71) it is present.
 # 0.15+, 0.16+, and future tracks: ingress and nginx-route are alternatives.
 #
 # dashboard (provides, interface http): optional for bundle building
 #   (canonical/charm-integration-testing#434).
 overrides:
-  # latest/ + 0.14/: nginx-route only, no ingress endpoint - nginx-route stays required
+  # Revisions 52 and 55 fail to install on 20.04: typing._SpecialGenericAlias is unavailable.
+  - criteria:
+      - ubuntu_version: "20.04"
+      - any_of:
+          - track: "0.14"
+            risk: beta
+          - track: "0.15"
+            any_of:
+              - risk: stable
+              - risk: candidate
+              - risk: beta
+    assumes: [unsupported-juju-dashboard-python]
+
+  # latest/, 0.14/, and 0.15/{stable,candidate} on 22.04 (rev 55): nginx-route only, no ingress
+  # endpoint - nginx-route stays required
   - criteria:
       - any_of:
           - track: latest
           - track: "0.14"
+          - track: "0.15"
+            ubuntu_version: "22.04"
+            any_of:
+              - risk: stable
+              - risk: candidate
     provides:
       dashboard:
         optional: true
