@@ -11,10 +11,6 @@ inputs:
   packages:
     description: Space-separated package names from the mise catalogue
     default: ""
-  juju-channel:
-    description: Override the Juju client channel for this setup only; empty uses
-      the saved selection or repository default
-    default: ""
 runs:
   using: composite
   steps:
@@ -34,7 +30,6 @@ runs:
         SETUP_GROUPS: ${{ inputs.groups }}
         SETUP_TOOLS: ${{ inputs.tools }}
         SETUP_PACKAGES: ${{ inputs.packages }}
-        JUJU_CHANNEL: ${{ inputs.juju-channel }}
       run: |-
         setup_inputs="$SETUP_GROUPS$SETUP_TOOLS$SETUP_PACKAGES"
         if [[ "$setup_inputs" == *$'\n'* || "$setup_inputs" == *$'\r'* ]]; then
