@@ -407,7 +407,7 @@ _cmd_up() {
             export PATH=\"\$HOME/.local/bin:\$PATH\"
         fi
         cd '$VM_MOUNT'
-        uv sync --python 3.12.12 --all-packages --no-default-groups --extra dev --group dev --locked
+        uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras --group dev --locked
     "
 
     # Install node-based tools used by the sandbox if not present

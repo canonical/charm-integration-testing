@@ -44,7 +44,7 @@ jobs:
       - name: Install uv
         run: pipx install uv==0.13.6
       - name: Install dependencies
-        run: uv sync --python 3.12.12 --all-packages --no-default-groups --extra dev
+        run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
           --group dev --locked
       - name: Setup NPM
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -64,7 +64,7 @@ jobs:
       - name: Install uv
         run: pipx install uv==0.13.6
       - name: Install dependencies
-        run: uv sync --python 3.12.12 --all-packages --no-default-groups --extra dev
+        run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
           --group dev --locked
       - name: Run Charm Integration Testing Unit Tests
         run: ./scripts/charm-integration-testing-unit-tests.sh
@@ -85,7 +85,7 @@ jobs:
       - name: Install uv
         run: pipx install uv==0.13.6
       - name: Install dependencies
-        run: uv sync --python 3.12.12 --all-packages --no-default-groups --extra dev
+        run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
           --group dev --locked
       - name: Run Validators Unit Tests
         run: ./scripts/validators-unit-tests.sh
@@ -100,7 +100,7 @@ jobs:
       - name: Install uv
         run: pipx install uv==0.13.6
       - name: Install dependencies
-        run: uv sync --python 3.12.12 --all-packages --no-default-groups --extra dev
+        run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
           --group dev --locked
       - name: Run Bundle Builder X Tests
         env:

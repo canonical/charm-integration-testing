@@ -200,7 +200,7 @@ if [[ "$project" != none ]]; then
         main) mise exec -- uv sync --python "$python" --all-packages --no-default-groups --locked ;;
         dev)
             mise exec -- uv sync --python "$python" --all-packages \
-                --no-default-groups --extra dev --group dev --locked
+                --no-default-groups --all-extras --group dev --locked
             ;;
     esac
 fi
