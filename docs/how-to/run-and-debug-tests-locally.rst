@@ -200,10 +200,7 @@ Next, install the Python dependencies to run the repository code:
 
 .. code:: bash
 
-   sudo apt-get update
-   sudo apt-get install pipx
-   pipx install poetry==2.0
-   poetry install
+   mise run setup -- --group development
 
 Generate dynamic bundles
 ------------------------

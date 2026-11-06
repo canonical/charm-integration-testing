@@ -6,8 +6,11 @@ a Z3 SMT solver to produce minimal, valid bundles.
 
 ## Quick start
 
+Prepare the development environment first with
+`mise run setup -- --group development`.
+
 ```bash
-poetry run bundle-builder-x \
+uv run --no-sync --all-packages bundle-builder-x \
     --spec my-spec.yaml \
     --overrides static/charm-overrides \
     --output-bundles output/ \
@@ -81,8 +84,8 @@ bundle_builder_x/
 
 ```bash
 # Unit and logic tests (fast, no network)
-poetry run python -m pytest bundle_builder_x/tests/unit/ bundle_builder_x/tests/logic/ -q
+uv run --no-sync --all-packages python -m pytest bundle_builder_x/tests/unit/ bundle_builder_x/tests/logic/ -q
 
 # Integration tests (hits Charmhub API)
-poetry run python -m pytest bundle_builder_x/tests/integration/ -v
+uv run --no-sync --all-packages python -m pytest bundle_builder_x/tests/integration/ -v
 ```
