@@ -91,6 +91,11 @@ Later setup runs on that machine, including jobs on persistent CI runners, use
 the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
 install does not replace the previous selection.
 
+The charm-testing workflow selects its `juju_channel` input with this task before
+cloud setup. Omitted or empty inputs use `3/stable`, overriding any saved runner
+selection. The selected channel is logged and persists for subsequent setup steps;
+the shared setup does not consume a `JUJU_CHANNEL` environment variable.
+
 Channels are not revision pins and do not change controllers or agents; use fresh
 test controllers when trying another major version.
 

@@ -73,6 +73,7 @@ jobs:
               "charm_under_test": "${{ inputs.target_charm }}",
               "charm_endpoint": "${{ inputs.target_endpoint }}",
               "execution_id": "${{ steps.create-test-execution.outputs.test_execution_id }}",
+              "juju_channel": "3/stable",
               "neighbor": "${{ inputs.neighbor_charm }}",
               "neighbor_endpoint": "${{ inputs.neighbor_endpoint }}",
               "revision": "${{ inputs.target_revision }}",
