@@ -127,17 +127,6 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
-      - name: Configure pip proxy
-        shell: bash
-        env:
-          PIP_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-        run: |
-          if [[ -n "${PIP_PROXY}" ]]; then
-            sudo tee /etc/pip.conf <<EOF
-          [global]
-          proxy= ${PIP_PROXY}
-          EOF
-          fi
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
