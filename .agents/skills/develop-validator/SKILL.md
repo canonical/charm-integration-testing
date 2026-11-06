@@ -104,9 +104,9 @@ import stubs and helpers from `validators.test_utils` (`make_charm_from_relation
 `ApplicationStub`, `RelationRoleStub`, `RelationStub`, etc.) — when
 `tests/unit/test_validator.py` does this, declare `validators-test-utils` under
 `[project.optional-dependencies].dev` in that validator's own `pyproject.toml`.
-The development workspace sync installs member dev dependencies. The runner
-must still declare each validator it loads in
-`validators/runner/pyproject.toml`.
+The development workspace sync installs member `dev` extras, so no separate
+root dev dependency is needed. The runner must still declare each validator it
+loads in `validators/runner/pyproject.toml`.
 
 **Naming convention:** the `[project] name` field always uses dashes, even when the
 directory or module uses underscores. For example, a validator in
