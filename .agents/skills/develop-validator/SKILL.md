@@ -137,8 +137,10 @@ under `validators/<name>/` with passing `dev-validate` output.
    from bundle_builder_x.charmhub_http import CharmhubHttpClient
 
    client = CharmhubClient(CharmhubHttpClient())
-   for charm in client.search("<interface>"):
-       print(charm.name, charm.summary)
+   providers = client.find_charms(provides="<interface>")
+   requirers = client.find_charms(requires="<interface>")
+   print("Providers:", sorted(providers))
+   print("Requirers:", sorted(requirers))
    ```
 
 3. Write `/tmp/spec.yaml` describing a minimal two-charm deployment. Use a
