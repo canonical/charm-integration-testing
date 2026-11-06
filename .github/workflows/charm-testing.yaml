@@ -47,6 +47,10 @@ on:
       execution_id:
         description: Test Observer execution ID to post results from this test to.
         required: false
+      juju_channel:
+        description: Juju client channel to use while testing.
+        required: false
+        default: 3/stable
       neighbor:
         description: charmhub.io name of the charm to test the primary charm against.
         required: true
@@ -133,6 +137,13 @@ jobs:
           groups: integration
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+      - name: Select Juju channel
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ inputs.juju_channel || '3/stable' }}
+        run: |
+          mise run juju:channel -- "$REQUESTED_CHANNEL"
+          juju version
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -173,6 +184,7 @@ jobs:
           charm_under_test: ${{ inputs.charm_under_test }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           execution_id: ${{ inputs.execution_id }}
+          juju_channel: ${{ inputs.juju_channel || '3/stable' }}
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
@@ -194,6 +206,7 @@ jobs:
           echo "| \`charm_under_test\` | \`${charm_under_test}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`charm_endpoint\` | \`${charm_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`execution_id\` | \`${execution_id}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`juju_channel\` | \`${juju_channel}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
