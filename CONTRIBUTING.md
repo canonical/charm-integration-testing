@@ -34,7 +34,7 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 |---|---|
 | `mise run setup -- --group runtime` | Python, uv and runtime project dependencies |
 | `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
-| `mise run setup -- --group integration` | CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
+| `mise run setup -- --group integration` | Juju, CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
 | `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
@@ -68,11 +68,11 @@ requests alone do not install project dependencies. Automatic installation is
 disabled, and a bare `mise install` intentionally installs the full catalogue.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 
-CI still installs project dependencies directly with uv in this layer, so its
-jobs explicitly include the development extras and group. The CI adoption layer
-will switch those jobs to the shared setup task. OpenStack operations and Swift
-uploads share `openstackclients`; remove a conflicting `openstack` snap
-manually.
+CI uses the same setup task: development and test jobs select `development` or
+`integration`, while cloud actions and cleanup select only their needed clients.
+OpenStack operations and Swift uploads share `openstackclients`. Remove a
+conflicting legacy `openstack` snap manually before installing `openstackclients`;
+the shared setup does not remove it automatically.
 
 ### Selecting the Juju client
 
@@ -90,6 +90,14 @@ The selection is saved outside the checkout at
 Later setup runs on that machine, including jobs on persistent CI runners, use
 the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
 install does not replace the previous selection.
+
+The shared `setup-mise` action installs Mise, selects a nonempty `juju-channel`
+input with this task, then installs the requested setup groups. The charm-testing
+workflow passes its optional `juju_channel` input unchanged. Omitted or empty
+inputs preserve the saved selection or use the catalogue default; `integration`
+installs Juju alongside the runtime prerequisites. The workflow logs the effective
+channel and installed client version separately from the requested input.
+The shared setup does not consume a `JUJU_CHANNEL` environment variable.
 
 Channels are not revision pins and do not change controllers or agents; use fresh
 test controllers when trying another major version.

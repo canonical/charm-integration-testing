@@ -1,0 +1,50 @@
+---
+name: Set up mise
+description: Prepare repository setup groups, catalogue tools and system packages
+inputs:
+  juju-channel:
+    description: Optional Juju client channel; empty uses the saved selection or catalogue
+      default
+    default: ""
+  groups:
+    description: Space-separated setup groups from mise-tasks/setup
+    default: ""
+  tools:
+    description: Space-separated tool identifiers from mise.toml (e.g. python, aqua:cli/cli,
+      pypi:zizmor)
+    default: ""
+  packages:
+    description: Space-separated system package identifiers from mise.toml (e.g. snap:juju)
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Read pinned mise version
+      id: version
+      shell: bash
+      run: echo "version=$(cat .mise-version)" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.version.outputs.version }}
+        install: false
+        cache: false
+    - name: Select Juju channel
+      if: ${{ inputs.juju-channel != '' }}
+      shell: bash
+      env:
+        REQUESTED_CHANNEL: ${{ inputs.juju-channel }}
+      run: mise run juju:channel -- "$REQUESTED_CHANNEL"
+    - name: Set up environment
+      shell: bash
+      env:
+        SETUP_GROUPS: ${{ inputs.groups }}
+        SETUP_TOOLS: ${{ inputs.tools }}
+        SETUP_PACKAGES: ${{ inputs.packages }}
+      run: |-
+        # Split space-separated inputs without expanding filesystem globs.
+        set -f
+        mise run setup -- \
+          ${SETUP_GROUPS:+--group $SETUP_GROUPS} \
+          ${SETUP_TOOLS:+--tools $SETUP_TOOLS} \
+          ${SETUP_PACKAGES:+--packages $SETUP_PACKAGES}

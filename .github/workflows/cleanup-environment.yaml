@@ -79,6 +79,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Set up project tools
+        uses: ./.github/actions/setup-mise
+        with:
+          groups: cleanup
       - name: Get environment info
         id: env_info
         uses: ./.github/actions/get-environment-info
@@ -125,7 +129,6 @@ jobs:
             printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
             echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
-
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
       # | |/ / |  | |  _ \|  ____|  __ \| \ | |  ____|__   __|  ____|/ ____|
@@ -134,11 +137,10 @@ jobs:
       # | . \| |__| | |_) | |____| | \ \| |\  | |____   | |  | |____ ____) |
       # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
       #
-      - name: Install kubectl
+      - name: Ensure Kubernetes client
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install kubectl --classic
+        shell: bash
+        run: mise run setup -- --packages snap:kubectl
       - name: Remove orphaned rawfile PV directories from nodes
         if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
@@ -402,11 +404,10 @@ jobs:
       # | |__| | |    | |____| |\  |____) |  | |/ ____ \ |____| . \ 
       #  \____/|_|    |______|_| \_|_____/   |_/_/    \_\_____|_|\_\
       #
-      - name: Install openstack client
+      - name: Ensure OpenStack client
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install openstackclients
+        shell: bash
+        run: mise run setup -- --packages snap:openstackclients
       - name: Find and delete servers older than age threshold
         if: ${{ !cancelled() && steps.creds.outputs.openstack == 'true' }}
         shell: bash
@@ -558,9 +559,8 @@ jobs:
       #
       - name: Install lxd client
         if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
-        uses: ./.github/actions/install-with-retry
-        with:
-          command: sudo snap install lxd
+        shell: bash
+        run: mise run setup -- --packages snap:lxd
       - name: Set up LXD remote
         id: lxd-remote
         if: ${{ !cancelled() && steps.creds.outputs.lxd == 'true' }}
