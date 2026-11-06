@@ -7,48 +7,114 @@ Testing.
 
 ## General recommendations
 
-Prepare the project dependencies with Mise:
+Install Mise as described in the [README](README.md#getting-started), then
+prepare a workstation:
 
 ```bash
-mise run setup -- --group runtime
 mise run setup -- --group development
 ```
 
-The root `pyproject.toml` is a uv workspace for the framework, bundle builder,
-and validator packages. Runtime and package-specific development dependencies
-remain in each package's own project metadata; the root `dev` group contains
-shared repository tooling. The direct uv equivalents are:
+### What goes where
+
+| File | Owns |
+|---|---|
+| `mise.toml`, `mise.lock`, `.mise/locks/` | Tool catalogue, locks and snap channels |
+| `mise-tasks/setup` | Setup groups and explicit tool, package and project installation |
+| `pyproject.toml`, `uv.lock` | Workspace and locked dependencies; package dependencies remain local |
+
+Version-only tools are listed under `[tools]`; per-tool tables hold provider
+metadata such as npm/PyPI dependencies. `[bootstrap.packages]` declares
+machine-wide packages. Mise installs standalone tools and packages; uv manages
+the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
+[canonical/juju-k8s-crashdump#21](https://github.com/canonical/juju-k8s-crashdump/pull/21).
+
+### Setup groups
+
+| Command | Prepares |
+|---|---|
+| `mise run setup -- --group runtime` | Python, uv and runtime project dependencies |
+| `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
+| `mise run setup -- --group integration` | CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
+| `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --group cleanup` | jq and yq |
+| `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
+| `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
+| `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
+| `mise run setup -- --group cloud-lxd` | Juju and yq clients |
+
+Groups compose, for example `mise run setup -- --group development integration`.
+Runtime selects:
 
 ```bash
 uv sync --all-packages --no-default-groups --locked
+```
+
+Development selects:
+
+```bash
 uv sync --all-packages --no-default-groups --all-extras --group dev --locked
 ```
 
-## Linting and Formatting
+Development takes precedence when groups are combined. Runtime and
+package-specific development dependencies remain in each package's project
+metadata; the root `dev` group contains shared repository tooling. Execution
+tasks do not install dependencies, and installed tools are not PATH-isolated by
+group.
 
-Linting and formatting is enforced by [ruff](https://docs.astral.sh/ruff) and
-[markdownlint](https://github.com/davidanson/markdownlint) as a GitHub Action that runs
-automatically on Pull Requests to this repository. To format, run:
+Use `--no-packages` to skip group snaps or `--dry-run` to preview package-only
+requests. Explicit `--tools` and `--packages` must match the catalogue; those
+requests alone do not install project dependencies. Automatic installation is
+disabled, and a bare `mise install` intentionally installs the full catalogue.
+Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
+
+CI still installs project dependencies directly with uv in this layer, so its
+jobs explicitly include the development extras and group. The CI adoption layer
+will switch those jobs to the shared setup task. OpenStack operations and Swift
+uploads share `openstackclients`; remove a conflicting `openstack` snap
+manually.
+
+### Selecting the Juju client
+
+To select a persistent Juju client channel on this machine:
 
 ```bash
-./scripts/format.sh
+mise run juju:channel -- 4/stable
+mise run juju:channel                  # Show the saved channel or repository default
+juju version                          # Check the actual installed client
+mise run juju:channel -- --reset       # Remove the selection and apply the default
 ```
+
+The selection is saved outside the checkout at
+`${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/juju.toml`.
+Later setup runs on that machine, including jobs on persistent CI runners, use
+the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
+install does not replace the previous selection.
+
+Channels are not revision pins and do not change controllers or agents; use fresh
+test controllers when trying another major version.
+
+## Linting and Formatting
+
+Run `mise run format` to apply formatting and `mise run lint` to check it.
+CI runs the same lint checks.
 
 ## Tooling and Continuous Integration
 
-### Scripts
+### Mise tasks
 
-| Script | Purpose |
+File tasks own their `#MISE` metadata. `mise-tasks/` contains
+shared setup and package operations.
+
+| Task | Purpose |
 |---|---|
-| `scripts/format.sh` | Auto-fix: ruff, yamlfix, markdownlint |
-| `scripts/lint.sh` | Full check: ruff, bandit, mypy (all packages), yamlfix, markdownlint |
-| `scripts/charm-integration-testing-unit-tests.sh` | Run `charm_integration_testing` unit tests |
-| `scripts/validators-unit-tests.sh` | Run validator unit tests |
-| `scripts/bundle-builder-x-tests.sh` | Run bundle builder tests |
+| `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
+| `mise run test:validators` | Run validator unit tests |
+| `mise run test:bundle-builder-x` | Run bundle builder tests |
 
 ### CI gates (all must pass on every PR)
 
-1. **lint** — `scripts/lint.sh`
+1. **lint** — `mise run lint`
 2. **charm-integration-testing-unit-tests**
 3. **validators-unit-tests**
 4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
@@ -57,7 +123,7 @@ automatically on Pull Requests to this repository. To format, run:
 ### Juju / environment notes
 
 - `juju status > file` exits 1 with an empty file — always pipe: `juju status | cat > file`
-- `kubectl` is accessed as `sudo k8s kubectl` (Canonical k8s snap)
+- `kubectl` uses the declared snap channel; `sudo k8s kubectl` also works in the sandbox
 - After editing validator source code, pass `--reinstall` to `dev-validate.py` to force re-injection on units
 
 ## Documentation
@@ -82,9 +148,11 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective scripts above before submitting a PR.
+Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective mise tasks above before submitting a PR.
 
-Integration tests live in `charm_integration_testing/test_suite/` and run against a live Juju model. These are executed by the CI `charm-testing-integration-tests` job and can be run locally via `scripts/run-tests.sh` (with the required Juju environment configured).
+Integration tests live in `charm_integration_testing/test_suite/` and run against
+live charms. Follow the [local testing guide](docs/how-to/run-and-debug-tests-locally.rst)
+to run them in the sandbox.
 
 ## Pull requests
 

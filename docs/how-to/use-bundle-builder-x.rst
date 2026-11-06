@@ -8,11 +8,12 @@ a Z3 constraint solver to produce minimal, valid bundles.
 Prerequisites
 -------------
 
-Prepare the monorepo development environment with ``mise`` and ``uv``::
+Complete the `repository setup
+<https://github.com/canonical/charm-integration-testing#getting-started>`_
+or use the development sandbox. Run the bundle-builder task from the repository
+root::
 
-    mise run setup -- --group development
-
-This makes the ``bundle-builder-x`` CLI available in the project environment.
+    mise run bundle:build-x -- --help
 
 Writing a spec file
 -------------------
@@ -39,7 +40,7 @@ Running the CLI
 
 .. code-block:: bash
 
-   uv run --no-sync --all-packages bundle-builder-x \
+   mise run bundle:build-x -- \
        --spec my-spec.yaml \
        --overrides static/charm-overrides \
        --output-bundles output/ \
