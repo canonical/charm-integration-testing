@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
-from resource_registry import ResourceRegistry
+from resource_registry import ResourceRegistry, ResourceTeardownWarning
 
 from juju.extension import JujuExtension
 
@@ -50,8 +51,22 @@ class JujuResourceRegistryExtension(JujuExtension):
         controller_handle = JujuControllerHandle(controller=controller)
         # Tear down child models (collect logs + deregister) before collecting controller logs.
         for child_handle in self._registry.children_of(controller_handle):
-            self._registry.teardown(child_handle)
-        self._registry.collect_logs(controller_handle)
+            try:
+                self._registry.teardown(child_handle)
+            except Exception as exc:
+                warnings.warn(
+                    f"Teardown failed for '{child_handle.resource_id}': {exc}",
+                    ResourceTeardownWarning,
+                    stacklevel=2,
+                )
+        try:
+            self._registry.collect_logs(controller_handle)
+        except Exception as exc:
+            warnings.warn(
+                f"Log collection failed for '{controller_handle.resource_id}': {exc}",
+                ResourceTeardownWarning,
+                stacklevel=2,
+            )
 
     def post_kill_controller(self, controller: str) -> None:
         handle = JujuControllerHandle(controller=controller)
