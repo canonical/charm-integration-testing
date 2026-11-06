@@ -24,6 +24,12 @@ dependencies = [
     "kubernetes (>=32.0.0, < 33.0.0)",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "types-pyyaml>=6.0.12.20250915",
+    "types-requests>=2.32.4.20250913",
+]
+
 [tool.poetry]
 packages = [
     { include = "chaos_client" },

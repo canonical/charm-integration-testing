@@ -140,12 +140,21 @@ dependencies = [
     { name = "z3-solver" },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "types-pyyaml" },
+    { name = "types-requests" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5,<3.0.0" },
     { name = "requests", specifier = ">=2.32.5,<3.0.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
+    { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.32.4.20250913" },
     { name = "z3-solver", specifier = ">=4.15.4.0,<5.0.0.0" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "cassandra-driver"
@@ -323,6 +332,12 @@ dependencies = [
     { name = "validators-runner" },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "types-pyyaml" },
+    { name = "types-requests" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "bundle-builder-x", editable = "bundle_builder_x" },
@@ -334,9 +349,12 @@ requires-dist = [
     { name = "pyyaml", specifier = "==6.0.2" },
     { name = "requests", specifier = ">=2.32.3,<2.35.0" },
     { name = "tenacity", specifier = ">=9.0.0,<10.0.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
+    { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.32.4.20250913" },
     { name = "validators-base", editable = "validators/base" },
     { name = "validators-runner", editable = "validators/runner" },
 ]
+provides-extras = ["dev"]
 
 [[package]]
 name = "charm-integration-testing-meta"
@@ -349,8 +367,6 @@ dev = [
     { name = "mypy" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "types-pyyaml" },
-    { name = "types-requests" },
     { name = "yamlfix" },
 ]
 
@@ -362,8 +378,6 @@ dev = [
     { name = "mypy", specifier = ">=1.19.0,<2.0.0" },
     { name = "pytest-cov", specifier = ">=6.2.1,<7.0.0" },
     { name = "ruff", specifier = "==0.5.7" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
-    { name = "types-requests", specifier = ">=2.32.4.20250913" },
     { name = "yamlfix", specifier = "==1.19.1" },
 ]
 
@@ -3196,12 +3210,14 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "types-pyyaml" },
     { name = "validators-test-utils" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
     { name = "validators-base", editable = "validators/base" },
     { name = "validators-test-utils", marker = "extra == 'dev'", editable = "validators/test_utils" },
 ]
@@ -3218,12 +3234,14 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "types-pyyaml" },
     { name = "validators-test-utils" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
     { name = "validators-base", editable = "validators/base" },
     { name = "validators-test-utils", marker = "extra == 'dev'", editable = "validators/test_utils" },
 ]
@@ -3240,12 +3258,14 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "types-pyyaml" },
     { name = "validators-test-utils" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
     { name = "validators-base", editable = "validators/base" },
     { name = "validators-test-utils", marker = "extra == 'dev'", editable = "validators/test_utils" },
 ]
@@ -3412,6 +3432,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "types-pyyaml" },
     { name = "validators-test-utils" },
 ]
 
@@ -3419,6 +3440,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.26.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20250915" },
     { name = "validators-base", editable = "validators/base" },
     { name = "validators-test-utils", marker = "extra == 'dev'", editable = "validators/test_utils" },
 ]

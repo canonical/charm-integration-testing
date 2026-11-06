@@ -325,11 +325,11 @@ jobs:
           EOF
             HTTPS_PROXY="${PIP_PROXY}" pipx install uv==0.13.6
             HTTPS_PROXY="${PIP_PROXY}" uv sync --python 3.12.12 \
-              --all-packages --no-default-groups --extra dev --group dev --locked
+              --all-packages --no-default-groups --locked
           else
             pipx install uv==0.13.6
             uv sync --python 3.12.12 \
-              --all-packages --no-default-groups --extra dev --group dev --locked
+              --all-packages --no-default-groups --locked
           fi
       - name: Install TruffleHog CLI
         shell: bash
