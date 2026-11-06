@@ -47,6 +47,45 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+S3 storage
+~~~~~~~~~~
+
+For bundles whose ``s3-integrator`` has no endpoint configured, provide an S3 configuration
+file via ``S3_CONFIG_<cloud>``. For example, ``S3_CONFIG_target_cloud`` points to
+the config for Juju cloud ``target-cloud``. Use one config per logical cloud.
+
+The file contains unquoted ``KEY=value`` entries:
+
+.. code:: text
+
+   S3_ENDPOINT=https://s3.example
+   S3_ACCESS_KEY=...
+   S3_SECRET_KEY=...
+   S3_BUCKET_NAMESPACE=local
+
+``S3_REGION`` defaults to ``us-east-1``. Use a namespace dedicated to disposable test
+buckets: scheduled cleanup removes matching harness buckets older than four hours,
+regardless of which credentials created them. Cleanup secrets must explicitly set
+``S3_BUCKET_NAMESPACE``; the workflow rejects missing or empty namespaces.
+Use a dedicated S3 project/account
+for test buckets. The integrator receives
+``S3_ACCESS_KEY`` and ``S3_SECRET_KEY``. These same credentials must permit
+bucket creation and deletion, as well as workload access.
+
+For the local sandbox service, run setup and load its config path:
+
+.. code:: bash
+
+   bash development-sandbox/bin/setup-s3.sh
+   source "$HOME/.local/share/charmqa-s3/s3.env"
+
+For Kubernetes, also map this config to the selected Juju cloud in the same Bash
+shell before starting tests:
+
+.. code:: bash
+
+   export "S3_CONFIG_${K8S_CLOUD_NAME//-/_}=$S3_CONFIG_localhost"
+
 Set up Juju and k8s
 -------------------
 Juju and k8s will be needed to run the tests.
