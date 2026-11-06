@@ -16,3 +16,4 @@ uv run --no-sync --all-packages -- pytest \
     ./validators/*/tests/unit \
     "${cov_args[@]}" \
     --cov-report=term \
+    "$@"
