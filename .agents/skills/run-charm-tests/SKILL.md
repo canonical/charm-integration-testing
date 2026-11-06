@@ -268,6 +268,17 @@ When given a test execution, map parameters to `run-tests.sh` inputs:
 | `channel` | `--target-channel` | Charm channel (edge, beta, stable) |
 | `execution_id` | N/A | Used for logging/tracking |
 
+Older executions may include `juju_channel`. Before provisioning their local
+substrate, select that channel and verify the installed client:
+
+```bash
+mise run juju:channel -- <juju_channel>
+juju version
+```
+
+The selection persists on this machine and changes only the client. Use fresh
+controllers when reproducing another major version.
+
 ### 2. Setup Phase
 
 **Option A: Run tests via CLI**
