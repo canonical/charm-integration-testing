@@ -51,7 +51,7 @@ $PROJECT_ROOT/
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
   development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
-  pyproject.toml              # Root Poetry project (aggregates all subpackages)
+  pyproject.toml              # Root uv workspace (coordinates all subpackages)
 ```
 
 ---

@@ -36,7 +36,7 @@ mapfile -d '' -t yaml_files < <(find . -type d -name .mise -prune -o \
     -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 if ((${#yaml_files[@]})); then
     uv run --no-sync --all-packages yamlfix --check "${yaml_files[@]}" \
-        || die 'Failed on "yamlfix"; consider running: uv run yamlfix'
+        || die 'Failed on "yamlfix"; run: uv run --no-sync --all-packages yamlfix'
 fi
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 

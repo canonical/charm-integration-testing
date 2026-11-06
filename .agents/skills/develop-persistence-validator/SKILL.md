@@ -356,34 +356,28 @@ rather than registering multiple entry points for the same interface.
    dependency (e.g. a client library the functional validator doesn't use)
    or dev dependency (e.g. a test double), which must still be added to the
    package's own `pyproject.toml` under `[project].dependencies` /
-   `[project.optional-dependencies].dev` (matching the PEP 621 format
-   `validators/<name>/pyproject.toml` already uses - not the root project's
-   `[tool.poetry.dependencies]` format). A new dev dependency there is only
-   installed if the root `pyproject.toml`'s path dependency for this package
-   already lists `extras = ["dev"]` (e.g. `validators-postgresql-client = {
-   path = "./validators/postgresql_client", develop = true, extras = ["dev"]
-   }` - preserve any other existing extras already listed alongside `"dev"`)
-   - if it's missing `"dev"`, add it. If
+   `[project.optional-dependencies].dev` (the PEP 621 format used by
+   `validators/<name>/pyproject.toml`). Workspace members are mapped through
+   `[tool.uv.sources]` in the root `pyproject.toml`. Development extras are
+   selected across workspace members by the development setup command, so no
+   separate root dependency entry is needed. If
    you just created the package from scratch in step 1, make sure the
-   root/`validators/runner` registrations are also done (per
+   root workspace/`validators/runner` registrations are also done (per
    `develop-validator`); they're required for entry-point discovery
    regardless of which entry-point group(s) the package declares. Either
-   way, run `poetry install` (or `poetry update <package>` for a single
-   path dependency) after *any* change to a package's `pyproject.toml` made
-   in this step - not just a new/changed dependency or `extras` - including
+   way, run `uv lock` and `mise run setup -- --group development` after *any*
+   change to a package's `pyproject.toml` made in this step - not just a
+   new/changed dependency or extra - including
    just adding the `endpoint_persistence_validators` entry-point table
    itself. The runner discovers entry points through installed package
    metadata, so leaving the environment stale after any such change (a new
-   package, a new runtime/dev dependency, an `extras` change, or only a new
+   package, a new runtime/dev dependency, an extra change, or only a new
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
-   tests below. In the development sandbox this matters especially for a
-   long-lived `scripts/sandbox.sh run --interactive` session: `poetry
-   install` runs once at `sandbox.sh up` time, so the VM's venv reflects the
-   `pyproject.toml` as of `up` and goes stale for any change made mid-session
-   - re-run `poetry install` inside the VM after editing a `pyproject.toml`,
-   or the runner won't discover the new/changed entry point until the next
-   `up`.
+   tests below. For a long-lived sandbox session, run `uv lock` and
+   `uv sync --all-packages --no-default-groups --all-extras --group dev --locked`
+   inside the VM after editing a `pyproject.toml`, so its installed metadata
+   reflects the change.
 
 5. Write unit tests. If the package already has `tests/unit/test_validator.py`
    for its functional validator, extend it (reuse any connection/cursor stubs
@@ -469,8 +463,8 @@ rather than registering multiple entry points for the same interface.
 
 6. Run the package's unit tests and the monorepo-wide checks:
    ```
-   poetry run pytest validators/<name>
-   poetry run pytest validators/runner    # confirm discovery/wiring still passes
+   uv run --no-sync --all-packages pytest validators/<name>
+   uv run --no-sync --all-packages pytest validators/runner    # confirm discovery/wiring still passes
    ./scripts/format.sh
    ./scripts/lint.sh
    ```
@@ -743,7 +737,7 @@ class PostgreSQLClientPersistenceValidator(_PostgreSQLConnectionMixin, BasePersi
   Juju interface name.
 - Unit tests cover role gating, prepare, checkpoint (pass and fail), and
   cleanup (including the no-canary-resources case).
-- `poetry run pytest validators/<name> validators/runner` passes.
+- `uv run --no-sync --all-packages pytest validators/<name> validators/runner` passes.
 - `./scripts/format.sh` and `./scripts/lint.sh` pass (ruff, mypy, bandit,
   yamlfix, and markdownlint-cli2 for root `*.md` files; if the validator
   includes nested markdown documentation, run markdownlint-cli2 explicitly on
