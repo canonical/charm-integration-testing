@@ -58,6 +58,18 @@ on:
         required: true
       PROD_PS7_LXD:
         required: true
+      S3_PS6_SQA_STG_CHARM_QA_KUBERNETES:
+        required: false
+      S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES:
+        required: false
+      S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK:
+        required: false
+      S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES:
+        required: false
+      S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK:
+        required: false
+      S3_PS7_SQA_PROD_CHARM_QA_LXD:
+        required: false
 jobs:
   cleanup-environment:
     name: Clean up any leftover artifacts from old Charm QA environments
@@ -97,6 +109,11 @@ jobs:
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
           PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
+          if ! jq -en --argjson age "$AGE_THRESHOLD" \
+            '$age | type == "number" and . > 0 and (isinfinite | not) and (isnan | not)' >/dev/null; then
+            echo "::error::AGE_THRESHOLD must be a finite number greater than zero"
+            exit 1
+          fi
           if [[ "${CLOUD_TYPE}" == "k8s" && -n "${CREDENTIALS_SECRET_NAME}" ]]; then
             echo "kubernetes=true" >> $GITHUB_OUTPUT
             echo "${!CREDENTIALS_SECRET_NAME}" > "kubeconfig"
@@ -125,7 +142,6 @@ jobs:
             printf '%s\n' "${!CREDENTIALS_SECRET_NAME}" > "$LXD_CREDENTIALS_DIR/creds.yaml"
             echo "LXD_CREDENTIALS_DIR=$LXD_CREDENTIALS_DIR" >> "$GITHUB_ENV"
           fi
-
       ##################################################################################
       #  _  ___    _ ____  ______ _____  _   _ ______ _______ ______  _____ 
       # | |/ / |  | |  _ \|  ____|  __ \| \ | |  ____|__   __|  ____|/ ____|
@@ -610,3 +626,133 @@ jobs:
             echo "Deleting instance: $name"
             "$LXC_BINARY" delete --force "charmqa:${name}"
           done
+      ###################################################################################
+      #   _________________
+      #  /   _____/\_____  \
+      #  \_____  \   _(__  <
+      #  /        \ /       \
+      # /_______  //______  /
+      #         \/        \/
+      #
+      # S3 cleanup is independent of substrate cleanup.
+      - name: Install S3 cleanup dependencies
+        id: s3_dependencies
+        if: ${{ !cancelled() && steps.creds.outcome == 'success' && steps.env_info.outputs.s3-secret-name != '' }}
+        uses: ./.github/actions/install-with-retry
+        with:
+          command: sudo apt-get update && sudo apt-get install -y python3-venv jq
+            && python3 -m venv "${{ runner.temp }}/s3-cleanup" && "${{ runner.temp }}/s3-cleanup/bin/pip"
+            install 'awscli>=1.40,<2'
+      - name: Set up S3 client
+        id: s3-client
+        if: ${{ !cancelled() && steps.s3_dependencies.outcome == 'success' }}
+        shell: bash
+        env:
+          S3_STORAGE_SECRET_NAME: ${{ steps.env_info.outputs.s3-secret-name }}
+          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
+        run: |-
+          set -euo pipefail
+          declare -A config=()
+          line_number=0
+          while IFS= read -r line; do
+            ((line_number += 1))
+            [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+            if [[ "$line" != *=* ]]; then
+              echo "::error::Invalid S3 config entry on line $line_number"
+              exit 1
+            fi
+            name="${line%%=*}"
+            value="${line#*=}"
+            case "$name" in
+              S3_ENDPOINT|S3_REGION|S3_BUCKET_NAMESPACE|S3_ACCESS_KEY|S3_SECRET_KEY) ;;
+              *)
+                echo "::error::Invalid S3 config entry on line $line_number"
+                exit 1
+                ;;
+            esac
+            if [[ -v "config[$name]" ]]; then
+              echo "::error::Duplicate S3 config entry for $name"
+              exit 1
+            fi
+            config["$name"]="$value"
+          done <<< "${!S3_STORAGE_SECRET_NAME}"
+          namespace="${config[S3_BUCKET_NAMESPACE]:?Missing S3_BUCKET_NAMESPACE}"
+          namespace_hash="$(printf '%s' "$namespace" | sha256sum | cut -c1-8)"
+          aws_config="${RUNNER_TEMP}/aws-config"
+          printf '[default]\ns3 =\n    addressing_style = path\n' > "$aws_config"
+          chmod 600 "$aws_config"
+          {
+            echo "AWS_CONFIG_FILE=$aws_config"
+            echo "AWS_ACCESS_KEY_ID=${config[S3_ACCESS_KEY]:?Missing S3_ACCESS_KEY}"
+            echo "AWS_SECRET_ACCESS_KEY=${config[S3_SECRET_KEY]:?Missing S3_SECRET_KEY}"
+            echo "AWS_DEFAULT_REGION=${config[S3_REGION]:-us-east-1}"
+            echo "AWS_EC2_METADATA_DISABLED=true"
+            echo "S3_ENDPOINT=${config[S3_ENDPOINT]:?Missing S3_ENDPOINT}"
+            echo "S3_BUCKET_PREFIX=charmqa-s3-${namespace_hash}-"
+          } >> "$GITHUB_ENV"
+          echo "${RUNNER_TEMP}/s3-cleanup/bin" >> "$GITHUB_PATH"
+      - name: Find S3 buckets older than the age threshold
+        id: s3-buckets
+        if: ${{ !cancelled() && steps.s3-client.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api list-buckets --endpoint-url "$S3_ENDPOINT" --output json |
+            jq --raw-output --arg prefix "$S3_BUCKET_PREFIX" --argjson age "$AGE_THRESHOLD" '
+              .Buckets[].Name |
+              capture("^(?<name>" + $prefix + "(?<created>[0-9]{10})-[0-9a-f]{16})$") |
+              select((now - (.created | tonumber)) > ($age * 60)) |
+              .name
+            ' > s3_buckets_to_remove.txt
+      - name: Remove S3 buckets
+        if: ${{ !cancelled() && steps.s3-buckets.outcome == 'success' }}
+        shell: bash
+        run: |-
+          set -uo pipefail
+          set +e
+          failed=0
+          while IFS= read -r bucket; do
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would delete S3 bucket: $bucket"
+              continue
+            fi
+            echo "Deleting S3 bucket: $bucket"
+
+            # Stop on failure within a bucket, but still process the remaining buckets.
+            (
+              set -e
+              uploads=$(aws s3api list-multipart-uploads --bucket "$bucket" --endpoint-url "$S3_ENDPOINT" \
+                --output json | jq -c '.Uploads[]?')
+              while IFS= read -r upload; do
+                [[ -z "$upload" ]] && continue
+                key=$(jq -r '.Key' <<< "$upload")
+                upload_id=$(jq -r '.UploadId' <<< "$upload")
+                aws s3api abort-multipart-upload --bucket "$bucket" --key "$key" \
+                  --upload-id "$upload_id" --endpoint-url "$S3_ENDPOINT"
+              done <<< "$uploads"
+              objects=$(aws s3api list-object-versions --bucket "$bucket" --endpoint-url "$S3_ENDPOINT" \
+                --output json | jq -c '[.Versions[]?, .DeleteMarkers[]? | {Key, VersionId}]')
+              while [[ "$(jq 'length' <<< "$objects")" -gt 0 ]]; do
+                batch=$(jq -c '{Objects: .[0:1000], Quiet: true}' <<< "$objects")
+                delete_result=$(aws s3api delete-objects --bucket "$bucket" --delete "$batch" \
+                  --endpoint-url "$S3_ENDPOINT" --output json)
+                if jq -e '.Errors | length > 0' <<< "$delete_result" >/dev/null; then
+                  echo "::error::Failed to remove objects from S3 bucket $bucket"
+                  exit 1
+                fi
+                objects=$(jq -c '.[1000:]' <<< "$objects")
+              done
+              aws s3api delete-bucket --bucket "$bucket" --endpoint-url "$S3_ENDPOINT"
+            )
+            status=$?
+            if (( status != 0 )); then
+              echo "::error::Failed to remove S3 bucket $bucket"
+              failed=1
+            fi
+          done < s3_buckets_to_remove.txt
+          exit "$failed"
