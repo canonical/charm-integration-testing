@@ -47,11 +47,6 @@ on:
       execution_id:
         description: Test Observer execution ID to post results from this test to.
         required: false
-      juju_channel:
-        description: Juju client channel for this run (for example 4/stable); empty
-          uses 3/stable.
-        required: false
-        default: 3/stable
       neighbor:
         description: charmhub.io name of the charm to test the primary charm against.
         required: true
@@ -113,7 +108,6 @@ jobs:
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
     env:
-      JUJU_CHANNEL: ${{ inputs.juju_channel || '3/stable' }}
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
       UV_FILE: ${{ github.workspace }}/static/uv
