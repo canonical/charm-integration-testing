@@ -32,7 +32,7 @@ uv run --no-sync --all-packages bandit \
 uv run --no-sync --all-packages mypy bundle_builder_x || die 'Failed on "mypy bundle_builder_x"'
 uv run --no-sync --all-packages mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
 uv run --no-sync --all-packages mypy --explicit-package-bases validators/* || die 'Failed on "mypy validators"'
-mapfile -d '' -t yaml_files < <(find . -type d -name .mise -prune -o \
+mapfile -d '' -t yaml_files < <(find . -type d \( -name .mise -o -name .venv \) -prune -o \
     -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 if ((${#yaml_files[@]})); then
     uv run --no-sync --all-packages yamlfix --check "${yaml_files[@]}" \
