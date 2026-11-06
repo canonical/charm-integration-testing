@@ -19,7 +19,8 @@ task.run_auto_install = false
 python = "3.12.12"
 # Installs isolated Python tools; Poetry owns project dependencies.
 uv = "0.13.6"
-"pypi:poetry" = { version = "2.3.0", depends = ["python", "uv"] }
+# PyPI tools use the Python and uv declared above; Mise installs them first.
+"pypi:poetry" = { version = "2.3.0" }
 "aqua:jqlang/jq" = "1.8.2"
 "aqua:mikefarah/yq" = "4.54.1"
 "aqua:trufflesecurity/trufflehog" = "3.56.0"
@@ -30,9 +31,9 @@ node = "24.22.0"
 "aqua:mpalmer/action-validator" = "0.6.0"
 
 "npm:markdownlint-cli2" = { version = "0.24.0", depends = ["node"] }
-"pypi:zizmor" = { version = "1.5.1", depends = ["python", "uv"] }
-"pypi:ruff" = { version = "0.5.7", depends = ["python", "uv"] }
-"pypi:bandit" = { version = "1.9.4", extras = "toml", depends = ["python", "uv"] }
-"pypi:yamlfix" = { version = "1.19.1", depends = ["python", "uv"] }
-"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12", depends = ["python", "uv"] }
-"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "ee228d66ba8a238b5adfd07397bfc030178aedcd", python = "3.12.12", depends = ["python", "uv"] }
+"pypi:zizmor" = { version = "1.5.1" }
+"pypi:ruff" = { version = "0.5.7" }
+"pypi:bandit" = { version = "1.9.4", extras = "toml" }
+"pypi:yamlfix" = { version = "1.19.1" }
+"pypi:git+https://github.com/juju/juju-crashdump.git" = { version = "bde242ccfdd91cb2372f26d41d62d7b230660c08", with = ["ssh-agent-setup==2.0.1"], python = "3.12.12" }
+"pypi:git+https://github.com/canonical/juju-k8s-crashdump.git" = { version = "ee228d66ba8a238b5adfd07397bfc030178aedcd", python = "3.12.12" }
