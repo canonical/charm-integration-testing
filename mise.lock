@@ -158,12 +158,6 @@ specifiers = ["bde242ccfdd91cb2372f26d41d62d7b230660c08"]
 python = "3.12.12"
 with = '["ssh-agent-setup==2.0.1"]'
 
-[[tools."pypi:poetry"]]
-version = "2.3.0"
-backend = "pypi:poetry"
-specifiers = ["2.3.0"]
-uv = { path = ".mise/locks/pypi-poetry/2.3.0", digest = "sha256:10adbc3fe6d6e5b859d333810b1a188bcbb076d69f3cb4912c71be6fe58e12f2" }
-
 [[tools."pypi:ruff"]]
 version = "0.5.7"
 backend = "pypi:ruff"

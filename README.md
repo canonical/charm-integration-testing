@@ -5,11 +5,10 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Python dependencies are managed through poetry.
+Prepare the development environment with Mise and uv:
 
 ```bash
-pipx install poetry==2.0
-poetry install
+mise run setup -- --group development
 ```
 
 ## Development

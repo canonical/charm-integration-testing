@@ -7,8 +7,22 @@ Testing.
 
 ## General recommendations
 
-Following the [README Getting Started](README.md#getting-started) guide to clone
-and download dependencies.
+Prepare the project dependencies with Mise:
+
+```bash
+mise run setup -- --group runtime
+mise run setup -- --group development
+```
+
+The root `pyproject.toml` is a uv workspace for the framework, bundle builder,
+and validator packages. Runtime and package-specific development dependencies
+remain in each package's own project metadata; the root `dev` group contains
+shared repository tooling. The direct uv equivalents are:
+
+```bash
+uv sync --all-packages --no-default-groups --locked
+uv sync --all-packages --no-default-groups --extra dev --group dev --locked
+```
 
 ## Linting and Formatting
 
