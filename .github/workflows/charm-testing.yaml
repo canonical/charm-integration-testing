@@ -48,9 +48,9 @@ on:
         description: Test Observer execution ID to post results from this test to.
         required: false
       juju_channel:
-        description: Juju client channel to use while testing.
+        description: Optional Juju client channel; empty uses the saved selection
+          or catalogue default.
         required: false
-        default: 3/stable
       neighbor:
         description: charmhub.io name of the charm to test the primary charm against.
         required: true
@@ -135,15 +135,9 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           groups: integration
+          juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-      - name: Select Juju channel
-        shell: bash
-        env:
-          REQUESTED_CHANNEL: ${{ inputs.juju_channel || '3/stable' }}
-        run: |
-          mise run juju:channel -- "$REQUESTED_CHANNEL"
-          juju version
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
@@ -184,7 +178,7 @@ jobs:
           charm_under_test: ${{ inputs.charm_under_test }}
           charm_endpoint: ${{ inputs.charm_endpoint }}
           execution_id: ${{ inputs.execution_id }}
-          juju_channel: ${{ inputs.juju_channel || '3/stable' }}
+          juju_channel: ${{ inputs.juju_channel }}
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
@@ -197,6 +191,8 @@ jobs:
           debug_sleep_seconds: ${{ inputs.debug_sleep_seconds }}
           log_level: ${{ inputs.log_level }}
         run: |
+          mise run juju:channel
+          juju version
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY

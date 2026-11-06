@@ -2,6 +2,10 @@
 name: Set up mise
 description: Prepare repository setup groups, catalogue tools and system packages
 inputs:
+  juju-channel:
+    description: Optional Juju client channel; empty uses the saved selection or catalogue
+      default
+    default: ""
   groups:
     description: Space-separated setup groups from mise-tasks/setup
     default: ""
@@ -25,6 +29,17 @@ runs:
         version: ${{ steps.version.outputs.version }}
         install: false
         cache: false
+    - name: Select Juju channel
+      if: ${{ inputs.juju-channel != '' }}
+      shell: bash
+      env:
+        REQUESTED_CHANNEL: ${{ inputs.juju-channel }}
+      run: |-
+        if [[ "$REQUESTED_CHANNEL" == -* || "$REQUESTED_CHANNEL" == *$'\n'* || "$REQUESTED_CHANNEL" == *$'\r'* ]]; then
+          echo "Juju channel must be a single channel, not an option" >&2
+          exit 1
+        fi
+        mise run juju:channel -- "$REQUESTED_CHANNEL"
     - name: Set up environment
       shell: bash
       env:
