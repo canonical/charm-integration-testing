@@ -138,7 +138,7 @@ jobs:
       # |_|\_\\____/|____/|______|_|  \_\_| \_|______|  |_|  |______|_____/ 
       #
       - name: Ensure Kubernetes client
-        if: ${{ steps.creds.outputs.kubernetes == 'true' }}
+        if: ${{ !cancelled() && steps.creds.outputs.kubernetes == 'true' }}
         shell: bash
         run: mise run setup -- --packages snap:kubectl
       - name: Remove orphaned rawfile PV directories from nodes

@@ -6,10 +6,11 @@ inputs:
     description: Space-separated setup groups from mise-tasks/setup
     default: ""
   tools:
-    description: Space-separated executable names from the mise catalogue
+    description: Space-separated tool identifiers from mise.toml (e.g. python, aqua:cli/cli,
+      pypi:zizmor)
     default: ""
   packages:
-    description: Space-separated package names from the mise catalogue
+    description: Space-separated system package identifiers from mise.toml (e.g. snap:juju)
     default: ""
 runs:
   using: composite
