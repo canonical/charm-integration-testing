@@ -21,15 +21,14 @@ from typing import Any
 # Derive project root from this script's location: <project>/development-sandbox/bin/dev-validate.py
 PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent.parent)))
 
-# If not already running inside the project's Poetry venv, re-exec via
-# "poetry run python3" so all project packages (charm_integration_testing,
-# validators, etc.) are importable without manual PYTHONPATH juggling.
-_POETRY_MARKER = "pypoetry"
-if _POETRY_MARKER not in sys.executable:
+# Re-exec through uv so the workspace packages are importable.
+_PROJECT_VENV = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv"))
+if not _PROJECT_VENV.is_absolute():
+    _PROJECT_VENV = PROJECT_ROOT / _PROJECT_VENV
+if Path(sys.prefix).resolve() != _PROJECT_VENV.resolve():
     _result = subprocess.run(
-        ["poetry", "run", "python3"] + sys.argv,
+        ["uv", "run", "--no-sync", "--all-packages", "python3"] + sys.argv,
         cwd=str(PROJECT_ROOT),
-        env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
     )
     sys.exit(_result.returncode)
 VALIDATORS_DIR = PROJECT_ROOT / "validators"

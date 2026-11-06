@@ -16,12 +16,12 @@ set -e
 which markdownlint-cli2 || die 'markdownlint-cli2 missing; install via "npm install markdownlint-cli2"'
 
 # Actual lint checks begin here.
-poetry run ruff check || die 'Failed "ruff check"'
-poetry run ruff format --check || die 'Failed on "ruff format --check"; consider running: poetry run ruff format'
+uv run --no-sync --all-packages ruff check || die 'Failed "ruff check"'
+uv run --no-sync --all-packages ruff format --check \
+    || die 'Failed on "ruff format --check"; run: uv run --no-sync --all-packages ruff format'
 
-# Collect local package paths declared in pyproject.toml, plus scripts/
-mapfile -t _bandit_paths < <(grep -oP '(?<=path = "\./)[^"]+' pyproject.toml)
-poetry run bandit \
+_bandit_paths=(bundle_builder_x charm_integration_testing validators/*)
+uv run --no-sync --all-packages bandit \
     --configfile pyproject.toml \
     --quiet \
     --recursive \
@@ -29,14 +29,14 @@ poetry run bandit \
     "${_bandit_paths[@]}" \
     scripts \
     || die 'Failed on "bandit"'
-poetry run mypy bundle_builder_x || die 'Failed on "mypy bundle_builder_x"'
-poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
-poetry run mypy --explicit-package-bases validators/* || die 'Failed on "mypy validators"'
-mapfile -d '' -t yaml_files < <(find . -type d -name .mise -prune -o \
+uv run --no-sync --all-packages mypy bundle_builder_x || die 'Failed on "mypy bundle_builder_x"'
+uv run --no-sync --all-packages mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
+uv run --no-sync --all-packages mypy --explicit-package-bases validators/* || die 'Failed on "mypy validators"'
+mapfile -d '' -t yaml_files < <(find . -type d \( -name .mise -o -name .venv \) -prune -o \
     -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 if ((${#yaml_files[@]})); then
-    poetry run yamlfix --check "${yaml_files[@]}" \
-        || die 'Failed on "yamlfix"; consider running: poetry run yamlfix'
+    uv run --no-sync --all-packages yamlfix --check "${yaml_files[@]}" \
+        || die 'Failed on "yamlfix"; run: uv run --no-sync --all-packages yamlfix'
 fi
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 

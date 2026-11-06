@@ -35,7 +35,7 @@ Note: This applies to your chat output, not to repository documentation or skill
 ## Environment
 
 - Project: `$PROJECT_ROOT` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install` from `$PROJECT_ROOT`)
+- Python venv: managed by uv; run `mise run setup -- --group development` from `$PROJECT_ROOT`
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
 
@@ -51,7 +51,7 @@ $PROJECT_ROOT/
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
   development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
-  pyproject.toml              # Root Poetry project (aggregates all subpackages)
+  pyproject.toml              # Root uv workspace (coordinates all subpackages)
 ```
 
 ---

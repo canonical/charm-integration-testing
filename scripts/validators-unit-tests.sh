@@ -9,7 +9,7 @@ for dir in ./validators/*/; do
     cov_args+=(--cov="${dir%/}")
 done
 
-poetry run -- pytest \
+uv run --no-sync --all-packages -- pytest \
     ./validators/*/tests/unit \
     "${cov_args[@]}" \
     --cov-report=term \

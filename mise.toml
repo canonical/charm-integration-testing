@@ -17,10 +17,9 @@ task.run_auto_install = false
 
 [tools]
 python = "3.12.12"
-# Installs isolated Python tools; Poetry owns project dependencies.
+# Installs isolated Python tools; uv owns project dependencies.
 uv = "0.13.6"
 # PyPI tools use the Python and uv declared above; Mise installs them first.
-"pypi:poetry" = { version = "2.3.0" }
 "aqua:jqlang/jq" = "1.8.2"
 "aqua:mikefarah/yq" = "4.54.1"
 "aqua:trufflesecurity/trufflehog" = "3.56.0"
