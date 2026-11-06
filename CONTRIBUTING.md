@@ -21,7 +21,7 @@ shared repository tooling. The direct uv equivalents are:
 
 ```bash
 uv sync --all-packages --no-default-groups --locked
-uv sync --all-packages --no-default-groups --extra dev --group dev --locked
+uv sync --all-packages --no-default-groups --all-extras --group dev --locked
 ```
 
 ## Linting and Formatting

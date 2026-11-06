@@ -8,7 +8,7 @@ a Z3 constraint solver to produce minimal, valid bundles.
 Prerequisites
 -------------
 
-Prepare the monorepo development environment with Mise and uv::
+Prepare the monorepo development environment with ``mise`` and ``uv``::
 
     mise run setup -- --group development
 
