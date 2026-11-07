@@ -142,3 +142,5 @@ dmypy.json
 .DS_Store
 generated-*-bundle.yaml
 
+# Local sandbox skills, notes, and configuration
+/sandbox-local/

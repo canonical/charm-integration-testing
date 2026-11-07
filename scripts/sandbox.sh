@@ -30,6 +30,8 @@
 #                              as <NAME> (prefix stripped), e.g.
 #                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
 #                              inside the VM.
+#   SANDBOX_EXTRA_CONFIG_DIR   Project-local directory containing .github/skills or agents
+#   SANDBOX_PROMPT_FILE        Initial context file (defaults to .agents/skills/system.md)
 
 set -euo pipefail
 
@@ -300,6 +302,8 @@ Environment (.env keys):
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
+  SANDBOX_EXTRA_CONFIG_DIR  Project-local directory containing .github/skills or agents
+  SANDBOX_PROMPT_FILE     Initial context file (default: .agents/skills/system.md)
 
 Inside an interactive session use skill slash commands:
   /develop-validator     Develop a new charm integration validator
@@ -691,6 +695,35 @@ EOF
 
     TASK="${*:-}"
 
+    local _prompt_source="${SANDBOX_PROMPT_FILE:-.agents/skills/system.md}"
+    [[ "$_prompt_source" = /* ]] || _prompt_source="$PROJECT_DIR/$_prompt_source"
+    if [ ! -f "$_prompt_source" ] || [ ! -r "$_prompt_source" ]; then
+        echo "ERROR: Sandbox prompt file is not a readable file: $_prompt_source" >&2
+        return 1
+    fi
+
+    local _extra_config_vm_dir=""
+    if [ -n "${SANDBOX_EXTRA_CONFIG_DIR:-}" ]; then
+        local _extra_config_dir="$SANDBOX_EXTRA_CONFIG_DIR"
+        [[ "$_extra_config_dir" = /* ]] || _extra_config_dir="$PROJECT_DIR/$_extra_config_dir"
+        _extra_config_dir=$(cd -- "$_extra_config_dir" && pwd -P) || {
+            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR is not an accessible directory." >&2
+            return 1
+        }
+        case "$_extra_config_dir" in
+            "$PROJECT_DIR"/*) ;;
+            *)
+                echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR must be inside the project checkout." >&2
+                return 1
+                ;;
+        esac
+        if [ ! -d "$_extra_config_dir/.github/skills" ] && [ ! -d "$_extra_config_dir/.github/agents" ]; then
+            echo "ERROR: SANDBOX_EXTRA_CONFIG_DIR must contain .github/skills or .github/agents." >&2
+            return 1
+        fi
+        _extra_config_vm_dir="$VM_MOUNT/${_extra_config_dir#"$PROJECT_DIR"/}"
+    fi
+
     _require_github_auth
 
     # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
@@ -731,7 +764,7 @@ EOF
     _vm_temp_files+=("$PROMPT_FILE")
 
     {
-        cat "$PROJECT_DIR/.agents/skills/system.md"
+        cat "$_prompt_source"
         if [ -n "$TASK" ]; then
             printf "\n\n---\n\nTask: %s\n" "$TASK"
         fi
@@ -749,11 +782,13 @@ EOF
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            _skill_extra=()
+            [ -n \"\$1\" ] && _skill_extra=(--add-dir \"\$1\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" \"\${_skill_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "$_extra_config_vm_dir"
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
@@ -765,11 +800,13 @@ EOF
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
+            _skill_extra=()
+            [ -n \"\$1\" ] && _skill_extra=(--add-dir \"\$1\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" \"\${_skill_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "$_extra_config_vm_dir"
     fi
 }
 
