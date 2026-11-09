@@ -4,6 +4,7 @@ excludes = [
     "scripts/*.py",
     "scripts/helpers/**",
     "development-sandbox/bin/install-mise.sh",
+    "development-sandbox/bin/_require-sandbox.sh",
 ]
 
 [settings]

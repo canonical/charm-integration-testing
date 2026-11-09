@@ -18,6 +18,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/_require-sandbox.sh"
+
 for tool in lxd lxc juju; do
     if ! command -v "$tool" >/dev/null; then
         echo "Missing $tool; run: mise run setup -- --group local-lxd" >&2

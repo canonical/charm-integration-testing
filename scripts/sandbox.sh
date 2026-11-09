@@ -405,10 +405,14 @@ _cmd_up() {
 
     echo "==> Setting up the sandbox environment..."
     multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
+    multipass exec "$VM_NAME" -- bash -lc '
+        mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing"
+        touch "${XDG_CONFIG_HOME:-$HOME/.config}/charm-integration-testing/development-sandbox"
+    '
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
         cd '$VM_MOUNT'
-        mise run setup -- --group development integration agent
+        mise run setup -- --group sandbox development integration agent
     "
 
     _require_github_auth

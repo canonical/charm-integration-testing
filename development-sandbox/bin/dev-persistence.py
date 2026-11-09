@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Ruff would add a space after # and break Mise directive syntax.
 # fmt: off
 #MISE description="Run persistence validation against a deployed charm"
 #MISE raw_args=true
@@ -28,6 +29,10 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+_sandbox_guard = Path(__file__).with_name("_require-sandbox.sh")
+if subprocess.run(["bash", str(_sandbox_guard)], check=False).returncode:
+    sys.exit(1)
 
 # Derive project root from this script's location: <project>/development-sandbox/bin/dev-persistence.py
 PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent.parent)))

@@ -115,7 +115,7 @@ configuration changed, rerun:
 
 ```bash
 cd "$PROJECT_ROOT"
-mise run setup -- --group development integration agent
+mise run setup -- --group sandbox development integration agent
 ```
 
 Install prerequisites with the relevant setup group, then run the substrate task

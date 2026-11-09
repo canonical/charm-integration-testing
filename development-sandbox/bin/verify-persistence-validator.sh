@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/_require-sandbox.sh"
+
 # Derive project root from this script's location: <project>/development-sandbox/bin/verify-persistence-validator.sh
 PROJECT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 

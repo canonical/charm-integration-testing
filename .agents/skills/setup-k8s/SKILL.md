@@ -45,11 +45,14 @@ Use this path when Kubernetes is already ready and only Chaos Mesh setup
 or verification is needed. Do not bootstrap another controller or model.
 
 1. Provide a readable Kubernetes configuration. Install Helm 3, jq and kubectl
-   through the setup task without installing or initializing a local cluster.
+   without installing or initializing a local cluster:
+   ```bash
+   cd "$PROJECT_ROOT"
+   mise run setup -- --tools aqua:helm/helm aqua:jqlang/jq --packages snap:kubectl
+   ```
 2. Run:
    ```bash
    cd "$PROJECT_ROOT"
-   mise run setup -- --group chaos-mesh
    mise run sandbox:setup-chaos-mesh -- /home/ubuntu/k8s.yaml
    ```
    The configuration path is optional and defaults to `/home/ubuntu/k8s.yaml`.

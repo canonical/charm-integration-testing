@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/_require-sandbox.sh"
+
 CHART_VERSION="2.8.4"
 CHART_REPOSITORY="https://charts.chaos-mesh.org"
 RELEASE="chaos-mesh"
@@ -31,7 +33,7 @@ die() {
 
 for tool in helm jq; do
     command -v "$tool" >/dev/null ||
-        die "Missing $tool; run: mise run setup -- --group chaos-mesh"
+        die "Missing $tool; run: mise run setup -- --tools aqua:helm/helm aqua:jqlang/jq --packages snap:kubectl"
 done
 helm_version=$(helm version --short)
 [[ "$helm_version" == v3.* ]] || die "Expected Helm 3; found $helm_version."
@@ -41,7 +43,7 @@ if command -v kubectl >/dev/null 2>&1; then
 elif command -v k8s >/dev/null 2>&1; then
     kubectl_cmd=(sudo -n k8s kubectl)
 else
-    die "kubectl or Canonical k8s is required; run: mise run setup -- --group chaos-mesh"
+    die "kubectl or Canonical k8s is required; run: mise run setup -- --tools aqua:helm/helm aqua:jqlang/jq --packages snap:kubectl"
 fi
 kubectl_cmd+=(--kubeconfig "$KUBECONFIG_PATH")
 helm_args=(--kubeconfig "$KUBECONFIG_PATH" --namespace "$NAMESPACE")

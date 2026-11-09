@@ -10,8 +10,8 @@ usage() {
 Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
                         [--no-packages] [--dry-run]
 
-Groups: runtime, development, workflow, integration, cleanup, agent, local-k8s, local-lxd,
-        chaos-mesh, cloud-k8s, cloud-openstack, cloud-lxd
+Groups: runtime, development, workflow, integration, cleanup, sandbox, agent, local-k8s, local-lxd,
+        cloud-k8s, cloud-openstack, cloud-lxd
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
 --no-packages skips group packages; it cannot be combined with --packages.
@@ -87,10 +87,12 @@ for group in "${groups[@]}"; do
         agent)
             tools+=(
                 node
-                go
                 npm:@github/copilot
                 aqua:cli/cli
             )
+            ;;
+        sandbox)
+            tools+=(go)
             ;;
         integration)
             [[ "$project" == dev ]] || project=main
@@ -126,13 +128,6 @@ for group in "${groups[@]}"; do
                 snap:lxd
                 snap:juju
             )
-            ;;
-        chaos-mesh)
-            tools+=(
-                aqua:helm/helm
-                aqua:jqlang/jq
-            )
-            packages+=(snap:kubectl)
             ;;
         cloud-k8s)
             packages+=(
