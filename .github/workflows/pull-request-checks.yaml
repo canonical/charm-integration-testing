@@ -45,7 +45,7 @@ jobs:
         run: pipx install uv==0.13.6
       - name: Install dependencies
         run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
-          --group dev --locked
+          --group dev --locked --config-settings-package bundle-builder-x:editable_mode=compat
       - name: Setup NPM
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -65,7 +65,7 @@ jobs:
         run: pipx install uv==0.13.6
       - name: Install dependencies
         run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
-          --group dev --locked
+          --group dev --locked --config-settings-package bundle-builder-x:editable_mode=compat
       - name: Run Charm Integration Testing Unit Tests
         run: ./scripts/charm-integration-testing-unit-tests.sh
   charm-testing-integration-tests:
@@ -86,7 +86,7 @@ jobs:
         run: pipx install uv==0.13.6
       - name: Install dependencies
         run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
-          --group dev --locked
+          --group dev --locked --config-settings-package bundle-builder-x:editable_mode=compat
       - name: Run Validators Unit Tests
         run: ./scripts/validators-unit-tests.sh
   bundle-builder-x-tests:
@@ -101,7 +101,7 @@ jobs:
         run: pipx install uv==0.13.6
       - name: Install dependencies
         run: uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras
-          --group dev --locked
+          --group dev --locked --config-settings-package bundle-builder-x:editable_mode=compat
       - name: Run Bundle Builder X Tests
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}

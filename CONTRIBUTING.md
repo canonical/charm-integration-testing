@@ -20,8 +20,10 @@ remain in each package's own project metadata; the root `dev` group contains
 shared repository tooling. The direct uv equivalents are:
 
 ```bash
-uv sync --all-packages --no-default-groups --locked
-uv sync --all-packages --no-default-groups --all-extras --group dev --locked
+uv sync --all-packages --no-default-groups --locked \
+  --config-settings-package bundle-builder-x:editable_mode=compat
+uv sync --all-packages --no-default-groups --all-extras --group dev --locked \
+  --config-settings-package bundle-builder-x:editable_mode=compat
 ```
 
 ## Linting and Formatting

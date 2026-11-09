@@ -375,7 +375,8 @@ rather than registering multiple entry points for the same interface.
    entry point) can make the new/changed validator undiscoverable even
    though the source file itself is present. Do this before running the
    tests below. For a long-lived sandbox session, run `uv lock` and
-   `uv sync --all-packages --no-default-groups --all-extras --group dev --locked`
+   `uv sync --all-packages --no-default-groups --all-extras --group dev --locked
+   --config-settings-package bundle-builder-x:editable_mode=compat`
    inside the VM after editing a `pyproject.toml`, so its installed metadata
    reflects the change.
 

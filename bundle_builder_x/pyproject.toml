@@ -22,14 +22,12 @@ dev = [
     "types-requests>=2.32.4.20250913",
 ]
 
-[tool.poetry]
-packages = [
-    { include = "bundle_builder_x" },
-]
-
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bundle_builder_x*"]
 
 [project.scripts]
 bundle-builder-x = "bundle_builder_x.entrypoint:main"

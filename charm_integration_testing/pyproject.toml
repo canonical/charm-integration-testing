@@ -30,22 +30,22 @@ dev = [
     "types-requests>=2.32.4.20250913",
 ]
 
-[tool.poetry]
-packages = [
-    { include = "chaos_client" },
-    { include = "extensions" },
-    { include = "juju" },
-    { include = "juju_cmd" },
-    { include = "juju_jubilant" },
-    { include = "kubernetes_client" },
-    { include = "resource_registry" },
-    { include = "resource_tracking" },
-    { include = "serializeable_dataclass" },
-    { include = "test_suite" },
-    { include = "utils" },
-    { include = "test_observer_client" }
-]
-
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = [
+    "chaos_client*",
+    "extensions*",
+    "juju*",
+    "juju_cmd*",
+    "juju_jubilant*",
+    "kubernetes_client*",
+    "resource_registry*",
+    "resource_tracking*",
+    "serializeable_dataclass*",
+    "test_suite*",
+    "utils*",
+    "test_observer_client*",
+]

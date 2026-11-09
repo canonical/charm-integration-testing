@@ -16,7 +16,7 @@ Each interface validator lives in `validators/<interface_name>/` as an independe
   postgresql_client = "validators.postgresql_client:PostgreSQLClientValidator"
   ```
 - The entry-point **name must exactly match the Juju interface name** (e.g. `postgresql_client`).
-- Validator sub-packages use `setuptools`, not Poetry.
+- Validator sub-packages use `setuptools`.
 
 ### Validation levels
 

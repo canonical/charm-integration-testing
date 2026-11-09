@@ -13,12 +13,12 @@ cd "$(dirname "$0")/.."
 set -e
 
 # Check for prerequisites as appropriate.
-which markdownlint-cli2 || die 'markdownlint-cli2 missing; install via "npm install markdownlint-cli2"'
+which markdownlint-cli2 || die 'markdownlint-cli2 missing; run: mise run setup -- --group development'
 
 # Actual lint checks begin here.
 uv run --no-sync --all-packages ruff check || die 'Failed "ruff check"'
 uv run --no-sync --all-packages ruff format --check \
-    || die 'Failed on "ruff format --check"; run: uv run --no-sync --all-packages ruff format'
+    || die 'Failed on "ruff format --check"; run: mise run format'
 
 _bandit_paths=(bundle_builder_x charm_integration_testing validators/*)
 uv run --no-sync --all-packages bandit \
@@ -36,7 +36,7 @@ mapfile -d '' -t yaml_files < <(find . -type d \( -name .mise -o -name .venv \) 
     -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 if ((${#yaml_files[@]})); then
     uv run --no-sync --all-packages yamlfix --check "${yaml_files[@]}" \
-        || die 'Failed on "yamlfix"; run: uv run --no-sync --all-packages yamlfix'
+        || die 'Failed on "yamlfix"; run: mise run format'
 fi
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 
