@@ -7,8 +7,9 @@ Testing.
 
 ## General recommendations
 
-Install mise as described in the [README](README.md#getting-started), then
-prepare a workstation:
+The [development sandbox](development-sandbox/README.md) includes development
+tools. For direct host setup, install mise as described in the
+[README](README.md#getting-started), then prepare a workstation:
 
 ```bash
 mise run setup -- --group development
@@ -36,8 +37,10 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 | `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
 | `mise run setup -- --group integration` | Juju, CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
+| `mise run setup -- --group agent` | Node, Go, Copilot and gh without project dependencies |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
 | `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group chaos-mesh` | Helm, jq and kubectl for an existing cluster |
 | `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
 | `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
@@ -111,6 +114,8 @@ for its environment. Kubernetes-only cloud access does not install OpenStack
 clients, although Swift reporting still requires them.
 
 Installing system packages does not initialize substrates or register clouds.
+Run the relevant setup group first; sandbox substrate tasks only initialize and
+configure the prepared services. They do not install prerequisites.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Remove a conflicting legacy `openstack` snap manually before installing
 `openstackclients`; the shared setup does not remove it automatically.

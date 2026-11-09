@@ -51,7 +51,7 @@ Optional:
   --restore-cmd <cmd>    Override the provider-restore command (paired with --down-cmd).
   --output-dir <path>    Evidence output directory (default: /tmp/validator-verification-<timestamp>)
   --test-cmd <cmd>       Override validator unit-test command
-                         (default: poetry run pytest validators/<validator>/tests/unit -q)
+                         (default: uv run --no-sync --all-packages pytest validators/<validator>/tests/unit -q)
   -h, --help             Show this help
 EOF
 }
@@ -132,7 +132,7 @@ if [ -z "$OUTPUT_DIR" ]; then
 fi
 
 if [ -z "$TEST_CMD" ]; then
-    TEST_CMD="poetry run pytest validators/$VALIDATOR/tests/unit -q"
+    TEST_CMD="uv run --no-sync --all-packages pytest validators/$VALIDATOR/tests/unit -q"
 fi
 
 if [ "$DOWN_MODE" != "scale" ]; then
@@ -238,12 +238,12 @@ run_step format "mise run format"
 run_step lint "mise run lint"
 run_step unit_tests "$TEST_CMD"
 
-# Poetry normalises underscores to hyphens in distribution names, so derive
+# Distribution names normalize underscores to hyphens, so derive
 # the expected package name from the validator directory name.
 VALIDATOR_PKG="${VALIDATOR//_/-}"
 run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runner/pyproject.toml"
-run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\", develop = true' pyproject.toml"
-run_step entrypoint "cd '$PROJECT' && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
+run_step wiring_root "grep -Fq '\"validators-$VALIDATOR_PKG\" = { workspace = true }' pyproject.toml"
+run_step entrypoint "cd '$PROJECT' && uv run --no-sync --all-packages python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
 # Validate at each level while the workload is up.
 # Use --reinstall on the first call to push latest code; reuse venv for the rest.

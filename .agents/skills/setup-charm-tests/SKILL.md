@@ -213,6 +213,7 @@ Check access to the pinned source repository, then rerun the shared setup:
 git ls-remote https://github.com/canonical/juju-k8s-crashdump.git HEAD
 mise run setup -- --group integration
 ```
+
 ### Problem: "kubeconfig not found"
 
 If `/home/ubuntu/k8s.yaml` doesn't exist:

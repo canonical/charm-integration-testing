@@ -252,9 +252,9 @@ mise run test:suite -- --prefix "test-509067-agent2" &
 
 ### 1. Interpret Test Observer Parameters
 
-When given a test execution, map parameters to `run-tests.sh` inputs:
+When given a test execution, map parameters to `mise run test:suite --` inputs:
 
-| Test Observer | run-tests.sh | Notes |
+| Test Observer | `mise run test:suite --` | Notes |
 |---|---|---|
 | `target_environment` | `--target-cloud` | Extract cloud type (OpenStack, K8s, LXD, etc.) |
 | `neighbor_environment` | `--neighbor-cloud` | Second cloud (CMR tests only) |
@@ -558,7 +558,7 @@ juju status -m target/mymodel
 
 ### Test Execution Command
 
-The skill translates test observer parameters to `run-tests.sh` invocation:
+The skill translates Test Observer parameters to a `mise run test:suite --` invocation:
 
 ```bash
 mise run test:suite -- \

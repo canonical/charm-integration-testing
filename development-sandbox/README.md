@@ -117,7 +117,8 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 ```
 
 This applies to both interactive and autonomous `run` sessions.
-New sandboxes include Go and uvx; install them manually in older VMs.
+Sandbox setup includes Go and uvx; rerun `scripts/sandbox.sh up` to prepare them
+in older VMs.
 
 Any host environment variable prefixed with `SANDBOX_VAR_` is passed into the VM
 with that prefix removed. API overrides must be reachable from inside the VM.
