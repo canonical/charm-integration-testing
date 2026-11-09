@@ -1,6 +1,5 @@
 #!/bin/bash
-# Source this file to define generate_mcp_json, ensure_mcp_json and
-# mcp_env_keys, then call:
+# Source this file to define generate_mcp_json and ensure_mcp_json, then call:
 #
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
 #       generate_mcp_json [--sample PATH] [--output PATH]
@@ -17,13 +16,6 @@
 # placeholder cannot be resolved.
 
 _MCP_SANDBOX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../development-sandbox" && pwd)"
-
-# Print the unique env keys whose sample values are YOUR_... placeholders.
-mcp_env_keys() {
-    jq -r '[.mcpServers[]? | (.env // {}) | to_entries[]
-        | select(.value | type == "string" and startswith("YOUR_")) | .key] | unique[]' \
-        "${1:-$_MCP_SANDBOX_DIR/mcp.json.sample}"
-}
 
 # Generate the MCP config at $1 only if it does not exist yet.
 ensure_mcp_json() {

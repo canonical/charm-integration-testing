@@ -5,8 +5,8 @@
 # subcommands as scripts/sandbox.sh. For `up`, it first:
 #   - creates development-sandbox/mcp.json from mcp.json.sample if it does not
 #     exist (fails before writing if any required variable is unset), and
-#   - writes sandbox settings from the host environment to
-#     development-sandbox/.env. If that file already exists, it lists the
+#   - writes the host values of variables listed in development-sandbox/.env.sample
+#     to development-sandbox/.env. If that file already exists, it lists the
 #     variable names that would be removed or added and asks before overwriting.
 # Usage:
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
@@ -27,7 +27,7 @@ case "${1:-}" in
     up)
         shift
         ensure_mcp_json "$DEV_DIR/mcp.json"
-        write_sandbox_env_file "$DEV_DIR/.env" development-sandbox/mcp.json
+        write_sandbox_env_file "$DEV_DIR/.env"
         exec "$SCRIPT_DIR/sandbox.sh" up "$@"
         ;;
     *)

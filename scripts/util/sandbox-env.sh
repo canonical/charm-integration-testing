@@ -1,22 +1,24 @@
 #!/bin/bash
 # Source this file to define write_sandbox_env_file, then call:
 #
-#   write_sandbox_env_file ENV_FILE MCP_CONFIG_FILE
+#   write_sandbox_env_file ENV_FILE
 #
-# Writes the host values of the variables scripts/sandbox.sh reads from .env,
-# plus MCP credentials as SANDBOX_VAR_<NAME> so they are also passed into the
-# VM, and SANDBOX_MCP_CONFIG_FILE=MCP_CONFIG_FILE. If ENV_FILE already exists
-# and differs, lists the variable names (never values) that would be removed
-# or added and asks before overwriting it.
-
-# shellcheck source-path=SCRIPTDIR source=generate-mcp-json.sh
-source "$(dirname "${BASH_SOURCE[0]}")/generate-mcp-json.sh"
+# Writes the host values of the variables listed (set or commented out) in the
+# .env.sample next to ENV_FILE, plus SANDBOX_MCP_CONFIG_FILE uncommented with
+# its value from the sample.
+# Variables not listed in the sample are never written. If ENV_FILE already
+# exists and differs, lists the variable names (never values) that would be
+# removed or added and asks before overwriting it.
 
 # Print the sorted variable names assigned in an env file (never the values).
+# With --with-commented, also include commented-out "# NAME=..." examples.
 _env_names() {
-    local line
+    local line re='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)='
+    if [[ "${2:-}" == --with-commented ]]; then
+        re='^[[:space:]]*#?[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)='
+    fi
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)= ]]; then
+        if [[ "$line" =~ $re ]]; then
             printf '%s\n' "${BASH_REMATCH[2]}"
         fi
     done < "$1" | sort -u
@@ -26,21 +28,20 @@ _env_names() {
 _env_tmp=""
 
 write_sandbox_env_file() {
-    local env_file="$1" mcp_config_file="$2"
+    local env_file="$1"
+    local sample="${env_file%/*}/.env.sample"
     local -A vars=()
     local -a missing excess
     local name key answer
 
-    for name in SANDBOX_VM SANDBOX_MOUNT SANDBOX_CPUS SANDBOX_MEMORY SANDBOX_DISK GITHUB_TOKEN; do
-        if [[ -n "${!name:-}" ]]; then vars[$name]="${!name}"; fi
-    done
+    [[ -f "$sample" ]] || { echo "ERROR: $sample not found." >&2; return 1; }
     while IFS= read -r name; do
-        if [[ "$name" == SANDBOX_VAR_?* ]]; then vars[$name]="${!name}"; fi
-    done < <(compgen -e)
-    while IFS= read -r key; do
-        if [[ -n "${!key:-}" ]]; then vars[SANDBOX_VAR_$key]="${!key}"; fi
-    done < <(mcp_env_keys)
-    vars[SANDBOX_MCP_CONFIG_FILE]="$mcp_config_file"
+        if [[ "$name" == SANDBOX_MCP_CONFIG_FILE ]]; then
+            vars[$name]="$(sed -nE "s/^[[:space:]]*#?[[:space:]]*$name=//p" "$sample" | head -n1)"
+        elif [[ -n "${!name:-}" ]]; then
+            vars[$name]="${!name}"
+        fi
+    done < <(_env_names "$sample" --with-commented)
 
     # Contains credentials: build owner-only in a temp file, then swap it in.
     _env_tmp="$(mktemp "$env_file.XXXXXX")"
