@@ -97,6 +97,19 @@ unit tests, lint or formatting, and the integration group before live tests.
 uv reconciles project dependencies during setup; there is no additional
 readiness cache.
 
+The CI setup action wraps the same task. Lint and unit-test jobs use
+`groups: development`; live tests use `groups: integration`; cleanup uses the
+`cleanup` group. Workflow checks request their individual catalogue tools
+without installing the project. The action also supports explicit snap requests.
+Installed tools are available in later steps through mise activation.
+Mise-action caching remains disabled.
+
+Cloud setup ensures only the required clients: Juju and kubectl for Kubernetes,
+Juju and `openstackclients` for OpenStack, and Juju and yq for LXD.
+Swift uploads independently ensure `openstackclients`; cleanup selects clients
+for its environment. Kubernetes-only cloud access does not install OpenStack
+clients, although Swift reporting still requires them.
+
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Remove a conflicting legacy `openstack` snap manually before installing
@@ -118,6 +131,14 @@ The selection is saved outside the checkout at
 Later setup runs on that machine, including jobs on persistent CI runners, use
 the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
 install does not replace the previous selection.
+
+The shared `setup-mise` action installs Mise, selects a nonempty `juju-channel`
+input with this task, then installs the requested setup groups. The charm-testing
+workflow passes its optional `juju_channel` input unchanged. Omitted or empty
+inputs preserve the saved selection or use the catalogue default; `integration`
+installs Juju alongside the runtime prerequisites. The workflow logs the effective
+channel and installed client version separately from the requested input.
+The shared setup does not consume a `JUJU_CHANNEL` environment variable.
 
 The shared `setup-mise` action installs Mise, selects a nonempty `juju-channel`
 input with this task, then installs the requested setup groups. The charm-testing
