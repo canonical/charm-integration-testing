@@ -7,7 +7,7 @@ Testing.
 
 ## General recommendations
 
-Install Mise as described in the [README](README.md#getting-started), then
+Install mise as described in the [README](README.md#getting-started), then
 prepare a workstation:
 
 ```bash
@@ -34,11 +34,11 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 |---|---|
 | `mise run setup -- --group runtime` | Python, uv and runtime project dependencies |
 | `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
-| `mise run setup -- --group integration` | CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
+| `mise run setup -- --group integration` | Juju, CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
 | `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
-| `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
 | `mise run setup -- --group local-lxd` | LXD and Juju snaps |
+| `mise run setup -- --group cleanup` | jq and yq |
 | `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
 | `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
 | `mise run setup -- --group cloud-lxd` | Juju and yq clients |
@@ -49,11 +49,14 @@ Runtime selects:
 ```bash
 uv sync --all-packages --no-default-groups --locked \
   --config-settings-package bundle-builder-x:editable_mode=compat
+```
+
+Development selects:
+
+```bash
 uv sync --all-packages --no-default-groups --all-extras --group dev --locked \
   --config-settings-package bundle-builder-x:editable_mode=compat
 ```
-
-Development selects the second command.
 
 Development takes precedence when groups are combined. Runtime and
 package-specific development dependencies remain in each package's project
@@ -61,17 +64,41 @@ metadata; the root `dev` group contains shared repository tooling. Execution
 tasks do not install dependencies, and installed tools are not PATH-isolated by
 group.
 
-Use `--no-packages` to skip group snaps or `--dry-run` to preview package-only
-requests. Explicit `--tools` and `--packages` must match the catalogue; those
-requests alone do not install project dependencies. Automatic installation is
-disabled, and a bare `mise install` intentionally installs the full catalogue.
-Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
+`uv sync` reconciles the environment with the selected workspace dependencies.
+Use the `runtime` group for runtime dependencies only or `development` for the
+development extras and shared tooling.
 
-CI still installs project dependencies directly with uv in this layer, so its
-jobs explicitly include the development extras and group. The CI adoption layer
-will switch those jobs to the shared setup task. OpenStack operations and Swift
-uploads share `openstackclients`; remove a conflicting `openstack` snap
-manually.
+Use `--no-packages` to skip group snaps without skipping its tools or project
+dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
+Explicit requests also compose with groups:
+`mise run setup -- --group runtime --tools aqua:jqlang/jq --packages snap:juju`.
+`--tools` and `--packages` alone do not install project dependencies.
+`--no-packages` cannot be combined with explicit `--packages`.
+`--dry-run` previews package-only requests; it cannot be used with tool or project
+installation. No arguments is an error; `--help` lists the interface.
+
+Versions appear only in the catalogue. Groups explicitly include installation
+prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
+installation is disabled, including during task execution; no first-use installer
+or additional environment selection is needed. With `--tools`, explicitly name
+those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
+Tool and package names must match the catalogue; version overrides are rejected.
+Bare `mise install` intentionally still installs the entire catalogue; use setup
+instead. Strict locking preserves managed versions and artifact checksums.
+
+Groups control installation, not PATH isolation. Installed catalogue tools
+are available together. A missing executable can fall back to a host installation;
+run setup before executing an operation rather than relying on host tools.
+
+Execution tasks do not install dependencies. Prepare the development group before
+unit tests, lint or formatting, and the integration group before live tests.
+uv reconciles project dependencies during setup; there is no additional
+readiness cache.
+
+Installing system packages does not initialize substrates or register clouds.
+Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
+Remove a conflicting legacy `openstack` snap manually before installing
+`openstackclients`; the shared setup does not remove it automatically.
 
 ### Selecting the Juju client
 
@@ -107,9 +134,11 @@ shared setup and package operations.
 
 | Task | Purpose |
 |---|---|
+| `mise run bundle:build-x` | Generate bundles from a spec |
 | `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
 | `mise run test:validators` | Run validator unit tests |
 | `mise run test:bundle-builder-x` | Run bundle builder tests |
+| `mise run test:suite -- ...` | Run the live Juju integration suite |
 
 ### CI gates (all must pass on every PR)
 

@@ -225,7 +225,7 @@ bundle with bundle-builder-x:
            remote_application: neighbor
            remote_endpoint: "${NEIGHBOR_ENDPOINT}"
    EOF
-   ./scripts/build-bundle-x.sh \
+   mise run bundle:build-x -- \
      --spec "${SPEC_FILE}" \
      --output-bundles "$(dirname "${OUTPUT_FILE}")"
 
@@ -241,7 +241,7 @@ correct order:
 
 .. code:: bash
 
-   ./scripts/run-tests.sh \
+   mise run test:suite -- \
      --juju-cloud "${K8S_CLOUD_NAME}" \
      --juju-controller "${K8S_CONTROLLER_NAME}" \
      --model "${MODEL_NAME}" \
@@ -423,7 +423,7 @@ to place the neighbor model:
 
   .. code:: bash
 
-     ./scripts/run-tests.sh \
+     mise run test:suite -- \
        --target-cloud "${CLOUD_NAME}" \
        --target-charm "mysql" \
        --target-endpoint "database" \
