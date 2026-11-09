@@ -100,6 +100,142 @@ def test_setup_failure_is_included_in_junit_metadata(pytester: Pytester) -> None
     assert metadata["failure:cli:stderr"] == ["ERROR etcdserver: mvcc: database space exceeded"]
 
 
+def test_domain_exception_metadata_is_included_in_setup_failure_junit(pytester: Pytester) -> None:
+    pytester.makeconftest("from test_suite.conftest import pytest_runtest_makereport")
+    pytester.makepyfile(
+        test_domain_failure=textwrap.dedent(
+            """
+            import pytest
+            from bundle_builder_x import UncompletableBundleError, UnresolvedApplicationDiagnostic
+            from juju.backend import JujuApplicationState, JujuWaitState, JujuWaitTimeoutError
+            from juju.client import JujuValidationError
+            from resource_tracking import ModelResourceDiscrepancy, QualifiedSnapshot, ResourceDiscrepancyError
+            from resource_tracking.snapshot import PvcSnapshot
+            from test_suite.scheduler.states import State
+            from validators.base.validator import ValidationCheck, ValidationResult
+
+            @pytest.fixture(
+                params=[
+                    pytest.param(
+                        JujuWaitTimeoutError(
+                            JujuWaitState(
+                                noncompliant_applications={
+                                    "postgresql": JujuApplicationState(
+                                        charm="postgresql",
+                                        revision=1,
+                                        status="blocked",
+                                        message="primary endpoint unavailable",
+                                    )
+                                }
+                            )
+                        ),
+                        id="juju_wait_timeout",
+                    ),
+                    pytest.param(
+                        JujuValidationError(
+                            {
+                                "postgresql/0": [
+                                    ValidationResult(
+                                        status="FAIL",
+                                        endpoint="db",
+                                        interface="postgresql_client",
+                                        role="requires",
+                                        level="simple",
+                                        checks=[
+                                            ValidationCheck(
+                                                name="connect",
+                                                passed=False,
+                                                message="connection refused",
+                                            )
+                                        ],
+                                    )
+                                ]
+                            }
+                        ),
+                        id="juju_validation",
+                    ),
+                    pytest.param(
+                        UncompletableBundleError(
+                            diagnostics=[
+                                UnresolvedApplicationDiagnostic(
+                                    application="target",
+                                    charm_name="postgresql",
+                                )
+                            ]
+                        ),
+                        id="bundle",
+                    ),
+                    pytest.param(
+                        ResourceDiscrepancyError(
+                            [
+                                ModelResourceDiscrepancy(
+                                    state=State.DEPLOYED,
+                                    controller="test-controller",
+                                    model="test-model",
+                                    qualified={
+                                        "missing": (
+                                            QualifiedSnapshot(
+                                                snapshot=PvcSnapshot(
+                                                    name="data-0",
+                                                    namespace="test-model",
+                                                    storage_class="csi-cephfs",
+                                                    requested_storage="1Gi",
+                                                    phase="Bound",
+                                                )
+                                            ),
+                                        )
+                                    },
+                                )
+                            ]
+                        ),
+                        id="resource_discrepancy",
+                    ),
+                ]
+            )
+            def fail_during_setup(request):
+                raise request.param
+
+            def test_setup_failure(fail_during_setup):
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("--junitxml=results.xml", "-q")
+
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    testcases = ET.parse(pytester.path / "results.xml").findall(".//testcase")
+    assert len(testcases) == 4
+    metadata_by_testcase = []
+    for testcase in testcases:
+        properties = testcase.findall("./properties/property")
+        assert len(properties) == len({prop.attrib["name"] for prop in properties})
+        metadata = {prop.attrib["name"]: json.loads(prop.attrib["value"]) for prop in properties}
+        assert "failure:message" in metadata
+        metadata_by_testcase.append(metadata)
+
+    assert any(
+        metadata.get("failure:charm:postgresql:status") == ["application:blocked:primary endpoint unavailable"]
+        for metadata in metadata_by_testcase
+    )
+    assert any(
+        metadata.get("failure:validator:interface:postgresql_client:check") == ["connect: connection refused"]
+        for metadata in metadata_by_testcase
+    )
+    assert any(
+        metadata.get("failure:build_bundle:unresolved_application") == ["postgresql"]
+        for metadata in metadata_by_testcase
+    )
+    assert any(
+        metadata.get("resource_discrepancy:pvc:missing")
+        == [
+            "state=deployed controller=test-controller model=test-model pvc=data-XXX "
+            "requested_storage=XXXGi storage_class=csi-cephfs"
+        ]
+        for metadata in metadata_by_testcase
+    )
+
+
 def test_failure_metadata_is_merged_across_report_phases(pytester: Pytester) -> None:
     pytester.makeconftest("from test_suite.conftest import pytest_runtest_makereport")
     pytester.makepyfile(
