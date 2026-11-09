@@ -24,7 +24,7 @@ outputs:
     description: Debug mode for this runner type (ssh or tmate).
     value: ${{ steps.pick.outputs.debug-mode }}
   pip-proxy:
-    description: HTTP proxy to use for pip/uv, or empty string if none.
+    description: HTTP proxy to use for pip/poetry, or empty string if none.
     value: ${{ steps.pick.outputs.pip-proxy }}
 runs:
   using: composite

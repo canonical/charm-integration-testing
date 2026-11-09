@@ -323,15 +323,11 @@ jobs:
           [global]
           proxy= ${PIP_PROXY}
           EOF
-            HTTPS_PROXY="${PIP_PROXY}" pipx install uv==0.13.6
-            HTTPS_PROXY="${PIP_PROXY}" uv sync --python 3.12.12 \
-              --all-packages --no-default-groups --locked \
-              --config-settings-package bundle-builder-x:editable_mode=compat
+            HTTPS_PROXY="${PIP_PROXY}" pipx install poetry==2.3
+            HTTPS_PROXY="${PIP_PROXY}" poetry install
           else
-            pipx install uv==0.13.6
-            uv sync --python 3.12.12 \
-              --all-packages --no-default-groups --locked \
-              --config-settings-package bundle-builder-x:editable_mode=compat
+            pipx install poetry==2.3
+            poetry install
           fi
       - name: Install TruffleHog CLI
         shell: bash

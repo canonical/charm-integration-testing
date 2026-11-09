@@ -394,21 +394,20 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Set up the project environment with uv.
-    echo "==> Installing Python dependencies via uv..."
+    # Set up Python venv with project packages (poetry manages the venv)
+    echo "==> Installing Python dependencies via poetry..."
     multipass exec "$VM_NAME" -- bash -lc "
         set -euo pipefail
-        if ! command -v uv &>/dev/null && ! test -f ~/.local/bin/uv; then
+        if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
             if ! command -v pipx &>/dev/null; then
                 sudo apt-get install -y -q pipx
             fi
-            pipx install 'uv==0.13.6'
+            pipx install 'poetry==2.*'
             pipx ensurepath
             export PATH=\"\$HOME/.local/bin:\$PATH\"
         fi
         cd '$VM_MOUNT'
-        uv sync --python 3.12.12 --all-packages --no-default-groups --all-extras --group dev --locked \
-            --config-settings-package bundle-builder-x:editable_mode=compat
+        poetry install
     "
 
     # Install node-based tools used by the sandbox if not present
