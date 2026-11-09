@@ -10,7 +10,9 @@
 #     exist (fails before writing if any required variable is unset), and
 #   - writes the host values of variables listed in development-sandbox/.env.sample
 #     to development-sandbox/.env. If that file already exists, it lists the
-#     variable names that would be removed or added and asks before overwriting.
+#     variable names that would be removed or added.
+# Before writing either file, it lists the variable names it injects and asks
+# for consent. Declining mcp.json stops `up`; declining .env leaves it as is.
 #
 # Usage:
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \

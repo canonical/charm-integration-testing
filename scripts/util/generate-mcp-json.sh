@@ -13,7 +13,11 @@
 #
 # Idempotent: rewrites the output only when its content would change, and
 # always leaves it owner-only (0600). Fails without touching the output if any
-# placeholder cannot be resolved.
+# placeholder cannot be resolved. Before writing, lists the variable names it
+# will inject and asks for consent; declining fails without writing.
+
+# shellcheck source-path=SCRIPTDIR source=confirm.sh
+source "$(dirname "${BASH_SOURCE[0]}")/confirm.sh"
 
 _MCP_SANDBOX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../development-sandbox" && pwd)"
 
@@ -65,7 +69,7 @@ generate_mcp_json() (
         | select(.value | type == "string" and startswith("YOUR_"))
         | [$server, .key, .value] | @tsv' "$sample")
 
-    local missing=() values='{}' entry server key placeholder value
+    local missing=() injected=() values='{}' entry server key placeholder value
     for entry in "${placeholders[@]}"; do
         IFS=$'\t' read -r server key placeholder <<< "$entry"
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid env key '$key' in server '$server'."
@@ -74,6 +78,7 @@ generate_mcp_json() (
             missing+=("$key (server '$server', placeholder $placeholder)")
             continue
         fi
+        injected+=("$key (server '$server')")
         values="$(jq --arg k "$key" --arg v "$value" '. + {($k): $v}' <<< "$values")"
     done
 
@@ -100,6 +105,14 @@ generate_mcp_json() (
         chmod 600 "$output"
         echo "==> $output is up to date ($servers server(s))."
     else
+        {
+            echo "WARNING: these variables from your environment will be written to"
+            echo "$output and injected into the sandbox's MCP servers. Anything in the"
+            echo "sandbox, including the AI agent, can read them:"
+            printf '  - %s\n' "${injected[@]}"
+        } >&2
+        confirm "Write $output?" || die "not writing $output without your consent."
+
         # Contains credentials: write owner-only to a temp file, then swap it in atomically.
         local tmp action
         tmp="$(mktemp "$output.XXXXXX")"

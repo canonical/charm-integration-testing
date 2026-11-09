@@ -6,9 +6,12 @@
 # Writes the host values of the variables listed (set or commented out) in the
 # .env.sample next to ENV_FILE, plus SANDBOX_MCP_CONFIG_FILE uncommented with
 # its value from the sample.
-# Variables not listed in the sample are never written. If ENV_FILE already
-# exists and differs, lists the variable names (never values) that would be
-# removed or added and asks before overwriting it.
+# Variables not listed in the sample are never written. Before writing, lists
+# the variable names (never values) it will inject, plus any that an existing
+# ENV_FILE would lose or gain, and asks for consent.
+
+# shellcheck source-path=SCRIPTDIR source=confirm.sh
+source "$(dirname "${BASH_SOURCE[0]}")/confirm.sh"
 
 # Print the sorted variable names assigned in an env file (never the values).
 # With --with-commented, also include commented-out "# NAME=..." examples.
@@ -31,8 +34,8 @@ write_sandbox_env_file() {
     local env_file="$1"
     local sample="${env_file%/*}/.env.sample"
     local -A vars=()
-    local -a missing excess
-    local name key answer
+    local -a missing=() excess=()
+    local name key action="Write"
 
     [[ -f "$sample" ]] || { echo "ERROR: $sample not found." >&2; return 1; }
     while IFS= read -r name; do
@@ -58,11 +61,22 @@ write_sandbox_env_file() {
             trap - EXIT
             return 0
         fi
-
+        action="Overwrite"
         mapfile -t missing < <(comm -23 <(_env_names "$env_file") <(_env_names "$_env_tmp"))
         mapfile -t excess < <(comm -13 <(_env_names "$env_file") <(_env_names "$_env_tmp"))
-        {
-            echo "WARNING: $env_file already exists and differs from your environment."
+    fi
+
+    {
+        echo "WARNING: these variables will be written to $env_file and used by the sandbox:"
+        while IFS= read -r key; do
+            if [[ "$key" == SANDBOX_MCP_CONFIG_FILE ]]; then
+                echo "  - $key (value from .env.sample)"
+            else
+                echo "  - $key"
+            fi
+        done < <(printf '%s\n' "${!vars[@]}" | sort)
+        if [[ "$action" == Overwrite ]]; then
+            echo "$env_file already exists and differs."
             if [[ ${#missing[@]} -gt 0 ]]; then
                 echo "  Missing from your environment (removed if you overwrite):"
                 printf '    - %s\n' "${missing[@]}"
@@ -74,24 +88,17 @@ write_sandbox_env_file() {
             if [[ ${#missing[@]} -eq 0 && ${#excess[@]} -eq 0 ]]; then
                 echo "  Same variable names; only values or formatting differ."
             fi
-        } >&2
+        fi
+    } >&2
 
-        answer=""
-        if [[ -t 0 ]]; then
-            read -r -p "Overwrite $env_file? [y/N] " answer
-        else
-            echo "No terminal to confirm." >&2
-        fi
-        if [[ ! "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-            echo "==> Keeping the existing $env_file."
-            rm -f "$_env_tmp"
-            trap - EXIT
-            return 0
-        fi
+    if ! confirm "$action $env_file?"; then
+        echo "==> Not writing $env_file."
+        rm -f "$_env_tmp"
+        trap - EXIT
+        return 0
     fi
 
     mv -f "$_env_tmp" "$env_file"
     trap - EXIT
-    echo "==> Wrote $env_file with:"
-    printf '%s\n' "${!vars[@]}" | sort | sed 's/^/      /'
+    echo "==> Wrote $env_file."
 }

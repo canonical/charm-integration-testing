@@ -38,7 +38,11 @@ Before starting the VM, `up`:
 - writes the variables listed in
   [`.env.sample`](../development-sandbox/.env.sample) (such as the GitHub
   tokens above) to `development-sandbox/.env`. If a `.env` already exists, it
-  lists the variable names that would change and asks before overwriting it.
+  also lists the variable names that would be removed or added.
+
+Before writing either file, `up` lists the variable names (never values) it
+will inject into the sandbox and asks for your consent. Declining `mcp.json`
+stops `up`; declining `.env` leaves it as is.
 
 All other subcommands (`down`, `destroy`, `shell`, `run`) behave as in
 `scripts/sandbox.sh`.
