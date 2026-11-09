@@ -1,17 +1,21 @@
 #!/bin/bash
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-# Solutions QA entry point for the development sandbox. Accepts the same
-# subcommands as scripts/sandbox.sh. For `up`, it first:
+#
+# Solutions QA specific invocation of the development sandbox that configures
+# the recommended tooling. Accepts the same subcommands as scripts/sandbox.sh.
+#
+# For `up`, it first:
 #   - creates development-sandbox/mcp.json from mcp.json.sample if it does not
 #     exist (fails before writing if any required variable is unset), and
 #   - writes the host values of variables listed in development-sandbox/.env.sample
 #     to development-sandbox/.env. If that file already exists, it lists the
 #     variable names that would be removed or added and asks before overwriting.
+#
 # Usage:
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
-#       scripts/sandbox-solutions-qa.sh up [--cpus N] [--memory SIZE] [--disk SIZE]
-#   scripts/sandbox-solutions-qa.sh <down|destroy|shell|run|--help> ...
+#       scripts/sandbox-sqa.sh up [--cpus N] [--memory SIZE] [--disk SIZE]
+#   scripts/sandbox-sqa.sh <down|destroy|shell|run|--help> ...
 
 set -euo pipefail
 
