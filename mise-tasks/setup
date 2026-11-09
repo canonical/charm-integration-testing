@@ -197,16 +197,14 @@ if (( ${#packages[@]} )); then
 fi
 if [[ "$project" != none ]]; then
     python="$(mise which python)"
-    # Avoid the workspace directory shadowing the same-named import package.
-    editable_settings=(--config-settings-package bundle-builder-x:editable_mode=compat)
     case "$project" in
         main)
             mise exec -- uv sync --python "$python" --all-packages --no-default-groups \
-                --locked "${editable_settings[@]}"
+                --locked
             ;;
         dev)
             mise exec -- uv sync --python "$python" --all-packages \
-                --no-default-groups --all-extras --group dev --locked "${editable_settings[@]}"
+                --no-default-groups --all-extras --group dev --locked
             ;;
     esac
 fi
