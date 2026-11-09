@@ -105,6 +105,9 @@ class CharmhubClientStub(CharmhubClient):
                     break
         return result
 
+    def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
+        return sorted({charm.channel for charm in self._by_name.get(charm_name, [])})
+
 
 class StrictChannelCatalog(CharmhubClientStub):
     """Filter a synthetic catalog by channel, revision and base for solver tests."""
@@ -126,7 +129,7 @@ class StrictChannelCatalog(CharmhubClientStub):
         matches = [
             c
             for c in self._by_name.get(charm_name, [])
-            if (charm_track is None or c.channel.explicit_track == charm_track)
+            if (charm_track is None or c.channel.explicit_track == (charm_track or "latest"))
             and (charm_risk is None or c.channel.risk == charm_risk)
             and c.channel.branch == (charm_branch or "")
             and (charm_revision is None or c.revision == charm_revision)

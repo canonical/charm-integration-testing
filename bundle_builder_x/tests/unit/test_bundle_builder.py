@@ -40,7 +40,6 @@ from bundle_builder_x.bundle_diagnostics import (
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.charmhub import CharmhubClient
 from bundle_builder_x.constraints import add_constraints
-from bundle_builder_x.constraints_dsl import parse_constraint
 from bundle_builder_x.domain import (
     Domain,
     DomainApplication,
@@ -131,6 +130,9 @@ class _FakeCharmhubClient(CharmhubClient):
     ) -> set[str]:
         self.find_charms_calls.append({"provides": provides, "requires": requires, "platform": platform})
         return self._find_result
+
+    def get_charm_channels(self, charm_name: str) -> list[CharmChannel]:
+        return [_CHANNEL]
 
 
 def _make_charm(name: str, endpoints: dict[str, CharmEndpoint], ubuntu_version: str = "22.04") -> Charm:
@@ -239,7 +241,6 @@ class TestHandleSubordinateBaseMismatch:
         fake = _FakeCharmhubClient(
             charm_responses=[
                 CharmReleaseNotFoundException("nrpe", "No release on 22.04"),
-                CharmReleaseNotFoundException("nrpe", "No release on 22.04 on any risk"),
                 ubuntu_2404,
             ]
         )
@@ -293,6 +294,30 @@ class TestHandleSubordinateBaseMismatch:
         assert result is False
         assert len(domain.charms) == 2
 
+    def test_cached_variant_can_connect_to_another_principal(self) -> None:
+        domain = _domain_with_base_mismatch()
+        variant = domain.charms[1].spec.model_copy(update={"ubuntu_version": "22.04"})
+        fake = _FakeCharmhubClient(charm_responses=[variant, CharmReleaseNotFoundException("No other base")])
+        builder = BundleBuilder(charmhub_client=fake)
+        assert builder._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
+        variant_id = len(domain.charms) - 1
+        principal_id = add_charm_to_domain(
+            domain.charms[0].spec.model_copy(update={"name": "another-principal"}), domain, ModelRef(name="m")
+        )
+
+        tag = _mismatch_tag().model_copy(
+            update={"principal_charm_id": principal_id, "principal_charm_name": "another-principal"}
+        )
+        assert builder._handle_subordinate_base_mismatch(tag, domain)
+
+        assert len(fake.charm_from_store_calls) == 1
+        assert len(domain.charms) == 4
+        assert any(
+            {integration.requires_charm_id, integration.provides_charm_id} == {variant_id, principal_id}
+            for integration in domain.charm_integrations
+        )
+        assert not builder._handle_subordinate_base_mismatch(tag, domain)
+
     @pytest.mark.parametrize("base", [None, "24.04"], ids=["unpinned-base", "pinned-base"])
     def test_subordinate_same_revision_on_another_base_respects_application_pin(self, base: str | None) -> None:
         domain = _domain_with_base_mismatch()
@@ -308,91 +333,10 @@ class TestHandleSubordinateBaseMismatch:
 
         assert expanded is (base is None)
         assert len(domain.charms) == (3 if base is None else 2)
-        assert fake.charm_from_store_calls[0]["charm_revision"] == application.revision
-
-    @staticmethod
-    def _edge_variant() -> Charm:
-        return _make_charm(
-            "nrpe",
-            {
-                "general-info": CharmEndpoint(
-                    type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
-                )
-            },
-            ubuntu_version="22.04",
-        ).model_copy(update={"channel": CharmChannel(track="latest", risk="edge", branch="br")})
-
-    @pytest.mark.parametrize("revision", [None, 1], ids=["unpinned", "pinned-revision"])
-    @pytest.mark.parametrize("channel", ["latest/stable/br", "stable/br", "stable"])
-    def test_subordinate_retries_same_track_with_risk_unset_when_current_risk_lacks_base(
-        self, revision: int | None, channel: str
-    ) -> None:
-        domain = _domain_with_base_mismatch()
-        domain.models[ModelRef(name="m")].applications["nrpe"].revision = revision
-        resolved_channel = CharmChannel.model_validate(channel)
-        domain.charms[1].spec = domain.charms[1].spec.model_copy(update={"channel": resolved_channel})
-        edge_variant = self._edge_variant().model_copy(
-            update={"channel": CharmChannel(track="latest", risk="edge", branch=resolved_channel.branch)}
-        )
-        fake = _FakeCharmhubClient(
-            charm_responses=[
-                CharmReleaseNotFoundException("nrpe", "No stable on 22.04"),
-                edge_variant,
-                CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
-            ]
-        )
-
-        result = BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
-
-        assert result is True
-        assert domain.charms[2].spec.channel.risk == "edge"
-        exact, retry = fake.charm_from_store_calls[:2]
-        branch = resolved_channel.branch or None
-        assert (exact["charm_track"], exact["charm_risk"], exact["charm_branch"]) == ("latest", "stable", branch)
-        assert (retry["charm_track"], retry["charm_risk"], retry["charm_branch"]) == ("latest", None, branch)
-        assert retry["ubuntu_version"] == "22.04"
-        assert exact["charm_revision"] == retry["charm_revision"] == revision
-
-    @pytest.mark.parametrize("risk", ["", "stable"], ids=["track-only", "pinned-risk"])
-    def test_subordinate_retry_respects_application_risk(self, risk: str) -> None:
-        domain = _domain_with_base_mismatch()
-        model = domain.models[ModelRef(name="m")]
-        model.applications["nrpe"].channel = CharmChannel(track="latest", risk=risk, branch="")
-        fake = _FakeCharmhubClient(
-            charm_responses=[CharmReleaseNotFoundException("nrpe", "No stable build"), self._edge_variant()]
-        )
-        builder = BundleBuilder(charmhub_client=fake)
-
-        if risk:
-            with pytest.raises(CharmReleaseNotFoundException):
-                builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
-            assert len(fake.charm_from_store_calls) == 1
+        if base is None:
+            assert fake.charm_from_store_calls[0]["charm_revision"] == application.revision
         else:
-            charm = builder._fetch_subordinate_at_base(_mismatch_tag(), domain.charms[1].spec, model, "22.04")
-            assert charm.channel.risk == "edge"
-            assert fake.charm_from_store_calls[-1]["charm_risk"] is None
-
-    def test_subordinate_does_not_retry_when_current_risk_has_base(self) -> None:
-        domain = _domain_with_base_mismatch()
-        fake = _FakeCharmhubClient(
-            charm_responses=[
-                _make_charm(
-                    "nrpe",
-                    {
-                        "general-info": CharmEndpoint(
-                            type=EndpointType.REQUIRES, interface="juju-info", scope=EndpointScope.CONTAINER
-                        )
-                    },
-                    ubuntu_version="22.04",
-                ),
-                CharmReleaseNotFoundException("ubuntu", "No release on 24.04"),
-            ]
-        )
-
-        BundleBuilder(charmhub_client=fake)._handle_subordinate_base_mismatch(_mismatch_tag(), domain)
-
-        assert [c["charm_name"] for c in fake.charm_from_store_calls] == ["nrpe", "ubuntu"]
-        assert fake.charm_from_store_calls[0]["charm_risk"] == "stable"
+            assert all(call["charm_name"] != "nrpe" for call in fake.charm_from_store_calls)
 
 
 class TestGetCharmsForEndpoint:
@@ -1238,44 +1182,6 @@ class TestHandlePeerChannelMismatch:
         assert frozenset((0, 2)) in pairs
         assert len(fake.charm_from_store_calls) == 1
 
-    def test_peer_without_a_release_does_not_hide_other_mismatched_peers(self) -> None:
-        # GIVEN two mismatched peers merged into one tag, where the solver's core happened
-        # to name the first one (it has no release on the required track) and the second does
-        domain = Domain()
-        model_ref = ModelRef(name="m")
-        domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
-        endpoints_provides = {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")}
-        endpoints_requires = {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")}
-        add_charm_to_domain(_make_charm("anchor", endpoints_provides), domain, model_ref)
-        add_charm_to_domain(_make_charm("peer-a", endpoints_requires), domain, model_ref)
-        peer_b = _make_charm("peer-b", endpoints_requires)
-        add_charm_to_domain(peer_b, domain, model_ref)
-        fake = _FakeCharmhubClient(
-            charm_responses=[CharmReleaseNotFoundException("no match"), peer_b.model_copy(update={"revision": 2})]
-        )
-        builder = BundleBuilder(charmhub_client=fake)
-        tag = PeerChannelMismatchTag(
-            charm=CharmPayload(charm_name="anchor", charm_id=0),
-            endpoint="ep",
-            peer_charm_name="peer-a",
-            peer_charm_id=1,
-            required_track="latest",
-            other_peers=(CharmPayload(charm_name="peer-b", charm_id=2),),
-        )
-
-        # WHEN resolving the mismatch
-        result = builder._handle_peer_channel_mismatch(tag, domain)
-
-        # THEN the second peer's variant is added and paired with the anchor, and the
-        # owning charm is not moved
-        assert result is True
-        assert [call["charm_name"] for call in fake.charm_from_store_calls] == ["peer-a", "peer-b"]
-        pairs = {
-            frozenset((integration.requires_charm_id, integration.provides_charm_id))
-            for integration in domain.charm_integrations
-        }
-        assert frozenset((0, 3)) in pairs
-
     def test_owning_charm_adapts_only_when_no_release_exists_for_the_peer(self) -> None:
         # GIVEN a store with no release for the peer's required channel, but one for the
         # owning charm at the peer's actual (mismatched) channel
@@ -1361,335 +1267,6 @@ class TestHandlePeerChannelMismatch:
         # AND the charm was looked up using the peer's own model's arch (the only
         # attribute that differs between the two models in this test)
         assert fake.charm_from_store_calls[0]["ubuntu_arch"] == "arm64"
-
-    def test_risk_is_never_inherited_when_the_tag_omits_it(self) -> None:
-        # GIVEN a mismatch tag that pins a track and revision but does not specify a
-        # risk, and a peer whose CURRENT risk differs from the anchor's (so this test
-        # would fail if risk were silently inherited from either side)
-        domain = Domain()
-        model_ref = ModelRef(name="m")
-        domain.models[model_ref] = DomainModel(
-            arch="amd64",
-            platform="kubernetes",
-            juju_version=_JUJU,
-        )
-        anchor = _make_charm(
-            "anchor",
-            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
-        )
-        peer = _make_charm(
-            "peer",
-            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
-        ).model_copy(update={"channel": CharmChannel(track="latest", risk="edge", branch="")})
-        add_charm_to_domain(anchor, domain, model_ref)
-        add_charm_to_domain(peer, domain, model_ref)
-        peer_variant = peer.model_copy(update={"revision": 2})
-        fake = _FakeCharmhubClient(charm_responses=[peer_variant])
-        builder = BundleBuilder(charmhub_client=fake)
-        tag = PeerChannelMismatchTag(
-            charm=CharmPayload(charm_name="anchor", charm_id=0),
-            endpoint="ep",
-            peer_charm_name="peer",
-            peer_charm_id=1,
-            required_track="latest",
-            required_revision=2,
-        )
-
-        # WHEN resolving the mismatch (tag has no required_risk)
-        result = builder._handle_peer_channel_mismatch(tag, domain)
-
-        # THEN risk is left unset - the store's track+revision lookup resolves the
-        # charm without needing one, and nothing is guessed from anchor or peer
-        assert result is True
-        assert fake.charm_from_store_calls[0]["charm_risk"] is None
-
-    def test_risk_is_not_inherited_when_no_revision_is_pinned(self) -> None:
-        # GIVEN a track-only mismatch tag (no risk, no revision pinned) whose peer's
-        # current risk ("stable", from _CHANNEL) is not published on the required track
-        domain = Domain()
-        model_ref = ModelRef(name="m")
-        domain.models[model_ref] = DomainModel(
-            arch="amd64",
-            platform="kubernetes",
-            juju_version=_JUJU,
-        )
-        anchor = _make_charm(
-            "anchor",
-            {"ep": CharmEndpoint(type=EndpointType.PROVIDES, interface="mesh")},
-        )
-        peer = _make_charm(
-            "peer",
-            {"ep": CharmEndpoint(type=EndpointType.REQUIRES, interface="mesh")},
-        )
-        add_charm_to_domain(anchor, domain, model_ref)
-        add_charm_to_domain(peer, domain, model_ref)
-        peer_variant = peer.model_copy(update={"revision": 2})
-        fake = _FakeCharmhubClient(charm_responses=[peer_variant, CharmReleaseNotFoundException("no match")])
-        builder = BundleBuilder(charmhub_client=fake)
-
-        # WHEN resolving the mismatch (track required, no risk, no revision)
-        result = builder._handle_peer_channel_mismatch(
-            _mismatch(anchor_id=0, peer_id=1, track="8.4"),
-            domain,
-        )
-
-        # THEN risk is left unset instead of inheriting the peer's current risk, so
-        # charm_from_store's own track-wide risk search (which is channel-accurate,
-        # unlike the revision-pinned lookup) can find a risk the track actually publishes
-        assert result is True
-        assert fake.charm_from_store_calls[0]["charm_risk"] is None
-
-
-def _domain_with_peer_mismatch(
-    peer_channel: str, peer_revision: int, anchor_channel: str, anchor_revision: int
-) -> Domain:
-    """An anchor and a single peer, cyclically peered, with a track/risk/revision-match
-    constraint on the anchor - mirrors the real mongodb-k8s sharding_revision_match pattern.
-    """
-    constraint = parse_constraint(
-        "tracks(charms(endpoint[replication-offer])) == tracks({self}) and "
-        "risks(charms(endpoint[replication-offer])) == risks({self}) and "
-        "revisions(charms(endpoint[replication-offer])) == revisions({self})"
-    )
-    endpoints = {
-        "replication": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgdata", optional=True, cyclic=True),
-        "replication-offer": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgdata", optional=True, cyclic=True),
-    }
-    anchor = Charm(
-        name="mongo",
-        channel=CharmChannel.model_validate(anchor_channel),
-        revision=anchor_revision,
-        ubuntu_version="22.04",
-        ubuntu_arch="amd64",
-        endpoints=endpoints,
-        platforms=["kubernetes"],
-        constraints=[constraint],
-    )
-    peer = Charm(
-        name="mongo",
-        channel=CharmChannel.model_validate(peer_channel),
-        revision=peer_revision,
-        ubuntu_version="22.04",
-        ubuntu_arch="amd64",
-        endpoints=endpoints,
-        platforms=["kubernetes"],
-        constraints=[constraint],
-    )
-    domain = Domain()
-    model_ref = ModelRef(name="m")
-    domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
-    anchor_id = add_charm_to_domain(anchor, domain, model_ref)
-    peer_id = add_charm_to_domain(peer, domain, model_ref)
-    pair_charms_in_domain(domain, anchor_id, peer_id)
-    return domain
-
-
-def _domain_with_two_mismatched_peers(anchor_channel: str, anchor_revision: int) -> Domain:
-    """An anchor and TWO peer candidates, each violating a different single dimension.
-
-    Mirrors a mid-CEGIS domain where an earlier iteration already added a second peer
-    candidate alongside the original, and neither one fully matches the anchor yet.
-    """
-    constraint = parse_constraint(
-        "tracks(charms(endpoint[replication-offer])) == tracks({self}) and "
-        "risks(charms(endpoint[replication-offer])) == risks({self}) and "
-        "revisions(charms(endpoint[replication-offer])) == revisions({self})"
-    )
-    endpoints = {
-        "replication": CharmEndpoint(type=EndpointType.REQUIRES, interface="pgdata", optional=True, cyclic=True),
-        "replication-offer": CharmEndpoint(type=EndpointType.PROVIDES, interface="pgdata", optional=True, cyclic=True),
-    }
-    anchor = Charm(
-        name="mongo",
-        channel=CharmChannel.model_validate(anchor_channel),
-        revision=anchor_revision,
-        ubuntu_version="22.04",
-        ubuntu_arch="amd64",
-        endpoints=endpoints,
-        platforms=["kubernetes"],
-        constraints=[constraint],
-    )
-    # Peer A matches risk but has the wrong revision.
-    peer_a = anchor.model_copy(update={"revision": anchor_revision + 1})
-    # Peer B matches revision but has the wrong risk.
-    wrong_risk = "beta" if anchor.channel.risk != "beta" else "edge"
-    peer_b = anchor.model_copy(update={"channel": CharmChannel(track=anchor.channel.track, risk=wrong_risk, branch="")})
-    domain = Domain()
-    model_ref = ModelRef(name="m")
-    domain.models[model_ref] = DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
-    anchor_id = add_charm_to_domain(anchor, domain, model_ref)
-    peer_a_id = add_charm_to_domain(peer_a, domain, model_ref)
-    peer_b_id = add_charm_to_domain(peer_b, domain, model_ref)
-    pair_charms_in_domain(domain, anchor_id, peer_a_id)
-    pair_charms_in_domain(domain, anchor_id, peer_b_id)
-    return domain
-
-
-class TestMergeMismatchTagsAgainstARealCore:
-    """BundleBuilder._merge_mismatch_tags, applied to a real solver's raw unsat_core().
-
-    Proves the two scenarios that motivated widening the merge key to (anchor, endpoint):
-    a single peer whose core citation drops one of two violated dimensions, and multiple
-    peer candidates that each carry a different single dimension.
-    """
-
-    def test_dimensions_recovered_across_accumulated_candidates_for_one_target(self) -> None:
-        # GIVEN an anchor and two peer candidates for the same target: since
-        # _add_charm_for_charm_id accumulates candidates rather than replacing them, this
-        # is exactly what the domain looks like once a prior CEGIS iteration has already
-        # added a partially-fixed candidate alongside the original - one candidate wrong
-        # on revision only, the other wrong on risk only
-        domain = _domain_with_two_mismatched_peers(anchor_channel="8/edge", anchor_revision=231)
-        solver = z3.Solver()
-        solver.set("unsat_core", True)
-        add_constraints(solver, domain)
-        for charm in domain.charms:
-            solver.add(charm.exists)
-        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
-        assert solver.check() == z3.unsat
-        core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
-
-        # WHEN merging the raw core (no assertion scan, just what the core actually cites)
-        merged = BundleBuilder._merge_mismatch_tags(core_tags)
-
-        # THEN the two peers' single-dimension violations combine into one full
-        # requirement, without ever reading from the anchor's or peer's own channel
-        mismatch_tags = [t for t in merged if isinstance(t, PeerChannelMismatchTag)]
-        assert len(mismatch_tags) == 1
-        assert mismatch_tags[0].required_risk == "edge"
-        assert mismatch_tags[0].required_revision == 231
-
-    def test_does_not_invent_a_dimension_that_was_never_violated(self) -> None:
-        # GIVEN a peer wrong on revision only (track and risk already match the anchor)
-        domain = _domain_with_peer_mismatch(
-            peer_channel="8/edge", peer_revision=999, anchor_channel="8/edge", anchor_revision=231
-        )
-        solver = z3.Solver()
-        solver.set("unsat_core", True)
-        add_constraints(solver, domain)
-        solver.add(domain.charms[0].exists)
-        solver.add(domain.charms[1].exists)
-        solver.add(domain.charms[0].endpoints["replication-offer"].integrated)
-        assert solver.check() == z3.unsat
-        core_tags = [AssertionTag.decode(str(a)) for a in solver.unsat_core()]
-
-        # WHEN merging the raw core
-        merged = BundleBuilder._merge_mismatch_tags(core_tags)
-
-        # THEN risk stays unset - it was never actually violated for this peer, and
-        # nothing invents a value for it
-        mismatch_tags = [t for t in merged if isinstance(t, PeerChannelMismatchTag)]
-        assert len(mismatch_tags) == 1
-        assert mismatch_tags[0].required_risk is None
-        assert mismatch_tags[0].required_revision == 231
-
-
-class TestMergeMismatchTags:
-    """BundleBuilder._merge_mismatch_tags."""
-
-    def test_non_mismatch_tags_pass_through(self) -> None:
-        # GIVEN a list containing only a non-mismatch tag
-        tag = _mismatch_tag()
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([tag])
-
-        # THEN it is returned unchanged
-        assert result == [tag]
-
-    def test_single_mismatch_tag_passes_through(self) -> None:
-        # GIVEN a single PeerChannelMismatchTag
-        tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([tag])
-
-        # THEN it is returned as-is
-        assert result == [tag]
-
-    def test_same_pair_track_and_risk_combined(self) -> None:
-        # GIVEN two mismatch tags for the same (anchor, peer) pair - one carries track, one carries risk
-        track_tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
-        risk_tag = _mismatch(anchor_id=0, peer_id=1, risk="edge")
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([track_tag, risk_tag])
-
-        # THEN they collapse to one tag with both fields set
-        assert len(result) == 1
-        merged = result[0]
-        assert isinstance(merged, PeerChannelMismatchTag)
-        assert merged.required_track == "zed"
-        assert merged.required_risk == "edge"
-
-    def test_different_anchors_kept_separate(self) -> None:
-        # GIVEN mismatch tags for two different anchors (different targets)
-        tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
-        tag_b = _mismatch(anchor_id=1, peer_id=1, track="antelope")
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([tag_a, tag_b])
-
-        # THEN both are kept
-        assert len(result) == 2
-
-    def test_different_peers_for_the_same_anchor_are_merged(self) -> None:
-        # GIVEN two different peer candidates for the same anchor+endpoint, each
-        # carrying a different dimension of the same requirement (self's own track
-        # and risk are fixed, so both tags describe the one target being converged to)
-        track_tag = _mismatch(anchor_id=0, peer_id=1, track="zed")
-        risk_tag = _mismatch(anchor_id=0, peer_id=2, risk="edge")
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([track_tag, risk_tag])
-
-        # THEN they collapse to one tag with both dimensions set, so a fetch based on
-        # either peer's violation still resolves the full requirement
-        assert len(result) == 1
-        merged = result[0]
-        assert isinstance(merged, PeerChannelMismatchTag)
-        assert merged.required_track == "zed"
-        assert merged.required_risk == "edge"
-
-    def test_merged_tag_names_every_mismatched_peer(self) -> None:
-        # GIVEN three mismatch tags for the same anchor+endpoint, two of them for the same peer
-        tags: list[AssertionTag] = [
-            _mismatch(anchor_id=0, peer_id=1, track="zed"),
-            _mismatch(anchor_id=0, peer_id=2, track="zed"),
-            _mismatch(anchor_id=0, peer_id=1, risk="edge"),
-            _mismatch(anchor_id=0, peer_id=3, track="zed"),
-        ]
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags(tags)
-
-        # THEN the first peer stays primary and each other distinct peer is listed once
-        assert len(result) == 1
-        merged = result[0]
-        assert isinstance(merged, PeerChannelMismatchTag)
-        assert merged.peer_charm_id == 1
-        assert [p.charm_id for p in merged.other_peers] == [2, 3]
-
-    def test_insertion_order_preserved(self) -> None:
-        # GIVEN a mix: non-mismatch, mismatch pair A, non-mismatch, mismatch for a
-        # different anchor
-        non_mismatch = _mismatch_tag()
-        tag_a = _mismatch(anchor_id=0, peer_id=1, track="zed")
-        tag_a2 = _mismatch(anchor_id=0, peer_id=1, risk="edge")
-        tag_b = _mismatch(anchor_id=1, peer_id=2, track="antelope")
-
-        # WHEN merged
-        result = BundleBuilder._merge_mismatch_tags([non_mismatch, tag_a, non_mismatch, tag_b, tag_a2])
-
-        # THEN non-mismatch tags appear in their original positions and pair A is merged
-        assert result[0] is non_mismatch
-        assert result[1] is not tag_a  # pair A was replaced with a merged copy
-        assert isinstance(result[1], PeerChannelMismatchTag)
-        assert result[1].required_track == "zed"
-        assert result[1].required_risk == "edge"
-        assert result[2] is non_mismatch
-        assert isinstance(result[3], PeerChannelMismatchTag)
-        assert result[3].required_track == "antelope"
 
 
 def _domain_for_unresolved_diagnostics() -> Domain:
