@@ -18,6 +18,7 @@ setup_for_channel() {
     local config_home config_file status=0
 
     config_home="$(mktemp -d)"
+    local -x MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$config_home"
     config_file="$config_home/charm-integration-testing/juju.toml"
     mkdir -p "$(dirname "$config_file")"
     touch "$config_file"
