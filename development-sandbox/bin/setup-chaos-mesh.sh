@@ -11,8 +11,6 @@
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/_require-sandbox.sh"
-
 CHART_VERSION="2.8.4"
 CHART_REPOSITORY="https://charts.chaos-mesh.org"
 RELEASE="chaos-mesh"

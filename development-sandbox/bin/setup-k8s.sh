@@ -19,8 +19,6 @@
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/_require-sandbox.sh"
-
 die() {
     echo "ERROR: $*" >&2
     exit 1
