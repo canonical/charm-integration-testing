@@ -169,7 +169,7 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.neighbor_environment }}
-      - name: Log job information
+      - name: Log job inputs
         shell: bash
         env:
           target_environment: ${{ inputs.target_environment }}
@@ -191,7 +191,6 @@ jobs:
           debug_sleep_seconds: ${{ inputs.debug_sleep_seconds }}
           log_level: ${{ inputs.log_level }}
         run: |
-          juju version
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
