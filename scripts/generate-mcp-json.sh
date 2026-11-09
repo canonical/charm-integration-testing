@@ -12,11 +12,11 @@
 #
 # Usage:
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
-#       development-sandbox/bin/generate-mcp-json.sh [--sample PATH] [--output PATH]
+#       scripts/generate-mcp-json.sh [--sample PATH] [--output PATH]
 
 set -euo pipefail
 
-SANDBOX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SANDBOX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../development-sandbox" && pwd)"
 SAMPLE="$SANDBOX_DIR/mcp.json.sample"
 OUTPUT="$SANDBOX_DIR/mcp.json"
 
