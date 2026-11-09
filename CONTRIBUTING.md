@@ -47,15 +47,13 @@ Groups compose, for example `mise run setup -- --group development integration`.
 Runtime selects:
 
 ```bash
-uv sync --all-packages --no-default-groups --locked \
-  --config-settings-package bundle-builder-x:editable_mode=compat
+uv sync --all-packages --no-default-groups --locked
 ```
 
 Development selects:
 
 ```bash
-uv sync --all-packages --no-default-groups --all-extras --group dev --locked \
-  --config-settings-package bundle-builder-x:editable_mode=compat
+uv sync --all-packages --no-default-groups --all-extras --group dev --locked
 ```
 
 Development takes precedence when groups are combined. Runtime and
@@ -63,6 +61,10 @@ package-specific development dependencies remain in each package's project
 metadata; the root `dev` group contains shared repository tooling. Execution
 tasks do not install dependencies, and installed tools are not PATH-isolated by
 group.
+
+Workspace packages are installed editably in both runtime and development setup,
+so Python source edits are available without reinstalling. Rerun setup after
+changing dependencies, entry points or other package metadata.
 
 `uv sync` reconciles the environment with the selected workspace dependencies.
 Use the `runtime` group for runtime dependencies only or `development` for the
