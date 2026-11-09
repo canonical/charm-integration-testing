@@ -20,6 +20,7 @@ setup_for_channel() {
     config_home="$(mktemp -d)"
     config_file="$config_home/charm-integration-testing/juju.toml"
     mkdir -p "$(dirname "$config_file")"
+    touch "$config_file"
     if ! mise config set --file "$config_file" --type string \
         'bootstrap.packages."snap:juju".channel' "$channel"; then
         rm -f "$config_file"
