@@ -191,7 +191,6 @@ jobs:
           debug_sleep_seconds: ${{ inputs.debug_sleep_seconds }}
           log_level: ${{ inputs.log_level }}
         run: |
-          mise run juju:channel
           juju version
           echo "### Job inputs" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
