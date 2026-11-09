@@ -11,7 +11,7 @@ No manual configuration is required.
 |---|---|
 | `GITHUB_TOKEN` | Used on the host to register the VM's commit signing key with your GitHub account. Needs permission to manage SSH signing keys. |
 | `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT for the `gh` CLI inside the sandbox, usable by you and the agent. See [recommended permissions](#recommended-sandbox_var_github_token-permissions). |
-| `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Fine-grained PAT with the **Copilot Requests** permission, used by Copilot CLI inside the sandbox. |
+| `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Fine-grained PAT used by Copilot CLI inside the sandbox. See [recommended permissions](#recommended-sandbox_var_copilot_github_token-permissions). |
 | `TEST_OBSERVER_API_KEY` | API key for the Test Observer MCP server. |
 | `JIRA_API_TOKEN` | API token for the Jira MCP server. Your Jira username defaults to `git config user.email`; set `JIRA_USERNAME` to override it. |
 
@@ -67,6 +67,15 @@ Repository permissions, read-only:
 - Secret scanning alerts
 - Variables
 - Webhooks
+
+### Recommended `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` permissions
+
+Create a separate token for Copilot. Copilot permissions are account
+permissions, so this token must be owned by your user account, unlike
+`SANDBOX_VAR_GITHUB_TOKEN`, which is owned by `canonical`.
+
+Resource owner: your user account. Repository access: public repositories (the
+default; Copilot needs no repository permissions).
 
 Account permissions, read-only:
 
