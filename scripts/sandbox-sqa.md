@@ -10,7 +10,7 @@ No manual configuration is required.
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | Used on the host to register the VM's commit signing key with your GitHub account. Needs permission to manage SSH signing keys. |
-| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT for the `gh` CLI inside the sandbox. Grant only the permissions you want available to you and the agent; see [Configuration](../development-sandbox/README.md#configuration). |
+| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT for the `gh` CLI inside the sandbox, usable by you and the agent. See [recommended permissions](#recommended-sandbox_var_github_token-permissions). |
 | `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Fine-grained PAT with the **Copilot Requests** permission, used by Copilot CLI inside the sandbox. |
 | `TEST_OBSERVER_API_KEY` | API key for the Test Observer MCP server. |
 | `JIRA_API_TOKEN` | API token for the Jira MCP server. Your Jira username defaults to `git config user.email`; set `JIRA_USERNAME` to override it. |
@@ -22,6 +22,57 @@ export SANDBOX_VAR_COPILOT_GITHUB_TOKEN=<token>
 export TEST_OBSERVER_API_KEY=<key>
 export JIRA_API_TOKEN=<token>
 ```
+
+### Recommended `SANDBOX_VAR_GITHUB_TOKEN` permissions
+
+Resource owner: `canonical`. Repository access: all repositories.
+
+This is a good balance between usefulness and security. Write access covers
+day-to-day development: pushing branches, opening pull requests, filing issues,
+and running CI. Everything else is read-only, so you and the agent can
+investigate failures without being able to change settings, security
+configuration, or deployments. Limiting the owner to `canonical` keeps your
+personal repositories and other organizations out of reach.
+
+Repository permissions, read and write:
+
+- Actions
+- Agent tasks
+- Commit statuses
+- Contents
+- Issues
+- Pull requests
+- Workflows
+
+Repository permissions, read-only:
+
+- Artifact metadata
+- Attestations
+- Code quality
+- Code scanning alerts
+- Codespaces
+- Codespaces lifecycle admin
+- Codespaces metadata
+- Copilot agent settings
+- Custom properties
+- Dependabot alerts
+- Deployments
+- Discussions
+- Environments
+- License compliance alerts
+- Merge queues
+- Metadata
+- Pages
+- Repository security advisories
+- Secret scanning alerts
+- Variables
+- Webhooks
+
+Account permissions, read-only:
+
+- Copilot Chat
+- Copilot Editor Context
+- Copilot Requests
 
 ## 2. Start the sandbox
 
