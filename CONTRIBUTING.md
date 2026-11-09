@@ -140,14 +140,6 @@ installs Juju alongside the runtime prerequisites. The workflow logs the effecti
 channel and installed client version separately from the requested input.
 The shared setup does not consume a `JUJU_CHANNEL` environment variable.
 
-The shared `setup-mise` action installs Mise, selects a nonempty `juju-channel`
-input with this task, then installs the requested setup groups. The charm-testing
-workflow passes its optional `juju_channel` input unchanged. Omitted or empty
-inputs preserve the saved selection or use the catalogue default; `integration`
-installs Juju alongside the runtime prerequisites. The workflow logs the effective
-channel and installed client version separately from the requested input.
-The shared setup does not consume a `JUJU_CHANNEL` environment variable.
-
 Channels are not revision pins and do not change controllers or agents; use fresh
 test controllers when trying another major version.
 
