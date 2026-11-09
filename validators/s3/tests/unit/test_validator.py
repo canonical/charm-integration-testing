@@ -3,12 +3,16 @@
 
 import os
 from dataclasses import dataclass
-from typing import cast
+from io import BytesIO
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import boto3  # type: ignore[import-untyped]
 import ops
 import pytest
+from botocore.awsrequest import AWSPreparedRequest, AWSResponse  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from urllib3.response import HTTPResponse
 
 from validators.s3.validator import S3Validator
 from validators.test_utils.helpers import make_charm_from_relation, make_charm_from_relation_and_secrets
@@ -50,6 +54,9 @@ class ProxyParams:
     environment: dict[str, str]
     endpoint: str
     expected: dict[str, str] | None
+    addressing_style: str = "path"
+    bucket: str = "my-bucket"
+    expected_host: str | None = None
 
 
 @pytest.mark.parametrize(
@@ -116,20 +123,125 @@ class ProxyParams:
             ),
             id="default-aws-endpoint-wildcard-bypass",
         ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "my-bucket.s3.example.com:8443"},
+                "https://s3.example.com:8443",
+                {},
+                addressing_style="virtual",
+                expected_host="my-bucket.s3.example.com:8443",
+            ),
+            id="virtual-bucket-host-bypass-with-port",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "my-bucket.s3.example.com"},
+                "https://s3.example.com",
+                {"https": "http://juju:3128"},
+                expected_host="s3.example.com",
+            ),
+            id="path-style-does-not-match-bucket-host-bypass",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "s3.example.com"},
+                "https://s3.example.com",
+                {},
+                addressing_style="virtual",
+                expected_host="my-bucket.s3.example.com",
+            ),
+            id="virtual-host-respects-domain-bypass",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "my.bucket.s3.example.com"},
+                "https://s3.example.com",
+                {"https": "http://juju:3128"},
+                addressing_style="virtual",
+                bucket="my.bucket",
+                expected_host="s3.example.com",
+            ),
+            id="dotted-bucket-uses-actual-path-style-fallback",
+        ),
+        pytest.param(
+            ProxyParams(
+                {"JUJU_CHARM_HTTPS_PROXY": "http://juju:3128", "JUJU_CHARM_NO_PROXY": "my-bucket.s3.amazonaws.com"},
+                "",
+                {},
+                addressing_style="virtual",
+                expected_host="my-bucket.s3.amazonaws.com",
+            ),
+            id="default-aws-virtual-host-bypass",
+        ),
     ],
 )
 def test_client_uses_juju_proxy_settings(params: ProxyParams) -> None:
     # GIVEN a charm execution environment and an S3 endpoint
-    validator = _make_validator(VALID_DATABAG | {"endpoint": params.endpoint})
+    validator = _make_validator(
+        VALID_DATABAG | {"endpoint": params.endpoint, "s3-uri-style": params.addressing_style, "bucket": params.bucket}
+    )
+    routes: list[tuple[str, str | None]] = []
+
+    def send(session: Any, request: AWSPreparedRequest) -> AWSResponse:
+        routes.append((request.url, session._proxy_config.proxy_url_for(request.url)))
+        return AWSResponse(request.url, 200, {}, HTTPResponse(body=BytesIO(b""), preload_content=False))
+
     with patch.dict(os.environ, params.environment, clear=True):
         before = dict(os.environ)
-        with patch("validators.s3.validator.boto3.client", return_value=MagicMock()) as create_client:
+        with (
+            patch("validators.s3.validator.boto3.client", wraps=boto3.client) as create_client,
+            patch("botocore.httpsession.URLLib3Session.send", autospec=True, side_effect=send),
+        ):
             # WHEN validation creates the client
-            validator.validate(level="simple")
+            result = validator.validate(level="simple")
 
         # THEN proxy routing respects Juju settings without mutating the charm environment
+        assert result.status == "PASS"
         assert create_client.call_args.kwargs["config"].proxies == params.expected
+        assert len(routes) == 1
+        url, proxy = routes[0]
+        scheme = url.split(":", 1)[0]
+        expected_proxy = (
+            params.expected.get(scheme) if params.expected is not None else params.environment["HTTPS_PROXY"]
+        )
+        assert proxy == expected_proxy
+        if params.expected_host is not None:
+            assert url.startswith(f"{scheme}://{params.expected_host}/")
         assert dict(os.environ) == before
+
+
+def test_proxy_bypass_is_rechecked_after_region_redirect() -> None:
+    # GIVEN a bucket whose regional host bypasses the proxy, but whose initial host does not
+    validator = _make_validator(VALID_DATABAG | {"endpoint": "", "s3-uri-style": "virtual"})
+    environment = {
+        "JUJU_CHARM_HTTPS_PROXY": "http://juju:3128",
+        "JUJU_CHARM_NO_PROXY": "my-bucket.s3.eu-west-1.amazonaws.com",
+    }
+    routes: list[tuple[str, str | None]] = []
+
+    def send(session: Any, request: AWSPreparedRequest) -> AWSResponse:
+        routes.append((request.url, session._proxy_config.proxy_url_for(request.url)))
+        status = 301 if len(routes) == 1 else 200
+        return AWSResponse(
+            request.url,
+            status,
+            {"x-amz-bucket-region": "eu-west-1"},
+            HTTPResponse(body=BytesIO(b""), preload_content=False),
+        )
+
+    with (
+        patch.dict(os.environ, environment, clear=True),
+        patch("botocore.httpsession.URLLib3Session.send", autospec=True, side_effect=send),
+    ):
+        # WHEN Botocore retries HeadBucket against the redirected regional endpoint
+        result = validator.validate(level="simple")
+
+    # THEN the retry uses the redirected host's bypass rather than retaining the original proxy
+    assert result.status == "PASS"
+    assert routes == [
+        ("https://my-bucket.s3.amazonaws.com/", "http://juju:3128"),
+        ("https://my-bucket.s3.eu-west-1.amazonaws.com/", None),
+    ]
 
 
 # ---------------------------------------------------------------------------

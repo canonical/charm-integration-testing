@@ -9,10 +9,9 @@ from urllib.parse import urlparse
 from urllib.request import getproxies, proxy_bypass_environment  # type: ignore[attr-defined]
 
 import boto3  # type: ignore[import-untyped]
+from botocore.awsrequest import AWSPreparedRequest  # type: ignore[import-untyped]
 from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
-from botocore.regions import EndpointResolver  # type: ignore[import-untyped]
-from botocore.session import get_session  # type: ignore[import-untyped]
 
 from validators.base import BaseValidator, ValidationCheck, ValidationLevel, ValidationResult
 
@@ -28,7 +27,7 @@ _READ_TIMEOUT = 10
 _MAX_RETRY_ATTEMPTS = 1
 
 
-def _s3_proxies(endpoint_url: str | None, region: str) -> dict[str, str] | None:
+def _s3_proxies() -> dict[str, str] | None:
     """Resolve Juju proxy settings without changing the hosting charm's environment."""
     variables = {"http": "JUJU_CHARM_HTTP_PROXY", "https": "JUJU_CHARM_HTTPS_PROXY", "no": "JUJU_CHARM_NO_PROXY"}
     if not any(variable in os.environ for variable in variables.values()):
@@ -37,16 +36,7 @@ def _s3_proxies(endpoint_url: str | None, region: str) -> dict[str, str] | None:
     for scheme, variable in variables.items():
         if variable in os.environ:
             proxies[scheme] = os.environ[variable]
-    if endpoint_url is None:
-        endpoint = EndpointResolver(get_session().get_data("endpoints")).construct_endpoint("s3", region)
-        if endpoint is None:
-            raise ValueError(f"Cannot resolve the S3 endpoint for region '{region}'")
-        host = endpoint["hostname"]
-    else:
-        host = urlparse(endpoint_url).netloc
-    if proxy_bypass_environment(host, proxies):
-        return {}
-    return {scheme: proxies[scheme] for scheme in ("http", "https") if proxies.get(scheme)}
+    return proxies
 
 
 class S3Validator(BaseValidator):
@@ -214,6 +204,8 @@ class S3Validator(BaseValidator):
         endpoint_url = merged.get("endpoint") or None
         region = merged.get("region") or "us-east-1"
         addressing_style = merged.get("s3-uri-style", "path")
+        proxies = _s3_proxies()
+        request_proxies: dict[str, str] | None = {} if proxies is not None else None
 
         client_kwargs: dict[str, Any] = {
             "aws_access_key_id": merged["access-key"],
@@ -225,7 +217,7 @@ class S3Validator(BaseValidator):
                 connect_timeout=_CONNECT_TIMEOUT,
                 read_timeout=_READ_TIMEOUT,
                 retries={"max_attempts": _MAX_RETRY_ATTEMPTS},
-                proxies=_s3_proxies(endpoint_url, region),
+                proxies=request_proxies,
             ),
         }
 
@@ -235,7 +227,19 @@ class S3Validator(BaseValidator):
             client_kwargs["verify"] = self._ca_file_path
 
         try:
-            return boto3.client("s3", **client_kwargs)
+            client = boto3.client("s3", **client_kwargs)
+            if proxies is not None and request_proxies is not None:
+
+                def set_request_proxies(request: AWSPreparedRequest, **kwargs: Any) -> None:
+                    # The session shares this client-local mapping; resolve bypass after S3 rewrites the host.
+                    request_proxies.clear()
+                    if not proxy_bypass_environment(urlparse(request.url).netloc, proxies):
+                        request_proxies.update(
+                            {scheme: proxies[scheme] for scheme in ("http", "https") if proxies.get(scheme)}
+                        )
+
+                client.meta.events.register("before-send.s3", set_request_proxies)
+            return client
         except Exception:
             self._remove_ca_file()
             raise
