@@ -243,7 +243,7 @@ _require_github_auth() {
         return 0
     fi
 
-if _confirm_host_token_use "${_unset[@]}"; then
+    if _confirm_host_token_use "${_unset[@]}"; then
         if [ -z "$VM_GH_TOKEN" ] && [[ " ${_unset[*]} " == *" gh CLI inside the VM "* ]]; then
             VM_GH_TOKEN="$_gh_token"
         fi
