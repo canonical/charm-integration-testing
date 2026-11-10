@@ -1,0 +1,80 @@
+---
+# Throwaway evidence for #1251; not intended to merge.
+name: Run Charm Tests Action E2E
+permissions:
+  contents: read
+on:
+  pull_request:
+    paths: [.github/workflows/run-charm-tests-e2e.yaml]
+  workflow_dispatch:
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [single-model, cmr-lxd-neighbor]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./actions/install-juju
+        with:
+          channel: 3.6/stable
+      - id: k8s
+        uses: ./actions/setup-local-k8s
+      - id: lxd
+        if: ${{ matrix.mode == 'cmr-lxd-neighbor' }}
+        uses: ./actions/setup-local-lxd
+      - id: tests
+        continue-on-error: true
+        uses: ./actions/run-charm-tests
+        with:
+          target-charm: postgresql-k8s
+          target-endpoint: certificates
+          target-channel: 14/stable
+          target-revision: '495'
+          target-series: '22.04'
+          target-cloud: ${{ steps.k8s.outputs.cloud-name }}
+          target-kubeconfig: ${{ steps.k8s.outputs.kubeconfig-path }}
+          target-platform: ${{ steps.k8s.outputs.platform }}
+          neighbor-charm: self-signed-certificates
+          neighbor-endpoint: certificates
+          neighbor-cloud: ${{ steps.lxd.outputs.cloud-name }}
+          neighbor-platform: ${{ steps.lxd.outputs.platform }}
+          extra-args: >-
+            -k "test_build_bundle or test_bootstrap_controller or test_create_model
+            or (test_deploy and not old_revision) or test_pod_deletion or test_teardown"
+      - name: Check outputs
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.tests.outputs.outcome }}
+          JUNIT: ${{ steps.tests.outputs.junit-path }}
+          LOG_DIR: ${{ steps.tests.outputs.log-dir }}
+          TARGET_BUNDLE: ${{ steps.tests.outputs.target-bundle-path }}
+          NEIGHBOR_BUNDLE: ${{ steps.tests.outputs.neighbor-bundle-path }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euxo pipefail
+          test -s "$JUNIT"
+          test -d "$LOG_DIR"
+          test -s "$TARGET_BUNDLE"
+          if [[ "$MODE" == cmr-lxd-neighbor ]]; then test -s "$NEIGHBOR_BUNDLE"; else test -z "$NEIGHBOR_BUNDLE"; fi
+          python3 - "$JUNIT" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          for s in root.iter("testsuite"):
+              print({k: s.get(k) for k in ("tests", "failures", "errors", "skipped")})
+          for c in root.iter("testcase"):
+              status = next((e.tag for e in c if e.tag in ("failure", "error", "skipped")), "passed")
+              print(status, c.get("name"))
+          PY
+          [[ "$OUTCOME" == success ]]
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: e2e-${{ matrix.mode }}
+          path: |
+            ${{ steps.tests.outputs.junit-path }}
+            ${{ steps.tests.outputs.log-dir }}
