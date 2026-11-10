@@ -18,24 +18,15 @@ mise run setup -- --group development
 ```
 
 Setup installs Python, uv and project dependencies without changing system
-packages. Common tasks:
-
-```bash
-mise run setup -- --group development integration  # Live charm testing tools
-mise run format
-mise run lint
-mise run test:suite -- ...  # Live integration suite
-```
-
-Run `mise tasks` to list all tasks and `mise run setup -- --help` for groups.
+packages. Run `mise tasks --extended` to discover tasks and aliases, and
+`mise run setup -- --help` for setup groups and options.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
-best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, linters, and tests.
 
 ## Usage
 
