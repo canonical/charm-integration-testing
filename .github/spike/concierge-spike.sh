@@ -14,10 +14,21 @@ phase() {
     shift
     local start=$SECONDS rc=0
     echo "::group::$name"
-    "$@" || rc=$?
+    set +e
+    (set -e; "$@")
+    rc=$?
+    set -e
+    [[ $rc == 0 ]] || diagnostics
     echo "::endgroup::"
     echo "| $name | $((SECONDS - start))s | $([[ $rc == 0 ]] && echo ok || echo "FAIL ($rc)") |" >> "$summary"
     return "$rc"
+}
+
+diagnostics() {
+    echo "--- diagnostics"
+    juju status --relations 2>/dev/null || true
+    kubectl --kubeconfig "$HOME/k8s.yaml" get pods -A -o wide 2>/dev/null || true
+    sudo iptables -S FORWARD | head -5
 }
 
 baseline() {
@@ -89,6 +100,7 @@ chaos_mesh() {
 deploy_k8s() {
     juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
     juju add-model spike
+    juju set-model-constraints "arch=$arch"
     juju deploy self-signed-certificates --channel 1/stable
     juju wait-for application self-signed-certificates --query='status=="active"' --timeout 15m
 }
@@ -96,6 +108,7 @@ deploy_k8s() {
 deploy_lxd() {
     juju bootstrap localhost lxd-ctrl
     juju add-model spike
+    juju set-model-constraints "arch=$arch"
     juju deploy ubuntu --base ubuntu@24.04
     juju wait-for application ubuntu --query='status=="active"' --timeout 15m
 }
@@ -110,6 +123,11 @@ phase baseline baseline
 phase install-concierge install_concierge
 case $case_name in
     k8s) write_config cfg.yaml true false; phase prepare prepare cfg.yaml ;;
+    k8s-forward-accept)
+        write_config cfg.yaml true false; phase prepare prepare cfg.yaml
+        # Docker on hosted runners sets FORWARD DROP; Concierge only resets it for LXD.
+        phase forward-accept sudo iptables -P FORWARD ACCEPT
+        ;;
     lxd) write_config cfg.yaml false true; phase prepare prepare cfg.yaml ;;
     both) write_config cfg.yaml true true; phase prepare prepare cfg.yaml ;;
     additive)
@@ -124,8 +142,8 @@ if [[ $case_name != lxd ]]; then
     phase chaos-mesh chaos_mesh
     phase deploy-k8s deploy_k8s
 fi
-if [[ $case_name != k8s ]]; then
+if [[ $case_name != k8s* ]]; then
     # Concierge adds the runner user to the lxd group; this shell predates that.
-    phase deploy-lxd sg lxd -c "$(declare -f deploy_lxd); deploy_lxd"
+    phase deploy-lxd sg lxd -c "arch=$arch; $(declare -f deploy_lxd); deploy_lxd"
 fi
 phase after baseline

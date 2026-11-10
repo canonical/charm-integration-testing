@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        case: [k8s, lxd, both, additive]
+        case: [k8s, k8s-forward-accept, lxd, both, additive]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
