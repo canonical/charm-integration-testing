@@ -91,7 +91,7 @@ Built into Copilot CLI; no additional configuration needed.
 To use a Copilot CLI `settings.json` for a run, set
 `SANDBOX_COPILOT_SETTINGS_FILE` in `development-sandbox/.env`:
 
-```
+```bash
 SANDBOX_COPILOT_SETTINGS_FILE=development-sandbox/copilot-settings.json
 ```
 
