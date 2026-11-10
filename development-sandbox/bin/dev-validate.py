@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# Ruff would add a space after # and break Mise directive syntax.
+# fmt: off
+#MISE description="Run development validation against a deployed charm"
+#MISE raw_args=true
+#MISE alias="sandbox:dev-validate"
+# fmt: on
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 # Inject and run validators against a deployed Juju application.
 #
 # This script is designed to run INSIDE the sandbox VM.
@@ -21,15 +29,14 @@ from typing import Any
 # Derive project root from this script's location: <project>/development-sandbox/bin/dev-validate.py
 PROJECT_ROOT = Path(os.environ.get("PROJECT_ROOT", str(Path(__file__).parent.parent.parent)))
 
-# If not already running inside the project's Poetry venv, re-exec via
-# "poetry run python3" so all project packages (charm_integration_testing,
-# validators, etc.) are importable without manual PYTHONPATH juggling.
-_POETRY_MARKER = "pypoetry"
-if _POETRY_MARKER not in sys.executable:
+# Re-exec through uv so the workspace packages are importable.
+_PROJECT_VENV = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv"))
+if not _PROJECT_VENV.is_absolute():
+    _PROJECT_VENV = PROJECT_ROOT / _PROJECT_VENV
+if Path(sys.prefix).resolve() != _PROJECT_VENV.resolve():
     _result = subprocess.run(
-        ["poetry", "run", "python3"] + sys.argv,
+        ["uv", "run", "--no-sync", "--all-packages", "python3"] + sys.argv,
         cwd=str(PROJECT_ROOT),
-        env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
     )
     sys.exit(_result.returncode)
 VALIDATORS_DIR = PROJECT_ROOT / "validators"
@@ -118,7 +125,7 @@ def main() -> None:
         from charm_integration_testing.juju_jubilant.backend import JubilantBackend
     except ImportError as exc:
         print(f"ERROR: Could not import project packages: {exc}", file=sys.stderr)
-        print("Run 'scripts/sandbox.sh up' to set up the Python venv.", file=sys.stderr)
+        print("Run 'mise run setup -- --group development' to set up the Python environment.", file=sys.stderr)
         sys.exit(1)
 
     backend = JubilantBackend()

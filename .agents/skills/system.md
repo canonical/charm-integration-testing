@@ -35,9 +35,20 @@ Note: This applies to your chat output, not to repository documentation or skill
 ## Environment
 
 - Project: `$PROJECT_ROOT` (bind-mounted from the host)
-- Python venv: managed by Poetry (`poetry install` from `$PROJECT_ROOT`)
+- Python venv: managed by uv; run `mise run setup -- --group development` from `$PROJECT_ROOT`
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
+- Setup explicitly prepares named groups from one catalogue; no mise
+  profile is required. Do not edit tool pins or add ad hoc installers when a tool is missing.
+
+To change the Juju client, run `mise run juju:channel -- 4/stable` from
+`$PROJECT_ROOT` (choose an available channel with `snap info juju`). Show the saved
+choice with `mise run juju:channel`, verify the installed client with `juju version`,
+and restore the repository default with `mise run juju:channel -- --reset`.
+The selection is VM-local and survives later setup/tool calls; do not edit shared
+mise declarations or rely on exporting a variable in a single shell.
+Client selection does not upgrade controllers; use fresh test controllers for
+another major version. See [channel selection](../../CONTRIBUTING.md#selecting-the-juju-client).
 
 ---
 
@@ -50,8 +61,8 @@ $PROJECT_ROOT/
   bundle_builder_x/           # Build Juju bundles from CharmHub specs
   static/                     # Pre-built binaries and charm override YAMLs
   scripts/                    # Host-side scripts: format.sh, lint.sh, sandbox.sh, etc.
-  development-sandbox/        # Sandbox tooling (bin/, substrate.yaml)
-  pyproject.toml              # Root Poetry project (aggregates all subpackages)
+  development-sandbox/        # Sandbox tooling and configuration
+  pyproject.toml              # Root uv workspace and tooling configuration
 ```
 
 ---
@@ -76,7 +87,7 @@ replies, use the footer wording in `review-pr`.
 
 ## Important notes
 
-- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts or `substrate.yaml` can break subsequent runs.
+- **Do not modify project source code under `development-sandbox/` unless the task is explicitly about sandbox tooling.** That directory is your runtime environment; accidental edits to `bin/` scripts can break subsequent runs.
 - **Do not modify git configuration.** Never edit `.git/config`, change remote URLs, embed tokens in remote URLs (`https://<token>@github.com/...`), or run `git config` to change settings. The host machine's git identity and remote configuration must not be touched. If you need to authenticate, use the `GH_TOKEN` environment variable already present in your session. See the push-permission rule under Operating Principles: a rejected or missing push is intentional, not an obstacle to route around.
 - The Juju substrate is not pre-provisioned. If no Juju controller exists, run the `/setup-k8s` or `/setup-lxd` skill first.
 - For k8s deployments, the model type is `kubernetes`. For LXD deployments, the model type is `machine`.
