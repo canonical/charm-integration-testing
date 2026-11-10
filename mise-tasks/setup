@@ -116,18 +116,13 @@ for group in "${groups[@]}"; do
             tools+=(
                 aqua:helm/helm
                 aqua:jqlang/jq
+                github:canonical/concierge
             )
-            packages+=(
-                snap:k8s
-                snap:kubectl
-                snap:juju
-            )
+            packages+=(snap:juju)
             ;;
         local-lxd)
-            packages+=(
-                snap:lxd
-                snap:juju
-            )
+            tools+=(github:canonical/concierge)
+            packages+=(snap:juju)
             ;;
         cloud-k8s)
             packages+=(
