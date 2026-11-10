@@ -8,20 +8,26 @@ validating the deployment and interoperability of charms.
 For local charm testing, use the [development sandbox](development-sandbox/README.md).
 It mounts your checkout and installs the tools inside a VM.
 
-To install directly on your machine, install
-[mise](https://mise.jdx.dev/getting-started.html), then prepare the development
-environment:
+To install directly on your machine, install mise (on Ubuntu,
+`sudo snap install mise --classic`; see
+[getting started](https://mise.jdx.dev/getting-started.html) for other
+platforms), then prepare the development environment:
 
 ```bash
 mise run setup -- --group development
 ```
 
 Setup installs Python, uv and project dependencies without changing system
-packages. For live charm testing, include the integration tools with
-`mise run setup -- --group development integration`.
-Cloud setup and Swift upload ensure their own system packages.
-Local substrate preparation uses the `local-k8s` and `local-lxd` groups.
-Use `--no-packages` to skip a group's snaps.
+packages. Common tasks:
+
+```bash
+mise run setup -- --group development integration  # Live charm testing tools
+mise run format
+mise run lint
+mise run test:suite -- ...  # Live integration suite
+```
+
+Run `mise tasks` to list all tasks and `mise run setup -- --help` for groups.
 
 See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
 machine-wide snap channels, and Python dependencies.
