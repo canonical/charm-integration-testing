@@ -19,18 +19,15 @@ Ask Copilot to develop or test a validator, reproduce a failure, or review a PR.
 Skills such as `/setup-k8s`, `/setup-lxd`, `/develop-validator`, and `/test-validator`
 handle substrate setup and testing.
 
-Pass extra Copilot CLI arguments unchanged after `--`:
+## Copilot CLI arguments
 
-```bash
-scripts/sandbox.sh run --interactive -- --resume
-scripts/sandbox.sh run --interactive -- --resume 'session name'
-scripts/sandbox.sh run --interactive -- -r SESSION_ID
-scripts/sandbox.sh run --interactive -- --continue
-scripts/sandbox.sh run 'continue the task' -- --continue
-```
+Pass Copilot CLI arguments after `--`, for example:
+`scripts/sandbox.sh run --interactive -- --continue`.
+For autonomous runs, put the task before `--`.
 
-`--resume` without a value opens the session picker; `--continue` resumes the most
-recent session. In autonomous mode, put the task before `--`.
+Use `--resume [SESSION]` (or `-r`) to resume a session; without a value, it opens
+the session picker. `--continue` resumes the most recent session. See `copilot --help`
+inside the sandbox for other CLI arguments.
 
 | Command | Purpose |
 |---|---|

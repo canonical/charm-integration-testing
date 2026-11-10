@@ -2,15 +2,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.
-# Usage:
-#   scripts/sandbox.sh up            Create or resume the VM and install deps
-#   scripts/sandbox.sh down          Stop the VM (preserves state)
-#   scripts/sandbox.sh destroy       Delete the VM permanently
-#   scripts/sandbox.sh shell         Open a shell inside the VM
-#   scripts/sandbox.sh run 'task'    Run Copilot in autonomous mode
-#   scripts/sandbox.sh run --interactive   Run Copilot in interactive mode
-#   scripts/sandbox.sh run --interactive -- --continue   Resume the latest session
-#   scripts/sandbox.sh --help        Show this help
+# Run scripts/sandbox.sh --help for commands and development-sandbox/README.md
+# for Copilot CLI options and session-resume examples.
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
 #   GITHUB_TOKEN               Fine-grained PAT for GitHub API access on the
@@ -282,16 +275,12 @@ Usage:
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
   scripts/sandbox.sh shell                     Open a shell inside the VM
-  scripts/sandbox.sh run 'task description'    Autonomous Copilot mode
-  scripts/sandbox.sh run --interactive         Interactive Copilot mode
-  scripts/sandbox.sh run --interactive -- --resume [SESSION]
-                                               Resume a session (or open picker)
-  scripts/sandbox.sh run --interactive -- --continue
-                                               Resume the most recent session
+  scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
+  scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
   scripts/sandbox.sh --help                    Show this help
 
-Arguments after -- in run are passed directly to Copilot CLI.
-For autonomous mode, put the task before --.
+Copilot CLI arguments after -- are passed through.
+See development-sandbox/README.md for resume examples.
 
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
@@ -681,11 +670,8 @@ Usage:
   scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
   scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
 
-Arguments after -- are passed directly to Copilot CLI, for example:
-  scripts/sandbox.sh run --interactive -- --resume
-  scripts/sandbox.sh run --interactive -- --resume 'session name'
-  scripts/sandbox.sh run --interactive -- -r SESSION_ID
-  scripts/sandbox.sh run --interactive -- --continue
+Copilot CLI arguments after -- are passed through.
+See development-sandbox/README.md for resume examples.
 EOF
                 exit 0
                 ;;
