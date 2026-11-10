@@ -41,14 +41,9 @@ Note: This applies to your chat output, not to repository documentation or skill
 - Setup explicitly prepares named groups from one catalogue; no mise
   profile is required. Do not edit tool pins or add ad hoc installers when a tool is missing.
 
-To change the Juju client, run `mise run juju:channel -- 4/stable` from
-`$PROJECT_ROOT` (choose an available channel with `snap info juju`). Show the saved
-choice with `mise run juju:channel`, verify the installed client with `juju version`,
-and restore the repository default with `mise run juju:channel -- --reset`.
-The selection is VM-local and survives later setup/tool calls; do not edit shared
-mise declarations or rely on exporting a variable in a single shell.
-Client selection does not upgrade controllers; use fresh test controllers for
-another major version. See [channel selection](../../CONTRIBUTING.md#selecting-the-juju-client).
+To change the Juju client, follow
+[persistent channel selection](../../CONTRIBUTING.md#selecting-the-juju-client)
+before provisioning.
 
 ---
 

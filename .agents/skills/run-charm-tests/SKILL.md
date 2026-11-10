@@ -269,18 +269,11 @@ When given a test execution, map parameters to `mise run test:suite --` inputs:
 | `execution_id` | N/A | Used for logging/tracking |
 | `juju_channel` | `mise run juju:channel` | Select the client before provisioning; not a pytest option |
 
-Before provisioning the local substrate, select the execution's `juju_channel`
-and verify the installed client. If the input is absent or empty, consult the
+Before provisioning, follow
+[Juju client selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
+using the execution's `juju_channel`. If it is absent or empty, consult the
 execution logs for the effective saved or catalogue channel and installed version;
-the workflow does not impose a fixed default:
-
-```bash
-mise run juju:channel -- <juju_channel>
-juju version
-```
-
-The selection persists on this machine and changes only the client. Use fresh
-controllers when reproducing another major version.
+do not assume a fixed default.
 
 ### 2. Setup Phase
 
