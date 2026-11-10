@@ -15,6 +15,7 @@ from juju.client import JujuClient
 from juju.resource_registry.collectors import JujuCrashdumpCollector
 from juju.resource_registry.extension import JujuResourceRegistryExtension
 from kubernetes_client import KubernetesClientRegistry
+from resource_registry import ResourceHandle, ResourceTeardownWarning
 from resource_registry.registry import ResourceRegistry
 
 from ...extensions.shared import NullJujuBackend
@@ -483,6 +484,50 @@ class TestJujuResourceRegistryExtensionPostAddModel:
             "juju:model:my-ctrl:my-model",
             "juju:controller:my-ctrl",
         ]
+
+    @pytest.mark.parametrize("failure", ["model-logs", "model-destroy", "controller-logs"])
+    def test_kill_continues_after_resource_cleanup_failure(self, failure: str) -> None:
+        # GIVEN two models and a resource operation that fails before controller shutdown
+        collected: list[str] = []
+        destroyed: list[str] = []
+
+        class FailingCollector:
+            def supports(self, handle: ResourceHandle) -> bool:
+                return True
+
+            def collect(self, handle: ResourceHandle) -> None:
+                collected.append(handle.resource_id)
+                if (failure == "model-logs" and handle == first) or (
+                    failure == "controller-logs" and handle == controller
+                ):
+                    raise RuntimeError(failure)
+
+        def destroy_first() -> None:
+            destroyed.append("first")
+            if failure == "model-destroy":
+                raise RuntimeError(failure)
+
+        backend = BootstrapKillBackendStub()
+        registry = ResourceRegistry([FailingCollector()], logging.getLogger("test"))
+        extension = JujuResourceRegistryExtension(backend, registry)
+        client = JujuClient(backend, LoggerStub(), [extension])
+        controller = JujuControllerHandle(controller="my-ctrl")
+        first = JujuModelHandle(controller="my-ctrl", model="first")
+        second = JujuModelHandle(controller="my-ctrl", model="second")
+        client.bootstrap_controller(
+            cloud="mycloud", controller="my-ctrl", controller_constraints={}, bootstrap_configuration={}
+        )
+        registry.register(first, destroyer=destroy_first, parent=controller)
+        registry.register(second, destroyer=lambda: destroyed.append("second"), parent=controller)
+
+        # WHEN the controller is killed, THEN report the failure without abandoning cleanup
+        with pytest.warns(ResourceTeardownWarning, match=failure):
+            client.kill_controller(controller="my-ctrl")
+
+        assert collected == [first.resource_id, second.resource_id, controller.resource_id]
+        assert destroyed == ["first", "second"]
+        assert backend.killed == ["my-ctrl"]
+        assert registry.registered_handles() == []
 
 
 # ---------------------------------------------------------------------------
