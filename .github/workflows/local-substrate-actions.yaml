@@ -1,0 +1,93 @@
+---
+name: Local Substrate Actions
+on:
+  pull_request:
+    paths:
+      - actions/**
+      - mise-tasks/setup*
+      - mise.toml
+      - mise.lock
+      - .mise-version
+      - static/substrates/*.yaml
+      - .github/workflows/local-substrate-actions.yaml
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref
+    }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  local-substrates:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install Juju
+        id: juju
+        uses: ./actions/install-juju
+        with:
+          channel: 3.6/stable
+      - name: Check Juju version
+        env:
+          JUJU_VERSION: ${{ steps.juju.outputs.version }}
+        run: |
+          echo "Juju $JUJU_VERSION"
+          [[ "$JUJU_VERSION" == 3.6.* ]]
+      - name: Set up local Kubernetes
+        id: k8s
+        uses: ./actions/setup-local-k8s
+      # Deploy before setting up LXD, whose FORWARD reset would hide pod egress failures.
+      - name: Deploy on Kubernetes
+        env:
+          CLOUD: ${{ steps.k8s.outputs.cloud-name }}
+          KUBECONFIG_PATH: ${{ steps.k8s.outputs.kubeconfig-path }}
+          PLATFORM: ${{ steps.k8s.outputs.platform }}
+        run: |
+          set -euo pipefail
+          [[ "$PLATFORM" == kubernetes ]]
+          kubectl --kubeconfig "$KUBECONFIG_PATH" get crd stresschaos.chaos-mesh.org
+          juju bootstrap "$CLOUD" k8s-ctrl
+          juju add-model test -c k8s-ctrl
+          juju set-model-constraints -m k8s-ctrl:test "arch=$(dpkg --print-architecture)"
+          juju deploy -m k8s-ctrl:test self-signed-certificates
+          juju wait-for application self-signed-certificates -m k8s-ctrl:test \
+            --query='status=="active"' --timeout 20m
+      - name: Set up local LXD
+        id: lxd
+        uses: ./actions/setup-local-lxd
+      - name: Deploy on LXD
+        env:
+          CLOUD: ${{ steps.lxd.outputs.cloud-name }}
+          PLATFORM: ${{ steps.lxd.outputs.platform }}
+        run: |
+          set -euo pipefail
+          [[ "$CLOUD" == localhost && "$PLATFORM" == machine ]]
+          juju bootstrap "$CLOUD" lxd-ctrl
+          juju add-model test -c lxd-ctrl
+          juju set-model-constraints -m lxd-ctrl:test "arch=$(dpkg --print-architecture)"
+          juju deploy -m lxd-ctrl:test ubuntu
+          juju wait-for application ubuntu -m lxd-ctrl:test \
+            --query='status=="active"' --timeout 30m
+      - name: Re-run Kubernetes setup
+        uses: ./actions/setup-local-k8s
+      - name: Check workloads after re-run
+        run: |
+          set -euo pipefail
+          juju wait-for application self-signed-certificates -m k8s-ctrl:test \
+            --query='status=="active"' --timeout 5m
+          juju wait-for application ubuntu -m lxd-ctrl:test \
+            --query='status=="active"' --timeout 5m
+      - name: Show status on failure
+        if: failure()
+        run: |-
+          juju status -m k8s-ctrl:test || true
+          juju status -m lxd-ctrl:test || true
+          sudo k8s status || true

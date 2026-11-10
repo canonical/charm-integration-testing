@@ -1,0 +1,66 @@
+---
+name: Set up local Kubernetes
+description: >
+  Initialise Canonical Kubernetes on the runner, register it with the Juju client
+  and install
+  Chaos Mesh. Requires Juju (see install-juju). Docker is unusable on the runner afterwards.
+inputs:
+  cloud-name:
+    description: Juju cloud name to register
+    default: local-k8s
+  kubeconfig-path:
+    description: Where to write the kubeconfig; empty uses <runner.temp>/<cloud-name>.kubeconfig
+    default: ''
+  chaos-mesh:
+    description: Install pinned Chaos Mesh for chaos tests
+    default: 'true'
+outputs:
+  cloud-name:
+    description: Registered Juju cloud name
+    value: ${{ steps.setup.outputs.cloud-name }}
+  kubeconfig-path:
+    description: Kubeconfig path
+    value: ${{ steps.setup.outputs.kubeconfig-path }}
+  platform:
+    description: Charm platform for the cloud (kubernetes)
+    value: ${{ steps.setup.outputs.platform }}
+runs:
+  using: composite
+  steps:
+    - name: Locate action repository
+      id: repository
+      shell: bash
+      run: |-
+        root="$(realpath "$GITHUB_ACTION_PATH/../..")"
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+        echo "mise-version=$(cat "$root/.mise-version")" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.repository.outputs.mise-version }}
+        working_directory: ${{ steps.repository.outputs.root }}
+        install: false
+        cache: false
+        env: false
+        export_path: false
+        add_shims_to_path: false
+    - name: Set up Kubernetes
+      id: setup
+      shell: bash
+      working-directory: ${{ steps.repository.outputs.root }}
+      env:
+        CLOUD_NAME: ${{ inputs.cloud-name }}
+        KUBECONFIG_PATH: ${{ inputs.kubeconfig-path }}
+        CHAOS_MESH: ${{ inputs.chaos-mesh }}
+        MISE_TRUSTED_CONFIG_PATHS: ${{ steps.repository.outputs.root }}
+      run: |-
+        set -euo pipefail
+        command -v juju >/dev/null || { echo "::error::Juju is required; run install-juju first"; exit 1; }
+        args=(--cloud-name "$CLOUD_NAME" --kubeconfig "${KUBECONFIG_PATH:-$RUNNER_TEMP/$CLOUD_NAME.kubeconfig}")
+        case "$CHAOS_MESH" in
+          true) ;;
+          false) args+=(--no-chaos-mesh) ;;
+          *) echo "::error::chaos-mesh must be true or false"; exit 1 ;;
+        esac
+        mise run setup -- --group local-k8s --no-packages
+        mise run setup-k8s -- "${args[@]}" --output "$GITHUB_OUTPUT"

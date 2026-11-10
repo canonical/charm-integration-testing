@@ -1,0 +1,43 @@
+---
+name: Set up local LXD
+description: >
+  Initialise LXD on the runner for Juju's built-in localhost cloud and grant the runner
+  user
+  access in the same job. An existing LXD installation is not refreshed.
+outputs:
+  cloud-name:
+    description: Juju cloud name (localhost)
+    value: ${{ steps.setup.outputs.cloud-name }}
+  platform:
+    description: Charm platform for the cloud (machine)
+    value: ${{ steps.setup.outputs.platform }}
+runs:
+  using: composite
+  steps:
+    - name: Locate action repository
+      id: repository
+      shell: bash
+      run: |-
+        root="$(realpath "$GITHUB_ACTION_PATH/../..")"
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+        echo "mise-version=$(cat "$root/.mise-version")" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.repository.outputs.mise-version }}
+        working_directory: ${{ steps.repository.outputs.root }}
+        install: false
+        cache: false
+        env: false
+        export_path: false
+        add_shims_to_path: false
+    - name: Set up LXD
+      id: setup
+      shell: bash
+      working-directory: ${{ steps.repository.outputs.root }}
+      env:
+        MISE_TRUSTED_CONFIG_PATHS: ${{ steps.repository.outputs.root }}
+      run: |-
+        set -euo pipefail
+        mise run setup -- --group local-lxd --no-packages
+        mise run setup-lxd -- --output "$GITHUB_OUTPUT"
