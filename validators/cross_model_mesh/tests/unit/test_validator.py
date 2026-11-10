@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, mock_open, patch
 import ops
 import pytest
 
+from validators.base import ValidationCheck, ValidationResult
 from validators.cross_model_mesh.validator import (
     CMRData,
     CrossModelMeshValidator,
@@ -35,6 +36,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -43,6 +45,9 @@ from validators.test_utils.stubs import (
 
 _LOCAL_APP_NAME = "catalogue-k8s"
 _LOCAL_MODEL_NAME = "cross-model-mesh-test"
+_LOCAL_MODEL_UUID = "11111111-1111-1111-1111-111111111111"
+_REMOTE_MODEL_UUID = "22222222-2222-2222-2222-222222222222"
+_OPAQUE_REMOTE_APP_NAME = "remote-6f8b274a982c4111888944781aa0a932"
 
 _VALID_CMR_DATA = CMRData(app_name=_LOCAL_APP_NAME, juju_model_name=_LOCAL_MODEL_NAME)
 
@@ -52,11 +57,34 @@ _VALID_CMR_DATA = CMRData(app_name=_LOCAL_APP_NAME, juju_model_name=_LOCAL_MODEL
 # ---------------------------------------------------------------------------
 
 
+class _RemoteModelRelationStub(RelationStub):
+    """Relation stub with remote model metadata or a lookup error."""
+
+    def __init__(self, *args: Any, remote_model: ops.RemoteModel | ops.ModelError, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._remote_model = remote_model
+
+    @property
+    def remote_model(self) -> ops.RemoteModel:
+        if isinstance(self._remote_model, ops.ModelError):
+            raise self._remote_model
+        return self._remote_model
+
+
+def _consistency_check(validator: CrossModelMeshValidator) -> tuple[ValidationResult, ValidationCheck]:
+    with patch(
+        "validators.cross_model_mesh.validator.socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.5", 0))]
+    ):
+        result = validator.validate(level="simple")
+    return result, next(c for c in result.checks if c.name == "remote_app_consistency")
+
+
 def _make_requires_validator(
     local_databag: dict[str, str],
     endpoint: str = "require-cmr-mesh",
     local_app_name: str = _LOCAL_APP_NAME,
     local_model_name: str = _LOCAL_MODEL_NAME,
+    leader: bool = True,
 ) -> CrossModelMeshValidator:
     """Build a validator on the requirer side. Remote app publishes nothing."""
     remote_app = ApplicationStub(name="istio-beacon-k8s")
@@ -68,6 +96,7 @@ def _make_requires_validator(
         local_app_name=local_app_name,
         local_model_name=local_model_name,
     )
+    stub_charm.unit = UnitStub(leader=leader)
     # The requirer publishes cmr_data into its own local app databag.
     relation.data[stub_charm.app] = local_databag
     charm = cast(ops.CharmBase, stub_charm)
@@ -78,10 +107,18 @@ def _make_provides_validator(
     remote_databag: dict[str, str],
     endpoint: str = "provide-cmr-mesh",
     remote_app_name: str = _LOCAL_APP_NAME,
+    *,
+    remote_model: ops.RemoteModel | ops.ModelError | None = None,
+    local_model_uuid: str = _LOCAL_MODEL_UUID,
 ) -> CrossModelMeshValidator:
     """Build a validator on the provider side. Remote app is the requirer."""
     remote_app = ApplicationStub(name=remote_app_name)
-    relation = RelationStub(name=endpoint, id=0, app=remote_app, data={remote_app: remote_databag})
+    data: dict[ApplicationStub | UnitStub | None, dict[str, str]] = {remote_app: remote_databag}
+    relation: RelationStub
+    if remote_model is None:
+        relation = RelationStub(name=endpoint, id=0, app=remote_app, data=data)
+    else:
+        relation = _RemoteModelRelationStub(name=endpoint, id=0, app=remote_app, data=data, remote_model=remote_model)
     charm = cast(
         ops.CharmBase,
         make_charm_from_relation(
@@ -90,6 +127,7 @@ def _make_provides_validator(
             role=RelationRoleStub.provides,
             local_app_name="istio-beacon-k8s",
             local_model_name=_LOCAL_MODEL_NAME,
+            local_model_uuid=local_model_uuid,
         ),
     )
     return CrossModelMeshValidator(charm, cast(ops.Relation, relation))
@@ -440,6 +478,18 @@ class TestDiscoverServicePorts:
 
 
 class TestRequiresSimple:
+    def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
+        validator = _make_requires_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))},
+            leader=False,
+        )
+
+        with patch.object(validator, "_parse_local_cmr_data", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level="simple")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
+
     def test_valid_self_published_data_passes(self) -> None:
         validator = _make_requires_validator({"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))})
 
@@ -572,6 +622,152 @@ class TestProvidesSimple:
         result = validator.validate(level="simple")
         assert result.status == "ERROR"
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# L1 — provides role: remote application identity across models
+# ---------------------------------------------------------------------------
+
+
+class TestProvidesRemoteAppConsistency:
+    def test_same_model_matching_name_passes(self) -> None:
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))},
+            remote_app_name=_LOCAL_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_LOCAL_MODEL_UUID),
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert check.passed
+        assert result.status == "PASS"
+        assert "NOT independently verified" not in check.message
+
+    def test_same_model_name_mismatch_fails(self) -> None:
+        validator = _make_provides_validator(
+            {
+                "cmr_data": json.dumps(
+                    dataclasses.asdict(CMRData(app_name="some-other-app", juju_model_name=_LOCAL_MODEL_NAME))
+                )
+            },
+            remote_app_name=_LOCAL_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_LOCAL_MODEL_UUID),
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert not check.passed
+        assert result.status == "FAIL"
+        assert "could not tell" not in check.message.lower()
+
+    def test_cross_model_opaque_name_passes_without_claiming_verification(self) -> None:
+        cmr_data = CMRData(app_name="neighbor", juju_model_name="neighbor-model")
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(cmr_data))},
+            remote_app_name=_OPAQUE_REMOTE_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_REMOTE_MODEL_UUID),
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert check.passed
+        assert result.status == "PASS"
+        assert "NOT independently verified" in check.message
+        assert _OPAQUE_REMOTE_APP_NAME in check.message
+        assert _REMOTE_MODEL_UUID in check.message
+
+    def test_equal_model_names_in_different_models_pass(self) -> None:
+        cmr_data = CMRData(app_name="neighbor", juju_model_name=_LOCAL_MODEL_NAME)
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(cmr_data))},
+            remote_app_name=_OPAQUE_REMOTE_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_REMOTE_MODEL_UUID),
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert check.passed
+        assert result.status == "PASS"
+
+    def test_remote_prefix_alone_is_not_proof_of_cross_model(self) -> None:
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))},
+            remote_app_name="remote-0123456789abcdef0123456789abcdef",
+            remote_model=ops.RemoteModel(uuid=_LOCAL_MODEL_UUID),
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert not check.passed
+        assert result.status == "FAIL"
+
+    @pytest.mark.parametrize(
+        "remote_model",
+        [None, ops.ModelError("ERROR unknown command: relation-model-get")],
+        ids=["ops-without-remote_model", "juju-without-relation-model-get"],
+    )
+    def test_uuid_lookup_unavailable_falls_back_to_strict_comparison(self, remote_model: ops.ModelError | None) -> None:
+        cmr_data = CMRData(app_name="neighbor", juju_model_name="neighbor-model")
+        mismatch = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(cmr_data))},
+            remote_app_name=_OPAQUE_REMOTE_APP_NAME,
+            remote_model=remote_model,
+        )
+        match = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(cmr_data))},
+            remote_app_name="neighbor",
+            remote_model=remote_model,
+        )
+
+        mismatch_result, mismatch_check = _consistency_check(mismatch)
+        match_result, match_check = _consistency_check(match)
+
+        assert not mismatch_check.passed
+        assert mismatch_result.status == "FAIL"
+        assert "could not tell whether this relation is cross-model" in mismatch_check.message.lower()
+        assert match_check.passed
+        assert "NOT independently verified" not in match_check.message
+
+    def test_empty_local_uuid_is_not_treated_as_cross_model(self) -> None:
+        validator = _make_provides_validator(
+            {"cmr_data": json.dumps(dataclasses.asdict(_VALID_CMR_DATA))},
+            remote_app_name=_OPAQUE_REMOTE_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_REMOTE_MODEL_UUID),
+            local_model_uuid="",
+        )
+
+        result, check = _consistency_check(validator)
+
+        assert not check.passed
+        assert "empty" in check.message
+        assert result.status == "FAIL"
+
+    def test_cross_model_still_rejects_malformed_published_data(self) -> None:
+        validator = _make_provides_validator(
+            {
+                "cmr_data": json.dumps(
+                    dataclasses.asdict(CMRData(app_name="Not_Valid!", juju_model_name="neighbor-model"))
+                )
+            },
+            remote_app_name=_OPAQUE_REMOTE_APP_NAME,
+            remote_model=ops.RemoteModel(uuid=_REMOTE_MODEL_UUID),
+        )
+
+        result = validator.validate(level="simple")
+
+        assert result.status == "FAIL"
+        assert not next(c for c in result.checks if c.name == "identity_format").passed
+        assert all(c.name != "remote_app_consistency" for c in result.checks)
+
+    def test_absent_remote_application_fails_without_uuid_lookup(self) -> None:
+        validator = _make_validator_no_remote_app()
+
+        with patch.object(validator, "_is_cross_model_relation") as lookup:
+            check = validator._check_remote_app_consistency(_VALID_CMR_DATA)
+
+        lookup.assert_not_called()
+        assert not check.passed
+        assert "None" in check.message
 
 
 # ---------------------------------------------------------------------------

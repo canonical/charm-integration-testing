@@ -67,9 +67,21 @@ class ValidatorInjectorExtension(JujuExtension):
         self.persistence_state: dict[PersistenceKey, PersistenceState] = {}
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
+        return self._post_validate(model, application, level, set())
+
+    def post_validate_excluding_units(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        return self._post_validate(model, application, level, excluded_units)
+
+    def _post_validate(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
+            if unit in excluded_units:
+                continue
             results[unit] = self._run_validators_on_unit(model, unit, level, model_is_k8s)
         return results
 
@@ -86,10 +98,22 @@ class ValidatorInjectorExtension(JujuExtension):
         application: str,
         persistence: str | None = None,
     ) -> dict[str, list[ValidationResult]]:
+        return self._post_persistence(model, application, persistence, set())
+
+    def post_persistence_excluding_units(
+        self, model: JujuModelHandle, application: str, persistence: str | None, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        return self._post_persistence(model, application, persistence, excluded_units)
+
+    def _post_persistence(
+        self, model: JujuModelHandle, application: str, persistence: str | None, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
         op = persistence or self.persistence_operation(model)
         results: dict[str, list[ValidationResult]] = {}
         model_is_k8s = self.juju.is_k8s_model(model)
         for unit in self.juju.application_units(model, application):
+            if unit in excluded_units:
+                continue
             # Slice persistence_state down to just this unit's relations; the runner only ever
             # needs (and only ever reports back) refs for the unit it's running on.
             unit_refs = {

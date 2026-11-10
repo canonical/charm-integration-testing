@@ -234,59 +234,87 @@ jobs:
       - name: Ensure Juju home directory exists
         shell: bash
         run: mkdir -p $HOME/.local/share/juju
-      - name: Resolve target credentials
+      - name: Resolve Juju target cloud credentials
         id: target_creds
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.target_env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.target_env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.target_env_info.outputs.credentials-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
-            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
-            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Setup target S3 config
+        id: target_s3_config
+        shell: bash
+        env:
+          S3_SECRET_NAME: ${{ steps.target_env_info.outputs.s3-secret-name }}
+          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
+        run: |
+          if [[ -z "${S3_SECRET_NAME}" ]]; then
+            exit 0
           fi
-      - name: Resolve neighbor credentials
+          umask 077
+          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-target.XXXXXX")"
+          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
+          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
+      - name: Resolve Juju neighbor cloud credentials
         id: neighbor_creds
         if: ${{ inputs.neighbor_environment != '' }}
         shell: bash
         env:
-          KUBECONFIG_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.kubeconfig-secret }}
-          NOVARC_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.novarc-secret }}
+          CREDENTIALS_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.credentials-secret }}
           PROD_SQA_KUBECONFIG: ${{ secrets.PROD_SQA_KUBECONFIG }}
           STG_SQA_KUBECONFIG: ${{ secrets.STG_SQA_KUBECONFIG }}
           PROD_PS7_KUBECONFIG: ${{ secrets.PROD_PS7_KUBECONFIG }}
           PROD_SQA_NOVARC: ${{ secrets.PROD_SQA_NOVARC }}
           PROD_PS7_NOVARC: ${{ secrets.PROD_PS7_NOVARC }}
+          PROD_PS7_LXD: ${{ secrets.PROD_PS7_LXD }}
         run: |
-          if [[ -n "${KUBECONFIG_SECRET_NAME}" ]]; then
-            echo "kubeconfig<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!KUBECONFIG_SECRET_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${CREDENTIALS_SECRET_NAME}" ]]; then
+            echo "cloud-credentials<<EOF" >> "$GITHUB_OUTPUT"
+            echo "${!CREDENTIALS_SECRET_NAME}" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
-          if [[ -n "${NOVARC_SECRET_NAME}" ]]; then
-            echo "novarc<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${!NOVARC_SECRET_NAME}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Setup neighbor S3 config
+        id: neighbor_s3_config
+        if: ${{ inputs.neighbor_environment != '' }}
+        shell: bash
+        env:
+          S3_SECRET_NAME: ${{ steps.neighbor_env_info.outputs.s3-secret-name }}
+          S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_STG_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS6_SQA_STG_CHARM_QA_KUBERNETES }}
+          S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS6_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_KUBERNETES }}
+          S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_OPENSTACK }}
+          S3_PS7_SQA_PROD_CHARM_QA_LXD: ${{ secrets.S3_PS7_SQA_PROD_CHARM_QA_LXD }}
+        run: |
+          if [[ -z "${S3_SECRET_NAME}" ]]; then
+            exit 0
           fi
+          umask 077
+          S3_CONFIG_PATH="$(mktemp "${RUNNER_TEMP}/s3-config-neighbor.XXXXXX")"
+          printf '%s' "${!S3_SECRET_NAME}" > "${S3_CONFIG_PATH}"
+          echo "config-path=${S3_CONFIG_PATH}" >> "$GITHUB_OUTPUT"
       - name: Setup Target Cloud
         id: setup_target
         uses: ./.github/actions/setup-environment/setup-cloud
         with:
           cloud-name: target-cloud
           cloud-type: ${{ steps.target_env_info.outputs.cloud-type }}
-          kubeconfig: ${{ steps.target_creds.outputs.kubeconfig }}
-          novarc: ${{ steps.target_creds.outputs.novarc }}
+          cloud-credentials: ${{ steps.target_creds.outputs.cloud-credentials }}
       - name: Post 'setup_target_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_target.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -303,8 +331,7 @@ jobs:
         with:
           cloud-name: neighbor-cloud
           cloud-type: ${{ steps.neighbor_env_info.outputs.cloud-type }}
-          kubeconfig: ${{ steps.neighbor_creds.outputs.kubeconfig }}
-          novarc: ${{ steps.neighbor_creds.outputs.novarc }}
+          cloud-credentials: ${{ steps.neighbor_creds.outputs.cloud-credentials }}
       - name: Post 'setup_neighbor_failed' event
         if: ${{ failure() && env.TEST_OBSERVER_API != '' && inputs.execution_id != '' && steps.setup_neighbor.conclusion == 'failure' }}
         uses: ./.github/actions/test-observer/post-events
@@ -372,6 +399,8 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
+          S3_CONFIG_neighbor_cloud: ${{ steps.neighbor_s3_config.outputs.config-path }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
@@ -400,6 +429,8 @@ jobs:
           neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
           neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
           neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
+          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
+          neighbor_remote_logging: ${{ steps.neighbor_env_info.outputs.remote-logging }}
           neighbor_metadata_source: ${{ steps.setup_neighbor.outputs.metadata-source }}
           neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
           target_arch: ${{ steps.target_env_info.outputs.arch }}
@@ -423,11 +454,13 @@ jobs:
             --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
             ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
             --target-model-config "${model_config}" \
+            ${target_remote_logging:+--target-remote-logging-endpoint "${target_remote_logging}"} \
             \
             --neighbor-controller-bootstrap-config "${neighbor_bootstrap_config}" \
             --neighbor-controller-bootstrap-constraints "${neighbor_bootstrap_constraints}" \
             ${neighbor_metadata_source:+--neighbor-controller-bootstrap-metadata-source "${neighbor_metadata_source}"} \
             --neighbor-model-config "${neighbor_model_config}" \
+            ${neighbor_remote_logging:+--neighbor-remote-logging-endpoint "${neighbor_remote_logging}"} \
             \
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \
@@ -460,6 +493,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
+          S3_CONFIG_target_cloud: ${{ steps.target_s3_config.outputs.config-path }}
           KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
           CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
           CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
@@ -477,6 +511,7 @@ jobs:
           bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
           bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
           model_config: ${{ steps.target_env_info.outputs.model-config }}
+          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
           metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
           target_arch: ${{ steps.target_env_info.outputs.arch }}
         run: |
@@ -489,6 +524,7 @@ jobs:
             --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
             ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
             --target-model-config "${model_config}" \
+            ${target_remote_logging:+--target-remote-logging-endpoint "${target_remote_logging}"} \
             \
             --target-charm "${charm_under_test}" \
             --target-channel "${channel}" \

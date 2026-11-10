@@ -479,6 +479,8 @@ class _EtcdConnectionMixin:
         instead of letting the caller's existing missing-field checks (e.g.
         ``prefix_present``) report a normal FAIL.
         """
+        if not self.charm.unit.is_leader():  # type: ignore[attr-defined]
+            raise PersistenceNotApplicable("Only the leader unit can read its own application databag.")
         if self.charm.app not in self.relation.data:  # type: ignore[attr-defined]
             return {}
         return dict(self.relation.data[self.charm.app])  # type: ignore[attr-defined]
@@ -602,6 +604,9 @@ class EtcdClientValidator(_EtcdConnectionMixin, BaseValidator):
         error_result = self._check_relation_exists(level)
         if error_result:
             return error_result
+
+        if level == "deep" and not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader(level)
 
         creds = self._resolve_requirer_side_credentials()
         schema_check = self.validate_schema(_REQUIRER_FIELDS, creds)

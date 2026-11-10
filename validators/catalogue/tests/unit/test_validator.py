@@ -24,6 +24,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 # ---------------------------------------------------------------------------
@@ -38,11 +39,13 @@ def _make_validator(
     local_databag: dict[str, str],
     endpoint: str = _ENDPOINT,
     role: RelationRoleStub = RelationRoleStub.requires,
+    leader: bool = True,
 ) -> CatalogueValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: {}})
     stub_charm = make_charm_from_relation(relation, interface_name=_INTERFACE, role=role)
     relation.data[stub_charm.app] = local_databag
+    stub_charm.unit = UnitStub(leader=leader)
     return CatalogueValidator(cast(ops.CharmBase, stub_charm), cast(ops.Relation, relation))
 
 
@@ -206,6 +209,15 @@ class TestCatalogueValidatorSimple:
         validator = _make_validator(VALID_DATABAG)
         result = validator.validate(level="simple")
         assert result.status == "PASS", result.checks
+
+    def test_skips_non_leader_before_reading_local_app_databag(self) -> None:
+        validator = _make_validator(VALID_DATABAG, leader=False)
+
+        with patch.object(validator, "_local_databag", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level="simple")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
 
     def test_fail_missing_name(self) -> None:
         databag = {k: v for k, v in VALID_DATABAG.items() if k != "name"}

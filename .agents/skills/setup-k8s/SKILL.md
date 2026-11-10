@@ -24,8 +24,10 @@ clusters. Setup does not create chaos experiments.
    if needed. Check `juju controllers` and `juju models` first. When using
    the integration test suite, let the suite handle controller bootstrap
    as described in [setup-charm-tests](../setup-charm-tests/SKILL.md).
+   Use a 5 GB controller root disk, matching the Kubernetes bootstrap constraints
+   in `static/environments.yaml`.
    ```
-   juju bootstrap local-k8s k8s-ctrl
+   juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
    juju add-model testing
    ```
 

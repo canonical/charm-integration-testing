@@ -19,17 +19,19 @@ from juju import JujuApplicationInfo, JujuModelHandle
 from juju.backend import JujuExecOutput
 from kubernetes import client as k8s  # type: ignore[import-untyped]
 from kubernetes.client import ApiException  # type: ignore[import-untyped]
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesClientRegistry
 from test_suite.fixtures import chaos_tools
 from test_suite.fixtures.chaos_tools import (
     ChaosTool,
     available_chaos_tools,
-    chaos_client_for_model,
     detect_initial_tools,
+)
+from test_suite.fixtures.chaos_tools import (
+    chaos_client_for_model as _chaos_client_for_model,
 )
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_MODEL, State
 
-from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api
+from ...chaos_client.shared import FakeCustomObjectsApi, FakeNetworkingV1Api, FakeWorkloadPodsApi
 from ...extensions.shared import NullJujuBackend
 
 pytest_plugins = ["pytester"]
@@ -52,17 +54,25 @@ class KubernetesStub(KubernetesBackend):
         self.core_v1_api.list_namespaced_pod.return_value = k8s.V1PodList(
             items=[
                 k8s.V1Pod(
-                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"})
+                    metadata=k8s.V1ObjectMeta(name="postgresql-0", annotations={"unit.juju.is/id": "postgresql/0"}),
+                    spec=k8s.V1PodSpec(
+                        containers=[
+                            k8s.V1Container(
+                                name="workload", env=[k8s.V1EnvVar(name="JUJU_CONTAINER_NAME", value="workload")]
+                            )
+                        ]
+                    ),
                 )
             ]
         )
         self.api_client = ClosingApiStub()
+        self.core_v1_api = FakeWorkloadPodsApi()
         self.crds: set[str] = set()
         self.crd_reads: list[str] = []
         self.ready_deployments: set[tuple[str, str]] = set()
         self.reads: list[tuple[str, str]] = []
         self.error: ApiException | None = None
-        self.custom_objects_api = FakeCustomObjectsApi(inject_stress=True)
+        self.custom_objects_api = FakeCustomObjectsApi(inject_status=True)
         self.networking_v1_api = FakeNetworkingV1Api()
 
     def crd_exists(self, name: str) -> bool:
@@ -88,9 +98,9 @@ class JujuBackendStub(NullJujuBackend):
         self.exec_error: RuntimeError | None = None
         self.exec_return_code = 0
 
-    def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+    def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str | None:
         self.resolutions.append(model.uri)
-        return self.clients[model.uri]
+        return model.uri if self.clients[model.uri] is not None else None
 
     def exec_unit(self, model: JujuModelHandle, unit: str, task: str, operator: bool = False) -> JujuExecOutput:
         self.exec_calls.append((model, unit, task))
@@ -112,6 +122,26 @@ class JujuBackendStub(NullJujuBackend):
 
 
 RESOURCE_CONSTRAINTS_CLIENT = ResourceConstraintsClient()
+
+
+def _kubernetes_client_registry(backend: JujuBackendStub) -> KubernetesClientRegistry:
+    path_to_model = {
+        Path(f"{index}.kubeconfig"): model
+        for index, (model, client) in enumerate(backend.clients.items())
+        if client is not None
+    }
+    kubeconfigs = {model: path for path, model in path_to_model.items()}
+    return KubernetesClientRegistry(
+        kubeconfigs,
+        client_factory=lambda kubeconfig: backend.clients[path_to_model[kubeconfig]]
+        or KubernetesClient(backend.kubernetes),
+    )
+
+
+def chaos_client_for_model(
+    backend: JujuBackendStub, model: JujuModelHandle, resource_constraints_client: ResourceConstraintsClient
+) -> MetaChaosClient:
+    return _chaos_client_for_model(backend, model, resource_constraints_client, _kubernetes_client_registry(backend))
 
 
 class FinalizerRequest:
@@ -339,7 +369,7 @@ class TestInitialDetectionFixture:
             unwrap(chaos_tools.detect_chaos_tools)(
                 make_request(current_state=state.value),
                 backend,
-                {},
+                _kubernetes_client_registry(backend),
                 "target-controller-cloud",
                 TARGET,
                 "neighbor-controller-cloud",
@@ -369,7 +399,7 @@ class TestInitialDetectionFixture:
         unwrap(chaos_tools.detect_chaos_tools)(
             make_request(current_state=State.DEPLOYED.value),
             backend,
-            {},
+            _kubernetes_client_registry(backend),
             "unused",
             TARGET,
             "unused",
@@ -391,7 +421,7 @@ class TestInitialDetectionFixture:
             unwrap(chaos_tools.detect_chaos_tools)(
                 make_request(current_state=State.DEPLOYED.value),
                 backend,
-                {},
+                _kubernetes_client_registry(backend),
                 "target",
                 TARGET,
                 "neighbor",
@@ -415,7 +445,7 @@ class TestInitialDetectionFixture:
             unwrap(chaos_tools.detect_chaos_tools)(
                 make_request(current_state=State.DEPLOYED.value),
                 backend,
-                {},
+                _kubernetes_client_registry(backend),
                 "unused",
                 TARGET,
                 None,
@@ -431,7 +461,7 @@ class TestInitialDetectionFixture:
     def test_model_resolution_error_does_not_fall_back(self, caplog: pytest.LogCaptureFixture) -> None:
         # GIVEN a model lookup or configuration failure
         class FailingBackend(JujuBackendStub):
-            def get_kubernetes_client_for_model(self, model: JujuModelHandle) -> KubernetesClient | None:
+            def kubernetes_cloud_for_model(self, model: JujuModelHandle) -> str:
                 raise error
 
         error = RuntimeError("Model lookup failed")
@@ -442,7 +472,7 @@ class TestInitialDetectionFixture:
             unwrap(chaos_tools.detect_chaos_tools)(
                 make_request(current_state=State.DEPLOYED.value),
                 backend,
-                {},
+                _kubernetes_client_registry(backend),
                 "unused",
                 TARGET,
                 None,
@@ -464,7 +494,7 @@ class TestInitialDetectionFixture:
             unwrap(chaos_tools.detect_chaos_tools)(
                 make_request(current_state=State.DEPLOYED.value),
                 backend,
-                {},
+                _kubernetes_client_registry(backend),
                 "unused",
                 TARGET,
                 None,
@@ -786,7 +816,11 @@ class TestExperimentClients:
         backend = JujuBackendStub()
         request = FinalizerRequest()
         resolve = unwrap(chaos_tools.chaos_tool_for_model)(
-            cast(pytest.FixtureRequest, request), backend, RESOURCE_CONSTRAINTS_CLIENT, None
+            cast(pytest.FixtureRequest, request),
+            backend,
+            _kubernetes_client_registry(backend),
+            RESOURCE_CONSTRAINTS_CLIENT,
+            None,
         )
 
         # WHEN requesting clients and executing an experiment in each model
@@ -832,7 +866,7 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
 
         import pytest
         from juju import JujuModelHandle
-        from kubernetes_client import KubernetesBackend, KubernetesClient
+        from kubernetes_client import KubernetesBackend, KubernetesClient, KubernetesClientRegistry
 
         pytest_plugins = ["test_suite.fixtures.chaos_tools", "test_suite.scheduler.plugin"]
         TARGET = JujuModelHandle(controller="target-controller", model="target-model")
@@ -869,9 +903,9 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
                 record(task)
                 return JujuExecOutput(return_code=0, stdout="", stderr="")
 
-            def get_kubernetes_client_for_model(self, model):
+            def kubernetes_cloud_for_model(self, model):
                 record("model lookup")
-                return KubernetesClient(BackendStub())
+                return "target"
 
             def list_applications(self, model):
                 from juju import CharmChannel, JujuApplicationInfo
@@ -904,7 +938,15 @@ def chaos_pytester(pytester: pytest.Pytester) -> pytest.Pytester:
 
         @pytest.fixture(scope="session")
         def cloud_kubeconfigs():
-            return {}
+            return {"target": Path("fake-kubeconfig")}
+
+
+        @pytest.fixture(scope="session")
+        def kubernetes_client_registry():
+            return KubernetesClientRegistry(
+                {"target": Path("fake-kubeconfig")},
+                client_factory=lambda _: KubernetesClient(BackendStub()),
+            )
 
 
         @pytest.fixture(scope="session")

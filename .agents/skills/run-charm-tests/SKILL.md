@@ -91,28 +91,28 @@ This installs:
 ```
 
 ### With Full Test Observer Parameters (CMR Mixed Clouds)
+
 ```bash
-# Reproduce Issue #693 test execution 509067
-# Using a UNIQUE PREFIX to avoid conflicts with other agents
-UNIQUE_PREFIX="test-509067-$(date +%s)"
+# Use a unique prefix to avoid conflicts with other runs
+UNIQUE_PREFIX="test-cmr-$(date +%s)"
 
 # IMPORTANT: Include controller bootstrap constraints (even if empty) and log-level
 ./scripts/run-tests.sh \
   --target-cloud "localhost" \
   --target-bundle "./generated-target-bundle.yaml" \
   --target-controller-bootstrap-config '{}' \
-  --target-controller-bootstrap-constraints '' \
+  --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --target-model-config '{}' \
   \
   --neighbor-cloud "local-k8s" \
   --neighbor-bundle "./generated-neighbor-bundle.yaml" \
   --neighbor-controller-bootstrap-config '{}' \
-  --neighbor-controller-bootstrap-constraints '' \
+  --neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --neighbor-model-config '{}' \
   \
   --target-charm "glauth-utils" \
   --target-channel "latest/edge" \
-  --target-revision "50" \
+  --target-revision "default" \
   --target-downgrade-revision "default" \
   --target-series "22.04" \
   --target-platform "machine" \
@@ -134,27 +134,6 @@ UNIQUE_PREFIX="test-509067-$(date +%s)"
   --junit-xml "junit-${UNIQUE_PREFIX}.xml"
 ```
 
-**Test Execution Results (Real Run - July 3, 2026):**
-
-| Phase | Result | Duration | Notes |
-|-------|--------|----------|-------|
-| Bundle Building | ✅ PASSED | ~5 min | glauth-utils + glauth-k8s + postgresql-k8s + self-signed-certificates bundle created successfully |
-| K8s Bootstrap | ❌ FAILED | ~35 min | Timeout waiting for StatefulSet pod; resource exhaustion in sandbox |
-| All Other Tests | ⏭️ SKIPPED | - | State-marked tests skip after bootstrap failure |
-| **Total** | **1 PASS, 1 FAIL, 16 SKIP** | **40 min 40 sec** | See junit-509067-v2.xml for full results |
-
-**Failure Output:**
-```
-ERROR failed to bootstrap model: creating controller stack: creating statefulset for controller: timed out waiting for controller pod: pending:  -
-```
-
-**What This Proves:**
-- ✅ Bundle building validates charm configurations correctly
-- ✅ The fix in `collectors.py` for issue #693 is correct (code verified)
-- ✅ Mixed-cloud CMR setup works for bundle generation
-- ⚠️ K8s bootstrap limited by sandbox resource constraints (not a code issue)
-- ℹ️ Log collection phase never reached because bootstrap failed (expected behavior)
-
 ---
 
 ## Critical Parameters
@@ -165,13 +144,22 @@ These parameters MUST be included when reproducing test observer executions (mat
 |-----------|---|---------|
 | `--target-application` | **REQUIRED** - Application name for test results and logging | `'target'` or `'glauth-utils'` |
 | `--neighbor-application` | **REQUIRED** for CMR tests - Neighbor app name | `'neighbor'` or `'glauth-k8s'` |
-| `--target-controller-bootstrap-constraints` | Specifies machine constraints for target controller (can be empty) | `''` or `'mem=8G'` |
-| `--neighbor-controller-bootstrap-constraints` | Specifies machine constraints for neighbor controller (can be empty) | `''` or `'mem=8G'` |
+| `--target-controller-bootstrap-constraints` | Controller constraints as inline JSON or a JSON file path (can be empty) | `'{}'` or `'{"mem":"8G"}'` |
+| `--neighbor-controller-bootstrap-constraints` | Neighbor controller constraints as inline JSON or a JSON file path (can be empty) | `'{}'` or `'{"mem":"8G"}'` |
 | `--mermaid-output` | **REQUIRED** - Path to save bundle diagram | `'./generated-bundle.mmd'` |
 | `--log-level` | Logging detail for test framework (separate from `--log-cli-level`) | `'INFO'` or `'DEBUG'` |
 | `--prefix` | Prefix for generated controller names and models | `'test-509067'` |
 | `--target-downgrade-revision` | For downgrade tests; use `'default'` for standard runs | `'default'` or a specific revision |
 | `--target-platform` | Machine type: `'machine'` for LXD, `'kubernetes'` for K8s | `'machine'` or `'kubernetes'` |
+
+For test controllers in the VM, use a 5 GB root disk (`root-disk=5G`) on both
+LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack sizing in
+`static/environments.yaml`. Pass
+`--target-controller-bootstrap-constraints '{"root-disk":"5G"}'` and, for a separate
+neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`. These options
+accept JSON, unlike Juju's `--bootstrap-constraints`. Preserve any
+additional constraints when reproducing a specific execution.
 
 **Common Mistake:**
 ```bash
@@ -181,7 +169,7 @@ These parameters MUST be included when reproducing test observer executions (mat
 # ✅ CORRECT - Includes all required parameters
 ./scripts/run-tests.sh \
   --target-cloud localhost \
-  --target-controller-bootstrap-constraints '' \
+  --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
   --target-charm postgresql ...
 ```
 
@@ -737,7 +725,7 @@ juju clouds | grep local-k8s
 $PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
 
 # Bootstrap a K8s controller
-juju bootstrap local-k8s k8s-ctrl
+juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G
 ```
 
 ### Problem: "Charm deployment timeout"

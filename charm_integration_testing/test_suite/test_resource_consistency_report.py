@@ -22,11 +22,7 @@ from resource_tracking import ResourceDiscrepancyError, StateResourceTracker, ca
 
 def test_resource_consistency_report(
     state_resource_tracker: StateResourceTracker,
-    resource_tracking_skips_by_application: dict[tuple[str, str, str], frozenset[str]],
 ) -> None:
-    discrepancies = calculate_discrepancies(
-        state_resource_tracker.observations(),
-        skips=resource_tracking_skips_by_application,
-    )
+    discrepancies = calculate_discrepancies(state_resource_tracker.observations())
     if discrepancies:
         raise ResourceDiscrepancyError(discrepancies)

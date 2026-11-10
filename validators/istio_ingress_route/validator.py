@@ -224,7 +224,11 @@ class IstioIngressRouteValidator(BaseValidator):
         # it belongs at 'simple' level too: otherwise 'simple' would report PASS on
         # nothing but a stale-but-well-formed databag even when the gateway workload
         # is entirely down. The HTTP probe stays deep-only.
-        local_databag = dict(self.relation.data[self.charm.app])
+        parsed_url = urlparse(url)
+        needs_local_config = parsed_url.port is None and not parsed_url.path
+        if not self.charm.unit.is_leader() and needs_local_config:
+            return self._skipped_result_due_to_non_leader(level)
+        local_databag = dict(self.relation.data[self.charm.app]) if self.charm.unit.is_leader() else {}
         ports, port_check = _resolve_probe_ports(url, local_databag)
         if not ports:
             if port_check is not None:

@@ -8,9 +8,10 @@ import subprocess  # nosec B404
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kubernetes_client import KubernetesClientRegistry
 from resource_registry.protocols import ResourceHandle
 
-from ..handles import JujuControllerHandle
+from ..handles import JujuControllerHandle, JujuModelHandle
 
 if TYPE_CHECKING:
     from juju.backend import JujuBackend
@@ -25,8 +26,7 @@ _SUBPROCESS_TIMEOUT_SECONDS = _JUJU_CRASHDUMP_TIMEOUT_SECONDS * 2
 class JujuCrashdumpCollector:
     """Collect controller logs using juju-crashdump or juju-k8s-crashdump.
 
-    Cloud type and kubeconfig lookup are delegated to the backend, which is the
-    single source of truth for controller cloud configuration.
+    Juju supplies cloud metadata; KubernetesClientRegistry owns kubeconfig configuration.
     """
 
     def __init__(
@@ -34,9 +34,11 @@ class JujuCrashdumpCollector:
         logger: logging.Logger,
         backend: JujuBackend,
         output_dir: Path | None = None,
+        kubernetes_client_registry: KubernetesClientRegistry | None = None,
     ) -> None:
         self._logger = logger.getChild(type(self).__name__)
         self._backend = backend
+        self._kubernetes_client_registry = kubernetes_client_registry
         self._output_dir = output_dir
 
     def supports(self, handle: ResourceHandle) -> bool:
@@ -53,8 +55,12 @@ class JujuCrashdumpCollector:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{handle.path_segment}.tar.gz"
 
-        kubeconfig = self._backend.get_controller_kubeconfig(handle.controller)
-        if kubeconfig is not None:
+        controller_model = JujuModelHandle(controller=handle.controller, model="controller")
+        cloud = self._backend.kubernetes_cloud_for_model(controller_model)
+        if cloud is not None:
+            if self._kubernetes_client_registry is None:
+                raise RuntimeError("KubernetesClientRegistry is required to collect Kubernetes controller logs.")
+            kubeconfig = self._kubernetes_client_registry.kubeconfig_for_cloud(cloud)
             self._collect_k8s(handle.controller, output_path, kubeconfig)
         else:
             self._collect_machine(handle.controller, output_path)

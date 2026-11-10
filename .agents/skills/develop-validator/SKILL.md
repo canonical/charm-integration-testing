@@ -48,6 +48,16 @@ class MyValidator(BaseValidator):
         return self._make_result(level=level, checks=checks)
 ```
 
+### Leader-only application databags
+
+Juju permits only the leader unit to read its own application databag
+(`relation.data[charm.app]`). Guard local app reads against non-leader access:
+`BaseValidator.validate()` should return `SKIPPED`; persistence methods should
+raise `PersistenceNotApplicable`. If a path does not need local app data, avoid
+reading it and continue normally. Remote app data through `self.databag` or
+`relation.app` does not need a leader guard. Unit databags
+(`relation.data[unit]`) are separate and do not require it.
+
 ### Package structure for a new validator
 
 ```
@@ -119,6 +129,19 @@ under `validators/<name>/` with passing `dev-validate` output.
 
 2. Search CharmHub for a charm that **provides** the interface and one that
    **requires** it. Prefer widely-used charms on `stable` channels.
+
+   Use the repository client when it is available:
+
+   ```python
+   from bundle_builder_x.charmhub import CharmhubClient
+   from bundle_builder_x.charmhub_http import CharmhubHttpClient
+
+   client = CharmhubClient(CharmhubHttpClient())
+   providers = client.find_charms(provides="<interface>")
+   requirers = client.find_charms(requires="<interface>")
+   print("Providers:", sorted(providers))
+   print("Requirers:", sorted(requirers))
+   ```
 
 3. Write `/tmp/spec.yaml` describing a minimal two-charm deployment. Use a
    dedicated model name like `<interface>-test` (not `testing`) so the
@@ -296,6 +319,15 @@ def validate(self, level: ValidationLevel = "simple") -> ValidationResult:
 
 ### HTTP API helpers and canary resources
 
+- For outbound HTTP/S clients, consider `JUJU_CHARM_HTTP_PROXY`,
+  `JUJU_CHARM_HTTPS_PROXY`, and `JUJU_CHARM_NO_PROXY`: client libraries may only
+  recognize standard proxy variables. Resolve Juju settings at client creation,
+  honor no-proxy exclusions, and preserve standard behavior outside Juju without
+  mutating the hosting charm's environment. Keep transport-specific handling in
+  the interface validator rather than `BaseValidator`. Explicitly decide whether
+  a probe should use proxies or test direct ingress/mesh connectivity. Test both
+  proxied and bypassed requests; a runner-side connection does not prove unit-side
+  connectivity.
 - When decoding HTTP response bodies as JSON, wrap `json.loads()` in a
   `try`/`except json.JSONDecodeError` on **every** response path (success and
   error) — don't assume a 2xx response always has a JSON body.

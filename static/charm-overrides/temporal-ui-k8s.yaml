@@ -9,21 +9,6 @@
 # nginx-route (requires): optional reverse-proxy routing; ui accessible without it.
 # ingress (requires, 1.23+ only): optional reverse-proxy; accessible via ClusterIP.
 overrides:
-  # latest/ track: old version, no temporal-host-info or ingress
-  - criteria:
-      - track: latest
-    provides:
-      # https://github.com/canonical/temporal-k8s-operator/issues/120
-      ui:
-        limit: 1
-        optional: false
-        features: [ui]
-    requires:
-      nginx-route:
-        optional: true
-    constraints:
-      - 'bool(endpoint[ui]) => features(endpoint[ui]) == {"ui"}'
-
   # 1.23/ and future versioned tracks: temporal-host-info + ingress
   - provides:
       # https://github.com/canonical/temporal-k8s-operator/issues/120

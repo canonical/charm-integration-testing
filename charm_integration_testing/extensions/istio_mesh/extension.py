@@ -2,27 +2,31 @@
 # See LICENSE file for licensing details.
 
 import logging
-from datetime import timedelta
+from pathlib import Path
 
+import yaml
 from juju import JujuApplicationInfo, JujuBackend, JujuExtension, JujuModelHandle
+
+from bundle_builder_x import CharmhubClient
+from bundle_builder_x import JujuVersion as BundleJujuVersion
 
 # Charms that need a reconciling istio-k8s control plane to reach "active", with no Juju
 # relation to express the dependency.
 ISTIO_MESH_DEPENDENT_CHARMS = frozenset({"istio-beacon-k8s", "istio-ingress-k8s"})
 ISTIO_CONTROL_PLANE_CHARM = "istio-k8s"
-ISTIO_CONTROL_PLANE_CHANNEL = "1/stable"
-
-DEFAULT_ISTIO_DEPLOY_TIMEOUT = timedelta(minutes=15)
 
 
 class IstioMeshExtension(JujuExtension):
     """Deploys istio-k8s into a model when a mesh-dependent charm is present but has no
     istio-k8s of its own to reconcile against.
 
+    For bundles without an explicit control plane, ``pre_deploy()`` requests its deployment
+    before deploying dependent applications, without waiting for readiness.
+
     istio-beacon-k8s and istio-ingress-k8s each need a reconciling istio-k8s control plane
     in the *same model* to reach "active", with no Juju relation to express the dependency.
-    Checked via Juju application state rather than Kubernetes cluster state: the Gateway API
-    CRDs istio-k8s installs are cluster-scoped, so their presence says nothing about whether
+    Dependents are identified from the bundle and existing control planes from Juju application state.
+    The Gateway API CRDs istio-k8s installs are cluster-scoped, so their presence says nothing about whether
     *this* model has a working control plane -- a model on a cluster where istio-k8s happens
     to be deployed elsewhere still hangs the same way (confirmed live: istio-ingress-k8s's
     Gateway stayed unprogrammed even with the CRD already present cluster-wide from another
@@ -47,52 +51,64 @@ class IstioMeshExtension(JujuExtension):
     juju: JujuBackend
     logger: logging.Logger
 
-    def __init__(self, juju: JujuBackend, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        juju: JujuBackend,
+        logger: logging.Logger,
+        charmhub_client: CharmhubClient,
+    ) -> None:
         self.juju = juju
         self.logger = logger
+        self.charmhub_client = charmhub_client
 
-    def post_deploy(self, model: JujuModelHandle) -> None:
-        applications = self.juju.list_applications(model)
-        dependents = sorted(info.charm for info in applications.values() if info.charm in ISTIO_MESH_DEPENDENT_CHARMS)
-        if not dependents:
+    def pre_deploy(self, model: JujuModelHandle, bundle: Path) -> None:
+        # Preserve charm names across documents that only add options or offers.
+        charms: dict[str, str] = {}
+        for document in yaml.safe_load_all(bundle.read_text(encoding="utf-8")):
+            if not isinstance(document, dict):
+                continue
+            applications = document.get("applications")
+            if not isinstance(applications, dict):
+                continue
+            for name, app in applications.items():
+                if app is None:
+                    charms.pop(name, None)
+                elif isinstance(app, dict) and isinstance(app.get("charm"), str):
+                    charms[name] = app["charm"].removeprefix("ch:")
+        if not ISTIO_MESH_DEPENDENT_CHARMS.intersection(charms.values()):
             return
-
-        if self.juju.get_kubernetes_client_for_controller(model.controller) is None:
+        # Let the bundle deploy its explicit control plane with its own settings.
+        if ISTIO_CONTROL_PLANE_CHARM in charms.values() or not self.juju.is_k8s_model(model):
             return
+        self._ensure_istio_deployed(model)
 
-        existing = self._find_istio_application(applications)
-        if existing is not None:
-            self.juju.wait_application_settled(model, existing, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
-            return
-
-        self.logger.info(
-            f"{dependents} present in '{model.uri}' with no '{ISTIO_CONTROL_PLANE_CHARM}' of its own; "
-            f"deploying '{ISTIO_CONTROL_PLANE_CHARM}'."
-        )
-        application = self._ensure_istio_deployed(model)
-        self.juju.wait_application_settled(model, application, timeout=DEFAULT_ISTIO_DEPLOY_TIMEOUT)
-
-    def _ensure_istio_deployed(self, model: JujuModelHandle) -> str:
+    def _ensure_istio_deployed(self, model: JujuModelHandle) -> None:
         existing = self._find_istio_application(self.juju.list_applications(model))
         if existing is not None:
-            return existing
+            return
+        charm = self.charmhub_client.charm_from_store(
+            charm_name=ISTIO_CONTROL_PLANE_CHARM,
+            ubuntu_arch=self.juju.model_architecture(model),
+            platform="kubernetes",
+            juju_version=BundleJujuVersion.parse(str(self.juju.version(model))),
+        )
         try:
             self.juju.deploy_application(
                 model,
                 ISTIO_CONTROL_PLANE_CHARM,
                 application=ISTIO_CONTROL_PLANE_CHARM,
                 trust=True,
-                channel=ISTIO_CONTROL_PLANE_CHANNEL,
+                channel=str(charm.channel),
+                revision=charm.revision,
+                base=f"ubuntu@{charm.ubuntu_version}",
             )
             self.logger.info(f"Deployed '{ISTIO_CONTROL_PLANE_CHARM}' into '{model.uri}'.")
-            return ISTIO_CONTROL_PLANE_CHARM
         except Exception as error:
             # Re-check authoritative state instead of pattern-matching backend errors, to
             # tolerate a concurrent worker having already deployed istio-k8s.
             existing = self._find_istio_application(self.juju.list_applications(model))
             if existing is None:
                 raise error from None
-            return existing
 
     @staticmethod
     def _find_istio_application(applications: dict[str, JujuApplicationInfo]) -> str | None:

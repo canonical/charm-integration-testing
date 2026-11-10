@@ -32,6 +32,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+import ops
+
 from validators.base import (
     BaseValidator,
     ValidationCheck,
@@ -107,6 +109,9 @@ class CrossModelMeshValidator(BaseValidator):
         error = self._check_relation_exists("simple")
         if error:
             return error
+
+        if not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader("simple")
 
         cmr_data, schema_check = self._parse_local_cmr_data()
         checks.append(schema_check)
@@ -224,22 +229,43 @@ class CrossModelMeshValidator(BaseValidator):
         return _decode_cmr_data(self.databag.get("cmr_data", ""), source="remote application databag")
 
     def _check_remote_app_consistency(self, cmr_data: CMRData) -> ValidationCheck:
-        """Verify the declared ``app_name`` matches the actual remote relation application.
+        """Verify the declared ``app_name`` against the remote relation application.
 
-        Without this check, a requirer could publish a well-formed identity
-        for a *different* application/model than the one actually on the
-        other end of this relation. If that impersonated identity happens to
-        resolve, both L1 and L2 checks would otherwise pass while the
-        provider builds an authorization policy for the wrong application.
+        Juju hides cross-model consumers behind ``remote-<token>`` names, so
+        name comparison is skipped when the model UUIDs differ. This does not
+        verify the declared identity; requirer self-consistency is checked
+        separately. Same-model relations and unknown UUIDs use strict comparison.
         """
         actual_app_name = self.relation.app.name if self.relation.app is not None else None
+        is_cross_model, model_detail = self._is_cross_model_relation() if actual_app_name is not None else (None, "")
+
+        if is_cross_model:
+            return ValidationCheck(
+                name="remote_app_consistency",
+                passed=True,
+                message=(
+                    f"{model_detail} Juju presents the remote application as {actual_app_name!r}, so the "
+                    f"declared identity {cmr_data!r} was NOT independently verified on this side."
+                ),
+            )
+
         if cmr_data.app_name != actual_app_name:
+            fallback_note = (
+                ""
+                if is_cross_model is False
+                else (
+                    f" Could not tell whether this relation is cross-model ({model_detail}); for a real "
+                    "cross-model relation Juju shows an opaque remote application name, which this strict "
+                    "comparison cannot accept."
+                )
+            )
             return ValidationCheck(
                 name="remote_app_consistency",
                 passed=False,
                 message=(
                     f"Declared app_name {cmr_data.app_name!r} in cmr_data does not match the "
-                    f"actual remote application {actual_app_name!r} on relation '{self.endpoint}'. "
+                    f"actual remote application {actual_app_name!r} on relation '{self.endpoint}'."
+                    f"{fallback_note} "
                     "Remediation: verify the requirer publishes its own application name unmodified."
                 ),
             )
@@ -248,6 +274,26 @@ class CrossModelMeshValidator(BaseValidator):
             passed=True,
             message=f"Declared app_name matches the actual remote application {actual_app_name!r}.",
         )
+
+    def _is_cross_model_relation(self) -> tuple[bool | None, str]:
+        """Compare the remote and local model UUIDs.
+
+        Return None with a reason when either UUID is unavailable.
+        """
+        try:
+            remote_uuid = self.relation.remote_model.uuid
+        except AttributeError:
+            return None, "Relation.remote_model is unavailable (ops older than 2.20)"
+        except ops.ModelError as e:
+            return None, f"relation-model-get failed (Juju older than 3.6.2, or a lookup error): {e}"
+
+        local_uuid = self.charm.model.uuid
+        if not remote_uuid or not local_uuid:
+            return None, "remote or local model UUID is empty"
+
+        if remote_uuid == local_uuid:
+            return False, f"Remote and local model UUID are both {local_uuid}."
+        return True, f"Relation is cross-model (remote model UUID {remote_uuid}, local {local_uuid})."
 
     # ------------------------------------------------------------------
     # Helpers

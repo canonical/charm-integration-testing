@@ -22,6 +22,8 @@ from extensions import (
     MysqlK8sDatabaseReplicationExtension,
     PostgresqlDatabaseReplicationExtension,
     PostgresqlK8sDatabaseReplicationExtension,
+    RemoteLoggingExtension,
+    S3IntegratorExtension,
     UnsealVaultJujuExtension,
     UnsealVaultK8sJujuExtension,
     ValidatorInjectorExtension,
@@ -43,10 +45,11 @@ from juju.resource_registry import (
     JujuResourceRegistryExtension,
 )
 from juju_jubilant import JubilantBackend
-from kubernetes_client import KubernetesBackend, KubernetesClient
+from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 from pytest import StashKey
 from resource_registry import ResourceRegistry, ResourceTeardownWarning
 from resource_tracking import DiscrepancyEntry, ResourceDiscrepancyError
+from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
@@ -83,6 +86,11 @@ from bundle_builder_x import (
     JujuVersion as BundleJujuVersion,
 )
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
+from test_suite.fixtures.juju import get_juju_client_for_registered_models
+from test_suite.remote_logging import (
+    build_remote_logging_endpoints_by_controller,
+    remote_logging_existing_state_warning,
+)
 from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STATES_WITHOUT_EXISTING_MODEL, State
 
 pytest_plugins = [
@@ -91,6 +99,7 @@ pytest_plugins = [
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
     "test_suite.fixtures.resource_tracking",
+    "test_suite.fixtures.s3",
 ]
 
 
@@ -183,13 +192,31 @@ def cloud_definitions() -> dict[str, tuple[Path, Path]]:
 
 
 @pytest.fixture(scope="session")
-def juju_backend(cloud_kubeconfigs: dict[str, Path], cloud_definitions: dict[str, tuple[Path, Path]]) -> JujuBackend:
-    return JubilantBackend(cloud_kubeconfigs=cloud_kubeconfigs, cloud_definitions=cloud_definitions)
+def kubernetes_client_registry(cloud_kubeconfigs: dict[str, Path]) -> KubernetesClientRegistry:
+    """Own the shared Kubernetes clients used by Juju, chaos, and resource tracking."""
+    return KubernetesClientRegistry(cloud_kubeconfigs)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
+def juju_backend(
+    kubernetes_client_registry: KubernetesClientRegistry,
+    cloud_definitions: dict[str, tuple[Path, Path]],
+) -> JujuBackend:
+    return JubilantBackend(
+        kubernetes_client_registry=kubernetes_client_registry,
+        cloud_definitions=cloud_definitions,
+    )
+
+
+@pytest.fixture(scope="session")
+def unseal_vault_k8s_extension(juju_backend: JujuBackend, logger: logging.Logger) -> UnsealVaultK8sJujuExtension:
+    return UnsealVaultK8sJujuExtension(juju_backend, logger)
+
+
+@pytest.fixture(scope="session")
 def register_test_clouds(
     juju_backend: JujuBackend,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
     cloud_kubeconfigs: dict[str, Path],
     cloud_definitions: dict[str, tuple[Path, Path]],
     target_cloud: str,
@@ -205,23 +232,17 @@ def register_test_clouds(
         juju_backend.register_cloud(cloud=cloud)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def kubernetes_client(
-    cloud_kubeconfigs: dict[str, Path],
-    target_cloud: str,
-    target_controller: str,
-    logger: logging.Logger,
+    kubernetes_client_registry: KubernetesClientRegistry,
+    target_model_ref: JujuModelHandle,
     juju_backend: JujuBackend,
 ) -> KubernetesClient | None:
-    """KubernetesClient for the target cloud, or None for machine clouds."""
-    path = cloud_kubeconfigs.get(target_cloud)
-    if path is None:
+    """Return the shared KubernetesClient for the target model."""
+    cloud = juju_backend.kubernetes_cloud_for_model(target_model_ref)
+    if cloud is None:
         return None
-    return KubernetesClient(
-        KubernetesBackend.k8s_client(kubeconfig=path),
-        logger=logger,
-        extensions=[UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger)],
-    )
+    return kubernetes_client_registry.client_for_cloud(cloud)
 
 
 @pytest.fixture(scope="session")
@@ -245,11 +266,17 @@ def session_resource_registry(
     log_dir: Path | None,
     logger: logging.Logger,
     juju_backend: JujuBackend,
+    kubernetes_client_registry: KubernetesClientRegistry,
 ) -> Iterator[ResourceRegistry]:
     """Session-scoped resource registry covering all workflow controllers."""
     registry = ResourceRegistry(
         global_collectors=[
-            JujuCrashdumpCollector(logger, juju_backend, output_dir=log_dir),
+            JujuCrashdumpCollector(
+                logger,
+                juju_backend,
+                output_dir=log_dir,
+                kubernetes_client_registry=kubernetes_client_registry,
+            ),
         ],
         logger=logger,
     )
@@ -312,7 +339,7 @@ def persistence_extension(
 ) -> ValidatorInjectorExtension:
     """Session-scoped validator injector, and the owner of the canary persistence state.
 
-    One instance is shared by every ``JujuClient`` built during a run (see ``_build_juju_client``),
+    One instance is shared by the session-scoped ``juju_client`` fixture,
     so the state it holds is the single source of truth. The persistence op is auto-decided from
     that state: no state for a model means "prepare" (seed canary data), state means "checkpoint"
     (verify and advance it), and the pre-removal hooks run "cleanup" (drop it) when a model's
@@ -351,57 +378,52 @@ def register_preexisting_neighbor_cloud(
         juju_backend.add_cloud(cloud=neighbor_cloud, controller=target_controller)
 
 
-def _build_juju_client(
+@pytest.fixture(scope="session")
+def juju_client(
     juju_backend: JujuBackend,
+    istio_mesh_extension: IstioMeshExtension,
+    register_test_clouds: None,
     target_controller: str,
     logger: logging.Logger,
     ubuntu_pro_token: str | None,
     session_resource_registry: ResourceRegistry,
     persistence_extension: ValidatorInjectorExtension,
+    remote_logging_endpoints_by_controller: dict[str, str],
+    kubernetes_client_registry: KubernetesClientRegistry,
+    unseal_vault_k8s_extension: UnsealVaultK8sJujuExtension,
+    s3_provider_registry: S3ProviderRegistry,
+    s3_resources_for_provider: Callable[[S3Provider], S3ResourceRegistry],
 ) -> JujuClient:
     return JujuClient(
         juju_backend,
         logger,
         extensions=[
             ConfigureLivepatchServerExtension(juju_backend, logger, ubuntu_pro_token),
-            IstioMeshExtension(juju_backend, logger),
+            istio_mesh_extension,
             LegoExtension(juju_backend, logger),
             MetacontrollerExtension(juju_backend, logger),
             MysqlDatabaseReplicationExtension(juju_backend, logger),
             MysqlK8sDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlDatabaseReplicationExtension(juju_backend, logger),
             PostgresqlK8sDatabaseReplicationExtension(juju_backend, logger),
+            S3IntegratorExtension(juju_backend, s3_provider_registry, s3_resources_for_provider, logger),
             UnsealVaultJujuExtension(juju_backend, logger),
-            UnsealVaultK8sJujuExtension(juju_backend, target_controller, logger),
+            unseal_vault_k8s_extension,
             persistence_extension,
             JujuResourceRegistryExtension(juju_backend, session_resource_registry),
+            RemoteLoggingExtension(
+                juju_backend,
+                kubernetes_client_registry,
+                remote_logging_endpoints_by_controller,
+                session_resource_registry,
+            ),
         ],
-    )
-
-
-@pytest.fixture
-def juju_client(
-    juju_backend: JujuBackend,
-    target_controller: str,
-    logger: logging.Logger,
-    ubuntu_pro_token: str | None,
-    session_resource_registry: ResourceRegistry,
-    persistence_extension: ValidatorInjectorExtension,
-) -> JujuClient:
-    return _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
     )
 
 
 @pytest.fixture(scope="session", autouse=True)
 def seed_persistence_state_for_resumed_run(
     request: pytest.FixtureRequest,
-    persistence_extension: ValidatorInjectorExtension,
-    juju_backend: JujuBackend,
-    target_controller: str,
-    logger: logging.Logger,
-    ubuntu_pro_token: str | None,
-    session_resource_registry: ResourceRegistry,
     target_model_ref: JujuModelHandle,
     is_cmr_test: bool,
     neighbor_model_ref: JujuModelHandle | None,
@@ -440,9 +462,7 @@ def seed_persistence_state_for_resumed_run(
         )
         return
 
-    client = _build_juju_client(
-        juju_backend, target_controller, logger, ubuntu_pro_token, session_resource_registry, persistence_extension
-    )
+    client: JujuClient = request.getfixturevalue("juju_client")
     models = [target_model_ref]
     if is_cmr_test and neighbor_model_ref is not None:
         models.append(neighbor_model_ref)
@@ -564,6 +584,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=str,
         default=None,
         help="Architecture for the neighbor model in CMR tests, e.g. 'amd64' or 'arm64'. Defaults to --target-arch value.",
+    )
+    parser.addoption(
+        "--target-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the target controller model.",
+    )
+    parser.addoption(
+        "--neighbor-remote-logging-endpoint",
+        type=str,
+        default=None,
+        help="Optional Loki base URL (e.g. http://host:3100) for remote logging on the neighbor controller model.",
     )
     parser.addoption(
         "--charm-overrides",
@@ -868,6 +900,53 @@ def target_arch(request: pytest.FixtureRequest) -> str:
     return value
 
 
+@pytest.fixture(scope="session")
+def target_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--target-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def neighbor_remote_logging_endpoint(request: pytest.FixtureRequest) -> str | None:
+    value = request.config.getoption("--neighbor-remote-logging-endpoint")
+    assert value is None or isinstance(value, str)
+    return value
+
+
+@pytest.fixture(scope="session")
+def remote_logging_endpoints_by_controller(
+    target_controller: str,
+    target_remote_logging_endpoint: str | None,
+    neighbor_controller: str | None,
+    neighbor_remote_logging_endpoint: str | None,
+) -> dict[str, str]:
+    return build_remote_logging_endpoints_by_controller(
+        target_controller,
+        target_remote_logging_endpoint,
+        neighbor_controller,
+        neighbor_remote_logging_endpoint,
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warn_remote_logging_unsupported_for_existing_state(
+    request: pytest.FixtureRequest,
+) -> None:
+    """Warn when the requested starting state bypasses complete remote logging setup."""
+    current_state = State(request.config.getoption("--current-state"))
+    remote_logging_configured = bool(
+        request.config.getoption("--target-remote-logging-endpoint")
+        or request.config.getoption("--neighbor-remote-logging-endpoint")
+    )
+    message = remote_logging_existing_state_warning(
+        remote_logging_configured,
+        controller_already_exists=current_state not in STATES_WITHOUT_EXISTING_CONTROLLER,
+    )
+    if message is not None:
+        warnings.warn(message, UserWarning)
+
+
 @pytest.fixture
 def target_juju_version(juju_backend: JujuBackend, target_model_ref: JujuModelHandle) -> JujuVersion:
     return juju_backend.version(target_model_ref)
@@ -886,7 +965,7 @@ def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     return juju_backend.cli_version()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charm_overrides(request: pytest.FixtureRequest) -> Path:
     """Path to the unified charm overrides directory, passed via ``--charm-overrides``."""
     value = request.config.getoption("--charm-overrides")
@@ -899,7 +978,7 @@ def charm_overrides(request: pytest.FixtureRequest) -> Path:
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def overrides_client(charm_overrides: Path, logger: logging.Logger) -> OverridesClient:
     """Client for reading the charm-overrides YAML, shared by any fixture that needs it."""
     return OverridesClient(overrides=charm_overrides, logger=logger)
@@ -925,10 +1004,20 @@ def resource_constraints_client(request: pytest.FixtureRequest, logger: logging.
     return ResourceConstraintsClient(constraints_dir=constraints_dir, logger=logger)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def charmhub_client(overrides_client: OverridesClient, logger: logging.Logger) -> CharmhubClient:
     """Client for resolving canonical charm metadata (with overrides merged) from Charmhub."""
     return CharmhubClient(logger=logger, overrides_client=overrides_client)
+
+
+@pytest.fixture(scope="session")
+def istio_mesh_extension(
+    charmhub_client: CharmhubClient,
+    juju_backend: JujuBackend,
+    logger: logging.Logger,
+) -> IstioMeshExtension:
+    """Wire the control-plane extension with the backend and store client."""
+    return IstioMeshExtension(juju_backend, logger, charmhub_client)
 
 
 @pytest.fixture
@@ -1038,18 +1127,20 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> 
 def print_setup_and_teardown_info(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
-    juju_client: JujuClient,
     session_resource_registry: ResourceRegistry,
     record_execution_metadata: None,
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _print_all_model_statuses() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                try:
-                    juju_client.print_status(model=handle)
-                except Exception:
-                    logger.warning(f"Failed to print status for model '{handle.uri}'")
+        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+        if client_and_models is None:
+            return
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
+            try:
+                juju_client.print_status(model=handle)
+            except Exception:
+                logger.warning(f"Failed to print status for model '{handle.uri}'")
 
     # Print starting state for all registered models
     _print_all_model_statuses()
@@ -1203,15 +1294,18 @@ def record_charm_info_execution_metadata_instantaneous(
 
 @pytest.fixture
 def record_charm_info_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str], None],
     require_temp_juju_controller_alive: None,
 ) -> Iterator[None]:
     def _record_all() -> None:
-        for handle in session_resource_registry.registered_handles():
-            if isinstance(handle, JujuModelHandle):
-                record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
+        client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+        if client_and_models is None:
+            return
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
+            record_charm_info_execution_metadata_instantaneous(juju_client, handle, execution_metadata)
 
     # Save all charms and revisions at start of test
     _record_all()
@@ -1470,7 +1564,7 @@ def record_failure_execution_metadata(
 
 @pytest.fixture
 def record_juju_execution_metadata(
-    juju_client: JujuClient,
+    request: pytest.FixtureRequest,
     session_resource_registry: ResourceRegistry,
     execution_metadata: Callable[[str, str | int], None],
     require_temp_juju_controller_alive: None,
@@ -1478,8 +1572,10 @@ def record_juju_execution_metadata(
     yield
 
     # Save Juju version for each registered model
-    for handle in session_resource_registry.registered_handles():
-        if isinstance(handle, JujuModelHandle):
+    client_and_models = get_juju_client_for_registered_models(request, session_resource_registry)
+    if client_and_models is not None:
+        juju_client, model_handles = client_and_models
+        for handle in model_handles:
             execution_metadata("juju:version", str(juju_client.version(handle)))
 
 

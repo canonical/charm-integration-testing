@@ -170,6 +170,11 @@ pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caae
 
 ## Running Tests After Setup
 
+Test controllers in the VM should have a 5 GB root disk on both LXD and
+Kubernetes. Pass `--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`
+and, for a separate neighbor controller,
+`--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
+
 For Kubernetes sandbox tests, set
 `KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
 Tests request experiments through `require_chaos_tool`, which selects a
@@ -287,7 +292,7 @@ LXD and K8s bootstrap can take 5-10 minutes on first run. If timeout occurs:
 juju controllers
 
 # Wait and retry
-juju bootstrap localhost lxd-ctrl
+juju bootstrap localhost lxd-ctrl --bootstrap-constraints root-disk=5G
 
 # Or check logs
 juju debug-log -c lxd-ctrl --limit 50

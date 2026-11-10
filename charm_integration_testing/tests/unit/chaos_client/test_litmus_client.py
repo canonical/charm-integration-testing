@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from chaos_client import ChaosCleanupError, MetaChaosClient, ResourceConstraintsClient
 from chaos_client import litmus_client as module
+from chaos_client.backend import StressEndedEarlyError
 from chaos_client.litmus_client import LitmusChaosClient, LitmusNotInstalledError
 from chaos_client.litmus_detection import LITMUS_CRDS
 from chaos_client.litmus_setup import LitmusSetup
@@ -123,7 +124,9 @@ class ClientContext:
     def pause(self, seconds: float) -> None:
         self.now += seconds
 
-    def list_pods(self, *, label_selector: str, **kwargs: Any) -> Any:
+    def list_pods(self, *, label_selector: str = "", **kwargs: Any) -> Any:
+        if not label_selector:
+            return client.V1PodList(items=self.pods + self.children)
         return client.V1PodList(items=self.children if label_selector.startswith("chaosUID=") else self.pods)
 
     def create(self, *, body: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
@@ -244,7 +247,7 @@ class TestStress:
         assert env["TARGET_PODS"] == "postgresql-random-pod"
         assert spec["selectors"]["pods"][0]["names"] == env["TARGET_PODS"]
         assert env["TARGET_CONTAINER"] == "postgresql"
-        assert env["TOTAL_CHAOS_DURATION"] == "30"
+        assert env["TOTAL_CHAOS_DURATION"] == "33"
         assert len(f"{name}-{name}") <= 63
         context.setups[0].prepare.assert_called_once_with(params.experiment)
 
@@ -261,20 +264,288 @@ def test_invalid_target_does_not_prepare_resources(context: ClientContext, pods:
     assert context.created == []
 
 
-def test_multiple_workload_containers_require_explicit_selection(context: ClientContext) -> None:
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_multiple_workload_containers_are_stressed_together(context: ClientContext, operation: str) -> None:
     # GIVEN two workload containers
     context.pods[0].spec.containers.append(
         client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
     )
 
-    # WHEN no container is selected, THEN nothing is created
-    with pytest.raises(RuntimeError, match="Specify one workload container"):
-        context.chaos_client().stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
-    assert context.created == []
+    def read_after_submissions(**kwargs: Any) -> dict[str, Any]:
+        assert len(context.created) == 2, "Startup polling began before both Engines were submitted"
+        return context.read(**kwargs)
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read_after_submissions
+
+    # WHEN requesting unit stress, THEN both Engines remain active together, excluding the charm agent.
+    chaos = context.chaos_client()
+    if operation == "cpu":
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    assert len(context.engines) == 2
+    assert {
+        entry["value"]
+        for engine in context.created
+        for entry in engine["spec"]["experiments"][0]["spec"]["components"]["env"]
+        if entry["name"] == "TARGET_CONTAINER"
+    } == {"postgresql", "exporter"}
+    chaos.check_stress(MODEL, UNIT)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
 
     # WHEN explicitly selecting the workload, THEN stress can be requested
+    context.created.clear()
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = context.read
     context.chaos_client("postgresql").stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
     assert len(context.created) == 1
+
+
+@pytest.mark.parametrize("container", [None, "charm", "missing"])
+def test_no_matching_workload_fails_before_creation(context: ClientContext, container: str | None) -> None:
+    # GIVEN no Juju workload, or a selection that does not identify one
+    if container is None:
+        context.pods[0].spec.containers = [client.V1Container(name="charm")]
+    # WHEN requesting stress, THEN fail before preparing any resources.
+    with pytest.raises(RuntimeError, match="No matching workload containers"):
+        context.chaos_client(container).stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert not context.created
+    assert not context.setups
+
+
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_slow_multi_container_startup_preserves_requested_duration(context: ClientContext, operation: str) -> None:
+    # GIVEN the first workload starts while the second Engine submission is delayed
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    expires: dict[str, float] = {}
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        if context.created:
+            context.now += 2.5
+        resource = context.create(**kwargs)
+        settings = {
+            entry["name"]: entry["value"] for entry in resource["spec"]["experiments"][0]["spec"]["components"]["env"]
+        }
+        expires[resource["metadata"]["name"]] = context.now + int(settings["TOTAL_CHAOS_DURATION"])
+        return resource
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        resource = context.read(name=name, **kwargs)
+        if context.now >= expires[name]:
+            resource["status"]["engineStatus"] = "completed"
+        return resource
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN observing for the full requested duration after both workloads are active
+    if operation == "cpu":
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    context.now += 10
+
+    # THEN neither workload has expired, and cleanup still stops both experiments
+    chaos.check_stress(MODEL, UNIT)
+    assert len(expires) == 2
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("stage", ["submission", "startup-check"])
+def test_engine_submissions_share_startup_deadline(context: ClientContext, stage: str) -> None:
+    # GIVEN an API call that consumes the entire startup budget
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        if stage == "submission":
+            context.now += 3
+        return resource
+
+    reads = 0
+
+    def read(**kwargs: Any) -> dict[str, Any]:
+        nonlocal reads
+        reads += 1
+        if stage == "startup-check" and reads == 1:
+            context.now += 3
+        return context.read(**kwargs)
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN starting stress, THEN late startup fails without losing cleanup ownership
+    with pytest.raises(TimeoutError, match="startup"):
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert reads == {"submission": 0, "startup-check": 1}[stage]
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("operation", ["cpu", "memory"])
+def test_group_startup_stops_between_engines_at_deadline(context: ClientContext, operation: str) -> None:
+    # GIVEN two workloads whose first startup check exhausts the budget
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    reads: list[str] = []
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        reads.append(name)
+        if len(reads) == 1:
+            context.now += 3
+        return context.read(name=name, **kwargs)
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    chaos = context.chaos_client()
+
+    # WHEN startup fails, THEN the second Engine is not read
+    with pytest.raises(TimeoutError, match="startup"):
+        if operation == "cpu":
+            chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+        else:
+            chaos.stress_memory(MODEL, UNIT, 1, 128, timedelta(seconds=10))
+    first, second = [engine["metadata"]["name"] for engine in context.created]
+    assert reads == [first]
+    assert context.backend.custom_objects_api.list_namespaced_custom_object.call_count == 1
+
+    # THEN normal observation remains independent of the expired startup deadline
+    chaos.check_stress(MODEL, UNIT)
+    assert reads == [first, first, second]
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    for setup in context.setups:
+        setup.cleanup.assert_called_once()
+
+
+@pytest.mark.parametrize("first_ends", [False, True], ids=["all-start", "earlier-engine-ends"])
+def test_group_startup_rechecks_all_engines_each_round(context: ClientContext, first_ends: bool) -> None:
+    # GIVEN a second workload that is pending in the first polling round
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+    reads: list[str] = []
+
+    def read(*, name: str, **kwargs: Any) -> dict[str, Any]:
+        reads.append(name)
+        resource = context.read(name=name, **kwargs)
+        if first_ends and context.now >= 1 and name == context.created[0]["metadata"]["name"]:
+            resource["status"]["engineStatus"] = "completed"
+        return resource
+
+    def list_results(**kwargs: Any) -> dict[str, Any]:
+        response = context.list_results(**kwargs)
+        second = context.created[1]["metadata"]["name"]
+        if context.now < 1 and kwargs["label_selector"] == f"chaosUID=uid-{second}":
+            return {"items": []}
+        return response
+
+    context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = read
+    context.backend.custom_objects_api.list_namespaced_custom_object.side_effect = list_results
+    chaos = context.chaos_client()
+
+    # WHEN polling again, THEN an earlier success is rechecked rather than cached
+    if first_ends:
+        with pytest.raises(RuntimeError, match="ended before stress could be observed"):
+            chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    else:
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    first, second = [engine["metadata"]["name"] for engine in context.created]
+    assert reads == ([first, second, first] if first_ends else [first, second, first, second])
+    assert context.now == 1
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+
+
+@pytest.mark.parametrize("startup_seconds", [0.5, 3.2])
+def test_fractional_startup_allowance_rounds_up(context: ClientContext, startup_seconds: float) -> None:
+    # GIVEN a sub-second startup allowance or a fractional number of seconds
+    chaos = LitmusChaosClient(
+        context.backend,
+        startup_timeout=timedelta(seconds=startup_seconds),
+        clock=lambda: context.now,
+        pause=context.pause,
+    )
+
+    # WHEN requesting stress, THEN whole-second Litmus durations cover the entire allowance
+    chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    settings = {
+        entry["name"]: entry["value"]
+        for entry in context.created[0]["spec"]["experiments"][0]["spec"]["components"]["env"]
+    }
+    assert 10 + startup_seconds <= int(settings["TOTAL_CHAOS_DURATION"]) < 11 + startup_seconds
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+
+
+@pytest.mark.parametrize("stage", ["setup", "submission"])
+def test_expired_startup_stops_remaining_submissions(
+    context: ClientContext, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    # GIVEN two workloads and the first setup or submission exhausting the startup budget
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+
+    def make_setup(backend: KubernetesBackend, namespace: str, name: str, owner: str) -> LitmusSetup:
+        setup = context.make_setup(backend, namespace, name, owner)
+        if stage == "setup":
+            context.setups[-1].prepare.side_effect = lambda _: context.pause(3)
+        return setup
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        if stage == "submission":
+            context.now += 3
+        return resource
+
+    monkeypatch.setattr(module, "LitmusSetup", make_setup)
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    chaos = context.chaos_client()
+
+    # WHEN startup times out, THEN no further Engine is submitted and partial resources remain owned
+    with pytest.raises(TimeoutError, match="startup"):
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    assert len(context.setups) == 1
+    assert len(context.created) == (1 if stage == "submission" else 0)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+
+
+def test_second_container_setup_failure_cleans_both_experiments(context: ClientContext) -> None:
+    # GIVEN two workloads and a setup error after the first Engine starts
+    context.pods[0].spec.containers.append(
+        client.V1Container(name="exporter", env=[client.V1EnvVar(name="JUJU_CONTAINER_NAME", value="exporter")])
+    )
+
+    def create(**kwargs: Any) -> dict[str, Any]:
+        resource = context.create(**kwargs)
+        context.prepare_error = RuntimeError("second container setup failed")
+        return resource
+
+    context.backend.custom_objects_api.create_namespaced_custom_object.side_effect = create
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
+
+    # WHEN the second setup fails, THEN teardown stops the first fault and cleans both setups.
+    with pytest.raises(RuntimeError, match="second container setup failed"):
+        meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
+    meta.cleanup_all()
+    assert len(context.created) == 1
+    assert len(context.setups) == 2
+    assert not context.engines
+    assert not context.results
+    for setup in context.setups:
+        setup.cleanup.assert_called_once()
 
 
 @pytest.mark.parametrize("duration", [timedelta(0), timedelta(seconds=-1), timedelta(milliseconds=1500)])
@@ -514,6 +785,219 @@ def test_startup_waits_for_injection_not_engine_creation(context: ClientContext)
     assert context.now == 3
     chaos.cleanup(MODEL, UNIT, "")
     assert not context.engines
+
+
+class TestCheckStress:
+    @pytest.mark.parametrize("completion_source", ["engine", "result"])
+    def test_completion_between_reads_preserves_oom_retry(self, context: ClientContext, completion_source: str) -> None:
+        # GIVEN completion becomes visible on the next API read after active injection
+        chaos = context.chaos_client()
+        chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        active_engine = deepcopy(next(iter(context.engines.values())))
+        completed_engine = deepcopy(active_engine)
+        active_results = {"items": deepcopy(context.results)}
+        completed_results = deepcopy(active_results)
+        if completion_source == "engine":
+            completed_engine["status"]["engineStatus"] = "completed"
+        else:
+            completed_results["items"][0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+        api = context.backend.custom_objects_api
+        api.get_namespaced_custom_object.reset_mock()
+        api.list_namespaced_custom_object.reset_mock()
+        api.get_namespaced_custom_object.side_effect = [active_engine, completed_engine, completed_engine]
+        api.list_namespaced_custom_object.side_effect = [active_results, completed_results, completed_results]
+
+        # WHEN observing, THEN each resource is read once and early completion remains retryable
+        chaos.check_stress(MODEL, UNIT)
+        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 1
+        with pytest.raises(StressEndedEarlyError):
+            chaos.check_stress(MODEL, UNIT)
+        chaos.check_stress(MODEL, UNIT, allow_completed=True)
+        assert api.get_namespaced_custom_object.call_count == api.list_namespaced_custom_object.call_count == 3
+
+    @dataclass(frozen=True)
+    class CompletionParams:
+        label: str
+        engine_status: str = "initialized"
+        phase: str | None = "Running"
+        target_status: str = "injected"
+        verdict: str = "Awaited"
+        stop_requested: bool = False
+        recheck: bool = False
+        accepted: bool = False
+
+    @pytest.mark.parametrize("operation", ["stress_cpu", "stress_memory"])
+    @pytest.mark.parametrize(
+        "params",
+        [
+            CompletionParams("running-missing-results", phase=None),
+            CompletionParams("completed-missing-results", engine_status="completed", phase=None, accepted=True),
+            CompletionParams("running-targeted", target_status="targeted"),
+            CompletionParams("completed-targeted", engine_status="completed", target_status="targeted", accepted=True),
+            CompletionParams("running-reverted", target_status="reverted"),
+            CompletionParams("completed-reverted", engine_status="completed", target_status="reverted", accepted=True),
+            CompletionParams("running-stopped-result", phase="Stopped"),
+            CompletionParams("completed-stopped-result", engine_status="completed", phase="Stopped"),
+            CompletionParams(
+                "recheck-completed",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Pass",
+                recheck=True,
+                accepted=True,
+            ),
+            CompletionParams(
+                "recheck-failed",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Fail",
+                recheck=True,
+            ),
+            CompletionParams(
+                "recheck-missing-results", engine_status="completed", phase=None, recheck=True, accepted=True
+            ),
+            CompletionParams(
+                "recheck-stop-request",
+                engine_status="completed",
+                phase="Completed",
+                target_status="reverted",
+                verdict="Pass",
+                stop_requested=True,
+                recheck=True,
+            ),
+            CompletionParams(
+                "recheck-result-lag",
+                engine_status="completed",
+                phase="Completed",
+                verdict="Pass",
+                recheck=True,
+                accepted=True,
+            ),
+        ],
+        ids=lambda params: params.label,
+    )
+    def test_completion_contract_through_meta(
+        self, context: ClientContext, operation: str, params: CompletionParams
+    ) -> None:
+        # GIVEN confirmed stress and completion, interruption or delayed result evidence
+        chaos = context.chaos_client()
+        meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
+        if operation == "stress_cpu":
+            meta.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30), scenario="moderate_pressure")
+        else:
+            meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+        meta.check_stress(MODEL, UNIT)
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+        engine = next(iter(context.engines.values()))
+        engine["status"]["engineStatus"] = params.engine_status
+        if params.stop_requested:
+            engine["spec"]["engineState"] = "stop"
+        result = context.results[0]
+        if params.phase is None:
+            context.results.clear()
+        else:
+            result["status"]["experimentStatus"] = {"phase": params.phase, "verdict": params.verdict}
+            result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.target_status}
+
+        # WHEN OOM is detected after an early-end error, retry with completion permitted
+        if params.recheck:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT)
+        # THEN completion permits result lag, but never interruption or missing active evidence
+        if params.accepted:
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+        else:
+            with pytest.raises(RuntimeError):
+                meta.check_stress(MODEL, UNIT, allow_completed=True)
+        assert len(chaos._created) == 1
+
+    @dataclass(frozen=True)
+    class Params:
+        change: str
+        message: str
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            Params("engine-missing", "requested stress duration"),
+            Params("result-missing", "no longer confirmed active"),
+            Params("completed", "requested stress duration"),
+            Params("stopped", "requested stress duration"),
+            Params("reverted", "requested stress duration"),
+            Params("targeted", "no longer confirmed active"),
+            Params("failed", "failed"),
+            Params("replaced", "was replaced"),
+            Params("owner", "Cannot verify ownership"),
+            Params("deleting", "requested stress duration"),
+            Params("stop-requested", "requested stress duration"),
+        ],
+        ids=lambda params: params.change,
+    )
+    def test_rejects_loss_of_active_stress(self, context: ClientContext, params: Params) -> None:
+        # GIVEN successfully injected CPU stress
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        chaos.check_stress(MODEL, UNIT)
+        engine = next(iter(context.engines.values()))
+        result = context.results[0]
+
+        # WHEN the experiment ends, disappears or loses identity
+        match params.change:
+            case "engine-missing":
+                context.engines.clear()
+            case "result-missing":
+                context.results.clear()
+            case "completed" | "stopped":
+                engine["status"]["engineStatus"] = params.change
+            case "reverted" | "targeted":
+                result["metadata"]["annotations"] = {"pod/postgresql-random-pod": params.change}
+            case "failed":
+                result["status"]["experimentStatus"] = {"phase": "Error", "verdict": "Error"}
+            case "replaced":
+                engine["metadata"]["uid"] = "replacement"
+            case "owner":
+                engine["metadata"]["annotations"].clear()
+            case "deleting":
+                engine["metadata"]["deletionTimestamp"] = "2026-10-05T00:00:00Z"
+            case "stop-requested":
+                engine["spec"]["engineState"] = "stop"
+
+        # THEN observation fails immediately and retains cleanup tracking
+        with pytest.raises(RuntimeError, match=params.message):
+            chaos.check_stress(MODEL, UNIT)
+        assert context.now == 0
+        assert len(chaos._created) == 1
+
+    def test_unknown_scope_and_cleaned_run_are_not_reported_active(self, context: ClientContext) -> None:
+        # GIVEN a successfully started run
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+
+        # WHEN checking unrelated scopes, THEN no active run is reported
+        for model, unit in [
+            (JujuModelHandle(controller="other", model=MODEL.model), UNIT),
+            (MODEL, "postgresql/1"),
+        ]:
+            with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+                chaos.check_stress(model, unit)
+        chaos.cleanup(MODEL, UNIT, "")
+        with pytest.raises(RuntimeError, match="No tracked Litmus stress"):
+            chaos.check_stress(MODEL, UNIT)
+
+    def test_api_error_is_not_hidden(self, context: ClientContext) -> None:
+        # GIVEN active stress followed by an observation API failure
+        chaos = context.chaos_client()
+        chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=30))
+        error = ApiException(status=503)
+        context.backend.custom_objects_api.get_namespaced_custom_object.side_effect = error
+
+        # WHEN observing, THEN the original failure propagates
+        with pytest.raises(ApiException) as exc_info:
+            chaos.check_stress(MODEL, UNIT)
+        assert exc_info.value is error
+        assert len(chaos._created) == 1
 
 
 @pytest.mark.parametrize("verdict", ["Fail", "Error"])
@@ -786,3 +1270,145 @@ def test_terminal_pods_are_not_stress_targets(context: ClientContext, phase: str
         with pytest.raises(RuntimeError, match="Expected one live Pod"):
             chaos.stress_cpu(MODEL, UNIT, 1, timedelta(seconds=10))
         assert not context.setups
+
+
+def test_check_stress_reports_error_before_cleanup(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    meta = MetaChaosClient([chaos], JujuBackendStub(), ResourceConstraintsClient())
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"reason": "helper exited"},
+    }
+    with pytest.raises(RuntimeError, match="helper exited"):
+        meta.check_stress(MODEL, UNIT)
+    assert context.engines
+    assert context.results
+    context.setups[0].cleanup.assert_not_called()
+    meta.cleanup_all()
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    assert not meta._cleanups
+
+
+@pytest.mark.parametrize("end", ["engine", "result", "reverted", "missing"])
+def test_observation_rejects_early_completion(context: ClientContext, end: str) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    name = context.created[0]["metadata"]["name"]
+    if end == "engine":
+        context.engines[name]["status"]["engineStatus"] = "completed"
+    elif end == "result":
+        context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    elif end == "reverted":
+        context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    else:
+        del context.engines[name]
+    with pytest.raises(RuntimeError, match="requested stress duration was not verified"):
+        chaos.check_stress(MODEL, UNIT)
+    assert context.setups
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_early_completion_preserves_original_error_and_retries_real_cleanup_failure(
+    context: ClientContext, cleanup_fails: bool
+) -> None:
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    cleanup_error = RuntimeError("permissions cleanup failed")
+    if cleanup_fails:
+        context.setups[0].cleanup.side_effect = cleanup_error
+
+    # Exercise the live test's observation/finally sequence with both real clients.
+    with pytest.raises(RuntimeError, match="requested stress duration was not verified"):
+        try:
+            meta.check_stress(MODEL, UNIT)
+        finally:
+            if cleanup_fails:
+                with pytest.raises(ChaosCleanupError) as error:
+                    meta.cleanup_all()
+                nested = error.value.errors[0]
+                assert isinstance(nested, ChaosCleanupError)
+                assert nested.errors == (cleanup_error,)
+                assert meta._cleanups
+            else:
+                meta.cleanup_all()
+
+    assert not context.engines
+    assert not context.results
+    if cleanup_fails:
+        context.setups[0].cleanup.side_effect = None
+        meta.cleanup_all()
+    assert not meta._cleanups
+    calls = context.setups[0].cleanup.call_count
+    meta.cleanup_all()
+    assert context.setups[0].cleanup.call_count == calls
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_confirmed_fault_allows_completion_but_not_experiment_errors(context: ClientContext, failed: bool) -> None:
+    meta = MetaChaosClient([context.chaos_client()], JujuBackendStub(), ResourceConstraintsClient())
+    meta.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Completed",
+        "verdict": "Error" if failed else "Pass",
+    }
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    if failed:
+        with pytest.raises(RuntimeError, match="experiment .* failed"):
+            meta.check_stress(MODEL, UNIT, allow_completed=True)
+    else:
+        meta.check_stress(MODEL, UNIT, allow_completed=True)
+    meta.cleanup_all()
+    assert not context.engines
+    assert not context.results
+    assert not meta._cleanups
+
+
+def test_failed_experiment_without_reversion_fails_cleanup_immediately_and_is_retryable(context: ClientContext) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.auto_revert = False
+    context.results[0]["status"]["experimentStatus"] = {
+        "phase": "Error",
+        "verdict": "Error",
+        "errorOutput": {"errorCode": "EXPERIMENT_ABORTED", "reason": "killed"},
+    }
+    for _ in range(2):
+        before = context.now
+        with pytest.raises(ChaosCleanupError) as error:
+            chaos.cleanup(MODEL, UNIT, "")
+        assert "reversion is unconfirmed" in str(error.value.errors[0])
+        assert "EXPERIMENT_ABORTED" in str(error.value.errors[0])
+        assert context.now == before
+        assert context.engines and context.results
+        context.setups[0].cleanup.assert_not_called()
+    # New explicit reversion evidence allows removal, but never erases the experiment failure.
+    context.results[0]["metadata"]["annotations"][f"pod/{context.pods[0].metadata.name}"] = "reverted"
+    with pytest.raises(ChaosCleanupError, match="cleanup operation"):
+        chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines
+    assert not context.results
+    context.setups[0].cleanup.assert_called_once()
+    chaos.cleanup(MODEL, UNIT, "")
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_recheck_early_completion_after_oom(context: ClientContext, failed: bool) -> None:
+    chaos = context.chaos_client()
+    chaos.stress_memory(MODEL, UNIT, 1, 2048, timedelta(seconds=30))
+    context.results[0]["status"]["experimentStatus"] = {"phase": "Completed", "verdict": "Pass"}
+    with pytest.raises(RuntimeError, match="requested stress duration"):
+        chaos.check_stress(MODEL, UNIT)
+    if failed:
+        context.results[0]["status"]["experimentStatus"]["verdict"] = "Fail"
+        with pytest.raises(RuntimeError, match="failed"):
+            chaos.check_stress(MODEL, UNIT, allow_completed=True)
+    else:
+        chaos.check_stress(MODEL, UNIT, allow_completed=True)
+    chaos.cleanup(MODEL, UNIT, "")
+    assert not context.engines

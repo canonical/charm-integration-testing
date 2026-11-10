@@ -2,12 +2,24 @@
 # See LICENSE file for licensing details.
 
 import pytest
+from pydantic import ValidationError
 
 from bundle_builder_x.charmhub_http import (
     CHARMHUB_API_URL_ENV,
     DEFAULT_CHARMHUB_API_URL,
     CharmhubHttpClient,
+    InfoResponse,
 )
+
+
+@pytest.mark.parametrize("base_fields", [{}, {"base": None}], ids=["missing", "null"])
+def test_channel_map_requires_base(base_fields: dict[str, None]) -> None:
+    # GIVEN a channel-map entry with a missing or null base
+    channel = {"name": "stable", "track": "latest", "risk": "stable", **base_fields}
+
+    # WHEN parsing the response, THEN invalid base metadata is rejected at the boundary
+    with pytest.raises(ValidationError, match="channel-map.0.channel.base"):
+        InfoResponse.model_validate({"channel-map": [{"channel": channel}]})
 
 
 class TestCharmhubHttpClient:

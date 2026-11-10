@@ -58,13 +58,13 @@ stays small and substrate-agnostic:
 
 **Collectors** (``resource_tracking.collectors``)
   A ``ResourceCollector`` gathers snapshots from one *substrate*. For each
-  registered Juju model handle ``KubernetesResourceCollector`` resolves a
-  Kubernetes client for that model's *controller* through
-  ``JujuBackend.get_kubernetes_client_for_controller``, so a cross-model-relation
-  run spanning several controllers -- each bootstrapped on its own cluster --
-  queries every model against the cluster it actually lives on. It then runs each
+  registered Juju model handle ``KubernetesResourceCollector`` asks the backend
+  which Kubernetes cloud the model uses, then resolves the shared client through
+  ``KubernetesClientRegistry``. A cross-model-relation run spanning several
+  controllers -- each bootstrapped on its own cluster -- therefore queries each
+  model against the cluster it actually lives on. The collector then runs each
   source and returns ``CollectedResources`` per model. Collection is best-effort:
-  a controller that is not Kubernetes-based (its client resolves to ``None``) or
+  a model that is not Kubernetes-backed (its client resolves to ``None``) or
   that cannot be reached contributes no snapshots rather than raising, and a
   transient per-kind list error drops only that one model's observation. Every
   observed snapshot is recorded uniformly; per-charm opt-outs are *not* applied

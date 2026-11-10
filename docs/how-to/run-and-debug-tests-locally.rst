@@ -76,6 +76,11 @@ Set up the k8s cloud
 
 It is also needed to setup the k8s cloud in juju. Do this with the following commands:
 
+Test controllers in the VM should use a 5 GB root disk (``root-disk=5G``) on
+both LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack bootstrap
+constraints in ``static/environments.yaml``. This is a controller bootstrap
+constraint, not a workload storage setting.
+
 .. code:: bash
 
    juju add-k8s ${K8S_CLOUD_NAME} --client
@@ -83,6 +88,20 @@ It is also needed to setup the k8s cloud in juju. Do this with the following com
    juju add-model ${MODEL_NAME} \
      --config "logging-config=DEBUG" \
      --config="update-status-hook-interval=2m"
+
+When the test suite bootstraps controllers instead, pass
+``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
+``scripts/run-tests.sh``. For a separate neighbor controller, also pass
+``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
+These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
+When reproducing a specific execution, preserve any other bootstrap constraints
+from that execution's environment.
+
+For a manually bootstrapped LXD test controller, use the same sizing:
+
+.. code:: bash
+
+   juju bootstrap localhost lxd-test-controller --bootstrap-constraints root-disk=5G
 
 Chaos tools
 ~~~~~~~~~~~
@@ -130,6 +149,13 @@ API, execution and cleanup errors fail the test. Cleanup retains resources for m
 investigation when their recorded creation identifier cannot be verified.
 
 Litmus uses pinned Docker Hub images and waits for confirmed stress injection.
+Its configured startup timeout covers all workload Engine submissions and
+injection checks together (five minutes by default). Each Engine receives that
+allowance in addition to the requested stress duration so early workloads remain
+active throughout startup of the others. Cleanup stops any remaining injection.
+An in-flight synchronous API call can return after the deadline; its late result
+fails startup before the next poll or final active-stress check. The startup
+deadline does not cancel in-flight requests, which have separate network timeouts.
 Cleanup allows graceful termination and requires reversion evidence for observed
 injections before deleting results and permissions; otherwise, it reports an
 error and retains them for investigation.
@@ -137,6 +163,35 @@ error and retains them for investigation.
 Shared resources remain managed by the infrastructure repositories. Use
 approved disposable workloads for experiments; the shared operator and
 privileged helpers do not provide isolation between tenants.
+
+Moderate memory stress
+~~~~~~~~~~~~~~~~~~~~~~
+
+``test_live_memory_stress_moderate`` requires Kubernetes and Litmus or Chaos
+Mesh with ``StressChaos``. It skips without memory stress support or passing
+simple validators for every selected target and neighbor endpoint. If any selected
+endpoint has no passing simple validator, the test skips before injecting stress.
+
+Defaults are one worker, 128 MB and five minutes. Per-charm settings
+``memory_moderate_pressure_workers``, ``memory_moderate_pressure_size_mb`` and
+``memory_moderate_pressure_duration_seconds`` override them. Tune these values
+for the workload; container memory limits are unchanged.
+
+After confirmed injection, the test repeatedly checks experiment status,
+workload health and simple validators. Error/blocked workloads, disconnected
+agents, lost validation coverage, experiment errors and early completion fail.
+Non-idle states are allowed. Checks are sampled, so brief failures may be missed.
+The observation budget starts after injection is confirmed, with a two-minute
+allowance for the last validation round. Backend startup limits are separate;
+early completion still fails the active-stress checks. Calls exceeding the
+observation execution budget fail when they return.
+
+Cleanup runs on failure too; failed cleanup remains registered for retry.
+Chaos Mesh memory cleanup waits for resource deletion. After successful
+observation and cleanup, a separate fifteen-minute timeout applies to the
+active/idle wait, followed by simple validation without additional restarts.
+These post-cleanup checks are outside the stress execution budget.
+Select ``-k test_live_memory_stress_moderate`` to run it.
 
 Install the repository dependencies
 -----------------------------------
@@ -238,29 +293,83 @@ The ``--juju-model-config`` file is optional. If omitted, tests create the model
 without extra configuration; if provided, pass a JSON object of string keys and values
 matching Juju model configuration options.
 
-Total CPU stress
-----------------
+Moderate CPU pressure
+---------------------
+
+``test_live_cpu_stress_moderate`` requires Kubernetes and Litmus or Chaos Mesh.
+It stresses one target unit's workload containers and skips if CPU stress support
+or passing simple validators for any selected target or neighbor endpoint are
+unavailable. Each selected endpoint must have at least one passing simple result
+before injection.
+
+Defaults are one worker and five minutes, overridden by
+``cpu_moderate_pressure_workers`` and ``cpu_moderate_pressure_duration_seconds``.
+Tune workers for the charm's CPU allocation; one worker is not universally
+moderate pressure.
+
+After initial active/idle and simple validation, the test confirms injection
+and repeatedly checks stress status, workload health and simple validators.
+The full observation period and its two-minute final-round allowance start
+after injection is confirmed; Litmus startup has its own bounded allowance.
+Error/blocked workloads, disconnected agents, experiment errors and lost
+validation coverage fail. Non-idle states are allowed during stress; sampled
+checks may miss brief failures.
+
+Cleanup runs on failure too. After successful observation and cleanup, target
+and neighbor models must recover to active/idle within fifteen minutes and pass
+simple validation without additional restarts. Cleanup failures fail the test.
+Select ``-k test_live_cpu_stress_moderate`` to run it.
+
+Total memory stress
+-------------------
+
+``test_live_memory_stress_total`` supports StatefulSet-backed Kubernetes workloads
+and skips when no memory stress tool is available. It applies a temporary ``1Gi``
+workload limit and stresses one unit using Litmus or Chaos Mesh.
+
+Defaults are one worker, ``2048`` MB and ``600`` seconds of observation after
+confirmed injection. Per-charm ``memory_exhaustion_workers``,
+``memory_exhaustion_size_mb`` and ``memory_exhaustion_duration_seconds`` override
+these values. The experiment receives an additional two minutes after settings
+are resolved. Set ``memory_exhaustion_limit`` to a positive Kubernetes memory
+quantity (for example, ``2Gi``) to override the ``1Gi`` default; stress size must
+cover the configured limit.
+
+A new out-of-memory termination in the target container after confirmed injection
+ends observation early, even before restart. Neither termination nor a status
+change is required. Experiment errors, early completion without this evidence
+and cleanup failures fail the test.
+
+After cleanup, all bundle models must reach active/idle within fifteen minutes
+and pass available deep validators while the limit remains applied. Missing or
+skipped validators provide no functional coverage. Original memory settings are
+restored on success or failure, with a final idle check on success.
+
+Sustained CPU stress
+--------------------
 
 ``test_live_cpu_stress_total`` requires Kubernetes and Litmus or the Chaos Mesh
-``StressChaos`` CRD. It skips when no CPU stress tool is available. The test requires
-one workload container and a StatefulSet using ``RollingUpdate`` with partition zero.
+``StressChaos`` CRD. It skips when no CPU stress tool is available. The historical
+test name is retained for existing test selections.
 
-It temporarily limits the workload container to one CPU, waits for all bundle
-units to become active/idle, then starts four stress workers. Stress is held for
+It waits for all bundle units to become active/idle, then starts four stress
+workers in each Juju workload container of one target unit, concurrently.
+The charm-agent container is excluded. It does not change charm configuration,
+CPU requests, or CPU limits, and does not trigger a rollout. Without an existing
+CPU limit, this generates load rather than guaranteeing CPU saturation; it does
+not increase the worker count to exhaust the entire node. Stress is held for
 ``cpu_stress_duration`` (ten minutes by default); a non-active transition is not
 required. Chaos Mesh waits up to one minute for the controller to confirm target
 selection and injection before the hold period starts. A startup timeout fails
 the test and still triggers cleanup. The requested experiment duration includes
-two extra minutes to allow for startup and polling.
+two extra minutes to allow for startup and polling. Injection must still be active
+at the end of the observation period.
 After cleanup, all bundle units, including a cross-model neighbor,
 must become active/idle within ``cpu_recovery_timeout`` (fifteen minutes by
 default). Available deep interface validators run for the target application and
-its test neighbor, including validators implemented on the consumer side,
-before restoring the CPU limit, so a restore rollout cannot mask failed recovery.
+its test neighbor, including validators implemented on the consumer side.
 When no validator applies, logs report the missing validation coverage; only
 status recovery is checked. Deployment validation supplies the initial baseline.
-Original CPU requests and limits are restored even after failure or skip.
-A StatefulSet patch configures the limit; it does not replace a missing chaos tool.
 
 For PostgreSQL functional coverage, use ``postgresql-k8s:database`` against
 ``data-integrator:postgresql``. The ``postgresql_client`` validator runs on

@@ -17,11 +17,15 @@
 #                              the signing key). Falls back to the host's
 #                              `gh auth token` if not set.
 #   SANDBOX_VAR_GITHUB_TOKEN   Fine-grained PAT for gh CLI inside the VM.
-#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Override for Copilot AI auth inside the
-#                              VM (default: gh auth token)
+#                              Falls back to the host's `gh auth token` only
+#                              with your consent; if declined, the sandbox
+#                              continues without gh authentication.
+#   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Token for Copilot AI auth inside the VM.
+#                              Same consent-gated fallback; if declined, Copilot
+#                              is started without a token.
 #   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT               VM-side mount path (default: /project)
-#   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
+#   SANDBOX_VAR_COPILOT_MODEL   Optional Copilot model override
 #   SANDBOX_VAR_<NAME>          Any var with this prefix is passed into the VM
 #                              as <NAME> (prefix stripped), e.g.
 #                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
@@ -29,6 +33,14 @@
 #   SANDBOX_COPILOT_SETTINGS_FILE  Copilot settings JSON file for each run
 
 set -euo pipefail
+
+case "$(uname -m)" in
+    x86_64|amd64) ;;
+    *)
+        echo "NOTICE: the sandbox is only supported on amd64 hosts (detected: $(uname -m)). Exiting." >&2
+        exit 1
+        ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -50,9 +62,9 @@ fi
 
 VM_NAME="${SANDBOX_VM:-charm-qa-sandbox}"
 VM_MOUNT="${SANDBOX_MOUNT:-/project}"
-VM_CPUS="${SANDBOX_CPUS:-4}"
-VM_MEMORY="${SANDBOX_MEMORY:-8G}"
-VM_DISK="${SANDBOX_DISK:-40G}"
+VM_CPUS="${SANDBOX_CPUS:-8}"
+VM_MEMORY="${SANDBOX_MEMORY:-16G}"
+VM_DISK="${SANDBOX_DISK:-80G}"
 [[ "$VM_MOUNT" = /* ]] || { echo "ERROR: SANDBOX_MOUNT must be an absolute path: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *"'"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain single quotes: $VM_MOUNT" >&2; exit 1; }
 [[ "$VM_MOUNT" != *":"* ]] || { echo "ERROR: SANDBOX_MOUNT must not contain colons: $VM_MOUNT" >&2; exit 1; }
@@ -74,10 +86,9 @@ _is_mounted() {
 
 # Ingest every host env var prefixed with SANDBOX_VAR_, strip the prefix, and
 # append "NAME=value" entries onto the array named by $1 (nameref) for
-# passthrough into the VM via `multipass exec ... env ...`.
+# passthrough into the VM via _vm_exec_with_env.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
-# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN, COPILOT_MODEL, and COPILOT_HOME are
-# excluded here since callers handle them explicitly.
+# Credential variables and COPILOT_HOME are handled explicitly by the callers.
 _collect_sandbox_vars() {
     local -n _target="$1"
     local _var _name
@@ -85,10 +96,186 @@ _collect_sandbox_vars() {
         [[ "$_var" == SANDBOX_VAR_?* ]] || continue
         _name="${_var#SANDBOX_VAR_}"
         case "$_name" in
-            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL|COPILOT_HOME) continue ;;
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_HOME) continue ;;
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
+}
+
+_vm_temp_files=()
+_vm_temp_dirs=()
+
+_cleanup_vm_temp_paths() {
+    local _status=$?
+    if [ "${#_vm_temp_files[@]}" -gt 0 ]; then
+        if ! multipass exec "$VM_NAME" -- rm -f -- "${_vm_temp_files[@]}"; then
+            echo "WARNING: could not remove temporary files inside '$VM_NAME'." >&2
+        fi
+    fi
+    if [ "${#_vm_temp_dirs[@]}" -gt 0 ]; then
+        if ! multipass exec "$VM_NAME" -- rm -rf -- "${_vm_temp_dirs[@]}"; then
+            echo "WARNING: could not remove temporary directories inside '$VM_NAME'." >&2
+        fi
+    fi
+    return "$_status"
+}
+
+# Ensure temporary files created inside the VM are cleaned up on exit.
+# This trap will invoke _cleanup_vm_temp_paths when the script exits, regardless
+# of whether it exits normally or due to an error.
+trap _cleanup_vm_temp_paths EXIT
+
+# Transfer shell-quoted exports over stdin in a separate call so the session
+# keeps its terminal. Only the private file's path is passed in argv.
+_vm_exec_with_env() {
+    local -n _env="$1"
+    shift
+    local _env_file
+    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX)
+    _vm_temp_files+=("$_env_file")
+    printf 'export %q\n' "${_env[@]}" \
+        | multipass exec "$VM_NAME" -- bash -c 'cat > "$1"' bash "$_env_file"
+    multipass exec "$VM_NAME" -- bash -c '
+        set -e
+        source "$1"
+        rm -f -- "$1"
+        shift
+        exec "$@"
+    ' bash "$_env_file" "$@"
+}
+
+# True if the VM is running and its gh CLI already holds a valid login (e.g.
+# from a previous `up`/`run`). GH_TOKEN/GITHUB_TOKEN are unset so only stored
+# credentials are checked.
+_vm_gh_logged_in() {
+    [ "$(_vm_state)" = "Running" ] || return 1
+    multipass exec "$VM_NAME" -- bash -lc '
+        unset GH_TOKEN GITHUB_TOKEN
+        gh auth status --hostname github.com
+    ' &>/dev/null
+}
+
+# Resolved GitHub credentials, populated by _require_github_auth.
+VM_GH_TOKEN=""
+COPILOT_TOKEN=""
+
+# The host's `gh auth token` carries whatever scopes the host login has (often
+# broad: repo, workflow, admin:org, ...). Do not hand it to the sandbox without
+# the user's explicit consent. Args: the sandbox consumers that would receive it.
+# Returns non-zero if the user declines.
+_confirm_host_token_use() {
+    [ "$#" -gt 0 ] || return 0
+
+    local _bold="" _reset=""
+    if [ -t 2 ]; then _bold=$'\033[1m'; _reset=$'\033[0m'; fi
+
+    {
+        echo "${_bold}WARNING: no dedicated token is set for:${_reset}"
+        printf '  - %s\n' "$@"
+        echo ""
+        echo "You can pass your host 'gh auth token' into the sandbox instead. It"
+        echo "carries every permission your host gh login has. Anything running in the VM,"
+        echo "including the AI agent, can use it to act as you on GitHub. gh also stores it"
+        echo "in the VM (~/.config/gh/hosts.yml) until it is removed."
+        echo ""
+        if [[ "$_gh_token" == ghp_* ]]; then
+            echo "NOTE: your host token is a classic PAT (ghp_), which Copilot CLI does not"
+            echo "support. gh will work, but Copilot will still ask you to log in. Use a"
+            echo "fine-grained PAT with the 'Copilot Requests' permission"
+            echo "(SANDBOX_VAR_COPILOT_GITHUB_TOKEN) or an OAuth token from 'gh auth login'."
+            echo ""
+        fi
+        echo "If you decline, the sandbox still starts, but without GitHub authentication"
+        echo "for the items above."
+        echo ""
+        echo "You are responsible for your own actions. If you pass your host token without"
+        echo "configuring $DEV_DIR/.env, you accept these risks. To avoid them, set"
+        echo "SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN there to"
+        echo "fine-grained PATs limited to the repositories you need (Contents: read,"
+        echo "Pull requests: read and write)."
+        echo ""
+    } >&2
+
+    if [ ! -t 0 ]; then
+        echo "No terminal to ask for consent; continuing without GitHub credentials for the items above." >&2
+        return 1
+    fi
+
+    local _answer
+    read -r -p "Pass your host gh token into the sandbox? (N continues without it) [y/N] " _answer
+    case "$_answer" in
+        [yY]|[yY][eE][sS]) ;;
+        *)
+            echo "Continuing without GitHub credentials for the consumers above." >&2
+            echo "Set the dedicated tokens in $DEV_DIR/.env to enable them." >&2
+            return 1
+            ;;
+    esac
+}
+
+# Resolve GitHub credentials. They are optional: without them the sandbox still
+# runs, but gh and Copilot inside the VM are unauthenticated. The host's
+# `gh auth token` is only used with the user's consent. With --gh-only, the
+# Copilot token is not resolved (for commands that don't run Copilot).
+_require_github_auth() {
+    local _gh_only=false
+    [ "${1:-}" = "--gh-only" ] && _gh_only=true
+
+    VM_GH_TOKEN="${SANDBOX_VAR_GITHUB_TOKEN:-}"
+    COPILOT_TOKEN="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}"
+
+    local _unset=()
+    if [ -z "$VM_GH_TOKEN" ]; then
+        if _vm_gh_logged_in; then
+            echo "==> gh inside the VM is already authenticated; keeping the existing login."
+        else
+            _unset+=("gh CLI inside the VM")
+        fi
+    fi
+    if [ "$_gh_only" = "false" ] && [ -z "$COPILOT_TOKEN" ]; then
+        _unset+=("Copilot CLI inside the VM")
+    fi
+    [ "${#_unset[@]}" -gt 0 ] || return 0
+
+    if [ -z "$_gh_token" ]; then
+        {
+            echo "WARNING: no token is set and the host has no 'gh auth token' for:"
+            printf '  - %s\n' "${_unset[@]}"
+            echo "Continuing without GitHub authentication for the items above. To enable it,"
+            echo "set SANDBOX_VAR_GITHUB_TOKEN and SANDBOX_VAR_COPILOT_GITHUB_TOKEN in $DEV_DIR/.env."
+        } >&2
+        return 0
+    fi
+
+if _confirm_host_token_use "${_unset[@]}"; then
+        if [ -z "$VM_GH_TOKEN" ] && [[ " ${_unset[*]} " == *" gh CLI inside the VM "* ]]; then
+            VM_GH_TOKEN="$_gh_token"
+        fi
+        if [ "$_gh_only" = "false" ]; then
+            [ -n "$COPILOT_TOKEN" ] || COPILOT_TOKEN="$_gh_token"
+        fi
+    fi
+}
+
+# Log the VM's gh CLI in with the resolved token. Piped over stdin so the token
+# never lands in the VM's process list; GH_TOKEN/GITHUB_TOKEN are unset because
+# `gh auth login` refuses to run while they are present.
+_vm_gh_auth_login() {
+    if [ -z "$VM_GH_TOKEN" ]; then
+        echo "==> No gh token provided; leaving gh authentication inside the VM unchanged."
+        return 0
+    fi
+    echo "==> Authenticating gh inside the VM..."
+    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc '
+        unset GH_TOKEN GITHUB_TOKEN
+        gh auth login --hostname github.com --with-token
+    '; then
+        {
+            echo "ERROR: 'gh auth login' failed inside the VM; the token is likely invalid or expired."
+            echo "       Set SANDBOX_VAR_GITHUB_TOKEN in $DEV_DIR/.env, or re-run 'gh auth login' on the host."
+        } >&2
+        exit 1
+    fi
 }
 
 _usage() {
@@ -106,14 +293,15 @@ Usage:
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
   SANDBOX_MOUNT          VM-side mount path (default: /project)
-  SANDBOX_CPUS           vCPU count for new VMs (default: 4)
-  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 8G)
-  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 40G)
+  SANDBOX_CPUS           vCPU count for new VMs (default: 8)
+  SANDBOX_MEMORY         RAM for new VMs, e.g. 8G or 16G (default: 16G)
+  SANDBOX_DISK           Disk size for new VMs, e.g. 40G or 80G (default: 80G)
   GITHUB_TOKEN           Fine-grained PAT for host-side GitHub API access
                          when provisioning the VM (default: gh auth token)
   SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
-  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (default: gh auth token)
-  SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
+                         (falls back to host gh token only with consent)
+  SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (same fallback)
+  SANDBOX_VAR_COPILOT_MODEL  Optional Copilot model override
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
@@ -127,9 +315,9 @@ Inside an interactive session use skill slash commands:
   /setup-lxd             Set up LXD substrate
 
 VM resource flags (only applied when the VM does not yet exist):
-  --cpus N               vCPU count (default: SANDBOX_CPUS or 4)
-  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 8G)
-  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 40G)
+  --cpus N               vCPU count (default: SANDBOX_CPUS or 8)
+  --memory SIZE          RAM, e.g. 16G (default: SANDBOX_MEMORY or 16G)
+  --disk SIZE            Disk, e.g. 80G (default: SANDBOX_DISK or 80G)
 EOF
 }
 
@@ -174,6 +362,8 @@ _cmd_up() {
             *) break ;;
         esac
     done
+
+    _require_github_auth
 
     echo "==> Checking VM state..."
     state=$(_vm_state)
@@ -268,6 +458,8 @@ _cmd_up() {
         fi
     "
 
+    _vm_gh_auth_login
+
     # Trust all folders in Copilot so it never prompts for folder confirmation.
     echo "==> Configuring Copilot trusted folders..."
     multipass exec "$VM_NAME" -- bash -lc "
@@ -289,7 +481,7 @@ JSON
 
     _ENV_FILE="$DEV_DIR/.env"
     if ! grep -q '^SANDBOX_SIGNING_KEY=' "$_ENV_FILE" 2>/dev/null; then
-        echo "==> Generating VM signing key..."
+        echo "==> No SANDBOX_SIGNING_KEY found in $_ENV_FILE; generating a VM signing key..."
         _tmp_key=$(mktemp)
         rm -f "$_tmp_key"
         ssh-keygen -t ed25519 -C "sandbox-vm-signing" -N "" -f "$_tmp_key" -q
@@ -362,15 +554,16 @@ JSON
         _list_ok=1
         _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) || _list_ok=0
 
-        # Listing signing keys needs the 'admin:ssh_signing_key' scope. If the
-        # gh token lacks it, offer to grant it via `gh auth refresh` (with the
-        # user's consent) and retry rather than bailing out.
+        # Listing signing keys needs at least 'read:ssh_signing_key'; registering
+        # needs 'write:ssh_signing_key', which also covers reading. Request write
+        # (not admin) via `gh auth refresh`, with the user's consent, and retry.
         if [ "$_list_ok" -eq 0 ] && [ -t 0 ] \
-            && grep -Eqi 'admin:ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
-            echo "==> Your gh token is missing the 'admin:ssh_signing_key' scope, which is"
-            echo "    needed to verify/register the VM signing key with GitHub."
+            && grep -Eqi 'ssh_signing_key|missing.*scope|HTTP 40[34]' <<< "$_existing_keys"; then
+            echo "==> Your gh token is missing the 'write:ssh_signing_key' scope. It is needed to"
+            echo "    check whether the VM signing key is already registered with your GitHub"
+            echo "    account, and to register it if not. No other permissions are requested."
             read -r -p "  Grant this scope now via 'gh auth refresh'? [y/N] " _refresh_list
-            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s admin:ssh_signing_key; then
+            if [[ "$_refresh_list" =~ ^[Yy]$ ]] && gh auth refresh -h github.com -s write:ssh_signing_key; then
                 _existing_keys=$(gh api user/ssh_signing_keys --jq '.[].key' 2>&1) && _list_ok=1
             fi
         fi
@@ -381,7 +574,11 @@ JSON
         elif grep -qF "$(awk '{print $1, $2}' <<< "$_signing_pub")" <<< "$_existing_keys"; then
             echo "==> Signing key already registered with GitHub."
         elif [ -t 0 ]; then
-            read -r -p "  Register this signing key with GitHub now via the API? [y/N] " _register_key
+            echo "==> Since you did not provide a signing key (SANDBOX_SIGNING_KEY in $_ENV_FILE),"
+            echo "    we can create and register one for you. It signs commits the AI agent"
+            echo "    makes on your behalf so GitHub shows them as Verified."
+            echo "    Skip this if you don't intend to author commits in the sandbox."
+            read -r -p "  Register the generated signing key with your GitHub account? [y/N] " _register_key
             if [[ "$_register_key" =~ ^[Yy]$ ]]; then
                 _register_err=$(gh api user/ssh_signing_keys -f "title=sandbox-vm-signing ($VM_NAME)" -f "key=$_signing_pub" 2>&1 >/dev/null)
                 _register_rc=$?
@@ -418,7 +615,7 @@ JSON
         fi
     else
         echo "==> Warning: 'gh auth token' returned nothing."
-        echo "==>   Run: gh auth login -s admin:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
+        echo "==>   Run: gh auth login -s write:ssh_signing_key   on this machine, then re-run scripts/sandbox.sh up."
     fi
 
     echo ""
@@ -463,10 +660,12 @@ _cmd_shell() {
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
     fi
+    _require_github_auth --gh-only
+    _vm_gh_auth_login
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
-    exec multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+    _vm_exec_with_env _env_args bash -lc "
         cd '$VM_MOUNT' && exec bash -l
     "
 }
@@ -475,9 +674,6 @@ _cmd_shell() {
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
-    COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
-    _copilot_token="${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-$_gh_token}"
-
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -509,6 +705,8 @@ EOF
     done
 
     TASK="${*:-}"
+
+    _require_github_auth
 
     # Resolve and validate config file paths before any VM work.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
@@ -546,23 +744,22 @@ EOF
         exit 1
     fi
 
+    _vm_gh_auth_login
+
     # All prerequisites met. Copy run-specific config into the VM now.
     _mcp_vm_file=""
     _copilot_home=""
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
-        # Install a preliminary trap for the MCP file in case PROMPT_FILE creation fails.
-        # shellcheck disable=SC2064
-        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true" EXIT
+        _vm_temp_files+=("$_mcp_vm_file")
         # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
         cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
     if [ -n "${SANDBOX_COPILOT_SETTINGS_FILE:-}" ]; then
         echo "==> Copying Copilot settings into a temporary COPILOT_HOME..."
         _copilot_home=$(multipass exec "$VM_NAME" -- bash -c "mktemp -d /tmp/copilot-home-XXXXXX")
-        # shellcheck disable=SC2064
-        trap "multipass exec '$VM_NAME' -- rm -f '$_mcp_vm_file' 2>/dev/null || true; multipass exec '$VM_NAME' -- rm -rf '$_copilot_home' 2>/dev/null || true" EXIT
+        _vm_temp_dirs+=("$_copilot_home")
         multipass exec "$VM_NAME" -- bash -c \
             "for file in config.json mcp-config.json; do
                 if [ -f \"\$HOME/.copilot/\$file\" ]; then cp \"\$HOME/.copilot/\$file\" \"$_copilot_home/\$file\"; fi
@@ -572,9 +769,7 @@ EOF
     fi
 
     PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    # Update the EXIT trap to cover PROMPT_FILE as well.
-    # shellcheck disable=SC2064
-    trap "multipass exec '$VM_NAME' -- rm -f '$PROMPT_FILE' '$_mcp_vm_file' 2>/dev/null || true; [ -z '$_copilot_home' ] || multipass exec '$VM_NAME' -- rm -rf '$_copilot_home' 2>/dev/null || true" EXIT
+    _vm_temp_files+=("$PROMPT_FILE")
 
     {
         cat "$PROJECT_DIR/.agents/skills/system.md"
@@ -586,36 +781,36 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         [ -n "$_copilot_home" ] && _env_args+=("COPILOT_HOME=$_copilot_home")
         _collect_sandbox_vars _env_args
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _vm_exec_with_env _env_args bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
-            [ -z \"\${COPILOT_HOME:-}\" ] || rm -rf \"\$COPILOT_HOME\"
             exit \$_ec
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_GITHUB_TOKEN=$_copilot_token" "COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("PROJECT_ROOT=$VM_MOUNT")
+        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
         [ -n "$_copilot_home" ] && _env_args+=("COPILOT_HOME=$_copilot_home")
         _collect_sandbox_vars _env_args
-        multipass exec "$VM_NAME" -- env "${_env_args[@]}" bash -lc "
+        _vm_exec_with_env _env_args bash -lc "
                 cd '$VM_MOUNT'
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
             copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
-            [ -z \"\${COPILOT_HOME:-}\" ] || rm -rf \"\$COPILOT_HOME\"
             exit \$_ec
         "
     fi

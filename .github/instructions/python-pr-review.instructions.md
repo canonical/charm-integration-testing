@@ -22,14 +22,20 @@ Flag cross-layer violations: e.g. a data model importing a client, or a backend 
 
 **`JujuBackend` (ABC)** expresses what an ideal Juju would natively provide. It should contain no workarounds, compensating logic, or implementation detail. If Juju were a perfect API, every method here would map cleanly onto it. Flag any PR that adds workaround behaviour directly to the ABC.
 
-**`JujuClient`** is the single place for high-level orchestration and all logging. It delegates raw operations to the backend and calls extensions in sequence. Logging in a backend or extension is a style violation — it belongs in `JujuClient`.
+**`JujuClient`** owns high-level orchestration and its logging. It delegates raw operations to the backend and calls extensions in sequence. Extensions may log their own lifecycle work using an injected logger, as existing extensions do. Keep backend operation logging in `JujuClient`.
+
+Keep facade APIs in domain terms. `JujuClient` callers should work with Juju concepts and
+operations, not backend implementation details such as Kubernetes workload instances. Keep
+single-workflow implementation helpers private unless they represent a useful caller-facing
+operation. Tests should verify public behavior without making higher-level test code depend on
+those implementation details. Internal helpers may delegate to the backend when they centralize
+client-level logging or lifecycle behavior; avoid pass-through wrappers without such a responsibility.
 
 **Extensions (`JujuExtension` subclasses)** are wired exclusively through `JujuClient`. They must never be invoked directly from a backend or from test code. Flag any direct extension call that bypasses `JujuClient`.
 
-**`JubilantBackend`** is the active `JujuBackend` implementation. It inherits `JujuCmdBackend` but `JujuCmdBackend` is deprecated. When a new or changed behaviour is needed:
-- Add or override it in `JubilantBackend`.
-- Delete the corresponding method from `JujuCmdBackend` if it is no longer needed there.
-- Do not modify `JujuCmdBackend` to add new functionality.
+**`JubilantBackend`** is the active implementation and inherits `JujuBackend` directly.
+`JujuCmdBackend` is deprecated; do not introduce dependencies on it or add new
+functionality there. Implement new or changed behaviour in `JubilantBackend`.
 
 `JubilantBackend` is also permitted to depend on other infrastructure (e.g. `KubernetesClient`) when Juju itself cannot fulfil the operation. This is an intentional escape hatch for gaps in the Juju API, but it belongs in `JubilantBackend`, not in the ABC.
 

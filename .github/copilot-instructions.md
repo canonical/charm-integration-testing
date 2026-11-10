@@ -5,6 +5,7 @@ Prioritize coding style and maintainability in Python changes.
 
 ## Development Workflow
 
+- Before implementing or reviewing repository changes, read this file and any matching files under `.github/instructions/`.
 - After making any significant code change (new functionality, bug fixes, refactors spanning more than a trivial edit), run the repository linter (`scripts/lint.sh`, or the specific `ruff`/`mypy` commands for the affected package) before considering the work done. Fix any issues the linter reports in the changed code.
 - When opening a pull request, follow the structure defined in `.github/pull_request_template.md` (Description, Resolved issues, Documentation, Tests) rather than an ad hoc format.
 
@@ -12,6 +13,11 @@ Prioritize coding style and maintainability in Python changes.
 
 These principles come from recurring, substantive criticism on past PRs (not routine style nits).
 Apply them both when writing code and when reviewing it.
+
+### 0. Coordinate related work before changing shared surfaces
+- Before adding or changing a shared API, helper, extension hook, or backend operation, check related tickets and active PRs for overlapping work. Compare their diffs, not only their titles or descriptions.
+- If another PR is already changing the same surface, avoid implementing a second version with different semantics. Reuse the existing work, or coordinate a single API, behavior, and ownership boundary across the PRs.
+- Keep independently deliverable test cases separate where possible, but consolidate shared infrastructure rather than duplicating it.
 
 ### 1. Fixes must be evidence-based, not speculative
 - Ground implementation and review conclusions in observable evidence: a reproduced failure,
@@ -30,6 +36,16 @@ Apply them both when writing code and when reviewing it.
 - Timeout increases, retries, and relaxed conditions are not acceptable default responses to a
   flaky or hard-to-reproduce failure. Require evidence that they address the actual cause rather
   than masking it.
+
+- Treat exceptions from orchestration calls as potentially post-mutation: a backend action may
+  complete before a later lifecycle hook raises, and Juju operations may still be settling.
+  Inspect actual state before cleanup; preserve required capacity until disruptive operations
+  are known to have settled.
+- For infrastructure tests, assert the full success condition, including idle/convergence,
+  workload readiness, and relevant endpoint validation. Confirm validators are enabled before
+  claiming endpoint health; skipped validators do not prove that health.
+- Report live-test outcomes by the phase reached. A failure during bootstrap or deployment is
+  not evidence that the operation under test passed or failed.
 
 ### 2. Fix problems at the correct architectural layer
 - Fix the root cause at its source instead of compensating downstream (e.g. a charm-metadata/listing
@@ -70,6 +86,11 @@ Apply them both when writing code and when reviewing it.
 ### 9. Avoid low-value verbosity
 - Do not add large explanatory comments or docstrings whose value is unclear. Prefer concise comments
   that explain "why", not restatements of "what" the code already makes obvious.
+
+### 10. Avoid scattered or stale caches
+- Before caching derived or state-dependent data, identify its authoritative source, required lifetime, and invalidation events. Prefer looking it up from the owning backend/client at the point of use when practical.
+- Do not maintain the same cache or derived mapping independently across fixtures, extensions, and callers. This spreads invalidation responsibility and makes it unclear which copy is authoritative; let the subsystem that owns the data own any necessary cache.
+- If caching is justified by measured cost or consistency requirements, keep it within the smallest operation that needs it, key it by stable resource identity, and make refresh or invalidation behavior explicit. Do not retain model-, controller-, cluster-, or application-derived values across topology changes such as migration or teardown without a clear refresh mechanism.
 
 ## Review Goal
 
@@ -125,11 +146,12 @@ After findings, include:
   - Prefer resolving such values on demand from the authoritative source (e.g.
     `JujuBackend`/`juju_client.backend`) at the point of use, rather than precomputing a
     mapping in a fixture and passing the mapping around.
+  - Apply the same rule to derived model metadata such as architecture: a fixture-level value
+    inferred from the initial target/neighbor model can be wrong for another or migrated model.
   - If resolution is expensive enough to need caching, scope the cache to a single
     operation (e.g. one `collect()` call) instead of the whole test session, and cache by
     controller/identity rather than derived values like filesystem paths (which can differ
     for equivalent inputs, e.g. relative vs. absolute vs. `~`-expanded paths).
-  - Example precedent: `KubernetesResourceCollector` resolves Kubernetes clients per
-    controller via `JujuBackend.get_kubernetes_client_for_controller()` inside `collect()`,
-    instead of a `kubernetes_clients_by_controller` fixture that pre-builds and caches
-    clients for the session.
+  - Example precedent: `KubernetesResourceCollector` resolves each model's Kubernetes cloud
+    through the backend and obtains its shared client from `KubernetesClientRegistry` inside
+    `collect()`, instead of a fixture that pre-builds a client mapping for the session.

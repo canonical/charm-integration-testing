@@ -9,7 +9,7 @@
 #
 # After this script completes, register the cloud and bootstrap a controller:
 #   juju add-k8s local-k8s --client
-#   juju bootstrap local-k8s <controller-name>
+#   juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G
 #   juju add-model <model-name>
 
 set -euo pipefail
@@ -149,7 +149,7 @@ bash "$(dirname "${BASH_SOURCE[0]}")/setup-chaos-mesh.sh" /home/ubuntu/k8s.yaml
 echo ""
 echo "k8s substrate ready."
 echo "  Next steps:"
-echo "    juju bootstrap local-k8s <controller-name>"
+echo "    juju bootstrap local-k8s <controller-name> --bootstrap-constraints root-disk=5G"
 echo "    juju add-model <model-name>"
 echo ""
 echo "  The kubeconfig is at /home/ubuntu/k8s.yaml"

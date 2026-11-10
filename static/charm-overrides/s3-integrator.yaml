@@ -1,2 +1,4 @@
 ---
+# Source: https://github.com/canonical/s3-integrator/blob/main/metadata.yaml
+# Charm metadata documents Kubernetes support, which Charmhub deployable_on omits.
 platforms: [kubernetes, machine]

@@ -1,21 +1,25 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 from juju import JujuModelHandle, JujuValidationError
-from juju.client import JujuClient
+from juju.client import JujuClient, _JujuCleanupError
 from juju.extension import JujuExtension
 from juju.models import (
+    JujuApplicationHealth,
     JujuApplicationInfo,
     JujuIntegrationApplication,
     PersistenceKey,
 )
 from juju.version import JujuVersion
+from kubernetes_client import KubernetesClient
 
 from validators.base.validator import PersistenceState, ValidationCheck, ValidationResult
 
@@ -66,6 +70,16 @@ class BackendStub(NullJujuBackend):
 
 
 @dataclass
+class HealthBackendStub(NullJujuBackend):
+    health: JujuApplicationHealth
+    calls: list[tuple[JujuModelHandle, str]] = field(default_factory=list)
+
+    def application_health(self, model: JujuModelHandle, application: str) -> JujuApplicationHealth:
+        self.calls.append((model, application))
+        return self.health
+
+
+@dataclass
 class KillControllerBackendStub(NullJujuBackend):
     """Backend stub that records kill_controller calls."""
 
@@ -101,6 +115,81 @@ class WaitIdleBackendStub(NullJujuBackend):
         self.calls.append((models, timeout, count, strict_timeout))
 
 
+@dataclass
+class UnitOperationsBackendStub(NullJujuBackend):
+    units: list[str] = field(default_factory=list)
+    removed_units: list[str] = field(default_factory=list)
+    scaled_applications: list[tuple[JujuModelHandle, str, int]] = field(default_factory=list)
+
+    def scale_application(self, model: JujuModelHandle, application: str, num: int) -> None:
+        self.scaled_applications.append((model, application, num))
+
+    def application_units(self, model: JujuModelHandle, application: str) -> list[str]:
+        return list(self.units)
+
+    def remove_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.removed_units.append(unit)
+        self.units.remove(unit)
+
+
+@dataclass
+class WorkloadPodBackendStub(UnitOperationsBackendStub):
+    kubernetes_client: KubernetesClient | None = None
+
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return True
+
+    def delete_workload_instance(self, model: JujuModelHandle, instance_name: str) -> None:
+        if self.kubernetes_client is None:
+            raise RuntimeError("No Kubernetes client configured.")
+        self.kubernetes_client.delete_pod(namespace=model.model, pod_name=instance_name)
+
+
+class RestartFollowerBackendStub(NullJujuBackend):
+    def restart_follower(self, model: JujuModelHandle, application: str, timeout: timedelta) -> str:
+        return f"{application}/1"
+
+
+class RebootUnitBackendStub(NullJujuBackend):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.units: list[tuple[JujuModelHandle, str]] = []
+        self.available_units: list[tuple[JujuModelHandle, str, timedelta | None]] = []
+
+    def reboot_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.units.append((model, unit))
+        if self.error is not None:
+            raise self.error
+
+    def wait_for_unit_available(self, model: JujuModelHandle, unit: str, timeout: timedelta | None = None) -> None:
+        self.available_units.append((model, unit, timeout))
+
+
+class LegacySSHBackendStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[JujuModelHandle, str, str]] = []
+
+    def ssh(self, model: JujuModelHandle, application: str, command: str) -> str:
+        self.calls.append((model, application, command))
+        return "output"
+
+
+class RestartLifecycleExtension(JujuExtension):
+    def __init__(self) -> None:
+        self.restarted_units: list[tuple[JujuModelHandle, str]] = []
+        self.deleted_pods: list[tuple[JujuModelHandle, str]] = []
+        self.scaled_applications: list[tuple[JujuModelHandle, str, int | None]] = []
+
+    def post_scale(self, model: JujuModelHandle, application: str, num: int | None) -> None:
+        self.scaled_applications.append((model, application, num))
+
+    def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+        self.restarted_units.append((model, unit))
+
+    def post_delete_pod(self, model: JujuModelHandle, pod_name: str) -> None:
+        self.deleted_pods.append((model, pod_name))
+
+
 class ExtensionStub(JujuExtension):
     """Extension that returns configurable validate results."""
 
@@ -109,6 +198,15 @@ class ExtensionStub(JujuExtension):
 
     def post_validate(self, model: JujuModelHandle, application: str, level: str) -> dict[str, list[ValidationResult]]:
         return self.results.get(application, {})
+
+    def post_validate_excluding_units(
+        self, model: JujuModelHandle, application: str, level: str, excluded_units: set[str]
+    ) -> dict[str, list[ValidationResult]]:
+        return {
+            unit: results
+            for unit, results in self.post_validate(model, application, level).items()
+            if unit not in excluded_units
+        }
 
 
 class PersistenceExtensionStub(JujuExtension):
@@ -285,6 +383,224 @@ class TestJujuClientMultiModelIdleForPeriod:
         assert backend.calls == []
 
 
+class TestApplicationHealth:
+    @dataclass(frozen=True)
+    class Params:
+        label: str
+        health: JujuApplicationHealth
+        error: str | None = "Unhealthy application"
+
+    cases = [
+        Params("active", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "idle"}), None),
+        Params("busy", JujuApplicationHealth("waiting", {"app/2": "maintenance"}, {"app/2": "executing"}), None),
+        Params(
+            "maintenance", JujuApplicationHealth("maintenance", {"app/2": "maintenance"}, {"app/2": "executing"}), None
+        ),
+        Params("waiting", JujuApplicationHealth("waiting", {"app/2": "waiting"}, {"app/2": "idle"}), None),
+        Params("app-error", JujuApplicationHealth("error", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("app-blocked", JujuApplicationHealth("blocked", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("unit-error", JujuApplicationHealth("active", {"app/2": "error"}, {"app/2": "idle"})),
+        Params("unit-blocked", JujuApplicationHealth("active", {"app/2": "blocked"}, {"app/2": "idle"})),
+        Params("app-terminated", JujuApplicationHealth("terminated", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("unit-terminated", JujuApplicationHealth("active", {"app/2": "terminated"}, {"app/2": "idle"})),
+        Params("agent-error", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "error"})),
+        Params("agent-lost", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "lost"})),
+        Params("agent-down", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": "down"})),
+        Params("unknown", JujuApplicationHealth("unknown", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("empty-status", JujuApplicationHealth("", {"app/2": "active"}, {"app/2": "idle"})),
+        Params("empty-unit-status", JujuApplicationHealth("active", {"app/2": ""}, {"app/2": "idle"})),
+        Params("empty-agent-status", JujuApplicationHealth("active", {"app/2": "active"}, {"app/2": ""})),
+        Params("no-units", JujuApplicationHealth("active", {}, {}), "Incomplete unit health"),
+        Params("missing-agent", JujuApplicationHealth("active", {"app/2": "active"}, {}), "Incomplete unit health"),
+        Params(
+            "different-agent",
+            JujuApplicationHealth("active", {"app/2": "active"}, {"app/3": "idle"}),
+            "Incomplete unit health",
+        ),
+        Params(
+            "second-unit-blocked",
+            JujuApplicationHealth(
+                "active", {"app/2": "active", "app/3": "blocked"}, {"app/2": "idle", "app/3": "idle"}
+            ),
+        ),
+    ]
+
+    @pytest.mark.parametrize("params", cases, ids=lambda params: params.label)
+    def test_health_snapshot(self, params: Params) -> None:
+        # GIVEN a typed backend snapshot, without an idle-wait implementation
+        backend = HealthBackendStub(params.health)
+        client = JujuClient(backend, logging.getLogger(__name__))
+        model = JujuModelHandle(controller="ctrl", model="model")
+
+        # WHEN checking health, THEN bad states fail but non-idle healthy transitions are permitted
+        if params.error is None:
+            client.check_application_health(model, "app")
+        else:
+            with pytest.raises(RuntimeError, match=params.error):
+                client.check_application_health(model, "app")
+        assert backend.calls == [(model, "app")]
+
+    def test_default_method_preserves_existing_backends(self) -> None:
+        # GIVEN a pre-existing concrete backend that does not implement health
+        backend = NullJujuBackend()
+
+        # WHEN health is requested, THEN it fails explicitly rather than preventing instantiation
+        with pytest.raises(NotImplementedError):
+            backend.application_health(JujuModelHandle(controller="ctrl", model="model"), "app")
+
+
+class TestJujuClientUnitOperations:
+    def test_scaling_passes_application_and_target_to_post_scale_once(self) -> None:
+        # GIVEN an extension recording scale callbacks
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = UnitOperationsBackendStub()
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, logging.getLogger(__name__), [extension])
+
+        # WHEN the client dispatches an application-specific scale request
+        client.scale_application("app", 3, model)
+
+        # THEN the backend and hook each receive the application and requested target once
+        assert backend.scaled_applications == [(model, "app", 3)]
+        assert extension.scaled_applications == [(model, "app", 3)]
+
+    def test_lists_application_units_and_removes_specific_unit(self) -> None:
+        # GIVEN a backend with two units
+        backend = UnitOperationsBackendStub(units=["app/0", "app/1"])
+        client = JujuClient(backend, LoggerStub(), [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        # WHEN listing and removing a unit
+        units = client.application_units("app", model)
+        client.remove_unit("app/0", model)
+
+        # THEN unit lookup and removal are delegated through the client
+        assert units == ["app/0", "app/1"]
+        assert backend.removed_units == ["app/0"]
+        assert backend.units == ["app/1"]
+
+    def test_removing_a_unit_runs_the_post_scale_hook_once(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(UnitOperationsBackendStub(units=["app/0"]), LoggerStub(), [extension])  # type: ignore[arg-type]
+
+        client.remove_unit("app/0", model)
+
+        assert extension.scaled_applications == [(model, "app", None)]
+
+
+class TestJujuClientWorkloadInstanceOperations:
+    def test_multiple_cleanup_errors_are_preserved(self) -> None:
+        errors = [RuntimeError("first cleanup failed"), TimeoutError("second cleanup failed")]
+
+        with pytest.raises(_JujuCleanupError) as error:
+            JujuClient._raise_cleanup_errors(errors)
+
+        assert error.value.errors == tuple(errors)
+        assert error.value.__cause__ is errors[0]
+
+    def test_delete_pod_runs_juju_lifecycle_hook_after_deletion(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        kubernetes_backend = MagicMock()
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        backend = WorkloadPodBackendStub(kubernetes_client=kubernetes_client)
+        client = JujuClient(
+            backend,
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        client.delete_pod(model, "pod-0")
+
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.assert_called_once_with(name="pod-0", namespace="model")
+        assert extension.deleted_pods == [(model, "pod-0")]
+
+    def test_delete_pod_does_not_run_hook_when_deletion_fails(self) -> None:
+        kubernetes_backend = MagicMock()
+        kubernetes_backend.core_v1_api.delete_namespaced_pod.side_effect = RuntimeError("delete failed")
+        kubernetes_client = KubernetesClient(kubernetes_backend)
+        extension = RestartLifecycleExtension()
+        model = JujuModelHandle(controller="controller", model="model")
+        client = JujuClient(
+            WorkloadPodBackendStub(kubernetes_client=kubernetes_client),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            client.delete_pod(model, "pod-0")
+
+        assert extension.deleted_pods == []
+
+    def test_follower_restart_runs_juju_lifecycle_hook(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        extension = RestartLifecycleExtension()
+        client = JujuClient(
+            RestartFollowerBackendStub(),
+            cast(logging.Logger, LoggerStub()),
+            extensions=[extension],
+        )
+
+        assert client.restart_follower("app", model, timedelta(minutes=1)) == "app/1"
+
+        assert extension.restarted_units == [(model, "app/1")]
+
+    def test_restart_completion_dispatches_hook_before_waiting_for_availability(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = RebootUnitBackendStub()
+
+        class OrderingExtension(RestartLifecycleExtension):
+            def post_restart_unit(self, model: JujuModelHandle, unit: str) -> None:
+                assert backend.available_units == []
+                super().post_restart_unit(model, unit)
+
+        extension = OrderingExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == []
+
+        client.wait_for_unit_restart_completion("app/1", model, timedelta(minutes=1))
+
+        assert backend.available_units == [(model, "app/1", timedelta(minutes=1))]
+        assert extension.restarted_units == [(model, "app/1")]
+
+    def test_reboot_unit_does_not_run_hook_when_backend_reboot_fails(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend_error = RuntimeError("reboot failed")
+        backend = RebootUnitBackendStub(error=backend_error)
+        extension = RestartLifecycleExtension()
+        client = JujuClient(backend, cast(logging.Logger, LoggerStub()), [extension])
+
+        with pytest.raises(RuntimeError, match="reboot failed"):
+            client.reboot_unit("app/1", model)
+
+        assert backend.units == [(model, "app/1")]
+        assert extension.restarted_units == []
+
+    def test_ssh_without_timeout_supports_legacy_backend_signature(self) -> None:
+        model = JujuModelHandle(controller="controller", model="model")
+        backend = LegacySSHBackendStub()
+        client = JujuClient(cast(Any, backend), cast(logging.Logger, LoggerStub()))
+
+        assert client.ssh("app/1", "true", model) == "output"
+        assert backend.calls == [(model, "app/1", "true")]
+
+    def test_rotate_application_units_rejects_applications_without_units(self) -> None:
+        backend = UnitOperationsBackendStub()
+        logger = LoggerStub()
+        client = JujuClient(backend, logger, [])  # type: ignore[arg-type]
+        model = JujuModelHandle(controller="controller", model="model")
+
+        with pytest.raises(ValueError, match="it has no units"):
+            client.rotate_application_units("app", model, timeout=timedelta(minutes=5))
+
+        assert logger.infos == ["Rotating all units for app.", "Getting the units for app."]
+
+
 class TestJujuValidationError:
     class TestMessage:
         def test_single_unit_single_failure(self) -> None:
@@ -328,7 +644,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model(self._model())
+        assert client.validate_model(self._model()) == {}
 
     def test_does_not_raise_when_all_pass(self, logger: LoggerStub) -> None:
         # GIVEN one application whose backend validation returns PASS
@@ -355,6 +671,45 @@ class TestJujuClientValidateModel:
         assert set(error.value.failed_validations) == {"target/0"}
         # With the extension removed, the unrelated backend failure is excluded.
         self._client(logger, backend).validate_model(self._model(), level="deep", applications=["target"])
+
+    def test_excluded_units_are_skipped_from_backend_and_extension_results(self, logger: LoggerStub) -> None:
+        backend = BackendStub(
+            app_list={"myapp": _app_info()},
+            validate_results={"myapp": {"myapp/0": [_pass()], "myapp/1": [_fail()]}},
+        )
+        extension = ExtensionStub({"myapp": {"myapp/0": [_pass()], "myapp/1": [_fail()]}})
+        client = self._client(logger, backend, [extension])
+
+        results = client.validate_model(self._model(), applications=["myapp"], excluded_units={"myapp/1"})
+
+        assert set(results) == {"myapp/0"}
+        assert results["myapp/0"] == [_pass(), _pass()]
+
+    def test_excluded_units_require_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class ExtensionWithoutExclusion(JujuExtension):
+            def post_validate(
+                self, model: JujuModelHandle, application: str, level: str
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [ExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_validate_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], excluded_units={"myapp/1"})
+
+    def test_excluded_units_require_persistence_extensions_to_opt_into_safe_execution(self, logger: LoggerStub) -> None:
+        class PersistenceExtensionWithoutExclusion(JujuExtension):
+            def post_persistence(
+                self, model: JujuModelHandle, application: str, persistence: str | None = None
+            ) -> dict[str, list[ValidationResult]]:
+                return {"myapp/0": [_pass()]}
+
+        backend = BackendStub(app_list={"myapp": _app_info()})
+        client = self._client(logger, backend, [PersistenceExtensionWithoutExclusion()])
+
+        with pytest.raises(NotImplementedError, match="must implement post_persistence_excluding_units"):
+            client.validate_model(self._model(), applications=["myapp"], level=None, excluded_units={"myapp/1"})
 
     def test_raises_when_backend_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN the backend returns a FAIL result
@@ -498,7 +853,7 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend)
 
         # WHEN / THEN (no exception)
-        client.validate_model(self._model())
+        assert client.validate_model(self._model()) == {"myapp/0": [_skipped(), _skipped("metrics")]}
 
         # THEN the unit with all skipped results is skipped with a log
         assert any("Validation skipped for unit 'myapp/0'" in info for info in logger.infos)
@@ -536,10 +891,33 @@ class TestJujuClientValidateModel:
         client = self._client(logger, backend, [extension])
 
         # WHEN
-        client.validate_model(self._model(), level=None)
+        assert client.validate_model(self._model(), level=None) == {}
 
         # THEN the extension was invoked with the application
         assert extension.calls == [("myapp", "prepare", {})]
+
+    def test_returns_functional_results_without_persistence_or_aliasing(self, logger: LoggerStub) -> None:
+        # GIVEN backend and extension checks on multiple units and applications, plus persistence
+        backend_results = {"myapp/2": [_pass()]}
+        backend = BackendStub(
+            app_list={"myapp": _app_info(), "other": _app_info()},
+            validate_results={"myapp": backend_results, "other": {"other/3": [_pass("other")]}},
+        )
+        functional = ExtensionStub({"myapp": {"myapp/2": [_skipped("metrics")], "myapp/4": [_pass()]}})
+        persistence = PersistenceExtensionStub({"myapp": {"myapp/2": [_pass("canary")]}})
+        client = self._client(logger, backend, [functional, persistence])
+
+        # WHEN validating through the facade
+        results = client.validate_model(self._model())
+
+        # THEN functional checks are returned without persistence checks or shared result lists
+        assert results == {
+            "myapp/2": [_pass(), _skipped("metrics")],
+            "myapp/4": [_pass()],
+            "other/3": [_pass("other")],
+        }
+        results["myapp/2"].clear()
+        assert backend_results == {"myapp/2": [_pass()]}
 
     def test_raises_when_persistence_extension_returns_fail(self, logger: LoggerStub) -> None:
         # GIVEN a persistence extension that reports a FAIL
@@ -551,6 +929,29 @@ class TestJujuClientValidateModel:
         with pytest.raises(JujuValidationError) as exc_info:
             client.validate_model(self._model(), level=None)
         assert "myapp/0" in exc_info.value.failed_validations
+
+    @pytest.mark.parametrize("source", ["backend", "extension", "persistence"])
+    @pytest.mark.parametrize("selected", [False, True])
+    def test_endpoint_filter_preserves_selected_failures_and_persistence(
+        self, logger: LoggerStub, source: str, selected: bool
+    ) -> None:
+        # GIVEN a failure from each validation source, on a selected or unrelated endpoint
+        endpoint = "db" if selected else "metrics"
+        failure = {"myapp": {"myapp/0": [_fail(endpoint)]}}
+        backend = BackendStub(app_list={"myapp": _app_info()}, validate_results=failure if source == "backend" else {})
+        extensions: list[JujuExtension] = []
+        if source == "extension":
+            extensions.append(ExtensionStub(failure))
+        elif source == "persistence":
+            extensions.append(PersistenceExtensionStub(failure))
+        client = self._client(logger, backend, extensions)
+
+        # WHEN filtering functional results, THEN persistence failures are never filtered
+        if selected or source == "persistence":
+            with pytest.raises(JujuValidationError):
+                client.validate_model(self._model(), endpoints={("myapp", "db")})
+        else:
+            assert client.validate_model(self._model(), endpoints={("myapp", "db")}) == {"myapp/0": []}
 
     def test_persistence_extension_owns_its_state(self, logger: LoggerStub) -> None:
         # GIVEN an extension that adds a new state entry on prepare
@@ -1222,6 +1623,58 @@ class DeployBundlesBackendStub(NullJujuBackend):
 
 
 class TestDeployBundles:
+    @pytest.mark.parametrize("single", [True, False])
+    @pytest.mark.parametrize("fail", [True, False])
+    def test_prerequisites_run_before_any_bundle_deployment(self, tmp_path: Path, single: bool, fail: bool) -> None:
+        backend = DeployBundlesBackendStub()
+        model = JujuModelHandle(controller="ctrl", model="model")
+        bundle = tmp_path / "bundle.yaml"
+        bundle.write_text("applications: {}")
+
+        class Prerequisite(JujuExtension):
+            def pre_deploy(self, target: JujuModelHandle, bundle_path: Path) -> None:
+                assert target == model
+                assert bundle_path == bundle
+                assert backend.calls == []
+                backend.calls.append(("prepare", model.uri))
+                if fail:
+                    raise TimeoutError("Prerequisite unavailable")
+
+        client = _client(backend, [Prerequisite()])
+
+        def deploy() -> None:
+            if single:
+                client.deploy_bundle_file(str(bundle), model)
+            else:
+                client.deploy_bundles([(bundle, model)], tmp_path)
+
+        if fail:
+            with pytest.raises(TimeoutError, match="Prerequisite unavailable"):
+                deploy()
+            assert backend.calls == [("prepare", model.uri)]
+        else:
+            deploy()
+            assert backend.calls[0] == ("prepare", model.uri)
+            assert backend.calls[1][0] == "deploy"
+
+    def test_prepares_each_bundle_with_its_model(self, tmp_path: Path) -> None:
+        backend = DeployBundlesBackendStub()
+        models = [JujuModelHandle(controller="ctrl", model=name) for name in ("target", "migrated")]
+        paths = [tmp_path / f"bundle-{i}.yaml" for i in range(3)]
+        for path in paths:
+            path.write_text("applications: {}")
+        prepared: list[tuple[JujuModelHandle, Path]] = []
+
+        class Prerequisite(JujuExtension):
+            def pre_deploy(self, model: JujuModelHandle, bundle: Path) -> None:
+                assert backend.calls == []
+                prepared.append((model, bundle))
+
+        _client(backend, [Prerequisite()]).deploy_bundles(
+            [(paths[0], models[0]), (paths[1], models[1]), (paths[2], models[0])], tmp_path
+        )
+        assert prepared == [(models[0], paths[0]), (models[1], paths[1]), (models[0], paths[2])]
+
     def test_juju3_deploys_full_bundle_in_phase2(self, tmp_path: Path) -> None:
         bundle_path = tmp_path / "bundle.yaml"
         bundle_path.write_text(_BUNDLE_WITH_OFFERS)
@@ -1372,6 +1825,20 @@ class TestDeployBundles:
         ]
 
 
+def test_validate_model_returns_functional_results_only() -> None:
+    backend = BackendStub(
+        app_list={"app": JujuApplicationInfo(charm="app", revision=1)}, validate_results={"app": {"app/0": [_pass()]}}
+    )
+    extension = ExtensionStub({"app": {"app/0": [_pass(endpoint="other")]}})
+    persistence = PersistenceExtensionStub({"app": {"app/0": [_pass(endpoint="canary")]}})
+    client = _client(backend, [extension, persistence])
+    model = JujuModelHandle(controller="controller", model="model")
+    results = client.validate_model(model)
+    assert [result.endpoint for result in results["app/0"]] == ["db", "other"]
+    assert persistence.calls
+    assert client.validate_model(model, level=None) == {}
+
+
 # ---------------------------------------------------------------------------
 # TestJujuClientAddModelCloud
 # ---------------------------------------------------------------------------
@@ -1395,6 +1862,44 @@ class AddModelCloudBackendStub(NullJujuBackend):
         self.register_cloud_calls.append(cloud)
 
 
+class BootstrapBackendStub(NullJujuBackend):
+    """Backend stub that records the bootstrap configuration it is given."""
+
+    def __init__(self) -> None:
+        self.bootstrap_configurations: list[dict[str, str]] = []
+
+    def bootstrap_controller(
+        self,
+        cloud: str,
+        controller: str,
+        controller_constraints: dict[str, str],
+        bootstrap_configuration: dict[str, str],
+        metadata_source: Path | None = None,
+        agent_version: str | None = None,
+    ) -> None:
+        self.bootstrap_configurations.append(bootstrap_configuration)
+
+
+class TestJujuClientBootstrapConfiguration:
+    def test_bootstrap_applies_extension_configuration(self) -> None:
+        # GIVEN an extension adding a bootstrap config key
+        class ConfigExtension(JujuExtension):
+            def pre_bootstrap_controller(
+                self, cloud: str, controller: str, bootstrap_configuration: dict[str, str]
+            ) -> dict[str, str]:
+                return {**bootstrap_configuration, "extra": f"{cloud}-{controller}"}
+
+        backend = BootstrapBackendStub()
+
+        # WHEN a controller is bootstrapped
+        _client(backend, [ConfigExtension()]).bootstrap_controller(
+            cloud="lxd", controller="ctrl", controller_constraints={}, bootstrap_configuration={"foo": "bar"}
+        )
+
+        # THEN the backend receives the extended configuration
+        assert backend.bootstrap_configurations == [{"foo": "bar", "extra": "lxd-ctrl"}]
+
+
 class TestJujuClientAddModelCloud:
     """Verify add_model passes cloud through to backend and add_cloud delegates."""
 
@@ -1409,6 +1914,48 @@ class TestJujuClientAddModelCloud:
         _client(backend).add_model(controller="ctrl-a", model="model-a", model_config={})
 
         assert backend.add_model_calls == [("ctrl-a", "model-a", {}, None)]
+
+    def test_add_model_applies_extension_model_config(self) -> None:
+        # GIVEN an extension adding a model config key
+        class ConfigExtension(JujuExtension):
+            def __init__(self) -> None:
+                self.post_add_model_calls: list[tuple[str, str, str | None]] = []
+
+            def pre_add_model(
+                self, controller: str, model: str, model_config: dict[str, str], cloud: str | None
+            ) -> dict[str, str]:
+                return {**model_config, "extra": cloud or "default"}
+
+            def post_add_model_with_cloud(self, controller: str, model: str, cloud: str | None) -> None:
+                self.post_add_model_calls.append((controller, model, cloud))
+
+        backend = AddModelCloudBackendStub()
+        extension = ConfigExtension()
+        client = _client(backend, [extension])
+
+        # WHEN a model is added
+        client.add_model(controller="ctrl-a", model="model-a", model_config={"foo": "bar"}, cloud="k8s-cloud")
+
+        # THEN both hooks and the backend receive the model cloud
+        assert backend.add_model_calls == [("ctrl-a", "model-a", {"foo": "bar", "extra": "k8s-cloud"}, "k8s-cloud")]
+        assert extension.post_add_model_calls == [("ctrl-a", "model-a", "k8s-cloud")]
+
+    def test_add_model_preserves_legacy_post_add_model_hook(self) -> None:
+        class LegacyExtension(JujuExtension):
+            def __init__(self) -> None:
+                self.post_add_model_calls: list[tuple[str, str]] = []
+
+            def post_add_model(self, controller: str, model: str) -> None:
+                self.post_add_model_calls.append((controller, model))
+
+        backend = AddModelCloudBackendStub()
+        extension = LegacyExtension()
+
+        _client(backend, [extension]).add_model(
+            controller="ctrl-a", model="model-a", model_config={}, cloud="k8s-cloud"
+        )
+
+        assert extension.post_add_model_calls == [("ctrl-a", "model-a")]
 
     def test_add_cloud_delegates_to_backend(self) -> None:
         backend = AddModelCloudBackendStub()

@@ -20,9 +20,10 @@ charm deployments.
    This is idempotent. Each step checks whether it has already been done.
    Wait for it to complete before proceeding.
 
-2. Bootstrap a Juju controller. Use a descriptive controller name:
+2. Bootstrap a Juju controller. Use a descriptive controller name and a 5 GB
+   root disk for test controllers in the VM:
    ```
-   juju bootstrap localhost lxd-ctrl
+   juju bootstrap localhost lxd-ctrl --bootstrap-constraints root-disk=5G
    ```
 
 3. Create a working model:

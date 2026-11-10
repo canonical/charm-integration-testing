@@ -1,0 +1,16 @@
+---
+# Source: https://github.com/canonical/airbyte-k8s-operator
+# All published tracks share these endpoints and config; this default block covers them.
+overrides:
+  - configs:
+      storage-type: [MINIO, S3]
+    requires:
+      object-storage:
+        optional: true  # src/charm.py::_validate requires this only in MINIO mode
+      s3-parameters:
+        optional: true  # src/charm.py::_validate requires this only in S3 mode
+    constraints:
+      # Exactly one backend is wired, and its relation selects the matching mode.
+      - 'len(endpoint[object-storage]) + len(endpoint[s3-parameters]) == 1'
+      - 'bool(endpoint[object-storage]) => config[storage-type] == "MINIO"'
+      - 'bool(endpoint[s3-parameters]) => config[storage-type] == "S3"'

@@ -232,22 +232,26 @@ def _without_skipped(
 
 def calculate_discrepancies(
     observations: Iterable[ResourceObservation],
-    skips: Mapping[tuple[str, str, str], frozenset[str]] | None = None,
 ) -> list[ModelResourceDiscrepancy]:
     """Diff each state's later observations against its first (baseline) visit.
 
-    ``skips`` maps each ``(controller, model, application)`` to the resource kinds
-    it opts out of tracking.  Skips are scoped to the model rather than the charm
-    track because all of a model's states share one namespace, so a resource
-    retained by any track exercised in the model can appear in any state.  The
-    map is applied uniformly to every observation, so a skipped kind is excluded
-    identically across every visit.
+    Application skips are attached to observations and combined by
+    ``(controller, model, application)``. Skips are scoped to the model rather
+    than the charm track because all of a model's states share one namespace, so
+    a resource retained by any track exercised in the model can appear in any
+    state. The combined map is applied uniformly to every observation.
 
     Baselines are keyed by ``(state, controller, model)`` so two same-named models
     on different controllers (a CMR run) are never conflated into a single
     baseline.
     """
-    resolved_skips: Mapping[tuple[str, str, str], frozenset[str]] = skips if skips is not None else {}
+    observations = tuple(observations)
+    resolved_skips: dict[tuple[str, str, str], frozenset[str]] = {}
+    for observation in observations:
+        for application, resource_types in observation.skips_by_application:
+            key = (observation.controller, observation.model, application)
+            resolved_skips[key] = resolved_skips.get(key, frozenset()) | resource_types
+
     baselines: dict[tuple[State, str, str], frozenset[ResourceSnapshot]] = {}
     discrepancies: list[ModelResourceDiscrepancy] = []
 

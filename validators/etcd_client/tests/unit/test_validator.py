@@ -31,6 +31,7 @@ from validators.test_utils.stubs import (
     ApplicationStub,
     RelationRoleStub,
     RelationStub,
+    UnitStub,
 )
 
 
@@ -39,10 +40,12 @@ def _make_validator(
     endpoint: str = "etcd-client",
     role: RelationRoleStub = RelationRoleStub.requires,
     local_databag: dict[str, str] | None = None,
+    leader: bool = True,
 ) -> EtcdClientValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=0, app=app, data={app: databag})
     stub_charm = make_charm_from_relation(relation, interface_name="etcd_client", role=role)
+    stub_charm.unit = UnitStub(leader=leader)
     if local_databag is not None:
         relation.data[stub_charm.app] = local_databag
     return EtcdClientValidator(cast(ops.CharmBase, stub_charm), cast(ops.Relation, relation))
@@ -54,10 +57,12 @@ def _make_persistence_validator(
     role: RelationRoleStub = RelationRoleStub.requires,
     local_databag: dict[str, str] | None = None,
     relation_id: int = 0,
+    leader: bool = True,
 ) -> EtcdClientPersistenceValidator:
     app = ApplicationStub()
     relation = RelationStub(name=endpoint, id=relation_id, app=app, data={app: databag})
     stub_charm = make_charm_from_relation(relation, interface_name="etcd_client", role=role)
+    stub_charm.unit = UnitStub(leader=leader)
     if local_databag is not None:
         relation.data[stub_charm.app] = local_databag
     return EtcdClientPersistenceValidator(cast(ops.CharmBase, stub_charm), cast(ops.Relation, relation))
@@ -301,6 +306,15 @@ class TestEtcdClientValidatorRole:
 
         assert result.status == "SKIPPED"
         assert result.error is not None
+
+    def test_deep_requires_skips_non_leader_before_local_app_databag_access(self) -> None:
+        validator = _make_validator(VALID_REQUIRER_DATABAG, leader=False)
+
+        with patch.object(validator, "_local_databag", side_effect=AssertionError("local app databag read")):
+            result = validator.validate(level="deep")
+
+        assert result.status == "SKIPPED"
+        assert "leader" in (result.error or "")
 
     def test_returns_error_when_no_remote_app(self) -> None:
         app = ApplicationStub()
@@ -2165,6 +2179,22 @@ def _provision_client_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -
 
 
 class TestEtcdClientPersistenceValidatorRole:
+    @pytest.mark.parametrize("operation", ["prepare", "checkpoint", "cleanup"])
+    def test_local_app_databag_operations_are_not_applicable_on_non_leader(self, operation: str) -> None:
+        validator = _make_persistence_validator(
+            VALID_REQUIRER_DATABAG,
+            local_databag=VALID_LOCAL_REQUIRER_DATABAG,
+            leader=False,
+        )
+
+        with pytest.raises(PersistenceNotApplicable, match="leader"):
+            if operation == "prepare":
+                validator.prepare()
+            elif operation == "checkpoint":
+                validator.checkpoint(PersistenceState(id=1, ref=1, token="t"))
+            else:
+                validator.cleanup()
+
     @pytest.mark.parametrize("role", [RelationRoleStub.provides, RelationRoleStub.peer])
     def test_prepare_raises_not_applicable_for_non_requires_role(self, role: RelationRoleStub) -> None:
         validator = _make_persistence_validator(VALID_PROVIDER_DATABAG, role=role)

@@ -76,6 +76,8 @@ class CatalogueValidator(BaseValidator):
             return self._skipped_result_due_to_level(level)
         if not self.relation_exists():
             return self._error_result(level, f"No remote application on relation '{self.endpoint}'.")
+        if not self.charm.unit.is_leader():
+            return self._skipped_result_due_to_non_leader(level)
         if level == "simple":
             return self._validate_simple()
         if level == "deep":
