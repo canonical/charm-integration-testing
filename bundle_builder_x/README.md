@@ -10,12 +10,13 @@ Prepare the development environment first with
 `mise run setup -- --group development`.
 
 ```bash
-uv run --no-sync --all-packages bundle-builder-x \
+mise run build-bundle-x -- \
     --spec my-spec.yaml \
-    --overrides static/charm-overrides \
     --output-bundles output/ \
     --log-level INFO
 ```
+
+The task runs from the repository root and applies `static/charm-overrides`.
 
 ## What it does
 
