@@ -1,14 +1,14 @@
 ---
 name: Setup Cloud
 description: >
-  Set up a Juju cloud (K8s, OpenStack, or LXD), delegating to the appropriate
-  setup action based on cloud type.
+  Set up a Juju cloud (K8s, OpenStack, remote LXD, or a local runner substrate)
+  by delegating to the appropriate setup action based on cloud type.
 inputs:
   cloud-name:
     description: Name to register the Juju cloud under.
     required: true
   cloud-type:
-    description: Cloud type - either 'k8s', 'o7k', or 'lxd'.
+    description: Cloud type - 'k8s', 'o7k', 'lxd', 'local-k8s', or 'local-lxd'.
     required: true
   cloud-credentials:
     description: >
@@ -19,21 +19,19 @@ inputs:
 outputs:
   cloud-name:
     description: Name of the Juju cloud registered on this runner.
-    value: ${{ inputs.cloud-name }}
+    value: ${{ steps.setup-local-lxd.outputs.cloud-name || steps.setup-local-k8s.outputs.cloud-name || inputs.cloud-name }}
   kubeconfig_path:
-    description: Path to the kubeconfig file written to disk (k8s only; empty string
-      for o7k/lxd).
-    value: ${{ steps.setup-k8s.outputs.kubeconfig_path }}
+    description: Path to the kubeconfig file (empty for OpenStack and LXD).
+    value: ${{ steps.setup-local-k8s.outputs.kubeconfig-path || steps.setup-k8s.outputs.kubeconfig_path }}
   cloud-definition-path:
-    description: Path to the cloud definition YAML file written to disk (o7k/lxd;
-      empty string for k8s).
+    description: Path to the cloud definition YAML (empty for K8s and local runner
+      clouds).
     value: ${{ steps.setup-o7k.outputs.cloud-definition-path || steps.setup-lxd.outputs.cloud-definition-path }}
   credentials-path:
-    description: Path to the credentials YAML file written to disk (o7k/lxd; empty
-      string for k8s).
+    description: Path to the credentials YAML (empty for K8s and local runner clouds).
     value: ${{ steps.setup-o7k.outputs.credentials-path || steps.setup-lxd.outputs.credentials-path }}
   metadata-source:
-    description: Path to image metadata (o7k only; empty string for k8s).
+    description: Path to image metadata (OpenStack only).
     value: ${{ steps.setup-o7k.outputs.metadata-source }}
 runs:
   using: composite
@@ -68,3 +66,13 @@ runs:
         lxd-creds: ${{ inputs.cloud-credentials }}
         cloud-name: ${{ inputs.cloud-name }}
         workspace: ${{ steps.workspace.outputs.path }}
+    - name: Setup Local Kubernetes Cloud
+      id: setup-local-k8s
+      if: ${{ inputs.cloud-type == 'local-k8s' }}
+      uses: ./actions/setup-local-k8s
+      with:
+        cloud-name: ${{ inputs.cloud-name }}
+    - name: Setup Local LXD Cloud
+      id: setup-local-lxd
+      if: ${{ inputs.cloud-type == 'local-lxd' }}
+      uses: ./actions/setup-local-lxd
