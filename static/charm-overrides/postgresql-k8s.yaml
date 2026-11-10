@@ -1,4 +1,6 @@
 ---
+# Source: https://github.com/canonical/postgresql-k8s-operator
+# Ubuntu bases distinguish endpoint generations when risk-only channels use the default track.
 overrides:
     # postgresql-k8s does not officially support juju 4
     # https://github.com/canonical/postgresql-k8s-operator/issues/1464
@@ -17,7 +19,10 @@ overrides:
           - all-of:
               - juju >= 4
     criteria:
-      - track: '16'
+      - any_of:
+          - track: '16'
+          - track: latest
+            ubuntu_version: '24.04'
     # postgresql-k8s (via Juju/Kubernetes) retains its `pgdata` PersistentVolumeClaims
     # across application removal and scale-in events, so a leftover or re-created PVC
     # is expected behaviour rather than a defect. Skip PVC tracking; other kinds remain tracked.
@@ -73,6 +78,7 @@ overrides:
   - assumes: *assumes
     criteria:
       - track: 'latest'
+        ubuntu_version: '20.04'
     resource_tracking: *resource_tracking
     provides:
       db:
