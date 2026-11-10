@@ -12,7 +12,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [single-model, cmr-lxd-neighbor]
+        include:
+          - mode: single-model
+            endpoint: database
+            neighbor: data-integrator
+            neighbor-endpoint: postgresql
+          - mode: cmr-lxd-neighbor
+            endpoint: certificates
+            neighbor: self-signed-certificates
+            neighbor-endpoint: certificates
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -32,15 +40,15 @@ jobs:
         uses: ./actions/run-charm-tests
         with:
           target-charm: postgresql-k8s
-          target-endpoint: certificates
+          target-endpoint: ${{ matrix.endpoint }}
           target-channel: 14/stable
           target-revision: '495'
           target-series: '22.04'
           target-cloud: ${{ steps.k8s.outputs.cloud-name }}
           target-kubeconfig: ${{ steps.k8s.outputs.kubeconfig-path }}
           target-platform: ${{ steps.k8s.outputs.platform }}
-          neighbor-charm: self-signed-certificates
-          neighbor-endpoint: certificates
+          neighbor-charm: ${{ matrix.neighbor }}
+          neighbor-endpoint: ${{ matrix.neighbor-endpoint }}
           neighbor-cloud: ${{ steps.lxd.outputs.cloud-name }}
           neighbor-platform: ${{ steps.lxd.outputs.platform }}
           extra-args: >-
