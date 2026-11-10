@@ -1,29 +1,16 @@
 ---
 # Source: https://github.com/canonical/opentelemetry-collector-k8s-operator
-#
-# Three endpoint generations:
-#   track 1: metrics-endpoint + receive-loki-logs (provides); no CMR mesh, no receive-traces, no send-otlp
-#   track 2: adds receive-traces/receive-profiles (provides); CMR mesh (requires/provides); no send-otlp
-#   dev: adds external-config/ingress/istio-ingress/send-otlp (requires); receive-otlp (provides)
-#
-# grafana-dashboards-consumer (requires): optional - _get_missing_mandatory_relations() only
-#   blocks when this IS connected but unpaired; absent relation causes no BlockedStatus.
-# grafana-dashboards-provider (provides): optional - same reasoning; forwarding is secondary purpose.
-# require-cmr-mesh, service-mesh (requires): optional - CMR mesh is additive mesh integration.
-# provide-cmr-mesh (provides): optional - CMR mesh is additive mesh integration; must track
-#   receive-loki-logs/receive-traces/receive-profiles's cross-model status; see GH-980.
-# Pipeline pairing: _get_missing_mandatory_relations() sets BlockedStatus if an incoming telemetry
-#   relation is connected without a matching outgoing backend. Modelled as implications.
+# Endpoint generations differ in CMR mesh and OTLP support; preserve telemetry pipeline pairing.
 overrides:
   # track 1: no CMR mesh; metrics-endpoint and receive-loki-logs as incoming; send-otlp absent
   - criteria:
       - track: "1"
     requires:
       grafana-dashboards-consumer:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations only gates connected dashboards.
     provides:
       grafana-dashboards-provider:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations allows no dashboard forwarding.
     constraints:
       - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])'
       - 'bool(endpoint[receive-loki-logs]) => bool(endpoint[cloud-config]) or bool(endpoint[send-loki-logs])'
@@ -35,16 +22,16 @@ overrides:
       - track: "2"
     requires:
       grafana-dashboards-consumer:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations only gates connected dashboards.
       require-cmr-mesh:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations does not require mesh.
       service-mesh:
-        optional: true
+        optional: true  # ServiceMeshConsumer.enabled is false without a mesh relation.
     provides:
       grafana-dashboards-provider:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations allows no dashboard forwarding.
       provide-cmr-mesh:
-        optional: true
+        optional: true  # ServiceMeshConsumer adds companion metadata for cross-model telemetry.
     constraints:
       - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])'
       - 'bool(endpoint[receive-loki-logs]) => bool(endpoint[cloud-config]) or bool(endpoint[send-loki-logs])'
@@ -55,21 +42,25 @@ overrides:
         | endpoint[receive-profiles])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
 
-  # dev: CMR mesh + send-otlp/receive-otlp added as valid pipeline backends
+  # 0.130/dev add OTLP pipelines; risk-only default channels use Ubuntu 26.04.
   - criteria:
-      - track: dev
+      - any_of:
+          - track: '0.130'
+          - track: dev
+          - track: latest
+            ubuntu_version: '26.04'
     requires:
       grafana-dashboards-consumer:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations only gates connected dashboards.
       require-cmr-mesh:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations does not require mesh.
       service-mesh:
-        optional: true
+        optional: true  # ServiceMeshConsumer.enabled is false without a mesh relation.
     provides:
       grafana-dashboards-provider:
-        optional: true
+        optional: true  # charm.py::_get_missing_mandatory_relations allows no dashboard forwarding.
       provide-cmr-mesh:
-        optional: true
+        optional: true  # ServiceMeshConsumer adds companion metadata for cross-model telemetry.
     constraints:
       - 'bool(endpoint[metrics-endpoint]) => bool(endpoint[cloud-config]) or bool(endpoint[send-remote-write])
         or bool(endpoint[send-otlp])'
