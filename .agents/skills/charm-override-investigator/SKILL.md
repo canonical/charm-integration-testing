@@ -302,7 +302,7 @@ a skip must not hide.
 Run the self-validation checklist, then run the overrides pytest suite to validate all criteria blocks against real published channels:
 
 ```bash
-poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels --overrides ./static/charm-overrides/ -v
+mise run test:bundle-builder-x -- overrides -k <charm-name> --all-channels --overrides ./static/charm-overrides/ -v
 ```
 
 `--all-channels` tests every channel that matches each criteria block, catching track-specific mistakes (wrong endpoint names, missing criteria coverage) that a single solver run would miss.
@@ -310,7 +310,7 @@ poetry run pytest bundle_builder_x/tests/ -k <charm-name> --all-channels --overr
 Also run the solver against a minimal single-charm spec and evaluate the output:
 
 ```bash
-poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
+mise run bundle:build-x -- --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
 ```
 
 Inspect the diagram: does the bundle contain the apps you would expect for a real deployment of this charm?
@@ -334,13 +334,10 @@ add the override, validate with and without it, and confirm the expected result.
      the candidate override clearly labelled as unverified (no VM run).
 
    Only continue with the rest of this step if the user picks `Run validation on sandbox`:
-   - *Provision the VM (host side).* Use the development sandbox to get a clean VM. For a
-     truly fresh environment, recycle any existing one first:
-     ```bash
-     scripts/sandbox.sh destroy   # only if a stale VM exists
-     scripts/sandbox.sh up        # create/resume the VM and install deps
-     scripts/sandbox.sh run --interactive   # or: scripts/sandbox.sh shell
-     ```
+   - *Prepare a clean test environment.* Follow the
+     [development sandbox guide](../../../development-sandbox/README.md#quick-start)
+     for VM lifecycle and entry commands. Obtain explicit approval before destroying an
+     existing VM; do not assume it is disposable.
    - *Install substrates and logging tools (inside the VM).* Run the `/setup-charm-tests`
      skill scoped to Kubernetes; it installs Canonical k8s plus the crashdump/kubectl tooling
      and leaves controller bootstrap to the test suite:
@@ -357,7 +354,7 @@ add the override, validate with and without it, and confirm the expected result.
      If this is missing, the client is silently `None`: `test_pod_deletion` fails with
      "KubernetesClient was not instantiated correctly", no snapshots are collected, and
      `test_resource_consistency_report` passes vacuously - a false green that proves nothing.
-   The actual test runs go through the `/run-charm-tests` skill (`scripts/run-tests.sh`);
+   The actual test runs go through the `/run-charm-tests` skill (`mise run test:suite`);
    follow that skill for the full set of required parameters (e.g. `--target-application`,
    `--mermaid-output`, and the empty `--*-controller-bootstrap-constraints`). The commands in
    the next steps show only the flags specific to this workflow.
@@ -390,7 +387,7 @@ add the override, validate with and without it, and confirm the expected result.
      ```bash
      cp -r static/charm-overrides /tmp/overrides-no-skip
      # edit /tmp/overrides-no-skip/<charm>.yaml to delete only the resource_tracking block
-     ./scripts/run-tests.sh \
+     mise run test:suite -- \
        -k "test_scale_in_and_scale_out or test_pod_deletion or test_idempotent_redeploy or test_resource_consistency_report" \
        --target-cloud "local-k8s" --target-charm "<charm>" --target-endpoint "<endpoint>" \
        --neighbor-charm "<neighbor>" --neighbor-endpoint "<endpoint>" \
@@ -424,7 +421,7 @@ add the override, validate with and without it, and confirm the expected result.
 ## Self-Validation Checklist
 
 1. **YAML structure** - parses correctly; matches `CharmGlobalOverrides` schema
-2. **Lint** - `poetry run yamlfix --check static/charm-overrides/<charm>.yaml` passes
+2. **Lint** - `mise exec -- yamlfix --check static/charm-overrides/<charm>.yaml` passes
 3. **Endpoint names** - every name exists in the charm's actual Charmhub metadata on the correct side (requires/provides)
 4. **Config keys** - every key in `configs:` exists in the charm's `config.yaml`
 5. **Criteria coverage** - every criteria block matches at least one published channel
@@ -629,7 +626,7 @@ models:
 Run:
 
 ```bash
-poetry run bundle-builder-x --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
+mise run bundle:build-x -- --spec /tmp/test.yaml --overrides ./static/charm-overrides/ --output-mermaid /tmp/result.md
 ```
 
 **Important:** You do not need to add the charm's known dependencies to the spec. If an

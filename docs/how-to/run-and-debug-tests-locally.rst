@@ -2,9 +2,33 @@
 
 Run and debug tests locally
 ===========================
-In this how-to, we will go through how to locally execute and debug charm tests. Specifically, we will test one endpoint from one charm, which is the primary charm being tested and is called the target charm, with one endpoint from one other charm, which we call the neighbor charm.
+Use the development sandbox to run and debug charm tests without installing the
+test toolchain or substrates on your host. The project checkout is mounted into
+the VM, so host-side edits are available inside it.
 
-Note that the steps below are the same used for executing charm tests in the charm integration testing project.
+The examples below test one endpoint of a target charm against one endpoint of a
+neighbor charm. Run all test commands inside the sandbox VM.
+
+Start the development sandbox
+-----------------------------
+
+Follow the `development sandbox guide
+<https://github.com/canonical/charm-integration-testing/blob/main/development-sandbox/README.md>`_
+to start the VM and open a shell. Use its VM-side setup task for Kubernetes,
+LXD, or both, depending on your charms.
+
+The Kubernetes setup task registers ``local-k8s`` with Juju, writes
+``/home/ubuntu/k8s.yaml``, and installs or verifies Chaos Mesh. LXD uses Juju's
+``localhost`` cloud. Do not bootstrap a controller manually when starting the
+suite from ``no_controller`` or ``no_bundle``; the suite handles that.
+
+For the Kubernetes examples below, set:
+
+.. code:: bash
+
+   export K8S_CLOUD_NAME=local-k8s
+   export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+   export VALIDATORS_PATH="${PWD}/validators"
 
 Information you will need
 -------------------------
@@ -47,59 +71,21 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
-Set up Juju and k8s
--------------------
-Juju and k8s will be needed to run the tests. Install Juju, k8s, kubectl,
-and the local substrate tools from the repository catalogue:
+Controller sizing
+-----------------
 
-.. code:: bash
-
-   mise run setup -- --group local-k8s
-
-Next, bootstrap ``k8s`` and configure ``kubectl``:
-
-.. code:: bash
-
-   sudo k8s bootstrap --address=127.0.0.1
-   sudo k8s config > ~/.kube/config
-
-Set up the k8s cloud
-~~~~~~~~~~~~~~~~~~~~
-
-It is also needed to setup the k8s cloud in juju. Do this with the following commands:
-
-Test controllers in the VM should use a 5 GB root disk (``root-disk=5G``) on
-both LXD and Kubernetes. This matches the Kubernetes and PS7 OpenStack bootstrap
-constraints in ``static/environments.yaml``. This is a controller bootstrap
-constraint, not a workload storage setting.
-
-.. code:: bash
-
-   juju add-k8s ${K8S_CLOUD_NAME} --client
-   juju bootstrap ${K8S_CLOUD_NAME} ${K8S_CONTROLLER_NAME} --bootstrap-constraints root-disk=5G
-   juju add-model ${MODEL_NAME} \
-     --config "logging-config=DEBUG" \
-     --config="update-status-hook-interval=2m"
-
-When the test suite bootstraps controllers instead, pass
+For the sandbox's 5 GB test-controller root disks, pass
 ``--target-controller-bootstrap-constraints '{"root-disk":"5G"}'`` to
-``scripts/run-tests.sh``. For a separate neighbor controller, also pass
+``mise run test:suite``. For a separate neighbor controller, also pass
 ``--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'``.
-These test-suite options accept JSON, unlike Juju's ``--bootstrap-constraints``.
 When reproducing a specific execution, preserve any other bootstrap constraints
 from that execution's environment.
 
-For a manually bootstrapped LXD test controller, use the same sizing:
-
-.. code:: bash
-
-   juju bootstrap localhost lxd-test-controller --bootstrap-constraints root-disk=5G
-
 Chaos tools
-~~~~~~~~~~~
+-----------
 
-Install Litmus or Chaos Mesh on the Kubernetes cluster for CPU and memory
-pressure. Disk I/O latency requires Chaos Mesh. On PS6 staging and PS7, the
+Sandbox Kubernetes setup includes Chaos Mesh for CPU, memory, and disk I/O
+pressure; do not install it a second time. On PS6 staging and PS7, the
 infrastructure repositories manage the shared ``litmus-core`` Helm release.
 See ``docs/how-to/install_litmus_core.rst`` in sqa-ops for installation steps
 and chart versions.
@@ -215,6 +201,7 @@ correct order:
    mise run test:suite -- \
      --juju-cloud "${K8S_CLOUD_NAME}" \
      --juju-controller "${K8S_CONTROLLER_NAME}" \
+     --target-controller-bootstrap-constraints '{"root-disk":"5G"}' \
      --model "${MODEL_NAME}" \
      --current-state "no_controller" \
      --bundle "${OUTPUT_FILE}" \

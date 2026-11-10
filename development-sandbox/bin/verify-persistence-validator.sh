@@ -1,4 +1,9 @@
 #!/bin/bash
+#MISE description="Run persistence validator checks in the sandbox"
+#MISE raw_args=true
+#MISE alias="sandbox:verify-persistence-validator"
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
 # Run deterministic persistence-validator verification gates inside the VM workspace.
 #
 # This script is VM-native and must be run from inside the sandbox VM where
@@ -29,7 +34,7 @@ RESTORE_CMD=""
 usage() {
     cat <<'EOF'
 Usage:
-  development-sandbox/bin/verify-persistence-validator.sh \
+  mise run sandbox:verify-persistence-validator -- \
     --model <model> --app <app> --provider <provider> --validator <validator-name> [options]
 
 Required:
@@ -48,7 +53,7 @@ Optional:
   --restore-cmd <cmd>    Override the restore command (paired with --down-cmd).
   --output-dir <path>    Evidence output directory (default: /tmp/persistence-verification-<timestamp>)
   --test-cmd <cmd>       Override validator unit-test command
-                         (default: poetry run pytest validators/<validator>/tests/unit -q)
+                         (default: uv run --no-sync --all-packages pytest validators/<validator>/tests/unit -q)
   -h, --help             Show this help
 EOF
 }
@@ -118,7 +123,7 @@ if [ -z "$OUTPUT_DIR" ]; then
 fi
 
 if [ -z "$TEST_CMD" ]; then
-    TEST_CMD="poetry run pytest validators/$VALIDATOR/tests/unit -q"
+    TEST_CMD="uv run --no-sync --all-packages pytest validators/$VALIDATOR/tests/unit -q"
 fi
 
 # --down-cmd and --restore-cmd must be supplied together.
@@ -221,20 +226,20 @@ PY
 }
 
 run_step pre_status "juju status -m $MODEL --relations"
-run_step format "./scripts/format.sh"
-run_step lint "./scripts/lint.sh"
+run_step format "mise run format"
+run_step lint "mise run lint"
 run_step unit_tests "$TEST_CMD"
 
-# Poetry normalises underscores to hyphens in distribution names, so derive
+# Distribution names normalize underscores to hyphens, so derive
 # the expected package name from the validator directory name.
 VALIDATOR_PKG="${VALIDATOR//_/-}"
 run_step wiring_runner "grep -q '\"validators-$VALIDATOR_PKG\"' validators/runner/pyproject.toml"
-run_step wiring_root "grep -q '^validators-$VALIDATOR_PKG = { path = \"./validators/$VALIDATOR\"' pyproject.toml"
-run_step entrypoint "cd '$PROJECT' && poetry run python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_persistence_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
+run_step wiring_root "grep -Fq '\"validators-$VALIDATOR_PKG\" = { workspace = true }' pyproject.toml"
+run_step entrypoint "cd '$PROJECT' && uv run --no-sync --all-packages python3 -c \"from importlib.metadata import entry_points; import sys; names=[e.name for e in entry_points(group='endpoint_persistence_validators')]; sys.exit(0 if '$INTERFACE' in names else 1)\""
 
 # Seed canary data while the workload is up. --reinstall pushes the latest
 # validator code onto the units.
-run_step prepare "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op prepare --state-file $state_file --reinstall"
+run_step prepare "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op prepare --state-file $state_file --reinstall"
 run_step status_prepared "juju status -m $MODEL --relations"
 
 # Disrupt the provider, then restore it and wait for the model to settle before
@@ -349,14 +354,14 @@ run_step wait_settled "$wait_cmd"
 
 # Verify the canary data survived the disruption.
 if [ "${STEP_RC[wait_settled]:-1}" -eq 0 ]; then
-    run_step checkpoint "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op checkpoint --state-file $state_file"
+    run_step checkpoint "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op checkpoint --state-file $state_file"
 else
     printf "[checkpoint] skipped because wait_settled failed\n  rc=1\n\n" >> "$summary"
     STEP_RC[checkpoint]=1
 fi
 
 # Drop the canary data.
-run_step cleanup "$PROJECT/development-sandbox/bin/dev-persistence.py --model $MODEL --app $APP --op cleanup --state-file $state_file"
+run_step cleanup "mise run sandbox:dev-persistence -- --model $MODEL --app $APP --op cleanup --state-file $state_file"
 
 quality_pass=false
 wiring_pass=false
