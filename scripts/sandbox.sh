@@ -87,8 +87,8 @@ _is_mounted() {
 # append "NAME=value" entries onto the array named by $1 (nameref) for
 # passthrough into the VM via _vm_exec_with_env.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
-# Credential variables and COPILOT_MODEL are excluded here because callers
-# explicitly map credentials and optional model overrides.
+# Credential variables are excluded here because callers handle credential
+# mapping and fallback explicitly.
 _collect_sandbox_vars() {
     local -n _target="$1"
     local _var _name
@@ -96,7 +96,7 @@ _collect_sandbox_vars() {
         [[ "$_var" == SANDBOX_VAR_?* ]] || continue
         _name="${_var#SANDBOX_VAR_}"
         case "$_name" in
-            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL) continue ;;
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN) continue ;;
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
@@ -738,7 +738,6 @@ EOF
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=("PROJECT_ROOT=$VM_MOUNT")
-        [ -n "${SANDBOX_VAR_COPILOT_MODEL:-}" ] && _env_args+=("COPILOT_MODEL=$SANDBOX_VAR_COPILOT_MODEL")
         [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
@@ -755,7 +754,6 @@ EOF
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=("PROJECT_ROOT=$VM_MOUNT")
-        [ -n "${SANDBOX_VAR_COPILOT_MODEL:-}" ] && _env_args+=("COPILOT_MODEL=$SANDBOX_VAR_COPILOT_MODEL")
         [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
