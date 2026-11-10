@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#MISE description="Initialise local LXD for Juju's localhost cloud"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: mise run setup-lxd -- [--output FILE]
+
+Initialises LXD with Concierge and grants the invoking user access. An existing LXD installation
+is not refreshed. Re-running converges without data loss.
+
+--output  Append cloud-name and platform as key=value lines
+USAGE
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+output=""
+while (( $# )); do
+    case "$1" in
+        --output)
+            if (( $# < 2 )) || [[ -z "$2" ]]; then die "$1 requires a value"; fi
+            output="$2"
+            shift
+            ;;
+        --help|-h) usage; exit 0 ;;
+        *) usage >&2; die "Unknown argument: $1" ;;
+    esac
+    shift
+done
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+command -v concierge >/dev/null || die "Missing concierge; run: mise run setup -- --group local-lxd"
+
+echo "==> Preparing LXD with Concierge..."
+sudo "$(command -v concierge)" prepare --config "$project_root/static/substrates/lxd.yaml" --verbose
+
+lxc info >/dev/null || die "LXD is not accessible to $(id -un)"
+
+if [[ -n "$output" ]]; then
+    printf 'cloud-name=localhost\nplatform=machine\n' >> "$output"
+fi
+
+cat <<'NEXT'
+
+LXD is ready as Juju's localhost cloud. To bootstrap a controller manually:
+  juju bootstrap localhost <controller-name> --bootstrap-constraints root-disk=5G
+NEXT
