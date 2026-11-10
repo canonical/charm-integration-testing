@@ -23,12 +23,14 @@ for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
         sed -i \
             -e '/^export MISE_ENV=\(sandbox\|development\|development,provisioning,sandbox\)$/d' \
             -e '\|^export MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml:development-sandbox/mise.toml$|d' \
+            -e '/^# mise sandbox environment$/a export MISE_ENV=sandbox' \
             "$startup_file"
     fi
     if ! grep -Fq '# mise sandbox environment' "$startup_file" 2>/dev/null; then
         cat >> "$startup_file" <<'EOF'
 
 # mise sandbox environment
+export MISE_ENV=sandbox
 eval "$(~/.local/bin/mise activate bash)"
 EOF
     fi
