@@ -2,14 +2,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.
-# Usage:
-#   scripts/sandbox.sh up            Create or resume the VM and install deps
-#   scripts/sandbox.sh down          Stop the VM (preserves state)
-#   scripts/sandbox.sh destroy       Delete the VM permanently
-#   scripts/sandbox.sh shell         Open a shell inside the VM
-#   scripts/sandbox.sh run 'task'    Run Copilot in autonomous mode
-#   scripts/sandbox.sh run --interactive   Run Copilot in interactive mode
-#   scripts/sandbox.sh --help        Show this help
+# Run scripts/sandbox.sh --help for commands and development-sandbox/README.md
+# for Copilot CLI options and session-resume examples.
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
 #   GITHUB_TOKEN               Fine-grained PAT for GitHub API access on the
@@ -280,9 +274,12 @@ Usage:
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
   scripts/sandbox.sh shell                     Open a shell inside the VM
-  scripts/sandbox.sh run 'task description'    Autonomous Copilot mode
-  scripts/sandbox.sh run --interactive         Interactive Copilot mode
+  scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
+  scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
   scripts/sandbox.sh --help                    Show this help
+
+Copilot CLI arguments after -- are passed through.
+See development-sandbox/README.md for resume examples.
 
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
@@ -657,6 +654,7 @@ _cmd_shell() {
 # ---------------------------------------------------------------------------
 _cmd_run() {
     INTERACTIVE=false
+    local copilot_args=() task_args=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --interactive)
@@ -666,13 +664,17 @@ _cmd_run() {
             -h|--help)
                 cat <<'EOF'
 Usage:
-  scripts/sandbox.sh run 'task description'   autonomous mode
-  scripts/sandbox.sh run --interactive        interactive mode
+  scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
+  scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
+
+Copilot CLI arguments after -- are passed through.
+See development-sandbox/README.md for resume examples.
 EOF
                 exit 0
                 ;;
             --)
                 shift
+                copilot_args=("$@")
                 break
                 ;;
             -*)
@@ -681,12 +683,15 @@ EOF
                 exit 1
                 ;;
             *)
-                break
+                while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+                    task_args+=("$1")
+                    shift
+                done
                 ;;
         esac
     done
 
-    TASK="${*:-}"
+    TASK="${task_args[*]}"
 
     _require_github_auth
 
@@ -747,10 +752,10 @@ EOF
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" \"\$@\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "${copilot_args[@]}"
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=("PROJECT_ROOT=$VM_MOUNT")
@@ -763,10 +768,10 @@ EOF
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" \"\$@\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "${copilot_args[@]}"
     fi
 }
 
