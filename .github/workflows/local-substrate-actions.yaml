@@ -11,8 +11,8 @@ on:
       - static/environments.yaml
       - static/github-runners.yaml
       - static/substrates/*.yaml
-      - .github/actions/get-environment-info/**
-      - .github/actions/pick-runner/**
+      - .github/actions/get-environment-info/action.yaml
+      - .github/actions/pick-runner/action.yaml
       - .github/actions/setup-environment/**
       - .github/workflows/local-substrate-actions.yaml
   workflow_dispatch:
