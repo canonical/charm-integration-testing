@@ -123,7 +123,8 @@ _cleanup_vm_temp_files() {
 trap _cleanup_vm_temp_files EXIT
 
 # Transfer shell-quoted exports over stdin in a separate call so the session
-# keeps its terminal. Only the private file's path is passed in argv.
+# keeps its terminal, then select the VM-local project environment.
+# Only the private file's path is passed in argv.
 _vm_exec_with_env() {
     local -n _env="$1"
     shift
@@ -137,8 +138,14 @@ _vm_exec_with_env() {
         source "$1"
         rm -f -- "$1"
         shift
+        project_root="$(realpath -- "$1")"
+        shift
+        project_hash="$(printf "%s" "$project_root" | sha256sum)"
+        export PROJECT_ROOT="$project_root"
+        export UV_PROJECT_ENVIRONMENT="${XDG_DATA_HOME:-$HOME/.local/share}/charm-integration-testing/venvs/${project_hash%% *}"
+        cd "$project_root"
         exec "$@"
-    ' bash "$_env_file" "$@"
+    ' bash "$_env_file" "$VM_MOUNT" "$@"
 }
 
 # Check stored credentials after mounting the project and preparing its tools,
@@ -405,7 +412,8 @@ _cmd_up() {
 
     echo "==> Setting up the sandbox environment..."
     multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
-    multipass exec "$VM_NAME" -- bash -lc "
+    _env_args=("PROJECT_ROOT=$VM_MOUNT")
+    _vm_exec_with_env _env_args bash -lc "
         set -euo pipefail
         cd '$VM_MOUNT'
         mise run setup -- --group sandbox development integration agent
