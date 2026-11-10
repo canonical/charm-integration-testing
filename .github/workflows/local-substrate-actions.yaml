@@ -57,8 +57,8 @@ jobs:
           juju bootstrap "$CLOUD" k8s-ctrl
           juju add-model test -c k8s-ctrl
           juju set-model-constraints -m k8s-ctrl:test "arch=$(dpkg --print-architecture)"
-          juju deploy -m k8s-ctrl:test prometheus-k8s --trust
-          juju wait-for application prometheus-k8s -m k8s-ctrl:test \
+          juju deploy -m k8s-ctrl:test self-signed-certificates
+          juju wait-for application self-signed-certificates -m k8s-ctrl:test \
             --query='status=="active"' --timeout 20m
       - name: Set up local LXD
         id: lxd
@@ -81,7 +81,7 @@ jobs:
       - name: Check workloads after re-run
         run: |
           set -euo pipefail
-          juju wait-for application prometheus-k8s -m k8s-ctrl:test \
+          juju wait-for application self-signed-certificates -m k8s-ctrl:test \
             --query='status=="active"' --timeout 5m
           juju wait-for application ubuntu -m lxd-ctrl:test \
             --query='status=="active"' --timeout 5m

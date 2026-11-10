@@ -116,8 +116,8 @@ inputs:
     description: Prefix for controllers and models created by the suite
     default: charmqa-${{ github.run_id }}
   extra-args:
-    description: Additional whitespace-separated pytest arguments, for example -k
-      test_name
+    description: Additional pytest arguments, split with shell quoting rules, for
+      example -k "test_deploy or test_teardown"
     default: ''
   ubuntu-pro-token:
     description: Optional Ubuntu Pro token for machine deployments
@@ -253,7 +253,10 @@ runs:
             [[ -z "$value" ]] || export "${pair%%:*}_$suffix=$(absolute "$value")"
           done
         done
-        read -ra extra_args <<< "$(input extra-args)"
+        # Split with shell quoting rules, without evaluating the input.
+        mapfile -d '' extra_args < <(python3 -c \
+          'import shlex, sys; sys.stdout.write("".join(a + "\0" for a in shlex.split(sys.argv[1])))' \
+          "$(input extra-args)")
         export VALIDATORS_PATH="$ROOT/validators" UV_FILE="$ROOT/static/uv"
         UBUNTU_PRO_TOKEN="$(input ubuntu-pro-token)"
         export UBUNTU_PRO_TOKEN
