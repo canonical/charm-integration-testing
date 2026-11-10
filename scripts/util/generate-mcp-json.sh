@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
 # Source this file to define generate_mcp_json and ensure_mcp_json, then call:
 #
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
@@ -44,7 +47,7 @@ generate_mcp_json() (
         case "$1" in
             --sample) sample="${2:?--sample requires a path}"; shift 2 ;;
             --output) output="${2:?--output requires a path}"; shift 2 ;;
-            -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) sed -n '/^# Source this file/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
             *) die "unknown argument: $1" ;;
         esac
     done

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+#
 # Source this file to define validate_sandbox_tokens.
 #
 # Checks the sandbox GitHub tokens set in the host environment. GitHub cannot

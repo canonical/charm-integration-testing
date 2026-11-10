@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
 # Source this file to define confirm.
 
 # Ask a y/N question on the terminal; succeeds only if the user answers yes.

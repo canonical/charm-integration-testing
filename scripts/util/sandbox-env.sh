@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
 # Source this file to define write_sandbox_env_file, then call:
 #
 #   write_sandbox_env_file ENV_FILE
