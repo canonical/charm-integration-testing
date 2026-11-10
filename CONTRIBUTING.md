@@ -44,18 +44,10 @@ executing them rather than relying on host tools. Groups control installation,
 not PATH isolation; installed catalogue tools are available together.
 Use setup rather than bare `mise install`, which installs the entire catalogue.
 
-The CI setup action wraps the same task. Lint and unit-test jobs use
-`groups: development`; live tests use `groups: integration`; cleanup uses the
-`cleanup` group. Workflow checks request their individual catalogue tools
-without installing the project. The action also supports explicit snap requests.
-Installed tools are available in later steps through mise activation.
-Mise-action caching remains disabled.
-
-Cloud setup ensures only the required clients: Juju and kubectl for Kubernetes,
-Juju and `openstackclients` for OpenStack, and Juju and yq for LXD.
-Swift uploads independently ensure `openstackclients`; cleanup selects clients
-for its environment. Kubernetes-only cloud access does not install OpenStack
-clients, although Swift reporting still requires them.
+The [CI setup action](.github/actions/setup-mise/action.yaml) wraps the same task
+and activates installed tools for later steps. Its [workflow callers](.github/workflows/)
+select the groups and clients they need; cloud access and Swift reporting install
+their clients independently. Mise-action caching remains disabled.
 
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
