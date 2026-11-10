@@ -1,0 +1,44 @@
+---
+# Throwaway diagnostics for LXD bootstrap stalls after setup-local-k8s.
+name: LXD Bootstrap Diagnostics
+permissions:
+  contents: read
+on:
+  workflow_dispatch:
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s: [true, false]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: ./actions/install-juju
+        with:
+          channel: 3.6/stable
+      - if: ${{ matrix.k8s }}
+        uses: ./actions/setup-local-k8s
+      - uses: ./actions/setup-local-lxd
+      - name: Bootstrap with diagnostics
+        run: |
+          set -x
+          (while sleep 60; do date; lxc list --format csv; done) &
+          timeout 20m juju bootstrap localhost diag --debug 2>&1 | cat || echo "bootstrap rc=$?"
+          kill %1 || true
+          lxc list
+          for c in $(lxc list --format csv -c n); do
+            lxc info "$c" --show-log | tail -30
+            lxc exec "$c" -- cloud-init status --long || true
+            lxc exec "$c" -- tail -50 /var/log/cloud-init-output.log || true
+            lxc exec "$c" -- ip -4 route || true
+            lxc exec "$c" -- timeout 10 curl -sSI https://streams.canonical.com || true
+          done
+          lxc network show lxdbr0
+          sudo iptables -S FORWARD | head -30
+          sudo iptables -t nat -S POSTROUTING | head -20
+          sudo nft list ruleset | grep -iE "lxd|forward|policy" | head -30
+          ip -4 addr
