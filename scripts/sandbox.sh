@@ -25,7 +25,7 @@
 #                              is started without a token.
 #   SANDBOX_VM                 VM name override (default: charm-qa-sandbox)
 #   SANDBOX_MOUNT               VM-side mount path (default: /project)
-#   SANDBOX_VAR_COPILOT_MODEL   Copilot model override (default: sonnet-4.6)
+#   SANDBOX_VAR_COPILOT_MODEL   Optional Copilot model override
 #   SANDBOX_VAR_<NAME>          Any var with this prefix is passed into the VM
 #                              as <NAME> (prefix stripped), e.g.
 #                              SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
@@ -87,9 +87,8 @@ _is_mounted() {
 # append "NAME=value" entries onto the array named by $1 (nameref) for
 # passthrough into the VM via _vm_exec_with_env.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
-# GITHUB_TOKEN, COPILOT_GITHUB_TOKEN and COPILOT_MODEL are excluded here since
-# they need special-cased handling (dual GH_TOKEN/GITHUB_TOKEN mapping and
-# host-side defaults) that callers apply explicitly.
+# Credential variables are excluded here because callers handle credential
+# mapping and fallback explicitly.
 _collect_sandbox_vars() {
     local -n _target="$1"
     local _var _name
@@ -97,7 +96,7 @@ _collect_sandbox_vars() {
         [[ "$_var" == SANDBOX_VAR_?* ]] || continue
         _name="${_var#SANDBOX_VAR_}"
         case "$_name" in
-            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN|COPILOT_MODEL) continue ;;
+            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN) continue ;;
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
@@ -296,7 +295,7 @@ Environment (.env keys):
   SANDBOX_VAR_GITHUB_TOKEN  Fine-grained PAT for gh CLI inside the VM
                          (falls back to host gh token only with consent)
   SANDBOX_VAR_COPILOT_GITHUB_TOKEN  Copilot AI auth token (same fallback)
-  SANDBOX_VAR_COPILOT_MODEL  Copilot model (default: sonnet-4.6)
+  SANDBOX_VAR_COPILOT_MODEL  Optional Copilot model override
   SANDBOX_VAR_<NAME>     Passed into the VM as <NAME> (prefix stripped), e.g.
                          SANDBOX_VAR_CHARMHUB_API_URL -> CHARMHUB_API_URL
   SANDBOX_MCP_CONFIG_FILE  Path to an MCP server config JSON file on the host
@@ -657,8 +656,6 @@ _cmd_shell() {
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
-    COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
-
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -740,7 +737,7 @@ EOF
     if [ "$INTERACTIVE" = "true" ]; then
         CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("PROJECT_ROOT=$VM_MOUNT")
         [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
@@ -756,7 +753,7 @@ EOF
         "
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
+        _env_args=("PROJECT_ROOT=$VM_MOUNT")
         [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
         [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
         [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
