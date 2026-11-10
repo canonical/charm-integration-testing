@@ -140,7 +140,7 @@ for group in "${groups[@]}"; do
 done
 
 if [[ "$project" != none ]]; then
-    tools+=(python uv pypi:poetry)
+    tools+=(python uv)
 fi
 [[ "$no_packages" == false ]] || packages=()
 
@@ -195,7 +195,16 @@ if (( ${#packages[@]} )); then
 
     mise bootstrap packages apply --yes "${dry_run[@]}" "${packages[@]}"
 fi
-case "$project" in
-    main) mise exec -- poetry install --only main ;;
-    dev) mise exec -- poetry install --with dev ;;
-esac
+if [[ "$project" != none ]]; then
+    python="$(mise which python)"
+    case "$project" in
+        main)
+            mise exec -- uv sync --python "$python" --all-packages --no-default-groups \
+                --locked
+            ;;
+        dev)
+            mise exec -- uv sync --python "$python" --all-packages \
+                --no-default-groups --all-extras --group dev --locked
+            ;;
+    esac
+fi
