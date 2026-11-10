@@ -20,8 +20,6 @@ This guide will reference variables that need to contain values specific to your
   Endpoint for the neighbor charm being tested. For example, ``grafana-dashboard``.
 ``REVISION``:
   Revision number of the charm under test. For our example, ``143``.
-``CHANNEL``:
-  Channel for the target charm. For example, ``14/stable``.
 ``SERIES``:
   Series to run the charm tests under. This is one of ``20.04``, ``22.04`` and ``24.04``.
 ``SUBSTRATE``:
@@ -33,8 +31,7 @@ This guide will reference variables that need to contain values specific to your
 ``MODEL_NAME``:
   The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
 ``OUTPUT_FILE``:
-  Path to the generated bundle file. The filename is ``<MODEL_NAME>.yaml``.
-  For example, ``/tmp/bundles/charm-testing.yaml``.
+  Path to the model bundle produced by bundle builder X. For example, ``generated-bundles/charm-testing.yaml``.
 ``JUJU_MODEL_CONFIG_FILE``:
   Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
@@ -200,37 +197,11 @@ Next, install the Python development dependencies and integration tools:
 Generate dynamic bundles
 ------------------------
 
-Create a bundle spec for the target and neighbor charms, then generate the
-bundle with bundle-builder-x:
-
-.. code:: bash
-
-   SPEC_FILE=/tmp/charm-testing-spec.yaml
-   mkdir -p "$(dirname "${OUTPUT_FILE}")"
-   cat > "${SPEC_FILE}" <<EOF
-   models:
-     - name: "${MODEL_NAME}"
-       platform: "${SUBSTRATE}"
-       applications:
-         target:
-           charm: "${TARGET_CHARM}"
-           channel: "${CHANNEL}"
-           revision: ${REVISION}
-           base: "ubuntu@${SERIES}"
-         neighbor:
-           charm: "${NEIGHBOR_CHARM}"
-       integrations:
-         - application: target
-           endpoint: "${TARGET_ENDPOINT}"
-           remote_application: neighbor
-           remote_endpoint: "${NEIGHBOR_ENDPOINT}"
-   EOF
-   mise run bundle:build-x -- \
-     --spec "${SPEC_FILE}" \
-     --output-bundles "$(dirname "${OUTPUT_FILE}")"
-
-The generated bundle is written to ``${OUTPUT_FILE}`` and contains the target,
-neighbor, and requested integration.
+Follow :doc:`use-bundle-builder-x` to write a spec containing the ``target`` and
+``neighbor`` applications and their integration, then generate the bundles with
+``mise run bundle:build-x``. The :doc:`/reference/spec-file` reference describes
+revision, base, and endpoint settings. Set ``OUTPUT_FILE`` to the generated model
+bundle path.
 
 Run tests
 ---------

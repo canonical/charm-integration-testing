@@ -42,7 +42,6 @@ Running the CLI
 
    mise run bundle:build-x -- \
        --spec my-spec.yaml \
-       --overrides static/charm-overrides \
        --output-bundles output/ \
        --output-mermaid output/diagram.md \
        --log-level INFO

@@ -7,12 +7,7 @@ Testing.
 
 ## General recommendations
 
-Install mise as described in the [README](README.md#getting-started), then
-prepare a workstation:
-
-```bash
-mise run setup -- --group development
-```
+For workstation setup, follow the [README](README.md#getting-started).
 
 ### What goes where
 
@@ -34,45 +29,20 @@ Run `mise run setup -- --help` for supported groups and options.
 Groups compose, for example `mise run setup -- --group development integration`.
 The `runtime` group installs runtime project dependencies; `development` also
 installs development extras and shared tooling, taking precedence when combined.
-Runtime and package-specific development dependencies remain in each package's project
-metadata; the root `dev` group contains shared repository tooling. Execution
-tasks do not install dependencies, and installed tools are not PATH-isolated by
-group.
 
 Workspace packages are installed editably in both runtime and development setup,
 so Python source edits are available without reinstalling. Rerun setup after
 changing dependencies, entry points or other package metadata.
 
-`uv sync` reconciles the environment with the selected workspace dependencies.
-Use the `runtime` group for runtime dependencies only or `development` for the
-development extras and shared tooling.
+Groups include installation prerequisites. With explicit `--tools` requests,
+name those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
+Tool and package names must match the catalogue; version overrides are rejected,
+and strict locking preserves managed versions and artifact checksums.
 
-Use `--no-packages` to skip group snaps without skipping its tools or project
-dependencies, for example `mise run setup -- --group local-k8s --no-packages`.
-Explicit requests also compose with groups:
-`mise run setup -- --group runtime --tools aqua:jqlang/jq --packages snap:juju`.
-`--tools` and `--packages` alone do not install project dependencies.
-`--no-packages` cannot be combined with explicit `--packages`.
-`--dry-run` previews package-only requests; it cannot be used with tool or project
-installation. No arguments is an error; `--help` lists the interface.
-
-Versions appear only in the catalogue. Groups explicitly include installation
-prerequisites: Node for npm tools, Python and uv for Python tools. Automatic
-installation is disabled, including during task execution; no first-use installer
-or additional environment selection is needed. With `--tools`, explicitly name
-those prerequisites too, for example `--tools node npm:markdownlint-cli2`.
-Tool and package names must match the catalogue; version overrides are rejected.
-Bare `mise install` intentionally still installs the entire catalogue; use setup
-instead. Strict locking preserves managed versions and artifact checksums.
-
-Groups control installation, not PATH isolation. Installed catalogue tools
-are available together. A missing executable can fall back to a host installation;
-run setup before executing an operation rather than relying on host tools.
-
-Execution tasks do not install dependencies. Prepare the development group before
-unit tests, lint or formatting, and the integration group before live tests.
-uv reconciles project dependencies during setup; there is no additional
-readiness cache.
+Tasks do not install missing dependencies automatically. Run setup before
+executing them rather than relying on host tools. Groups control installation,
+not PATH isolation; installed catalogue tools are available together.
+Use setup rather than bare `mise install`, which installs the entire catalogue.
 
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.

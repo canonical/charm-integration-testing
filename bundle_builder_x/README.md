@@ -6,8 +6,7 @@ a Z3 SMT solver to produce minimal, valid bundles.
 
 ## Quick start
 
-Prepare the development environment first with
-`mise run setup -- --group development`.
+Complete the [repository setup](../README.md#getting-started), then run:
 
 ```bash
 mise run build-bundle-x -- \
