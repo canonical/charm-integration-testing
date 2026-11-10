@@ -32,7 +32,8 @@ skills, not their manual controller/model bootstrap steps. Wait for provisioning
 to finish successfully. With `--current-state "no_bundle"` or
 `--current-state "no_controller"`, the test suite creates the controllers.
 
-Kubernetes setup also installs or checks Chaos Mesh; do not run it a second time.
+Kubernetes setup (`mise run setup-k8s`) also installs or checks Chaos Mesh;
+do not run it a second time.
 For an existing sandbox cluster that only needs Chaos Mesh, follow the
 [existing-cluster procedure](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 
@@ -100,8 +101,7 @@ juju controllers
 This is fine. `/setup-lxd` is idempotent:
 
 ```bash
-cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
-# Output: LXD substrate ready (or already configured)
+cd "$PROJECT_ROOT" && mise run setup-lxd
 ```
 
 ### Problem: "Cannot install juju-k8s-crashdump"
@@ -119,7 +119,7 @@ If `/home/ubuntu/k8s.yaml` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
+cd "$PROJECT_ROOT" && mise run setup-k8s
 
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
@@ -154,8 +154,8 @@ juju debug-log -c lxd-ctrl --limit 50
 ## Key References
 
 - **charm-testing.yaml**: Official workflow that shows the canonical setup process
-- **setup-lxd.sh**: `mise run sandbox:setup-lxd`
-- **setup-k8s.sh**: `mise run sandbox:setup-k8s`
+- **mise-tasks/setup-lxd**: `mise run setup-lxd`
+- **mise-tasks/setup-k8s**: `mise run setup-k8s`
 - **Issue #693**: Mixed-cloud CMR logging (requires juju-k8s-crashdump)
 
 ---

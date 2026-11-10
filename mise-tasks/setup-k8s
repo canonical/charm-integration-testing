@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+#MISE description="Initialise local Canonical Kubernetes and register it as a Juju cloud"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: mise run setup-k8s -- [--cloud-name NAME] [--kubeconfig PATH] [--no-chaos-mesh]
+                            [--output FILE]
+
+Initialises Canonical Kubernetes with Concierge, writes its kubeconfig, registers it with the
+Juju client and installs or verifies Chaos Mesh. Re-running converges without data loss.
+
+--cloud-name     Juju cloud name (default: local-k8s)
+--kubeconfig     Kubeconfig destination (default: $HOME/k8s.yaml)
+--no-chaos-mesh  Skip Chaos Mesh
+--output         Append cloud-name, kubeconfig-path and platform as key=value lines
+USAGE
+}
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+cloud_name=local-k8s
+kubeconfig="$HOME/k8s.yaml"
+chaos_mesh=true
+output=""
+while (( $# )); do
+    case "$1" in
+        --cloud-name|--kubeconfig|--output)
+            if (( $# < 2 )) || [[ -z "$2" ]]; then die "$1 requires a value"; fi
+            case "$1" in
+                --cloud-name) cloud_name="$2" ;;
+                --kubeconfig) kubeconfig="$2" ;;
+                --output) output="$2" ;;
+            esac
+            shift
+            ;;
+        --no-chaos-mesh) chaos_mesh=false ;;
+        --help|-h) usage; exit 0 ;;
+        *) usage >&2; die "Unknown argument: $1" ;;
+    esac
+    shift
+done
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+kubeconfig="$(realpath -m "$kubeconfig")"
+
+for tool in concierge juju jq; do
+    command -v "$tool" >/dev/null || die "Missing $tool; run: mise run setup -- --group local-k8s"
+done
+
+echo "==> Preparing Canonical Kubernetes with Concierge..."
+sudo "$(command -v concierge)" prepare --config "$project_root/static/substrates/k8s.yaml" --verbose
+
+# Concierge resets the FORWARD policy only for LXD (canonical/concierge#288). Docker's DROP
+# policy on GitHub-hosted runners otherwise blocks pod egress.
+if sudo iptables -S FORWARD | grep -qx -- '-P FORWARD DROP'; then
+    echo "==> Setting the iptables FORWARD policy to ACCEPT..."
+    sudo iptables -P FORWARD ACCEPT
+fi
+
+echo "==> Writing kubeconfig to $kubeconfig..."
+mkdir -p "$(dirname "$kubeconfig")"
+# The redirect runs as the invoking user so that they own the file.
+# shellcheck disable=SC2024
+(umask 077 && sudo k8s config > "$kubeconfig")
+
+if juju clouds --client --format json | jq -e --arg cloud "$cloud_name" 'has($cloud)' >/dev/null; then
+    echo "==> Juju cloud $cloud_name already registered."
+else
+    echo "==> Registering Juju cloud $cloud_name..."
+    juju add-k8s "$cloud_name" --client < "$kubeconfig"
+fi
+
+if [[ "$chaos_mesh" == true ]]; then
+    "$project_root/mise-tasks/setup-chaos-mesh" "$kubeconfig"
+fi
+
+if [[ -n "$output" ]]; then
+    printf 'cloud-name=%s\nkubeconfig-path=%s\nplatform=kubernetes\n' \
+        "$cloud_name" "$kubeconfig" >> "$output"
+fi
+
+kubeconfig_variable="KUBECONFIG_${cloud_name//-/_}"
+cat <<NEXT
+
+Kubernetes cloud $cloud_name is ready. To run tests against it:
+  export $kubeconfig_variable=$kubeconfig
+To bootstrap a controller manually:
+  juju bootstrap $cloud_name <controller-name> --bootstrap-constraints root-disk=5G
+NEXT

@@ -17,7 +17,6 @@ task.run_auto_install = false
 "snap:kubectl" = { channel = "1.32/stable", classic = true }
 "snap:openstackclients" = { channel = "latest/stable" }
 "snap:lxd" = { channel = "latest/stable" }
-"snap:k8s" = { channel = "1.32-classic/stable", classic = true }
 
 [tools]
 python = "3.12.12"
@@ -29,6 +28,7 @@ uv = "0.13.6"
 "aqua:trufflesecurity/trufflehog" = "3.56.0"
 "aqua:cli/cli" = "2.103.3"
 "aqua:helm/helm" = "3.21.4"
+"github:canonical/concierge" = "1.9.0"
 node = "24.22.0"
 go = "1.26.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
