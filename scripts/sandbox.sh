@@ -9,6 +9,7 @@
 #   scripts/sandbox.sh shell         Open a shell inside the VM
 #   scripts/sandbox.sh run 'task'    Run Copilot in autonomous mode
 #   scripts/sandbox.sh run --interactive   Run Copilot in interactive mode
+#   scripts/sandbox.sh run --interactive -- --continue   Resume the latest session
 #   scripts/sandbox.sh --help        Show this help
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
@@ -283,7 +284,14 @@ Usage:
   scripts/sandbox.sh shell                     Open a shell inside the VM
   scripts/sandbox.sh run 'task description'    Autonomous Copilot mode
   scripts/sandbox.sh run --interactive         Interactive Copilot mode
+  scripts/sandbox.sh run --interactive -- --resume [SESSION]
+                                               Resume a session (or open picker)
+  scripts/sandbox.sh run --interactive -- --continue
+                                               Resume the most recent session
   scripts/sandbox.sh --help                    Show this help
+
+Arguments after -- in run are passed directly to Copilot CLI.
+For autonomous mode, put the task before --.
 
 Environment (.env keys):
   SANDBOX_VM             VM name override (default: charm-qa-sandbox)
@@ -660,6 +668,7 @@ _cmd_run() {
     COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
 
     INTERACTIVE=false
+    local copilot_args=() task_args=()
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --interactive)
@@ -669,13 +678,20 @@ _cmd_run() {
             -h|--help)
                 cat <<'EOF'
 Usage:
-  scripts/sandbox.sh run 'task description'   autonomous mode
-  scripts/sandbox.sh run --interactive        interactive mode
+  scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
+  scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
+
+Arguments after -- are passed directly to Copilot CLI, for example:
+  scripts/sandbox.sh run --interactive -- --resume
+  scripts/sandbox.sh run --interactive -- --resume 'session name'
+  scripts/sandbox.sh run --interactive -- -r SESSION_ID
+  scripts/sandbox.sh run --interactive -- --continue
 EOF
                 exit 0
                 ;;
             --)
                 shift
+                copilot_args=("$@")
                 break
                 ;;
             -*)
@@ -684,12 +700,15 @@ EOF
                 exit 1
                 ;;
             *)
-                break
+                while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+                    task_args+=("$1")
+                    shift
+                done
                 ;;
         esac
     done
 
-    TASK="${*:-}"
+    TASK="${task_args[*]}"
 
     _require_github_auth
 
@@ -750,10 +769,10 @@ EOF
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" \"\$@\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "${copilot_args[@]}"
     else
         # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
         _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
@@ -766,10 +785,10 @@ EOF
             _mcp_extra=()
             [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
             _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
+            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" \"\$@\" || _ec=\$?
             rm -f \"$PROMPT_FILE\"
             exit \$_ec
-        "
+        " bash "${copilot_args[@]}"
     fi
 }
 
