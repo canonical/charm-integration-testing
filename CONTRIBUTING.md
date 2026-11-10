@@ -30,34 +30,11 @@ the workspace. The `juju-k8s-crashdump` tool is pinned to the commit containing
 
 ### Setup groups
 
-| Command | Prepares |
-|---|---|
-| `mise run setup -- --group runtime` | Python, uv and runtime project dependencies |
-| `mise run setup -- --group development` | Repository checkers, Node and development dependencies |
-| `mise run setup -- --group integration` | Juju, CLI utilities, TruffleHog, crashdump tools and runtime project dependencies |
-| `mise run setup -- --group workflow` | jq, yq and gh without project dependencies |
-| `mise run setup -- --group local-k8s` | Helm, jq and the k8s/Juju/kubectl snaps |
-| `mise run setup -- --group local-lxd` | LXD and Juju snaps |
-| `mise run setup -- --group cleanup` | jq and yq |
-| `mise run setup -- --group cloud-k8s` | Juju and kubectl clients |
-| `mise run setup -- --group cloud-openstack` | Juju and OpenStack clients |
-| `mise run setup -- --group cloud-lxd` | Juju and yq clients |
-
+Run `mise run setup -- --help` for supported groups and options.
 Groups compose, for example `mise run setup -- --group development integration`.
-Runtime selects:
-
-```bash
-uv sync --all-packages --no-default-groups --locked
-```
-
-Development selects:
-
-```bash
-uv sync --all-packages --no-default-groups --all-extras --group dev --locked
-```
-
-Development takes precedence when groups are combined. Runtime and
-package-specific development dependencies remain in each package's project
+The `runtime` group installs runtime project dependencies; `development` also
+installs development extras and shared tooling, taking precedence when combined.
+Runtime and package-specific development dependencies remain in each package's project
 metadata; the root `dev` group contains shared repository tooling. Execution
 tasks do not install dependencies, and installed tools are not PATH-isolated by
 group.
@@ -134,23 +111,19 @@ CI runs the same lint checks.
 File tasks own their `#MISE` metadata. `mise-tasks/` contains
 shared setup and package operations.
 
-| Task | Purpose |
-|---|---|
-| `mise run bundle:build-x` | Generate bundles from a spec |
-| `mise run test:cit` | Run `charm_integration_testing` unit tests |
-| `mise run test:validators` | Run validator unit tests |
-| `mise run test:bbx` | Run bundle builder tests |
-| `mise run test:suite -- ...` | Run the live Juju integration suite |
+List available tasks, descriptions and aliases directly from that metadata:
 
+```bash
+mise tasks --extended
+```
+
+Use `mise tasks info <task>` to inspect an individual task.
 File-name task names and the existing longer aliases remain supported.
 
-### CI gates (all must pass on every PR)
+### CI checks
 
-1. **lint** — `mise run lint`
-2. **charm-integration-testing-unit-tests**
-3. **validators-unit-tests**
-4. **bundle-builder-x-tests** (unit | integration | logic | overrides suites)
-5. **charm-testing-integration-tests** — full Juju integration suite
+The [PR workflows](.github/workflows/) define the lint, unit-test and live
+integration checks. Check their results before requesting review.
 
 ### Juju / environment notes
 
@@ -180,7 +153,9 @@ Juju and the variables for which endpoints to test.
 
 ## Testing
 
-Unit tests mirror the source structure under `tests/unit/`. Run all unit test suites via their respective mise tasks above before submitting a PR.
+Unit tests mirror the source structure under `tests/unit/`. Use
+[task discovery](#mise-tasks) to find their entrypoints and run all unit test
+suites before submitting a PR.
 
 Integration tests live in `charm_integration_testing/test_suite/` and run against
 live charms. Follow the [local testing guide](docs/how-to/run-and-debug-tests-locally.rst)
