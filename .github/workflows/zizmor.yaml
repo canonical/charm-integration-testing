@@ -4,7 +4,8 @@ permissions:
   contents: read
 on:
   push:
-    paths: [.github/workflows/*, .github/actions/**]
+    paths: [.github/workflows/*, .github/actions/**, .mise-version, mise*.toml, mise*.lock,
+      .mise/locks/**, mise-tasks/*]
 jobs:
   workflow_validation:
     name: Workflow validation
@@ -14,11 +15,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Install action-validator with asdf
-        uses: asdf-vm/actions/install@9cd779f40fe38688dd19505ccbc4eaaf018b44e7
+      - name: Set up project tools
+        uses: ./.github/actions/setup-mise
         with:
-          tool_versions: |
-            action-validator 0.6.0
+          tools: aqua:mpalmer/action-validator
       - name: Lint Actions
         run: |
           find .github/workflows -type f \( -iname \*.yaml -o -iname \*.yml \) \
@@ -33,11 +33,10 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Install zizmor from crates.io
-        uses: baptiste0928/cargo-install@91c5da15570085bcde6f4d7aed98cb82d6769fd3
+      - name: Set up project tools
+        uses: ./.github/actions/setup-mise
         with:
-          crate: zizmor
-          version: 1.5.1
+          tools: python uv pypi:zizmor
       - name: Scan all workflows
         run: |-
           zizmor --pedantic .github
