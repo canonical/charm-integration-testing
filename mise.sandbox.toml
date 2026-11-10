@@ -1,0 +1,2 @@
+[env]
+UV_PROJECT_ENVIRONMENT = "{{ xdg_data_home }}/charm-integration-testing/venvs/{{ config_root | canonicalize | hash }}"

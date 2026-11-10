@@ -31,6 +31,15 @@ handle substrate setup and testing.
 
 `up` installs the sandbox, development, integration, and agent tool groups.
 
+Sandbox shells select the `sandbox` Mise environment. Its `UV_PROJECT_ENVIRONMENT`
+stores Python dependencies under
+`~/.local/share/charm-integration-testing/venvs/<checkout-path-hash>` (or
+`$XDG_DATA_HOME/charm-integration-testing/venvs/<checkout-path-hash>` when set).
+The hash uses the canonical VM checkout path, so different mounts have separate
+environments and changing directories between them selects the matching one.
+Host commands continue using the checkout's `.venv`; sandbox setup leaves it
+untouched. Run `scripts/sandbox.sh up` again to configure an existing sandbox.
+
 Install substrate prerequisites separately, then run the provisioning task.
 Provisioning does not install or refresh packages.
 
