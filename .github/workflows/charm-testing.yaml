@@ -114,12 +114,6 @@ jobs:
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
-      UV_FILE: ${{ github.workspace }}/static/uv
-      UBUNTU_PRO_TOKEN: ${{ secrets.UBUNTU_PRO_TOKEN }}
-      VALIDATORS_PATH: ${{ github.workspace }}/validators
-      TARGET_BUNDLE_OUTPUT: ./generated-target-bundle.yaml
-      NEIGHBOR_BUNDLE_OUTPUT: ./generated-neighbor-bundle.yaml
-      BUNDLE_MERMAID_OUTPUT: ./generated-bundle.mmd
     steps:
       - name: Clone Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -329,159 +323,49 @@ jobs:
           test_execution_id: ${{ inputs.execution_id }}
           event_name: test_start
           detail: Tests started.
-      - name: Run charm CMR tests
-        id: run_tests_cmr
-        if: ${{ inputs.neighbor_environment != '' }}
-        continue-on-error: true
-        shell: bash
-        env:
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          KUBECONFIG_neighbor_cloud: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
-          CLOUD_DEFINITION_neighbor_cloud: ${{ steps.setup_neighbor.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_neighbor_cloud: ${{ steps.setup_neighbor.outputs.credentials-path }}
-          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
-          neighbor_cloud: ${{ (inputs.same_controller && inputs.neighbor_environment
-            == inputs.target_environment) && steps.setup_target.outputs.cloud-name
-            || steps.setup_neighbor.outputs.cloud-name }}
-          same_controller: ${{ inputs.same_controller }}
-          charm_endpoint: ${{ inputs.charm_endpoint }}
-          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
-          charm_under_test: ${{ inputs.charm_under_test }}
-          revision: ${{ inputs.revision }}
-          downgrade_revision: ${{ inputs.downgrade_revision }}
-          channel: ${{ inputs.channel }}
-          series: ${{ inputs.series }}
-          neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
-          log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
-          metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          neighbor_bootstrap_config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
-          neighbor_bootstrap_constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
-          neighbor_model_config: ${{ steps.neighbor_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
-          neighbor_remote_logging: ${{ steps.neighbor_env_info.outputs.remote-logging }}
-          neighbor_metadata_source: ${{ steps.setup_neighbor.outputs.metadata-source }}
-          neighbor_platform: ${{ steps.neighbor_env_info.outputs.platform }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
-          neighbor_arch: ${{ steps.neighbor_env_info.outputs.arch }}
-          run_id: ${{ github.run_id }}
-        run: |
-          echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-          SAME_CONTROLLER_ARG=()
-          if [[ "${same_controller}" == "true" ]]; then
-            SAME_CONTROLLER_ARG=(--same-controller)
-          fi
-          ./scripts/run-tests.sh \
-            --target-cloud "${target_cloud}" \
-            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
-            \
-            --neighbor-cloud "${neighbor_cloud}" \
-            "${SAME_CONTROLLER_ARG[@]}" \
-            --neighbor-bundle "${NEIGHBOR_BUNDLE_OUTPUT}" \
-            \
-            --target-controller-bootstrap-config "${bootstrap_config}" \
-            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
-            --target-model-config "${model_config}" \
-            ${target_remote_logging:+--target-remote-logging-endpoint "${target_remote_logging}"} \
-            \
-            --neighbor-controller-bootstrap-config "${neighbor_bootstrap_config}" \
-            --neighbor-controller-bootstrap-constraints "${neighbor_bootstrap_constraints}" \
-            ${neighbor_metadata_source:+--neighbor-controller-bootstrap-metadata-source "${neighbor_metadata_source}"} \
-            --neighbor-model-config "${neighbor_model_config}" \
-            ${neighbor_remote_logging:+--neighbor-remote-logging-endpoint "${neighbor_remote_logging}"} \
-            \
-            --target-charm "${charm_under_test}" \
-            --target-channel "${channel}" \
-            --target-revision "${revision}" \
-            --target-downgrade-revision "${downgrade_revision}" \
-            --target-series "${series}" \
-            --target-platform "${platform}" \
-            --target-arch "${target_arch}" \
-            \
-            --neighbor-charm "${neighbor}" \
-            --neighbor-platform "${neighbor_platform}" \
-            --neighbor-arch "${neighbor_arch}" \
-            \
-            --target-application "target" \
-            --target-endpoint "${charm_endpoint}" \
-            --neighbor-application "neighbor" \
-            --neighbor-endpoint "${neighbor_endpoint}" \
-            \
-            --current-state "no_bundle" \
-            --charm-overrides "./static/charm-overrides/" \
-            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
-            --log-cli-level "${log_level}" \
-            --log-level "${log_level}" \
-            --log-dir "./test-logs" \
-            --prefix "charmqa-${run_id}" \
-            --junit-xml=junit.xml
       - name: Run charm tests
         id: run_tests
-        if: ${{ inputs.neighbor_environment == '' && !inputs.same_controller }}
+        if: ${{ inputs.neighbor_environment != '' || !inputs.same_controller }}
         continue-on-error: true
-        shell: bash
-        env:
-          KUBECONFIG_target_cloud: ${{ steps.setup_target.outputs.kubeconfig_path }}
-          CLOUD_DEFINITION_target_cloud: ${{ steps.setup_target.outputs.cloud-definition-path }}
-          CLOUD_CREDENTIALS_target_cloud: ${{ steps.setup_target.outputs.credentials-path }}
-          target_cloud: ${{ steps.setup_target.outputs.cloud-name }}
-          charm_endpoint: ${{ inputs.charm_endpoint }}
-          neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
-          charm_under_test: ${{ inputs.charm_under_test }}
-          revision: ${{ inputs.revision }}
-          downgrade_revision: ${{ inputs.downgrade_revision }}
-          channel: ${{ inputs.channel }}
-          series: ${{ inputs.series }}
-          neighbor: ${{ inputs.neighbor }}
-          platform: ${{ steps.target_env_info.outputs.platform }}
-          log_level: ${{ inputs.log_level }}
-          bootstrap_config: ${{ steps.target_env_info.outputs.bootstrap-config }}
-          bootstrap_constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
-          model_config: ${{ steps.target_env_info.outputs.model-config }}
-          target_remote_logging: ${{ steps.target_env_info.outputs.remote-logging }}
-          metadata_source: ${{ steps.setup_target.outputs.metadata-source }}
-          target_arch: ${{ steps.target_env_info.outputs.arch }}
-        run: |
-          echo "junit_xml=$(realpath junit.xml)" >> $GITHUB_OUTPUT
-          ./scripts/run-tests.sh \
-            --target-cloud "${target_cloud}" \
-            --target-bundle "${TARGET_BUNDLE_OUTPUT}" \
-            \
-            --target-controller-bootstrap-config "${bootstrap_config}" \
-            --target-controller-bootstrap-constraints "${bootstrap_constraints}" \
-            ${metadata_source:+--target-controller-bootstrap-metadata-source "${metadata_source}"} \
-            --target-model-config "${model_config}" \
-            ${target_remote_logging:+--target-remote-logging-endpoint "${target_remote_logging}"} \
-            \
-            --target-charm "${charm_under_test}" \
-            --target-channel "${channel}" \
-            --target-revision "${revision}" \
-            --target-downgrade-revision "${downgrade_revision}" \
-            --target-series "${series}" \
-            --target-platform "${platform}" \
-            --target-arch "${target_arch}" \
-            \
-            --neighbor-charm "${neighbor}" \
-            \
-            --target-application "target" \
-            --target-endpoint "${charm_endpoint}" \
-            --neighbor-application "neighbor" \
-            --neighbor-endpoint "${neighbor_endpoint}" \
-            \
-            --current-state "no_bundle" \
-            --charm-overrides "./static/charm-overrides/" \
-            --mermaid-output "${BUNDLE_MERMAID_OUTPUT}" \
-            --log-cli-level "${log_level}" \
-            --log-level "${log_level}" \
-            --log-dir "./test-logs" \
-            --prefix "charmqa-${{ github.run_id }}" \
-            --junit-xml=junit.xml
+        uses: ./actions/run-charm-tests
+        with:
+          install-dependencies: false
+          output-dir: ${{ runner.temp }}/charm-integration-testing
+          target-charm: ${{ inputs.charm_under_test }}
+          target-endpoint: ${{ inputs.charm_endpoint }}
+          target-cloud: ${{ steps.setup_target.outputs.cloud-name }}
+          target-platform: ${{ steps.target_env_info.outputs.platform }}
+          target-arch: ${{ steps.target_env_info.outputs.arch }}
+          target-channel: ${{ inputs.channel }}
+          target-revision: ${{ inputs.revision }}
+          target-downgrade-revision: ${{ inputs.downgrade_revision }}
+          target-series: ${{ inputs.series }}
+          target-kubeconfig: ${{ steps.setup_target.outputs.kubeconfig_path }}
+          target-cloud-definition: ${{ steps.setup_target.outputs.cloud-definition-path }}
+          target-cloud-credentials: ${{ steps.setup_target.outputs.credentials-path }}
+          target-controller-bootstrap-config: ${{ steps.target_env_info.outputs.bootstrap-config }}
+          target-controller-bootstrap-constraints: ${{ steps.target_env_info.outputs.bootstrap-constraints }}
+          target-controller-bootstrap-metadata-source: ${{ steps.setup_target.outputs.metadata-source }}
+          target-model-config: ${{ steps.target_env_info.outputs.model-config }}
+          target-remote-logging-endpoint: ${{ steps.target_env_info.outputs.remote-logging }}
+          neighbor-charm: ${{ inputs.neighbor }}
+          neighbor-endpoint: ${{ inputs.neighbor_endpoint }}
+          neighbor-cloud: ${{ inputs.neighbor_environment != '' && ((inputs.same_controller
+            && inputs.neighbor_environment == inputs.target_environment) && steps.setup_target.outputs.cloud-name
+            || steps.setup_neighbor.outputs.cloud-name) || '' }}
+          neighbor-platform: ${{ steps.neighbor_env_info.outputs.platform }}
+          neighbor-arch: ${{ steps.neighbor_env_info.outputs.arch }}
+          neighbor-kubeconfig: ${{ steps.setup_neighbor.outputs.kubeconfig_path }}
+          neighbor-cloud-definition: ${{ steps.setup_neighbor.outputs.cloud-definition-path }}
+          neighbor-cloud-credentials: ${{ steps.setup_neighbor.outputs.credentials-path }}
+          neighbor-controller-bootstrap-config: ${{ steps.neighbor_env_info.outputs.bootstrap-config }}
+          neighbor-controller-bootstrap-constraints: ${{ steps.neighbor_env_info.outputs.bootstrap-constraints }}
+          neighbor-controller-bootstrap-metadata-source: ${{ steps.setup_neighbor.outputs.metadata-source }}
+          neighbor-model-config: ${{ steps.neighbor_env_info.outputs.model-config }}
+          neighbor-remote-logging-endpoint: ${{ steps.neighbor_env_info.outputs.remote-logging }}
+          same-controller: ${{ inputs.same_controller }}
+          log-level: ${{ inputs.log_level }}
+          ubuntu-pro-token: ${{ secrets.UBUNTU_PRO_TOKEN }}
       - name: Post 'test_end' event
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-events
@@ -494,20 +378,24 @@ jobs:
       - name: Post bundles to github
         shell: bash
         continue-on-error: true
+        env:
+          MERMAID_PATH: ${{ steps.run_tests.outputs.mermaid-path }}
+          TARGET_BUNDLE_PATH: ${{ steps.run_tests.outputs.target-bundle-path }}
+          NEIGHBOR_BUNDLE_PATH: ${{ steps.run_tests.outputs.neighbor-bundle-path }}
         run: |
           # Note the generated bundles
           echo '### Generated Bundle Mermaid Diagram' >> $GITHUB_STEP_SUMMARY
           echo '```mermaid' >> $GITHUB_STEP_SUMMARY
-          cat ${BUNDLE_MERMAID_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          cat "${MERMAID_PATH}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo '### Generated Target Juju Bundle' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat ${TARGET_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+          cat "${TARGET_BUNDLE_PATH}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          if [[ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ]]; then
+          if [[ -n "${NEIGHBOR_BUNDLE_PATH}" && -f "${NEIGHBOR_BUNDLE_PATH}" ]]; then
             echo '### Generated Neighbor Juju Bundle' >> $GITHUB_STEP_SUMMARY
             echo '```yaml' >> $GITHUB_STEP_SUMMARY
-            cat ${NEIGHBOR_BUNDLE_OUTPUT} >> $GITHUB_STEP_SUMMARY
+            cat "${NEIGHBOR_BUNDLE_PATH}" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
       - name: Post execution metadata to Test Observer
@@ -517,7 +405,7 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ steps.run_tests.outputs.junit-path }}
       - name: Post results to Test Observer
         if: ${{ env.TEST_OBSERVER_API != '' && inputs.execution_id != '' }}
         uses: ./.github/actions/test-observer/post-results
@@ -525,19 +413,22 @@ jobs:
           test_observer_api: ${{ env.TEST_OBSERVER_API }}
           test_observer_token: ${{ env.TEST_OBSERVER_TOKEN }}
           test_execution_id: ${{ inputs.execution_id }}
-          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ steps.run_tests.outputs.junit-path }}
       - name: Collect logs
         id: collect_logs
         if: ${{ !cancelled() }}
         shell: bash
         env:
-          junit_xml: ${{ inputs.neighbor_environment != '' && steps.run_tests_cmr.outputs.junit_xml || steps.run_tests.outputs.junit_xml }}
+          junit_xml: ${{ steps.run_tests.outputs.junit-path }}
+          log_dir: ${{ steps.run_tests.outputs.log-dir }}
+          target_bundle: ${{ steps.run_tests.outputs.target-bundle-path }}
+          neighbor_bundle: ${{ steps.run_tests.outputs.neighbor-bundle-path }}
         run: |
           mkdir -p "logs"
-          [ -d "./test-logs" ] && cp -r ./test-logs/. "logs/"
+          [ -d "${log_dir}" ] && cp -r "${log_dir}/." "logs/"
           [ -f "${junit_xml}" ] && cp "${junit_xml}" "logs/junit.xml"
-          [ -f "${TARGET_BUNDLE_OUTPUT}" ] && cp "${TARGET_BUNDLE_OUTPUT}" "logs/generated-target-bundle.yaml"
-          [ -f "${NEIGHBOR_BUNDLE_OUTPUT}" ] && cp "${NEIGHBOR_BUNDLE_OUTPUT}" "logs/generated-neighbor-bundle.yaml"
+          [ -f "${target_bundle}" ] && cp "${target_bundle}" "logs/generated-target-bundle.yaml"
+          [ -f "${neighbor_bundle}" ] && cp "${neighbor_bundle}" "logs/generated-neighbor-bundle.yaml"
           echo "directory_path=$(realpath "logs")" >> $GITHUB_OUTPUT
       - name: Post Logs To Swift
         id: post_logs_to_swift
