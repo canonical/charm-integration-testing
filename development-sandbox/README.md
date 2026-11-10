@@ -19,17 +19,11 @@ Ask Copilot to develop or test a validator, reproduce a failure, or review a PR.
 Skills such as `/setup-k8s`, `/setup-lxd`, `/develop-validator`, and `/test-validator`
 handle substrate setup and testing.
 
-| Command | Purpose |
-|---|---|
-| `scripts/sandbox.sh run 'task'` | Run a task autonomously |
-| `scripts/sandbox.sh shell` | Open a VM shell |
-| `scripts/sandbox.sh down` | Stop the VM, preserving its state |
-| `scripts/sandbox.sh up` | Create or resume the VM and install dependencies |
-| `scripts/sandbox.sh destroy` | Permanently delete the VM |
+Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
 
 ## VM setup
 
-`up` installs the sandbox, development, integration, and agent tool groups.
+`up` prepares the VM toolchain from the repository catalogue.
 
 `scripts/sandbox.sh up`, `run`, and `shell` set `UV_PROJECT_ENVIRONMENT` to store
 Python dependencies under
@@ -41,21 +35,14 @@ use the other checkout's `scripts/sandbox.sh shell` or `run` to work on that pro
 Host commands continue using the checkout's `.venv`; sandbox setup leaves it
 untouched. Run `scripts/sandbox.sh up` again to configure an existing sandbox.
 
-Install substrate prerequisites separately, then run the provisioning task.
-Provisioning does not install or refresh packages.
+For substrate prerequisites and provisioning, follow the
+[Kubernetes](../.agents/skills/setup-k8s/SKILL.md) or
+[LXD](../.agents/skills/setup-lxd/SKILL.md) setup steps. Provisioning does not
+install or refresh packages. For Chaos Mesh on an existing cluster, follow the
+[existing-cluster procedure](../.agents/skills/setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 
-| Command | Purpose |
-|---|---|
-| `mise run setup -- --group local-k8s` | Install Kubernetes prerequisites |
-| `mise run setup -- --group local-lxd` | Install LXD prerequisites |
-| `mise run sandbox:setup-k8s` | Provision Canonical k8s and register it as a Juju cloud |
-| `mise run sandbox:setup-chaos-mesh` | Install or verify Chaos Mesh on an existing cluster |
-| `mise run sandbox:setup-lxd` | Initialize LXD for Juju's `localhost` cloud |
-
-To select another Juju client, run `mise run juju:channel -- 4/stable`.
-The selection is saved outside the checkout and respected by substrate setup.
-See [Juju client selection](../CONTRIBUTING.md#selecting-the-juju-client)
-for reset commands and controller-version cautions.
+To select another Juju client before provisioning, follow
+[Juju client selection](../CONTRIBUTING.md#selecting-the-juju-client).
 
 ## Configuration
 

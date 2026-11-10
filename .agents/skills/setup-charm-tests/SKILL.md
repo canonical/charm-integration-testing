@@ -7,81 +7,36 @@ description: Install charm testing prerequisites, including Chaos Mesh for Kuber
 
 ## Goal
 
-Install only the prerequisites needed for charm integration testing:
+Prepare the substrates needed for charm integration tests, with logging tools
+available regardless of substrate.
 
-1. **Cloud substrates** (LXD and/or Kubernetes) - only what you need
-2. **Logging tools** (always installed for all scenarios)
+## Setup
 
-The test suite automatically bootstraps controllers when you use `--current-state "no_bundle"` or `--current-state "no_controller"`.
+Start the VM using the [sandbox guide](../../../development-sandbox/README.md#quick-start)
+and work from `$PROJECT_ROOT` inside it. Sandbox startup prepares the toolchain;
+rerun `scripts/sandbox.sh up` on the host if tool setup failed or its configuration
+changed.
 
-Kubernetes and mixed setup also install or check Chaos Mesh through
-`setup-k8s.sh`. Do not run the Chaos Mesh script again after successful setup.
+To reproduce another Juju client version, follow
+[persistent channel selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
+before provisioning.
+
+Choose the requested `--platform` for `/setup-charm-tests`:
+
+- `machine`: follow [LXD setup](../setup-lxd/SKILL.md).
+- `kubernetes`: follow [Kubernetes setup](../setup-k8s/SKILL.md).
+- `mixed` or omitted: follow both.
+
+Use only the prerequisite-installation and substrate-provisioning steps in those
+skills, not their manual controller/model bootstrap steps. Wait for provisioning
+to finish successfully. With `--current-state "no_bundle"` or
+`--current-state "no_controller"`, the test suite creates the controllers.
+
+Kubernetes setup also installs or checks Chaos Mesh; do not run it a second time.
 For an existing sandbox cluster that only needs Chaos Mesh, follow the
-[existing cluster steps](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
-Do not use the manual controller bootstrap steps when the test suite manages it.
+[existing-cluster procedure](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 
----
-
-## Quick Start
-
-### Machine Charm Testing (LXD only)
-
-```bash
-/setup-charm-tests --platform machine
-```
-
-- ✅ Install and configure LXD
-- ✅ Install logging tools
-- ✅ Skip Kubernetes setup
-- ⏳ Test suite will bootstrap LXD controller when needed
-
-### Kubernetes Charm Testing (K8s only)
-
-```bash
-/setup-charm-tests --platform kubernetes
-```
-
-- ✅ Install and configure Canonical k8s
-- ✅ Install logging tools
-- ✅ Skip LXD setup
-- ⏳ Test suite will bootstrap K8s controller when needed
-
-### Cross-Model Relation Testing (LXD + K8s)
-
-```bash
-/setup-charm-tests --platform mixed
-```
-
-- ✅ Install and configure LXD
-- ✅ Install and configure Canonical k8s
-- ✅ Install logging tools
-- ⏳ Test suite will bootstrap both controllers when needed
-
-### Default (Everything)
-
-```bash
-/setup-charm-tests
-```
-
-- ✅ Installs all substrates and tools (same as `--platform mixed`)
-
----
-
-## What Gets Installed
-
-### Test prerequisites
-
-```bash
-mise run setup -- --group development integration
-```
-
-For machine tests, run `/setup-lxd`; for Kubernetes tests, run `/setup-k8s`.
-For mixed-cloud tests, run both skills. They install their declared tools and
-packages before provisioning the substrates.
-
----
-
-### Logging & Debugging Tools (Always Installed)
+## Logging prerequisites
 
 Sandbox startup installs both crashdump tools for machine and Kubernetes logs.
 Keep both available even for single-substrate tests, since log collection can
@@ -89,62 +44,6 @@ cross cloud boundaries. Their installation sources are declared in the root
 `mise.toml` and are selected by the `integration` setup group.
 The `kubectl` snap is installed only for Kubernetes or Chaos Mesh setup, not for
 LXD-only sandboxes.
-
-### Cloud Substrates (Optional based on `--platform`)
-
-**LXD** (when `--platform machine` or `--platform mixed`)
-
-- Juju cloud name: `localhost`
-- Platform: machine (LXD containers)
-- Use for: Traditional machine charms
-
-**Canonical Kubernetes** (when `--platform kubernetes` or `--platform mixed`)
-
-- Juju cloud name: `local-k8s`
-- Platform: Kubernetes (pod-based)
-- Use for: Kubernetes-native charms
-- Kubeconfig: `/home/ubuntu/k8s.yaml`
-
----
-
-## Step-by-Step Setup
-
-Start the VM using the [sandbox guide](../../../development-sandbox/README.md).
-Inside the VM, work from `$PROJECT_ROOT`. If tool setup failed or the tool
-configuration changed, rerun:
-
-```bash
-cd "$PROJECT_ROOT"
-mise run setup -- --group sandbox development integration agent
-```
-
-Install prerequisites with the relevant setup group, then run the substrate task
-to initialize services. Provisioning does not install packages; the test suite
-handles controller bootstrap.
-To test another Juju client, use the [persistent channel selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
-before substrate setup; these tasks preserve that choice.
-
-### Option 1: Machine Charms Only (LXD)
-
-```bash
-mise run setup -- --group local-lxd
-mise run sandbox:setup-lxd
-```
-
-### Option 2: Kubernetes Charms Only
-
-```bash
-mise run setup -- --group local-k8s
-mise run sandbox:setup-k8s
-```
-
-### Option 3: Mixed-Cloud CMR Tests (LXD + K8s)
-
-```bash
-mise run setup -- --group local-lxd local-k8s
-mise run sandbox:setup-lxd
-mise run sandbox:setup-k8s
-```
 
 ## Running Tests After Setup
 
