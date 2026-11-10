@@ -15,7 +15,7 @@ Install only the prerequisites needed for charm integration testing:
 The test suite automatically bootstraps controllers when you use `--current-state "no_bundle"` or `--current-state "no_controller"`.
 
 Kubernetes and mixed setup also install or check Chaos Mesh through
-`setup-k8s.sh`. Do not run the Chaos Mesh script again after successful setup.
+`mise run setup-k8s`. Do not run the Chaos Mesh task again after successful setup.
 For an existing sandbox cluster that only needs Chaos Mesh, follow the
 [existing cluster steps](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 Do not use the manual controller bootstrap steps when the test suite manages it.
@@ -128,22 +128,22 @@ before substrate setup; these tasks preserve that choice.
 
 ```bash
 mise run setup -- --group local-lxd
-mise run sandbox:setup-lxd
+mise run setup-lxd
 ```
 
 ### Option 2: Kubernetes Charms Only
 
 ```bash
 mise run setup -- --group local-k8s
-mise run sandbox:setup-k8s
+mise run setup-k8s
 ```
 
 ### Option 3: Mixed-Cloud CMR Tests (LXD + K8s)
 
 ```bash
 mise run setup -- --group local-lxd local-k8s
-mise run sandbox:setup-lxd
-mise run sandbox:setup-k8s
+mise run setup-lxd
+mise run setup-k8s
 ```
 
 ## Running Tests After Setup
@@ -201,8 +201,7 @@ juju controllers
 This is fine. `/setup-lxd` is idempotent:
 
 ```bash
-cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
-# Output: LXD substrate ready (or already configured)
+cd "$PROJECT_ROOT" && mise run setup-lxd
 ```
 
 ### Problem: "Cannot install juju-k8s-crashdump"
@@ -220,7 +219,7 @@ If `/home/ubuntu/k8s.yaml` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
+cd "$PROJECT_ROOT" && mise run setup-k8s
 
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
@@ -255,8 +254,8 @@ juju debug-log -c lxd-ctrl --limit 50
 ## Key References
 
 - **charm-testing.yaml**: Official workflow that shows the canonical setup process
-- **setup-lxd.sh**: `mise run sandbox:setup-lxd`
-- **setup-k8s.sh**: `mise run sandbox:setup-k8s`
+- **mise-tasks/setup-lxd**: `mise run setup-lxd`
+- **mise-tasks/setup-k8s**: `mise run setup-k8s`
 - **Issue #693**: Mixed-cloud CMR logging (requires juju-k8s-crashdump)
 
 ---

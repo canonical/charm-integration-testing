@@ -1,0 +1,10 @@
+---
+# Concierge configuration used by `mise run setup-lxd`.
+# Juju is managed by Mise and controllers are bootstrapped by the test suite.
+# The channel is unset so an existing LXD installation is left unchanged.
+juju:
+  disable: true
+providers:
+  lxd:
+    enable: true
+    bootstrap: false

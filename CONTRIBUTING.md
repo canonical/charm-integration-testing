@@ -115,8 +115,9 @@ for its environment. Kubernetes-only cloud access does not install OpenStack
 clients, although Swift reporting still requires them.
 
 Installing system packages does not initialize substrates or register clouds.
-Run the relevant setup group first; sandbox substrate tasks only initialize and
-configure the prepared services. They do not install prerequisites.
+Run the relevant setup group first, then `mise run setup-k8s` or `mise run setup-lxd`.
+These tasks use Concierge to install and initialize the substrate snaps; they do
+not install Juju or the other setup group tools.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Remove a conflicting legacy `openstack` snap manually before installing
 `openstackclients`; the shared setup does not remove it automatically.

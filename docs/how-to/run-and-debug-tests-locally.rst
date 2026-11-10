@@ -14,11 +14,12 @@ Start the development sandbox
 
 Follow the `development sandbox guide
 <https://github.com/canonical/charm-integration-testing/blob/main/development-sandbox/README.md>`_
-to start the VM and open a shell. Use its VM-side setup task for Kubernetes,
-LXD, or both, depending on your charms.
+to start the VM and open a shell. Run ``mise run setup-k8s``,
+``mise run setup-lxd``, or both, depending on your charms.
 
 The Kubernetes setup task registers ``local-k8s`` with Juju, writes
-``/home/ubuntu/k8s.yaml``, and installs or verifies Chaos Mesh. LXD uses Juju's
+``$HOME/k8s.yaml`` (``/home/ubuntu/k8s.yaml`` in the sandbox), and installs or
+verifies Chaos Mesh. LXD uses Juju's
 ``localhost`` cloud. Do not bootstrap a controller manually when starting the
 suite from ``no_controller`` or ``no_bundle``; the suite handles that.
 

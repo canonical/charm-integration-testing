@@ -724,7 +724,7 @@ juju clouds | grep local-k8s
 
 # If not found, install and configure K8s
 # (See setup-k8s skill documentation)
-mise run sandbox:setup-k8s
+mise run setup-k8s
 
 # Bootstrap a K8s controller
 juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G

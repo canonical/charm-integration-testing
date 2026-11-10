@@ -13,14 +13,15 @@ charm deployments.
 
 ## Steps
 
-1. Install prerequisites, then run the provisioning script:
+1. Install prerequisites, then run the provisioning task:
    ```
    cd "$PROJECT_ROOT"
    mise run setup -- --group local-lxd
-   mise run sandbox:setup-lxd
+   mise run setup-lxd
    ```
-   Mise installs the declared packages. The script provisions and registers
-   LXD, and is idempotent. Wait for it to complete before proceeding.
+   Mise installs the declared tools and packages. The task initializes LXD with
+   Concierge and grants the current user access; Juju uses it as the built-in
+   `localhost` cloud. It is idempotent. Wait for it to complete before proceeding.
 
 2. Bootstrap a Juju controller. Use a descriptive controller name and a 5 GB
    root disk for test controllers in the VM:

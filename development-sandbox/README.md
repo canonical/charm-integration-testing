@@ -31,16 +31,20 @@ handle substrate setup and testing.
 
 `up` installs the sandbox, development, integration, and agent tool groups.
 
-Install substrate prerequisites separately, then run the provisioning task.
-Provisioning does not install or refresh packages.
+Install substrate prerequisites, then run the provisioning task. Provisioning uses
+[Concierge](https://github.com/canonical/concierge) with the configurations in
+`static/substrates/`; it installs the k8s, kubectl and LXD snaps if needed.
+These tasks are not sandbox-specific and also run on other Ubuntu hosts.
 
 | Command | Purpose |
 |---|---|
 | `mise run setup -- --group local-k8s` | Install Kubernetes prerequisites |
 | `mise run setup -- --group local-lxd` | Install LXD prerequisites |
-| `mise run sandbox:setup-k8s` | Provision Canonical k8s and register it as a Juju cloud |
-| `mise run sandbox:setup-chaos-mesh` | Install or verify Chaos Mesh on an existing cluster |
-| `mise run sandbox:setup-lxd` | Initialize LXD for Juju's `localhost` cloud |
+| `mise run setup-k8s` | Provision Canonical k8s, register it as a Juju cloud and install Chaos Mesh |
+| `mise run setup-chaos-mesh` | Install or verify Chaos Mesh on an existing cluster |
+| `mise run setup-lxd` | Initialize LXD for Juju's `localhost` cloud |
+
+Run a task with `-- --help` for its options.
 
 To select another Juju client, run `mise run juju:channel -- 4/stable`.
 The selection is saved outside the checkout and respected by substrate setup.
