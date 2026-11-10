@@ -1,0 +1,266 @@
+---
+name: Run charm tests
+description: >
+  Run the Charm QA integration suite against a charm. Juju and the clouds must already
+  be set up,
+  for example with install-juju and setup-local-k8s. The step fails when tests fail;
+  use
+  continue-on-error and the outcome output to report results first.
+inputs:
+  target-charm:
+    description: Charm under test
+    required: true
+  target-endpoint:
+    description: Endpoint of the charm under test to integrate
+    required: true
+  target-cloud:
+    description: Juju cloud for the target controller, for example the setup action's
+      cloud-name
+    required: true
+  target-platform:
+    description: kubernetes or machine, for example the setup action's platform
+    required: true
+  target-channel:
+    description: Charmhub channel of the charm under test
+    default: default
+  target-revision:
+    description: Charm revision under test
+    default: default
+  target-downgrade-revision:
+    description: Revision to downgrade to
+    default: default
+  target-series:
+    description: Base series of the charm under test
+    default: default
+  target-arch:
+    description: Charm architecture; empty uses the runner architecture
+    default: ''
+  target-kubeconfig:
+    description: Kubeconfig path for a Kubernetes target cloud
+    default: ''
+  target-cloud-definition:
+    description: Cloud definition path for a target cloud registered by the suite
+    default: ''
+  target-cloud-credentials:
+    description: Credentials path for a target cloud registered by the suite
+    default: ''
+  target-controller-bootstrap-config:
+    description: Path to a JSON file of controller bootstrap configuration
+    default: ''
+  target-controller-bootstrap-constraints:
+    description: Path to a JSON file of controller bootstrap constraints
+    default: ''
+  target-controller-bootstrap-metadata-source:
+    description: Local image metadata directory for OpenStack bootstrap
+    default: ''
+  target-model-config:
+    description: Path to a JSON file of target model configuration
+    default: ''
+  target-remote-logging-endpoint:
+    description: Remote logging endpoint for the target model
+    default: ''
+  neighbor-charm:
+    description: Charm to integrate with the charm under test
+    required: true
+  neighbor-endpoint:
+    description: Endpoint of the neighbor charm
+    required: true
+  neighbor-cloud:
+    description: Juju cloud for a cross-model neighbor; empty runs both charms in
+      one model
+    default: ''
+  neighbor-platform:
+    description: Neighbor platform for cross-model runs
+    default: ''
+  neighbor-arch:
+    description: Neighbor architecture for cross-model runs
+    default: ''
+  neighbor-kubeconfig:
+    description: Kubeconfig path for a Kubernetes neighbor cloud
+    default: ''
+  neighbor-cloud-definition:
+    description: Cloud definition path for a neighbor cloud registered by the suite
+    default: ''
+  neighbor-cloud-credentials:
+    description: Credentials path for a neighbor cloud registered by the suite
+    default: ''
+  neighbor-controller-bootstrap-config:
+    description: Path to a JSON file of neighbor controller bootstrap configuration
+    default: ''
+  neighbor-controller-bootstrap-constraints:
+    description: Path to a JSON file of neighbor controller bootstrap constraints
+    default: ''
+  neighbor-controller-bootstrap-metadata-source:
+    description: Local image metadata directory for OpenStack bootstrap
+    default: ''
+  neighbor-model-config:
+    description: Path to a JSON file of neighbor model configuration
+    default: ''
+  neighbor-remote-logging-endpoint:
+    description: Remote logging endpoint for the neighbor model
+    default: ''
+  same-controller:
+    description: Use the target controller for the cross-model neighbor
+    default: 'false'
+  output-dir:
+    description: Directory for JUnit, bundles, the Mermaid diagram and logs; empty
+      uses <runner.temp>/charm-integration-testing
+    default: ''
+  collect-logs:
+    description: Collect Juju logs into <output-dir>/logs
+    default: 'true'
+  log-level:
+    description: Suite log level
+    default: INFO
+  prefix:
+    description: Prefix for controllers and models created by the suite
+    default: charmqa-${{ github.run_id }}
+  extra-args:
+    description: Additional pytest arguments, split with shell quoting rules, for
+      example -k "test_deploy or test_teardown"
+    default: ''
+  ubuntu-pro-token:
+    description: Optional Ubuntu Pro token for machine deployments
+    default: ''
+  install-dependencies:
+    description: Install the suite's Python dependencies and log tools
+    default: 'true'
+outputs:
+  junit-path:
+    description: JUnit XML path, set before tests start
+    value: ${{ steps.run.outputs.junit-path }}
+  log-dir:
+    description: Collected logs; empty when log collection is disabled
+    value: ${{ steps.run.outputs.log-dir }}
+  target-bundle-path:
+    description: Generated target bundle
+    value: ${{ steps.run.outputs.target-bundle-path }}
+  neighbor-bundle-path:
+    description: Generated neighbor bundle; empty unless cross-model
+    value: ${{ steps.run.outputs.neighbor-bundle-path }}
+  mermaid-path:
+    description: Generated Mermaid diagram of the bundles
+    value: ${{ steps.run.outputs.mermaid-path }}
+  outcome:
+    description: success or failure
+    value: ${{ steps.run.outputs.outcome }}
+runs:
+  using: composite
+  steps:
+    - name: Locate action repository
+      id: repository
+      shell: bash
+      run: |-
+        root="$(realpath "$GITHUB_ACTION_PATH/../..")"
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+        echo "mise-version=$(cat "$root/.mise-version")" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.repository.outputs.mise-version }}
+        working_directory: ${{ steps.repository.outputs.root }}
+        install: false
+        cache: false
+        env: false
+        export_path: false
+        add_shims_to_path: false
+    - name: Install suite dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      working-directory: ${{ steps.repository.outputs.root }}
+      env:
+        MISE_TRUSTED_CONFIG_PATHS: ${{ steps.repository.outputs.root }}
+      run: mise run setup -- --group integration --no-packages
+    - name: Run tests
+      id: run
+      shell: bash
+      working-directory: ${{ steps.repository.outputs.root }}
+      env:
+        MISE_TRUSTED_CONFIG_PATHS: ${{ steps.repository.outputs.root }}
+        ROOT: ${{ steps.repository.outputs.root }}
+        INPUTS: ${{ toJSON(inputs) }}
+      run: |-
+        set -euo pipefail
+        input() { mise exec aqua:jqlang/jq -- jq -r --arg name "$1" '.[$name] // ""' <<< "$INPUTS"; }
+        absolute() { [[ "$1" == /* ]] && echo "$1" || echo "$GITHUB_WORKSPACE/$1"; }
+        # Path inputs are relative to the caller's workspace; the suite runs from this repository.
+        suite_option() {
+          local value
+          value="$(input "$1-$2")"
+          case "$2" in
+            controller-bootstrap-*|model-config) [[ -z "$value" ]] || value="$(absolute "$value")" ;;
+          esac
+          echo "$value"
+        }
+        command -v juju >/dev/null || { echo "::error::Juju is required; run install-juju first"; exit 1; }
+        mkdir -p "$HOME/.local/share/juju"
+        output_dir="$(input output-dir)"
+        output_dir="$(absolute "${output_dir:-$RUNNER_TEMP/charm-integration-testing}")"
+        mkdir -p "$output_dir"
+        args=(
+          --current-state no_bundle
+          --charm-overrides ./static/charm-overrides/
+          --target-application target
+          --neighbor-application neighbor
+          --target-bundle "$output_dir/generated-target-bundle.yaml"
+          --mermaid-output "$output_dir/generated-bundle.mmd"
+          --junit-xml "$output_dir/junit.xml"
+          --log-level "$(input log-level)"
+          --log-cli-level "$(input log-level)"
+          --prefix "$(input prefix)"
+        )
+        {
+          echo "junit-path=$output_dir/junit.xml"
+          echo "target-bundle-path=$output_dir/generated-target-bundle.yaml"
+          echo "mermaid-path=$output_dir/generated-bundle.mmd"
+        } >> "$GITHUB_OUTPUT"
+        if [[ "$(input collect-logs)" == true ]]; then
+          args+=(--log-dir "$output_dir/logs")
+          echo "log-dir=$output_dir/logs" >> "$GITHUB_OUTPUT"
+        fi
+        target_arch="$(input target-arch)"
+        args+=(--target-arch "${target_arch:-$(dpkg --print-architecture)}")
+        for option in charm endpoint cloud platform channel revision downgrade-revision series \
+          controller-bootstrap-config controller-bootstrap-constraints \
+          controller-bootstrap-metadata-source model-config remote-logging-endpoint; do
+          value="$(suite_option target "$option")"
+          [[ -z "$value" ]] || args+=("--target-$option" "$value")
+        done
+        for option in charm endpoint; do
+          args+=("--neighbor-$option" "$(input "neighbor-$option")")
+        done
+        neighbor_cloud="$(input neighbor-cloud)"
+        if [[ -n "$neighbor_cloud" ]]; then
+          args+=(--neighbor-bundle "$output_dir/generated-neighbor-bundle.yaml")
+          echo "neighbor-bundle-path=$output_dir/generated-neighbor-bundle.yaml" >> "$GITHUB_OUTPUT"
+          for option in cloud platform arch controller-bootstrap-config \
+            controller-bootstrap-constraints controller-bootstrap-metadata-source model-config \
+            remote-logging-endpoint; do
+            value="$(suite_option neighbor "$option")"
+            [[ -z "$value" ]] || args+=("--neighbor-$option" "$value")
+          done
+          [[ "$(input same-controller)" != true ]] || args+=(--same-controller)
+        fi
+
+        # The suite reads per-cloud access files from KUBECONFIG_/CLOUD_*_<cloud> variables.
+        for side in target neighbor; do
+          cloud="$(input "$side-cloud")"
+          [[ -n "$cloud" ]] || continue
+          suffix="${cloud//-/_}"
+          for pair in KUBECONFIG:kubeconfig CLOUD_DEFINITION:cloud-definition \
+            CLOUD_CREDENTIALS:cloud-credentials; do
+            value="$(input "$side-${pair#*:}")"
+            [[ -z "$value" ]] || export "${pair%%:*}_$suffix=$(absolute "$value")"
+          done
+        done
+        # Split with shell quoting rules, without evaluating the input.
+        mapfile -d '' extra_args < <(python3 -c \
+          'import shlex, sys; sys.stdout.write("".join(a + "\0" for a in shlex.split(sys.argv[1])))' \
+          "$(input extra-args)")
+        export VALIDATORS_PATH="$ROOT/validators" UV_FILE="$ROOT/static/uv"
+        UBUNTU_PRO_TOKEN="$(input ubuntu-pro-token)"
+        export UBUNTU_PRO_TOKEN
+        status=0
+        mise run test:suite -- "${args[@]}" "${extra_args[@]}" || status=$?
+        echo "outcome=$([[ $status == 0 ]] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+        exit "$status"
