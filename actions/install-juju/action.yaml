@@ -1,0 +1,50 @@
+---
+name: Install Juju
+description: Install the Juju client snap used by Charm QA tests
+inputs:
+  channel:
+    description: Juju snap channel, for example 3.6/stable; empty uses the repository
+      default
+    default: ''
+outputs:
+  version:
+    description: Installed Juju client version
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Locate action repository
+      id: repository
+      shell: bash
+      run: |-
+        root="$(realpath "$GITHUB_ACTION_PATH/../..")"
+        echo "root=$root" >> "$GITHUB_OUTPUT"
+        echo "mise-version=$(cat "$root/.mise-version")" >> "$GITHUB_OUTPUT"
+    - name: Install mise
+      uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d  # v5.2.4
+      with:
+        version: ${{ steps.repository.outputs.mise-version }}
+        working_directory: ${{ steps.repository.outputs.root }}
+        install: false
+        cache: false
+        env: false
+        export_path: false
+        add_shims_to_path: false
+    - name: Install Juju
+      id: install
+      shell: bash
+      working-directory: ${{ steps.repository.outputs.root }}
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        MISE_TRUSTED_CONFIG_PATHS: ${{ steps.repository.outputs.root }}
+      run: |-
+        set -euo pipefail
+        if [[ -n "$CHANNEL" ]]; then
+          mise run juju:channel -- "$CHANNEL"
+        else
+          mise run setup -- --packages snap:juju
+        fi
+        if [[ ":$PATH:" != *:/snap/bin:* ]]; then
+          echo /snap/bin >> "$GITHUB_PATH"
+        fi
+        echo "version=$(/snap/bin/juju version)" >> "$GITHUB_OUTPUT"
