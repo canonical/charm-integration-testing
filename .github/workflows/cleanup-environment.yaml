@@ -100,6 +100,12 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.environment }}
+      - name: Reject local runner environments
+        if: ${{ startsWith(steps.env_info.outputs.cloud-type, 'local-') }}
+        shell: bash
+        run: |
+          echo "::error::Local runner environments are ephemeral and cannot be cleaned up by this workflow."
+          exit 1
       - name: Resolve credentials
         id: creds
         shell: bash

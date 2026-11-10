@@ -8,7 +8,12 @@ on:
       - mise.toml
       - mise.lock
       - .mise-version
+      - static/environments.yaml
+      - static/github-runners.yaml
       - static/substrates/*.yaml
+      - .github/actions/get-environment-info/action.yaml
+      - .github/actions/pick-runner/action.yaml
+      - .github/actions/setup-environment/**
       - .github/workflows/local-substrate-actions.yaml
   workflow_dispatch:
 concurrency:
@@ -18,6 +23,48 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  environment-config:
+    name: Validate GitHub-hosted environment configuration
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Pick runner
+        id: pick
+        uses: ./.github/actions/pick-runner
+        with:
+          target_environment: github-runner-k8s
+          neighbor_environment: github-runner-lxd
+      - name: Get Kubernetes environment info
+        id: k8s
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: github-runner-k8s
+      - name: Get LXD environment info
+        id: lxd
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: github-runner-lxd
+      - name: Validate environment outputs
+        env:
+          RUNNER_LABELS: ${{ steps.pick.outputs.runner-labels }}
+          K8S_CLOUD_TYPE: ${{ steps.k8s.outputs.cloud-type }}
+          K8S_PLATFORM: ${{ steps.k8s.outputs.platform }}
+          K8S_ARCH: ${{ steps.k8s.outputs.arch }}
+          K8S_CREDENTIALS_SECRET: ${{ steps.k8s.outputs.credentials-secret }}
+          LXD_CLOUD_TYPE: ${{ steps.lxd.outputs.cloud-type }}
+          LXD_PLATFORM: ${{ steps.lxd.outputs.platform }}
+          LXD_ARCH: ${{ steps.lxd.outputs.arch }}
+          LXD_CREDENTIALS_SECRET: ${{ steps.lxd.outputs.credentials-secret }}
+        run: |
+          set -euo pipefail
+          [[ "$RUNNER_LABELS" == '["ubuntu-24.04"]' ]]
+          [[ "$K8S_CLOUD_TYPE" == local-k8s && "$K8S_PLATFORM" == kubernetes ]]
+          [[ "$K8S_ARCH" == amd64 && -z "$K8S_CREDENTIALS_SECRET" ]]
+          [[ "$LXD_CLOUD_TYPE" == local-lxd && "$LXD_PLATFORM" == machine ]]
+          [[ "$LXD_ARCH" == amd64 && -z "$LXD_CREDENTIALS_SECRET" ]]
   local-substrates:
     strategy:
       fail-fast: false
@@ -43,16 +90,18 @@ jobs:
           [[ "$JUJU_VERSION" == 3.6.* ]]
       - name: Set up local Kubernetes
         id: k8s
-        uses: ./actions/setup-local-k8s
+        uses: ./.github/actions/setup-environment/setup-cloud
+        with:
+          cloud-name: local-k8s
+          cloud-type: local-k8s
       # Deploy before setting up LXD, whose FORWARD reset would hide pod egress failures.
       - name: Deploy on Kubernetes
         env:
           CLOUD: ${{ steps.k8s.outputs.cloud-name }}
-          KUBECONFIG_PATH: ${{ steps.k8s.outputs.kubeconfig-path }}
-          PLATFORM: ${{ steps.k8s.outputs.platform }}
+          KUBECONFIG_PATH: ${{ steps.k8s.outputs.kubeconfig_path }}
         run: |
           set -euo pipefail
-          [[ "$PLATFORM" == kubernetes ]]
+          [[ "$CLOUD" == local-k8s && -f "$KUBECONFIG_PATH" ]]
           kubectl --kubeconfig "$KUBECONFIG_PATH" get crd stresschaos.chaos-mesh.org
           juju bootstrap "$CLOUD" k8s-ctrl
           juju add-model test -c k8s-ctrl
@@ -62,14 +111,16 @@ jobs:
             --query='status=="active"' --timeout 20m
       - name: Set up local LXD
         id: lxd
-        uses: ./actions/setup-local-lxd
+        uses: ./.github/actions/setup-environment/setup-cloud
+        with:
+          cloud-name: local-lxd
+          cloud-type: local-lxd
       - name: Deploy on LXD
         env:
           CLOUD: ${{ steps.lxd.outputs.cloud-name }}
-          PLATFORM: ${{ steps.lxd.outputs.platform }}
         run: |
           set -euo pipefail
-          [[ "$CLOUD" == localhost && "$PLATFORM" == machine ]]
+          [[ "$CLOUD" == localhost ]]
           juju bootstrap "$CLOUD" lxd-ctrl
           juju add-model test -c lxd-ctrl
           juju set-model-constraints -m lxd-ctrl:test "arch=$(dpkg --print-architecture)"
