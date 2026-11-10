@@ -5,14 +5,15 @@
 # Solutions QA specific invocation of the development sandbox that configures
 # the recommended tooling. Accepts the same subcommands as scripts/sandbox.sh.
 #
-# For `up`, it first:
+# For `up` and `run` it first:
 #   - creates development-sandbox/mcp.json from mcp.json.sample if it does not
 #     exist (fails before writing if any required variable is unset), and
 #   - writes the host values of variables listed in development-sandbox/.env.sample
 #     to development-sandbox/.env. If that file already exists, it lists the
 #     variable names that would be removed or added.
+# `shell` only refreshes .env, since it does not use the MCP config.
 # Before writing either file, it lists the variable names it injects and asks
-# for consent. Declining mcp.json stops `up`; declining .env leaves it as is.
+# for consent. Declining mcp.json stops; declining .env leaves it as is.
 #
 # Usage:
 #   JIRA_API_TOKEN=... TEST_OBSERVER_API_KEY=... \
@@ -30,13 +31,13 @@ source "$SCRIPT_DIR/util/generate-mcp-json.sh"
 source "$SCRIPT_DIR/util/sandbox-env.sh"
 
 case "${1:-}" in
-    up)
-        shift
+    up|run)
         ensure_mcp_json "$DEV_DIR/mcp.json"
         write_sandbox_env_file "$DEV_DIR/.env"
-        exec "$SCRIPT_DIR/sandbox.sh" up "$@"
         ;;
-    *)
-        exec "$SCRIPT_DIR/sandbox.sh" "$@"
+    shell)
+        write_sandbox_env_file "$DEV_DIR/.env"
         ;;
 esac
+
+exec "$SCRIPT_DIR/sandbox.sh" "$@"

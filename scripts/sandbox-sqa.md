@@ -91,7 +91,7 @@ Run from the repository root:
 scripts/sandbox-sqa.sh up
 ```
 
-Before starting the VM, `up`:
+Before starting the VM, `up` (and `run`, before each session):
 
 - generates `development-sandbox/mcp.json` from your credentials, if it does
   not already exist, and
@@ -100,9 +100,13 @@ Before starting the VM, `up`:
   tokens above) to `development-sandbox/.env`. If a `.env` already exists, it
   also lists the variable names that would be removed or added.
 
-Before writing either file, `up` lists the variable names (never values) it
-will inject into the sandbox and asks for your consent. Declining `mcp.json`
-stops `up`; declining `.env` leaves it as is.
+`shell` refreshes only `.env`. This keeps rotated tokens in your shell in
+effect, since `scripts/sandbox.sh` reads `.env` on every command and its values
+take precedence.
 
-All other subcommands (`down`, `destroy`, `shell`, `run`) behave as in
-`scripts/sandbox.sh`.
+Before writing either file, the script lists the variable names (never values)
+it will inject into the sandbox and asks for your consent. Neither file is
+rewritten if it is already up to date. Declining `mcp.json` stops the command;
+declining `.env` leaves it as is.
+
+`down` and `destroy` behave as in `scripts/sandbox.sh`.
