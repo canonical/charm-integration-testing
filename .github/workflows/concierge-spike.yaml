@@ -1,0 +1,28 @@
+# Throwaway SQT-1273 spike: Concierge substrate setup on GitHub-hosted runners. Do not merge.
+name: Concierge spike
+
+on:
+  pull_request:
+    paths: [.github/workflows/concierge-spike.yaml, .github/spike/**]
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    name: ${{ matrix.case }} / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        case: [k8s, lxd, both, additive]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Run spike
+        env:
+          CASE: ${{ matrix.case }}
+        run: .github/spike/concierge-spike.sh "$CASE"
