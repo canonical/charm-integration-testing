@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "validators-test-utils",
+    "types-pyyaml>=6.0.12.20250915",
 ]
 
 [project.entry-points."endpoint_validators"]
