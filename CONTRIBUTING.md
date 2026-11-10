@@ -137,10 +137,12 @@ shared setup and package operations.
 | Task | Purpose |
 |---|---|
 | `mise run bundle:build-x` | Generate bundles from a spec |
-| `mise run test:charm-integration-testing` | Run `charm_integration_testing` unit tests |
+| `mise run test:cit` | Run `charm_integration_testing` unit tests |
 | `mise run test:validators` | Run validator unit tests |
-| `mise run test:bundle-builder-x` | Run bundle builder tests |
+| `mise run test:bbx` | Run bundle builder tests |
 | `mise run test:suite -- ...` | Run the live Juju integration suite |
+
+File-name task names and the existing longer aliases remain supported.
 
 ### CI gates (all must pass on every PR)
 

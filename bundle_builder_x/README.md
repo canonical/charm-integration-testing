@@ -85,8 +85,8 @@ bundle_builder_x/
 
 ```bash
 # Unit and logic tests (fast, no network)
-uv run --no-sync --all-packages python -m pytest bundle_builder_x/tests/unit/ bundle_builder_x/tests/logic/ -q
+mise run test:bbx -- 'unit|logic' -q
 
 # Integration tests (hits Charmhub API)
-uv run --no-sync --all-packages python -m pytest bundle_builder_x/tests/integration/ -v
+mise run test:bbx -- integration -v
 ```
