@@ -12,6 +12,7 @@ from juju import JujuModelHandle
 # https://github.com/canonical/jubilant/issues/443
 class _BoundedJuju(jubilant.Juju):
     command_timeout: float
+    bootstrap_timeout: float
 
     def _cli(
         self,
@@ -22,7 +23,9 @@ class _BoundedJuju(jubilant.Juju):
         timeout: float | None = None,
     ) -> tuple[str, str]:
         # Bound connection stalls that Juju/Jubilant's operation waits do not cover.
-        timeout = self.command_timeout if timeout is None else min(timeout, self.command_timeout)
+        # Bootstrap provisions a machine and agent, so it gets a longer ceiling.
+        ceiling = self.bootstrap_timeout if args[:1] == ("bootstrap",) else self.command_timeout
+        timeout = ceiling if timeout is None else min(timeout, ceiling)
         return super()._cli(
             *args,
             include_model=include_model,
@@ -33,10 +36,15 @@ class _BoundedJuju(jubilant.Juju):
 
 
 class JubilantClient:
-    def __init__(self, command_timeout: timedelta = timedelta(minutes=5)) -> None:
-        if command_timeout <= timedelta(0):
-            raise ValueError("Command timeout must be positive.")
+    def __init__(
+        self,
+        command_timeout: timedelta = timedelta(minutes=5),
+        bootstrap_timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        if command_timeout <= timedelta(0) or bootstrap_timeout <= timedelta(0):
+            raise ValueError("Command timeouts must be positive.")
         self.command_timeout = command_timeout
+        self.bootstrap_timeout = bootstrap_timeout
 
     def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
         client = _BoundedJuju(
@@ -44,4 +52,5 @@ class JubilantClient:
             wait_timeout=timedelta(days=1).total_seconds(),
         )
         client.command_timeout = self.command_timeout.total_seconds()
+        client.bootstrap_timeout = self.bootstrap_timeout.total_seconds()
         return client
