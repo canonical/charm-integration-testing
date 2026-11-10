@@ -1,112 +1,51 @@
 # Solutions QA sandbox
 
-`scripts/sandbox-sqa.sh` starts the [development sandbox](../development-sandbox/README.md)
-with the tooling Solutions QA recommends, including the Jira and Test Observer
-[MCP servers](../development-sandbox/README.md#recommended-mcp-servers).
-No manual configuration is required.
+Wraps the [dev sandbox](../development-sandbox/README.md) and sets up the SQA
+tooling (Jira and Test Observer MCP) from your shell. No `.env` editing.
 
-## 1. Export your credentials
-
-| Variable | Purpose |
-|---|---|
-| `GITHUB_TOKEN` | Used on the host to register the VM's commit signing key with your GitHub account. Needs permission to manage SSH signing keys. |
-| `SANDBOX_VAR_GITHUB_TOKEN` | Fine-grained PAT for the `gh` CLI inside the sandbox, usable by you and the agent. See [recommended permissions](#recommended-sandbox_var_github_token-permissions). |
-| `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` | Fine-grained PAT used by Copilot CLI inside the sandbox. See [recommended permissions](#recommended-sandbox_var_copilot_github_token-permissions). |
-| `TEST_OBSERVER_API_KEY` | API key for the Test Observer MCP server. |
-| `JIRA_API_TOKEN` | API token for the Jira MCP server. Your Jira username defaults to `git config user.email`; set `JIRA_USERNAME` to override it. |
+## Setup
 
 ```bash
-export GITHUB_TOKEN=<token>
-export SANDBOX_VAR_GITHUB_TOKEN=<token>
-export SANDBOX_VAR_COPILOT_GITHUB_TOKEN=<token>
-export TEST_OBSERVER_API_KEY=<key>
-export JIRA_API_TOKEN=<token>
-```
+export GITHUB_TOKEN=...                      # host only: registers the VM signing key
+export SANDBOX_VAR_GITHUB_TOKEN=...          # gh in the VM, owner: canonical
+export SANDBOX_VAR_COPILOT_GITHUB_TOKEN=...  # Copilot in the VM, owner: you
+export TEST_OBSERVER_API_KEY=...             # ask SQA
+export JIRA_API_TOKEN=...                    # JIRA_USERNAME defaults to git user.email
 
-### Recommended `SANDBOX_VAR_GITHUB_TOKEN` permissions
-
-Resource owner: `canonical`. Repository access: all repositories.
-
-This is a good balance between usefulness and security. Write access covers
-day-to-day development: pushing branches, opening pull requests, filing issues,
-and running CI. Everything else is read-only, so you and the agent can
-investigate failures without being able to change settings, security
-configuration, or deployments. Limiting the owner to `canonical` keeps your
-personal repositories and other organizations out of reach.
-
-Repository permissions, read and write:
-
-- Actions
-- Agent tasks
-- Commit statuses
-- Contents
-- Issues
-- Pull requests
-- Workflows
-
-Repository permissions, read-only:
-
-- Artifact metadata
-- Attestations
-- Code quality
-- Code scanning alerts
-- Codespaces
-- Codespaces lifecycle admin
-- Codespaces metadata
-- Copilot agent settings
-- Custom properties
-- Dependabot alerts
-- Deployments
-- Discussions
-- Environments
-- License compliance alerts
-- Merge queues
-- Metadata
-- Pages
-- Repository security advisories
-- Secret scanning alerts
-- Variables
-- Webhooks
-
-### Recommended `SANDBOX_VAR_COPILOT_GITHUB_TOKEN` permissions
-
-Create a separate token for Copilot. Copilot permissions are account
-permissions, so this token must be owned by your user account, unlike
-`SANDBOX_VAR_GITHUB_TOKEN`, which is owned by `canonical`.
-
-Resource owner: your user account. Repository access: public repositories (the
-default; Copilot needs no repository permissions).
-
-Account permissions, read-only:
-
-- Copilot Chat
-- Copilot Editor Context
-- Copilot Requests
-
-## 2. Start the sandbox
-
-Run from the repository root:
-
-```bash
 scripts/sandbox-sqa.sh up
 ```
 
-Before starting the VM, `up` (and `run`, before each session):
+Same subcommands as `scripts/sandbox.sh`.
 
-- generates `development-sandbox/mcp.json` from your credentials, if it does
-  not already exist, and
-- writes the variables listed in
-  [`.env.sample`](../development-sandbox/.env.sample) (such as the GitHub
-  tokens above) to `development-sandbox/.env`. If a `.env` already exists, it
-  also lists the variable names that would be removed or added.
+## Tokens
 
-`shell` refreshes only `.env`. This keeps rotated tokens in your shell in
-effect, since `scripts/sandbox.sh` reads `.env` on every command and its values
-take precedence.
+Use two separate fine-grained PATs. Copilot permissions only exist on
+user-owned tokens; everything else should be owned by `canonical`.
 
-Before writing either file, the script lists the variable names (never values)
-it will inject into the sandbox and asks for your consent. Neither file is
-rewritten if it is already up to date. Declining `mcp.json` stops the command;
-declining `.env` leaves it as is.
+**`SANDBOX_VAR_GITHUB_TOKEN`**: owner `canonical`, all repositories. Write
+for day-to-day dev, read-only for everything else.
 
-`down` and `destroy` behave as in `scripts/sandbox.sh`.
+- Read and write: Actions, Agent tasks, Commit statuses, Contents, Issues,
+  Pull requests, Workflows
+- Read-only: Artifact metadata, Attestations, Code quality, Code scanning
+  alerts, Codespaces, Codespaces lifecycle admin, Codespaces metadata, Copilot
+  agent settings, Custom properties, Dependabot alerts, Deployments,
+  Discussions, Environments, License compliance alerts, Merge queues, Metadata,
+  Pages, Repository security advisories, Secret scanning alerts, Variables,
+  Webhooks
+
+**`SANDBOX_VAR_COPILOT_GITHUB_TOKEN`**: owner: you, public repositories.
+Account permissions, read-only: Copilot Chat, Copilot Editor Context, Copilot
+Requests.
+
+## What it does
+
+- `up`, `run`, `shell`: checks both tokens are fine-grained, different, and
+  accepted by GitHub. It can't check permissions; GitHub doesn't expose them.
+- `up`, `run`: creates `development-sandbox/mcp.json` if missing.
+- `up`, `run`, `shell`: syncs `.env` from your shell (only variables in
+  `.env.sample`), so rotated tokens just work.
+- Asks before writing either file and shows variable names, never values.
+
+Handy after `git clean -fxd`. Export `SANDBOX_SIGNING_KEY` too, or you'll get a
+new VM signing key to register.
