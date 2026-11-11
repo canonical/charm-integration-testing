@@ -36,6 +36,28 @@ Determine `owner/repo` explicitly before doing anything else:
 
 All subsequent commands use `--repo <owner/repo>` with that confirmed value.
 
+## Label guidance
+
+For `canonical/charm-integration-testing`, use these labels according to the
+issue evidence:
+
+- `bug`: a defect in the test pipeline that can make a run fail or report an
+  incorrect result; do not use it for an upstream charm defect alone.
+- `enhancement`: a genuinely new capability the project should support.
+  Documentation, cleanup, refactoring, and reporting-only improvements are
+  not enhancements by themselves.
+- `wontfix`: a run blocker confirmed to be outside the project's supported
+  scope. Do not infer this only from an upstream or external failure.
+- `needs clarity`: a potentially run-impacting issue lacks enough evidence to
+  establish its cause, ownership, or expected behavior. Do not guess whether
+  it should be `bug`, `enhancement`, or `wontfix`; this label can accompany one
+  of those labels when that category is already clear.
+
+Issues that do not affect run execution or correctness do not need `bug`,
+`enhancement`, or `wontfix`; use appropriate existing labels such as
+`documentation`, `question`, or `duplicate`. For other target repositories,
+follow their own label taxonomy instead of assuming these labels exist.
+
 ---
 
 ## Step 1 — Check for duplicates first
@@ -137,11 +159,12 @@ EOF
 )"
 ```
 
-Use `--label enhancement` for enhancement proposals instead, or drop `--label`
-entirely if the target repo doesn't use that convention (check
-`gh label list --repo <owner/repo>` if unsure — an invalid label makes the
-whole command fail). Confirm the returned issue URL and report it back;
-don't assume success from exit code alone if the command produced no URL.
+Use the target repository's applicable label, if any. For
+`canonical/charm-integration-testing`, follow the Label guidance above. Check
+that a label exists with `gh label list --repo <owner/repo>`; do not impose
+these labels on other repositories or force a category when none fits. Confirm
+the returned issue URL and report it back; don't assume success from exit code
+alone if the command produced no URL.
 
 ---
 
