@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+#MISE description="Run Copilot CLI with repository development context"
+#MISE raw_args=true
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: mise run agent -- [--interactive] [--] [PROMPT...]
+
+Run Copilot CLI with the repository's development context. Set
+SANDBOX_MCP_CONFIG_FILE to an optional MCP config JSON file.
+EOF
+}
+
+interactive=false
+while (( $# )); do
+    case "$1" in
+        --interactive)
+            interactive=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+prompt="$*"
+if [[ "$interactive" == false && -z "$prompt" ]]; then
+    usage >&2
+    exit 1
+fi
+
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PROJECT_ROOT="$project_root"
+prompt_file="$(mktemp)"
+# shellcheck disable=SC2317
+cleanup() {
+    rm -f -- "$prompt_file"
+}
+trap cleanup EXIT
+
+mcp_args=()
+mcp_config="${SANDBOX_MCP_CONFIG_FILE:-}"
+if [[ -n "$mcp_config" ]]; then
+    if [[ "$mcp_config" != /* ]]; then
+        mcp_config="$project_root/$mcp_config"
+    fi
+    [[ -f "$mcp_config" ]] || {
+        echo "ERROR: SANDBOX_MCP_CONFIG_FILE not found: $mcp_config" >&2
+        exit 1
+    }
+    mcp_args+=(--additional-mcp-config "@$mcp_config")
+fi
+
+{
+    cat "$project_root/.agents/skills/system.md"
+    if [[ -n "$prompt" ]]; then
+        printf '\n\n---\n\nTask: %s\n' "$prompt"
+    fi
+} > "$prompt_file"
+
+if [[ "$interactive" == true ]]; then
+    set +e
+    copilot --yolo "${mcp_args[@]}" -i \
+        "Please read $prompt_file for project context, then await my instructions."
+    status=$?
+    set -e
+    exit "$status"
+fi
+
+copilot_args=(--yolo "${mcp_args[@]}" -p "$(cat "$prompt_file")")
+set +e
+copilot "${copilot_args[@]}"
+status=$?
+set -e
+exit "$status"

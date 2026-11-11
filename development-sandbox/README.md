@@ -19,21 +19,33 @@ Ask Copilot to develop or test a validator, reproduce a failure, or review a PR.
 Skills such as `/setup-k8s`, `/setup-lxd`, `/develop-validator`, and `/test-validator`
 handle substrate setup and testing.
 
-Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
+With Mise installed on the host, `mise run sandbox -- up` and
+`mise run sandbox -- run --interactive` provide the same interface. The direct
+launcher does not require Mise on the host.
+
+The `sandbox` task manages the host VM and delegates Copilot execution to the
+`agent` task inside it. The agent task can also run directly on a prepared Ubuntu host:
+
+```bash
+mise run setup -- --group agent
+mise run agent -- "Describe the task"
+```
+
+Run `mise run sandbox -- --help` for VM lifecycle and agent options.
 
 ## VM setup
 
 `up` prepares the VM toolchain from the repository catalogue.
 
-`scripts/sandbox.sh up`, `run`, and `shell` set `UV_PROJECT_ENVIRONMENT` to store
+`mise run sandbox -- up`, `run`, and `shell` set `UV_PROJECT_ENVIRONMENT` to store
 Python dependencies under
 `~/.local/share/charm-integration-testing/venvs/<checkout-path-hash>` (or
 `$XDG_DATA_HOME/charm-integration-testing/venvs/<checkout-path-hash>` when set).
 The hash uses the canonical VM checkout path, so different mounts have separate
 environments. Each shell or agent session keeps the environment for its mount;
-use the other checkout's `scripts/sandbox.sh shell` or `run` to work on that project.
+use the other checkout's `mise run sandbox -- shell` or `run` to work on that project.
 Host commands continue using the checkout's `.venv`; sandbox setup leaves it
-untouched. Run `scripts/sandbox.sh up` again to configure an existing sandbox.
+untouched. Run `mise run sandbox -- up` again to configure an existing sandbox.
 
 For substrate prerequisites and provisioning, follow the
 [Kubernetes](../.agents/skills/setup-k8s/SKILL.md) or
@@ -100,7 +112,7 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 ```
 
 This applies to both interactive and autonomous `run` sessions.
-Sandbox setup includes Go and uvx; rerun `scripts/sandbox.sh up` to prepare them
+Sandbox setup includes Go and uvx; rerun `mise run sandbox -- up` to prepare them
 in older VMs.
 
 Any host environment variable prefixed with `SANDBOX_VAR_` is passed into the VM

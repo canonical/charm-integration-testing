@@ -9,8 +9,8 @@
 #   scripts/sandbox.sh down          Stop the VM (preserves state)
 #   scripts/sandbox.sh destroy       Delete the VM permanently
 #   scripts/sandbox.sh shell         Open a shell inside the VM
-#   scripts/sandbox.sh run 'task'    Run Copilot in autonomous mode
-#   scripts/sandbox.sh run --interactive   Run Copilot in interactive mode
+#   scripts/sandbox.sh run 'task'    Run the agent task in autonomous mode
+#   scripts/sandbox.sh run --interactive   Run the agent task interactively
 #   scripts/sandbox.sh --help        Show this help
 #
 # Environment / .env (optional, loaded from development-sandbox/.env):
@@ -636,8 +636,6 @@ _cmd_shell() {
 # Subcommand: run
 # ---------------------------------------------------------------------------
 _cmd_run() {
-    COPILOT_MODEL="${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}"
-
     INTERACTIVE=false
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -686,6 +684,9 @@ EOF
     if [ "$INTERACTIVE" = "false" ]; then
         [ -n "$TASK" ] || { echo "Usage: scripts/sandbox.sh run 'task description'" >&2; exit 1; }
     fi
+    _agent_args=()
+    [ "$INTERACTIVE" = "false" ] || _agent_args+=(--interactive)
+    _agent_args+=("$@")
 
     if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
@@ -695,60 +696,25 @@ EOF
     _require_github_auth
     _vm_gh_auth_login
 
-    # All prerequisites met. Copy MCP config into the VM now.
+    # Copy MCP config into the VM; the agent task handles Copilot invocation.
     _mcp_vm_file=""
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         echo "==> Copying MCP config into VM..."
         _mcp_vm_file=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/mcp-config-XXXXXX.json")
         _vm_temp_files+=("$_mcp_vm_file")
         # Pipe rather than redirect: `multipass exec` hangs when its stdin is a regular file.
+        # shellcheck disable=SC2002
         cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
 
-    PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    _vm_temp_files+=("$PROMPT_FILE")
-
-    {
-        cat "$PROJECT_DIR/.agents/skills/system.md"
-        if [ -n "$TASK" ]; then
-            printf "\n\n---\n\nTask: %s\n" "$TASK"
-        fi
-    } | multipass exec "$VM_NAME" -- bash -c "cat > \"$PROMPT_FILE\""
-
-    if [ "$INTERACTIVE" = "true" ]; then
-        CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
-        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
-        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
-        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
-        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
-        _collect_sandbox_vars _env_args
-        _vm_exec_with_env _env_args bash -lc "
-                cd '$VM_MOUNT'
-            _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" || _ec=\$?
-            rm -f \"$PROMPT_FILE\"
-            exit \$_ec
-        "
-    else
-        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("COPILOT_MODEL=$COPILOT_MODEL" "PROJECT_ROOT=$VM_MOUNT")
-        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
-        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
-        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
-        _collect_sandbox_vars _env_args
-        _vm_exec_with_env _env_args bash -lc "
-                cd '$VM_MOUNT'
-            _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" || _ec=\$?
-            rm -f \"$PROMPT_FILE\"
-            exit \$_ec
-        "
-    fi
+    _env_args=("COPILOT_MODEL=${SANDBOX_VAR_COPILOT_MODEL:-sonnet-4.6}" "PROJECT_ROOT=$VM_MOUNT")
+    [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
+    [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
+    [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_CONFIG_FILE=$_mcp_vm_file")
+    _collect_sandbox_vars _env_args
+    # shellcheck disable=SC2016
+    _vm_exec_with_env _env_args bash -lc \
+        'cd "$PROJECT_ROOT" && exec mise run agent -- "$@"' bash "${_agent_args[@]}"
 }
 
 # ---------------------------------------------------------------------------
