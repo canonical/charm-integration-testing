@@ -11,7 +11,7 @@ Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACK
                         [--no-packages] [--dry-run]
 
 Groups: runtime, development, workflow, integration, cleanup, sandbox, agent, local-k8s, local-lxd,
-        cloud-k8s, cloud-openstack, cloud-lxd
+        local-s3, cloud-k8s, cloud-openstack, cloud-lxd
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
 --no-packages skips group packages; it cannot be combined with --packages.
@@ -127,6 +127,13 @@ for group in "${groups[@]}"; do
             packages+=(
                 snap:lxd
                 snap:juju
+            )
+            ;;
+        local-s3)
+            [[ "$project" == dev ]] || project=main
+            tools+=(
+                github:seaweedfs/seaweedfs
+                aqua:jqlang/jq
             )
             ;;
         cloud-k8s)

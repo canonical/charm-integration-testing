@@ -55,6 +55,13 @@ install or refresh packages. For Chaos Mesh on an existing cluster, follow the
 To select another Juju client before provisioning, follow
 [Juju client selection](../CONTRIBUTING.md#selecting-the-juju-client).
 
+## S3 storage
+
+For tests with s3-integrator, follow [local S3 setup](../.agents/skills/setup-s3/SKILL.md)
+to start a sandbox service without shared QA credentials. See
+[S3 configuration](../docs/how-to/run-and-debug-tests-locally.rst#s3-storage)
+for per-cloud configuration and externally supplied credentials.
+
 ## Configuration
 
 Set options in `development-sandbox/.env` (gitignored). See
