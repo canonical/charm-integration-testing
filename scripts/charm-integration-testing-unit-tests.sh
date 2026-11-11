@@ -1,4 +1,7 @@
 #!/bin/bash
+#MISE description="Run charm integration testing unit tests"
+#MISE raw_args=true
+#MISE alias=["test:charm-integration-testing", "test:cit"]
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 

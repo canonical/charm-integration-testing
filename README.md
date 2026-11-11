@@ -5,17 +5,28 @@ validating the deployment and interoperability of charms.
 
 ## Getting Started
 
-Python dependencies are managed through poetry.
+For local charm testing, use the [development sandbox](development-sandbox/README.md).
+It mounts your checkout and installs the tools inside a VM.
+
+To install directly on your machine, install mise (on Ubuntu,
+`sudo snap install mise --classic`; see
+[getting started](https://mise.jdx.dev/getting-started.html) for other
+platforms), then prepare the development environment:
 
 ```bash
-pipx install poetry==2.0
-poetry install
+mise run setup -- --group development
 ```
+
+Setup installs Python, uv and project dependencies without changing system
+packages. Run `mise tasks --extended` to discover tasks and aliases, and
+`mise run setup -- --help` for setup groups and options.
+
+See [tool ownership](CONTRIBUTING.md#what-goes-where) for locked tools,
+machine-wide snap channels, and Python dependencies.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information about development
-best practices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, linters, and tests.
 
 ## Usage
 

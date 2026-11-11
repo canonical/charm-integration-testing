@@ -31,7 +31,7 @@ This guide will reference variables that need to contain values specific to your
 ``MODEL_NAME``:
   The name to use for the Juju model that is created and used in the testing. For example, ``charm-testing``.
 ``OUTPUT_FILE``:
-  A filename to use for for the charm bundle output produced by the ``build-bundle.sh`` script. For example, ``generated-bundle.yaml``.
+  Path to the model bundle produced by bundle builder X. For example, ``generated-bundles/charm-testing.yaml``.
 ``JUJU_MODEL_CONFIG_FILE``:
   Path to a JSON file containing Juju model configuration values passed at model creation time. For example, ``./static/juju-model-config.json``.
 
@@ -49,20 +49,12 @@ The following environment variables are optional and only needed when testing sp
 
 Set up Juju and k8s
 -------------------
-Juju and k8s will be needed to run the tests.
-
-To install Juju, run:
-
-.. code:: bash
-
-  sudo snap install juju
-
-To install ``k8s`` and ``kubectl``, run:
+Juju and k8s will be needed to run the tests. Install Juju, k8s, kubectl,
+and the local substrate tools from the repository catalogue:
 
 .. code:: bash
 
-   sudo snap install k8s --classic --channel latest/edge
-   sudo snap install kubectl --classic --channel 1.30
+   mise run setup -- --group local-k8s
 
 Next, bootstrap ``k8s`` and configure ``kubectl``:
 
@@ -196,57 +188,20 @@ Select ``-k test_live_memory_stress_moderate`` to run it.
 Install the repository dependencies
 -----------------------------------
 
-Next, install the Python dependencies to run the repository code:
+Next, install the Python development dependencies and integration tools:
 
 .. code:: bash
 
-   sudo apt-get update
-   sudo apt-get install pipx
-   pipx install poetry==2.0
-   poetry install
+   mise run setup -- --group development integration
 
 Generate dynamic bundles
 ------------------------
 
-To run the tests, we will generate a dynamic bundle that includes our test charm, the neighbor charm, and their respective endpoints. Do this with the following command:
-
-.. code:: bash
-
-   ./scripts/build-bundle.sh \
-    --charms \
-      "target::${TARGET_CHARM}::${CHANNEL}::${REVISION}::${SERIES}" \
-      "neighbor::${NEIGHBOR_CHARM}::default::default::default" \
-    --integrations "target:${TARGET_ENDPOINT}::neighbor:${NEIGHBOR_ENDPOINT}" \
-    --substrate "${SUBSTRATE}" \
-    --charm-metadata-overrides ./static/charm-metadata-overrides/ \
-    --charm-platform-overrides ./static/charm-platform-overrides/ \
-    --charm-listing-overrides ./static/charm-listing-overrides.yaml \
-    --charm-test-configs ./static/charm-test-configs/ \
-    --output-file "${OUTPUT_FILE}"
-
-The contents of the output file will look something like the following:
-
-.. code:: yaml
-
-  applications:
-    neighbor:
-      base: ubuntu@20.04
-      channel: 1/stable
-      charm: loki-k8s
-      revision: 194
-      scale: 1
-      trust: true
-    target:
-      base: ubuntu@20.04
-      channel: 1/stable
-      charm: grafana-k8s
-      revision: 143
-      scale: 1
-      trust: true
-  bundle: kubernetes
-  relations:
-  - - neighbor:grafana-dashboard
-    - target:grafana-dashboard
+Follow :doc:`use-bundle-builder-x` to write a spec containing the ``target`` and
+``neighbor`` applications and their integration, then generate the bundles with
+``mise run bundle:build-x``. The :doc:`/reference/spec-file` reference describes
+revision, base, and endpoint settings. Set ``OUTPUT_FILE`` to the generated model
+bundle path.
 
 Run tests
 ---------
@@ -257,7 +212,7 @@ correct order:
 
 .. code:: bash
 
-   ./scripts/run-tests.sh \
+   mise run test:suite -- \
      --juju-cloud "${K8S_CLOUD_NAME}" \
      --juju-controller "${K8S_CONTROLLER_NAME}" \
      --model "${MODEL_NAME}" \
@@ -439,7 +394,7 @@ to place the neighbor model:
 
   .. code:: bash
 
-     ./scripts/run-tests.sh \
+     mise run test:suite -- \
        --target-cloud "${CLOUD_NAME}" \
        --target-charm "mysql" \
        --target-endpoint "database" \
