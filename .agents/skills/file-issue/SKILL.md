@@ -41,22 +41,22 @@ All subsequent commands use `--repo <owner/repo>` with that confirmed value.
 For `canonical/charm-integration-testing`, use these labels according to the
 issue evidence:
 
-- `bug`: a defect in the test pipeline, including incorrect run results; do
-  not use it for an upstream charm defect alone.
+- `bug`: a defect in the test pipeline that can make a run fail or report an
+  incorrect result; do not use it for an upstream charm defect alone.
 - `enhancement`: a genuinely new capability the project should support.
   Documentation, cleanup, refactoring, and reporting-only improvements are
   not enhancements by themselves.
 - `wontfix`: a run blocker confirmed to be outside the project's supported
   scope. Do not infer this only from an upstream or external failure.
 - `needs clarity`: a potentially run-impacting issue lacks enough evidence to
-  establish its cause, ownership, or expected behavior. Do not guess a triad
-  label; this label can accompany a triad label when that category is already
-  clear.
+  establish its cause, ownership, or expected behavior. Do not guess whether
+  it should be `bug`, `enhancement`, or `wontfix`; this label can accompany one
+  of those labels when that category is already clear.
 
-Issues that cannot make a run fail do not need a triad label; use appropriate
-existing labels such as `documentation`, `question`, or `duplicate`. For other
-target repositories, follow their own label taxonomy instead of assuming these
-labels exist.
+Issues that do not affect run execution or correctness do not need `bug`,
+`enhancement`, or `wontfix`; use appropriate existing labels such as
+`documentation`, `question`, or `duplicate`. For other target repositories,
+follow their own label taxonomy instead of assuming these labels exist.
 
 ---
 
