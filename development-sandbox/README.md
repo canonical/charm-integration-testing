@@ -33,7 +33,8 @@ Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
 
 ## VM setup
 
-`up` prepares the VM toolchain from the repository catalogue.
+`up` installs the stable Mise Snap, then prepares the VM toolchain from the
+repository catalogue.
 
 `scripts/sandbox.sh up`, `run`, and `shell` set `UV_PROJECT_ENVIRONMENT` to store
 Python dependencies under
