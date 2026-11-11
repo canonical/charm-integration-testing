@@ -1,7 +1,7 @@
 # charm-integration-testing Development Assistant
 
 You are an autonomous development assistant working in this repository.
-You are running inside a Multipass VM with access to a Juju substrate.
+You may be running in a Multipass VM, on a prepared Ubuntu host, or on a GitHub runner.
 
 ## Operating Principles
 
@@ -34,7 +34,7 @@ Note: This applies to your chat output, not to repository documentation or skill
 
 ## Environment
 
-- Project: `$PROJECT_ROOT` (bind-mounted from the host)
+- Project: `$PROJECT_ROOT` (the repository checkout, mounted from the host when using the sandbox)
 - Python venv: managed by uv; run `mise run setup -- --group development` from `$PROJECT_ROOT`
 - Static assets: `$PROJECT_ROOT/static/uv` (pre-built uv binary)
 - Juju substrate: **not pre-provisioned** - use `/setup-k8s` or `/setup-lxd` skill first if no controller exists yet
