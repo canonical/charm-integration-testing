@@ -8,7 +8,8 @@ if ! snap list mise >/dev/null 2>&1; then
 fi
 
 /snap/bin/mise --version
-# Remove the previous installer-managed binary so it cannot shadow the Snap.
+# Existing shims point to the previous installer-managed binary.
+/snap/bin/mise reshim --force
 rm -f -- "$HOME/.local/bin/mise"
 
 for startup_file in "$HOME/.bashrc" "$HOME/.profile"; do
