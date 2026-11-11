@@ -33,6 +33,14 @@ mise run agent -- "Describe the task"
 
 Run `mise run sandbox -- --help` for VM lifecycle and agent options.
 
+The `Run development agent` workflow is manually dispatched with a prompt. Configure
+a `COPILOT_GITHUB_TOKEN` Actions secret with Copilot CLI access. The workflow token
+has read-only repository permissions; the agent can change files in its runner but
+cannot publish them. The agent may provision a local substrate by running
+`mise run setup -- --group local-k8s` followed by `mise run setup-k8s`, or the
+equivalent `local-lxd` setup. Test Observer reporting and artifact uploads are not
+configured yet.
+
 ## VM setup
 
 `up` prepares the VM toolchain from the repository catalogue.

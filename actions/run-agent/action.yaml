@@ -1,0 +1,34 @@
+---
+name: Run development agent
+description: Run the repository Copilot task and publish its response to the job summary
+inputs:
+  prompt:
+    description: Task for the agent
+    required: true
+  copilot-token:
+    description: Token with Copilot CLI access
+    required: true
+  github-token:
+    description: Optional token for read-only GitHub CLI access
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Set up agent tools
+      uses: ./.github/actions/setup-mise
+      with:
+        groups: agent
+    - name: Run agent
+      shell: bash
+      env:
+        PROMPT: ${{ inputs.prompt }}
+        COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-token }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |-
+        set -euo pipefail
+        [[ -n "$COPILOT_GITHUB_TOKEN" ]] || { echo "::error::copilot-token is required"; exit 1; }
+        if [[ -n "$INPUT_GITHUB_TOKEN" ]]; then
+          export GH_TOKEN="$INPUT_GITHUB_TOKEN" GITHUB_TOKEN="$INPUT_GITHUB_TOKEN"
+        fi
+        mise run agent -- "$PROMPT"
