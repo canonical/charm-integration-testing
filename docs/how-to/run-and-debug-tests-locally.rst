@@ -87,10 +87,14 @@ The file contains unquoted ``KEY=value`` entries:
    S3_SECRET_KEY=...
    S3_BUCKET_NAMESPACE=local
 
-``S3_REGION`` defaults to ``us-east-1``. Use a namespace dedicated to disposable test
-buckets: scheduled cleanup removes matching harness buckets older than four hours,
-regardless of which credentials created them. Cleanup secrets must explicitly set
-``S3_BUCKET_NAMESPACE``; the workflow rejects missing or empty namespaces.
+``S3_REGION`` defaults to ``us-east-1``. For shared QA storage, use a namespace
+dedicated to disposable test buckets: scheduled cleanup removes matching harness
+buckets older than four hours, regardless of which credentials created them. This
+cleanup does not reach the local SeaweedFS service. The test suite deletes its
+registered local buckets at session teardown, but an interrupted run may leave
+buckets in the VM's persistent service data. Shared-QA cleanup secrets must
+explicitly set ``S3_BUCKET_NAMESPACE``; the workflow rejects missing or empty
+namespaces.
 Use a dedicated S3 project/account
 for test buckets. The integrator receives
 ``S3_ACCESS_KEY`` and ``S3_SECRET_KEY``. These same credentials must permit
