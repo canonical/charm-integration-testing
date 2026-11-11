@@ -1,0 +1,26 @@
+---
+name: Run development agent
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Task for the agent to perform in this checkout
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  run-agent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Run agent
+        uses: ./actions/run-agent
+        with:
+          prompt: ${{ inputs.prompt }}
+          copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          github-token: ${{ github.token }}

@@ -44,8 +44,10 @@ fi
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PROJECT_ROOT="$project_root"
 prompt_file="$(mktemp)"
+output_file=""
 # shellcheck disable=SC2317
 cleanup() {
+    [[ -z "$output_file" ]] || rm -f -- "$output_file"
     rm -f -- "$prompt_file"
 }
 trap cleanup EXIT
@@ -80,6 +82,27 @@ if [[ "$interactive" == true ]]; then
 fi
 
 copilot_args=(--yolo "${mcp_args[@]}" -p "$(cat "$prompt_file")")
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    output_file="$(mktemp)"
+    set +e
+    copilot "${copilot_args[@]}" 2>&1 | tee "$output_file"
+    pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    status="${pipeline_status[0]}"
+    if (( pipeline_status[1] != 0 )); then
+        status="${pipeline_status[1]}"
+    fi
+    response="$(cat "$output_file")"
+    for secret in "${COPILOT_GITHUB_TOKEN:-}" "${GH_TOKEN:-}" "${GITHUB_TOKEN:-}"; do
+        [[ -z "$secret" ]] || response="${response//"$secret"/[REDACTED]}"
+    done
+    {
+        printf '## Agent response\n\n'
+        printf '%s\n' "$response"
+    } >> "$GITHUB_STEP_SUMMARY"
+    exit "$status"
+fi
+
 set +e
 copilot "${copilot_args[@]}"
 status=$?
