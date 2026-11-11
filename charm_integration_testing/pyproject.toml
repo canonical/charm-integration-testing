@@ -25,23 +25,30 @@ dependencies = [
     "kubernetes (>=32.0.0, < 33.0.0)",
 ]
 
-[tool.poetry]
-packages = [
-    { include = "chaos_client" },
-    { include = "extensions" },
-    { include = "juju" },
-    { include = "juju_cmd" },
-    { include = "juju_jubilant" },
-    { include = "kubernetes_client" },
-    { include = "resource_registry" },
-    { include = "resource_tracking" },
-    { include = "s3_storage" },
-    { include = "serializeable_dataclass" },
-    { include = "test_suite" },
-    { include = "utils" },
-    { include = "test_observer_client" }
+[project.optional-dependencies]
+dev = [
+    "types-pyyaml>=6.0.12.20250915",
+    "types-requests>=2.32.4.20250913",
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.13.6,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = [
+    "chaos_client",
+    "extensions",
+    "juju",
+    "juju_cmd",
+    "juju_jubilant",
+    "kubernetes_client",
+    "resource_registry",
+    "resource_tracking",
+    "s3_storage",
+    "serializeable_dataclass",
+    "test_suite",
+    "utils",
+    "test_observer_client",
+]

@@ -18,4 +18,4 @@ for t in "${TYPES[@]}"; do
     PATHS+=("./bundle_builder_x/tests/$t")
 done
 
-poetry run -- pytest "${PATHS[@]}" "${@:2}"
+uv run --no-sync --all-packages -- pytest "${PATHS[@]}" "${@:2}"

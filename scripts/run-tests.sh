@@ -3,6 +3,6 @@
 # See LICENSE file for licensing details.
 
 cd "$(dirname "$0")/.."
-poetry run pytest \
+uv run --no-sync --all-packages pytest \
     charm_integration_testing/test_suite \
     "$@"

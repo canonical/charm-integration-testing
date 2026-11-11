@@ -68,7 +68,7 @@ class ValidationStatusStore(Object):
 
     def status(self) -> BlockedStatus | None:
         """Return the stored status, or None if the last recorded check passed."""
-        if self._stored.kind == "blocked":  # type: ignore[comparison-overlap]
+        if self._stored.kind == "blocked":
             return BlockedStatus(str(self._stored.message))
         return None
 
