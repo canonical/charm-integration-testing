@@ -35,18 +35,18 @@ jobs:
         id: pick
         uses: ./.github/actions/pick-runner
         with:
-          target_environment: github-runner-k8s
-          neighbor_environment: github-runner-lxd
+          target_environment: github-runner-k8s-1
+          neighbor_environment: github-runner-lxd-1
       - name: Get Kubernetes environment info
         id: k8s
         uses: ./.github/actions/get-environment-info
         with:
-          environment_name: github-runner-k8s
+          environment_name: github-runner-k8s-1
       - name: Get LXD environment info
         id: lxd
         uses: ./.github/actions/get-environment-info
         with:
-          environment_name: github-runner-lxd
+          environment_name: github-runner-lxd-1
       - name: Validate environment outputs
         env:
           RUNNER_LABELS: ${{ steps.pick.outputs.runner-labels }}
