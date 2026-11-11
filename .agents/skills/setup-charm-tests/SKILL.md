@@ -7,166 +7,43 @@ description: Install charm testing prerequisites, including Chaos Mesh for Kuber
 
 ## Goal
 
-Install only the prerequisites needed for charm integration testing:
+Prepare the substrates needed for charm integration tests, with logging tools
+available regardless of substrate.
 
-1. **Cloud substrates** (LXD and/or Kubernetes) - only what you need
-2. **Logging tools** (always installed for all scenarios)
+## Setup
 
-The test suite automatically bootstraps controllers when you use `--current-state "no_bundle"` or `--current-state "no_controller"`.
+Start the VM using the [sandbox guide](../../../development-sandbox/README.md#quick-start)
+and work from `$PROJECT_ROOT` inside it. Sandbox startup prepares the toolchain;
+rerun `scripts/sandbox.sh up` on the host if tool setup failed or its configuration
+changed.
 
-Kubernetes and mixed setup also install or check Chaos Mesh through
-`setup-k8s.sh`. Do not run the Chaos Mesh script again after successful setup.
+To reproduce another Juju client version, follow
+[persistent channel selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
+before provisioning.
+
+Choose the requested `--platform` for `/setup-charm-tests`:
+
+- `machine`: follow [LXD setup](../setup-lxd/SKILL.md).
+- `kubernetes`: follow [Kubernetes setup](../setup-k8s/SKILL.md).
+- `mixed` or omitted: follow both.
+
+Use only the prerequisite-installation and substrate-provisioning steps in those
+skills, not their manual controller/model bootstrap steps. Wait for provisioning
+to finish successfully. With `--current-state "no_bundle"` or
+`--current-state "no_controller"`, the test suite creates the controllers.
+
+Kubernetes setup also installs or checks Chaos Mesh; do not run it a second time.
 For an existing sandbox cluster that only needs Chaos Mesh, follow the
-[existing cluster steps](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
-Do not use the manual controller bootstrap steps when the test suite manages it.
+[existing-cluster procedure](../setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 
----
+## Logging prerequisites
 
-## Quick Start
-
-### Machine Charm Testing (LXD only)
-
-```bash
-/setup-charm-tests --platform machine
-```
-
-- ✅ Install and configure LXD
-- ✅ Install logging tools
-- ✅ Skip Kubernetes setup
-- ⏳ Test suite will bootstrap LXD controller when needed
-
-### Kubernetes Charm Testing (K8s only)
-
-```bash
-/setup-charm-tests --platform kubernetes
-```
-
-- ✅ Install and configure Canonical k8s
-- ✅ Install logging tools
-- ✅ Skip LXD setup
-- ⏳ Test suite will bootstrap K8s controller when needed
-
-### Cross-Model Relation Testing (LXD + K8s)
-
-```bash
-/setup-charm-tests --platform mixed
-```
-
-- ✅ Install and configure LXD
-- ✅ Install and configure Canonical k8s
-- ✅ Install logging tools
-- ⏳ Test suite will bootstrap both controllers when needed
-
-### Default (Everything)
-
-```bash
-/setup-charm-tests
-```
-
-- ✅ Installs all substrates and tools (same as `--platform mixed`)
-
----
-
-## What Gets Installed
-
-### Logging & Debugging Tools (Always Installed)
-
-Always install these regardless of platform, since log collection needs both tools:
-
-- **juju-crashdump** (snap)
-  - Collects logs from machine/LXD controllers
-  - Captures unit logs, charm output, and Juju internals
-
-- **juju-k8s-crashdump** (git+pip)
-  - Collects logs from Kubernetes controllers
-  - Captures pod logs, statefulset events, and K8s-specific state
-  - **Required for reproducing issue #693** (mixed-cloud CMR logging)
-
-- **kubectl** (snap)
-  - Inspect Kubernetes pods and events
-  - Used by juju-k8s-crashdump
-
-### Cloud Substrates (Optional based on `--platform`)
-
-**LXD** (when `--platform machine` or `--platform mixed`)
-
-- Juju cloud name: `localhost`
-- Platform: machine (LXD containers)
-- Use for: Traditional machine charms
-
-**Canonical Kubernetes** (when `--platform kubernetes` or `--platform mixed`)
-
-- Juju cloud name: `local-k8s`
-- Platform: Kubernetes (pod-based)
-- Use for: Kubernetes-native charms
-- Kubeconfig: `/home/ubuntu/k8s.yaml`
-
----
-
-## Step-by-Step Setup
-
-### Option 1: Machine Charms Only (LXD)
-
-```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
-
-# 2. Setup LXD only
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
-
-# That's it! Test suite will bootstrap controller when you run tests with --current-state
-```
-
-### Option 2: Kubernetes Charms Only
-
-```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
-
-# 2. Setup K8s only
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
-
-# That's it! Test suite will bootstrap controller when you run tests with --current-state
-```
-
-### Option 3: Mixed-Cloud CMR Tests (LXD + K8s)
-
-```bash
-# 1. Install logging tools
-sudo snap install juju-crashdump --classic
-sudo snap install kubectl --classic
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
-
-# 2. Setup both substrates
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
-
-# That's it! Test suite will bootstrap both controllers when you run tests with --current-state
-```
-
-### Installing Logging Tools Details
-
-All three tools should be installed regardless of which clouds you're using, since you might need both for log collection in mixed-cloud scenarios.
-
-```bash
-# juju-crashdump: For machine/LXD controllers
-sudo snap install juju-crashdump --classic
-
-# kubectl: For Kubernetes inspection and juju-k8s-crashdump support
-sudo snap install kubectl --classic
-
-# juju-k8s-crashdump: For Kubernetes controllers
-# Using specific commit hash from charm-testing.yaml workflow
-pipx install "git+https://github.com/canonical/juju-k8s-crashdump.git@22ef04caaeeb94ad6ed49f8392b6bada65184569#egg=juju-k8s-crashdump"
-```
-
-**Note**: If installation fails, see Troubleshooting section below.
-
----
+Sandbox startup installs both crashdump tools for machine and Kubernetes logs.
+Keep both available even for single-substrate tests, since log collection can
+cross cloud boundaries. Their installation sources are declared in the root
+`mise.toml` and are selected by the `integration` setup group.
+The `kubectl` snap is installed only for Kubernetes or Chaos Mesh setup, not for
+LXD-only sandboxes.
 
 ## Running Tests After Setup
 
@@ -184,30 +61,8 @@ client supports an experiment, it skips when requested. Missing Kubernetes
 configuration and API errors fail rather than skip. CRD presence does not
 prove that a chaos experiment will succeed.
 
-Once setup is complete, run tests with the test suite. The suite handles controller bootstrap based on `--current-state`:
-
-```bash
-# The test suite will bootstrap LXD controller automatically
-./scripts/run-tests.sh \
-  --target-cloud "localhost" \
-  --target-charm "postgresql" \
-  --target-endpoint "database" \
-  --target-application "target" \
-  --current-state "no_bundle" \
-  --mermaid-output "./bundle.mmd" \
-  ...
-
-# The test suite will bootstrap both controllers for CMR
-./scripts/run-tests.sh \
-  --target-cloud "localhost" \
-  --target-charm "glauth-utils" \
-  --neighbor-cloud "local-k8s" \
-  --neighbor-charm "glauth-k8s" \
-  --current-state "no_bundle" \
-  ...
-```
-
-See the `run-charm-tests` skill for full test execution documentation.
+Follow [run-charm-tests](../run-charm-tests/SKILL.md) for complete single-cloud
+and cross-model test commands.
 
 ---
 
@@ -216,10 +71,13 @@ See the `run-charm-tests` skill for full test execution documentation.
 ### Check Logging Tools
 
 ```bash
-juju-crashdump --version
+juju-crashdump --help
 juju-k8s-crashdump --help  # Should show help without errors
 kubectl version --client
 ```
+
+Check `kubectl version --client` only for Kubernetes or mixed-platform tests.
+The `local-k8s` setup group installs it; it is not required for LXD-only tests.
 
 ### Check Cloud Setup (after running tests)
 
@@ -239,25 +97,20 @@ juju controllers
 
 ### Problem: "LXD is already installed"
 
-This is fine! The setup scripts are idempotent:
+This is fine. `/setup-lxd` is idempotent:
 
 ```bash
-$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-lxd
 # Output: LXD substrate ready (or already configured)
 ```
 
 ### Problem: "Cannot install juju-k8s-crashdump"
 
-The tool is in a private repository. If you encounter issues:
+Check access to the pinned source repository, then rerun the shared setup:
 
 ```bash
-# Try with git+https instead of git+ssh
-git clone https://github.com/canonical/juju-k8s-crashdump.git
-cd juju-k8s-crashdump
-pip install .
-
-# Or use the commit hash from charm-testing.yaml
-pip install "git+https://github.com/canonical/juju-k8s-crashdump@22ef04caaeeb94ad6ed49f8392b6bada65184569"
+git ls-remote https://github.com/canonical/juju-k8s-crashdump.git HEAD
+mise run setup -- --group integration
 ```
 
 ### Problem: "kubeconfig not found"
@@ -266,7 +119,7 @@ If `/home/ubuntu/k8s.yaml` doesn't exist:
 
 ```bash
 # Re-run K8s setup
-$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh
+cd "$PROJECT_ROOT" && mise run sandbox:setup-k8s
 
 # Verify location
 ls -la /home/ubuntu/k8s.yaml
@@ -274,13 +127,11 @@ ls -la /home/ubuntu/k8s.yaml
 
 ### Problem: "juju-crashdump: command not found"
 
-If snap installation failed:
+Rerun the shared setup and verify the mise-managed executable:
 
 ```bash
-# Try reinstalling
-sudo snap remove juju-crashdump
-sudo snap install juju-crashdump --classic
-juju-crashdump --version
+mise run setup -- --group integration
+mise exec -- juju-crashdump --help
 ```
 
 ### Problem: "Controller bootstrap timeout"
@@ -300,47 +151,11 @@ juju debug-log -c lxd-ctrl --limit 50
 
 ---
 
-## Next Steps
-
-After setup completes, you can run charm integration tests:
-
-```bash
-# Test a single charm on LXD
-./scripts/run-tests.sh \
-  --target-cloud "localhost" \
-  --target-charm "postgresql" \
-  --target-endpoint "database" \
-  --target-application "target" \
-  --mermaid-output "./bundle.mmd" \
-  --current-state "no_bundle" \
-  --prefix "test-1"
-
-# Test mixed-cloud CMR (LXD + K8s)
-./scripts/run-tests.sh \
-  --target-cloud "localhost" \
-  --target-charm "glauth-utils" \
-  --target-endpoint "glauth-auxiliary" \
-  --target-application "target" \
-  \
-  --neighbor-cloud "local-k8s" \
-  --neighbor-charm "glauth-k8s" \
-  --neighbor-endpoint "glauth-auxiliary" \
-  --neighbor-application "neighbor" \
-  \
-  --current-state "no_bundle" \
-  --mermaid-output "./bundle.mmd" \
-  --prefix "test-cmr-1"
-```
-
-See the `run-charm-tests` skill for full documentation.
-
----
-
 ## Key References
 
 - **charm-testing.yaml**: Official workflow that shows the canonical setup process
-- **setup-lxd.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-lxd.sh`
-- **setup-k8s.sh**: `$PROJECT_ROOT/development-sandbox/bin/setup-k8s.sh`
+- **setup-lxd.sh**: `mise run sandbox:setup-lxd`
+- **setup-k8s.sh**: `mise run sandbox:setup-k8s`
 - **Issue #693**: Mixed-cloud CMR logging (requires juju-k8s-crashdump)
 
 ---
@@ -348,10 +163,7 @@ See the `run-charm-tests` skill for full documentation.
 ## Environment Details
 
 - **Project**: charm-integration-testing
-- **Python**: 3.12+
-- **Juju**: 3/stable (3.6.25+)
-- **LXD**: 5.21+
-- **Kubernetes**: 1.32+ (Canonical k8s)
+- **Tool versions and snap channels**: root `mise.toml`, `mise.lock` and `.mise/locks/`
 - **System**: Linux (Ubuntu 22.04+)
 
 ---

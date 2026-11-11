@@ -29,13 +29,31 @@ Use `--resume [SESSION]` (or `-r`) to resume a session; without a value, it open
 the session picker. `--continue` resumes the most recent session. See `copilot --help`
 inside the sandbox for other CLI arguments.
 
-| Command | Purpose |
-|---|---|
-| `scripts/sandbox.sh run 'task'` | Run a task autonomously |
-| `scripts/sandbox.sh shell` | Open a VM shell |
-| `scripts/sandbox.sh down` | Stop the VM, preserving its state |
-| `scripts/sandbox.sh up` | Create or resume the VM and install dependencies |
-| `scripts/sandbox.sh destroy` | Permanently delete the VM |
+Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
+
+## VM setup
+
+`up` installs the stable Mise Snap, then prepares the VM toolchain from the
+repository catalogue.
+
+`scripts/sandbox.sh up`, `run`, and `shell` set `UV_PROJECT_ENVIRONMENT` to store
+Python dependencies under
+`~/.local/share/charm-integration-testing/venvs/<checkout-path-hash>` (or
+`$XDG_DATA_HOME/charm-integration-testing/venvs/<checkout-path-hash>` when set).
+The hash uses the canonical VM checkout path, so different mounts have separate
+environments. Each shell or agent session keeps the environment for its mount;
+use the other checkout's `scripts/sandbox.sh shell` or `run` to work on that project.
+Host commands continue using the checkout's `.venv`; sandbox setup leaves it
+untouched. Run `scripts/sandbox.sh up` again to configure an existing sandbox.
+
+For substrate prerequisites and provisioning, follow the
+[Kubernetes](../.agents/skills/setup-k8s/SKILL.md) or
+[LXD](../.agents/skills/setup-lxd/SKILL.md) setup steps. Provisioning does not
+install or refresh packages. For Chaos Mesh on an existing cluster, follow the
+[existing-cluster procedure](../.agents/skills/setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
+
+To select another Juju client before provisioning, follow
+[Juju client selection](../CONTRIBUTING.md#selecting-the-juju-client).
 
 ## Configuration
 
@@ -66,6 +84,14 @@ Without dedicated tokens, the script asks before using your host `gh` token in t
 VM. That token carries your host permissions; prefer narrowly scoped tokens.
 Declining leaves the corresponding tools unauthenticated.
 
+Host-side GitHub API calls use `GITHUB_TOKEN` or the host's `gh` token. Automatic
+SSH signing-key registration requires the `write:ssh_signing_key` scope.
+
+## Chaos Mesh
+
+Sandbox Kubernetes setup installs Chaos Mesh components but does not run chaos
+experiments. Shared CI clusters are provisioned separately.
+
 ## Recommended MCP servers
 
 Copy the optional [sample](mcp.json.sample), replace the credential placeholders,
@@ -84,7 +110,11 @@ SANDBOX_MCP_CONFIG_FILE=development-sandbox/mcp.json
 ```
 
 This applies to both interactive and autonomous `run` sessions.
-New sandboxes include Go and uvx; install them manually in older VMs.
+Sandbox setup includes Go and uvx; rerun `scripts/sandbox.sh up` to prepare them
+in older VMs.
+
+Any host environment variable prefixed with `SANDBOX_VAR_` is passed into the VM
+with that prefix removed. API overrides must be reachable from inside the VM.
 
 The root `.copilotignore` uses path-independent patterns for local credential
 files. It does not protect process

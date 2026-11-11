@@ -1,4 +1,6 @@
 #!/bin/bash
+#MISE description="Manage the development sandbox"
+#MISE raw_args=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 # Host-side entry point for the charm-integration-testing development sandbox.
@@ -114,7 +116,8 @@ _cleanup_vm_temp_files() {
 trap _cleanup_vm_temp_files EXIT
 
 # Transfer shell-quoted exports over stdin in a separate call so the session
-# keeps its terminal. Only the private file's path is passed in argv.
+# keeps its terminal, then select the VM-local project environment.
+# Only the private file's path is passed in argv.
 _vm_exec_with_env() {
     local -n _env="$1"
     shift
@@ -128,19 +131,24 @@ _vm_exec_with_env() {
         source "$1"
         rm -f -- "$1"
         shift
+        project_root="$(realpath -- "$1")"
+        shift
+        project_hash="$(printf "%s" "$project_root" | sha256sum)"
+        export PROJECT_ROOT="$project_root"
+        export UV_PROJECT_ENVIRONMENT="${XDG_DATA_HOME:-$HOME/.local/share}/charm-integration-testing/venvs/${project_hash%% *}"
+        cd "$project_root"
         exec "$@"
-    ' bash "$_env_file" "$@"
+    ' bash "$_env_file" "$VM_MOUNT" "$@"
 }
 
-# True if the VM is running and its gh CLI already holds a valid login (e.g.
-# from a previous `up`/`run`). GH_TOKEN/GITHUB_TOKEN are unset so only stored
-# credentials are checked.
+# Check stored credentials after mounting the project and preparing its tools,
+# so Mise can resolve gh. Unset GH_TOKEN/GITHUB_TOKEN to ignore environment tokens.
 _vm_gh_logged_in() {
     [ "$(_vm_state)" = "Running" ] || return 1
-    multipass exec "$VM_NAME" -- bash -lc '
+    multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
-        gh auth status --hostname github.com
-    ' &>/dev/null
+        cd '$VM_MOUNT' && gh auth status --hostname github.com
+    " &>/dev/null
 }
 
 # Resolved GitHub credentials, populated by _require_github_auth.
@@ -235,7 +243,7 @@ _require_github_auth() {
         return 0
     fi
 
-if _confirm_host_token_use "${_unset[@]}"; then
+    if _confirm_host_token_use "${_unset[@]}"; then
         if [ -z "$VM_GH_TOKEN" ] && [[ " ${_unset[*]} " == *" gh CLI inside the VM "* ]]; then
             VM_GH_TOKEN="$_gh_token"
         fi
@@ -254,10 +262,10 @@ _vm_gh_auth_login() {
         return 0
     fi
     echo "==> Authenticating gh inside the VM..."
-    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc '
+    if ! printf '%s\n' "$VM_GH_TOKEN" | multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
-        gh auth login --hostname github.com --with-token
-    '; then
+        cd '$VM_MOUNT' && gh auth login --hostname github.com --with-token
+    "; then
         {
             echo "ERROR: 'gh auth login' failed inside the VM; the token is likely invalid or expired."
             echo "       Set SANDBOX_VAR_GITHUB_TOKEN in $DEV_DIR/.env, or re-run 'gh auth login' on the host."
@@ -353,8 +361,6 @@ _cmd_up() {
         esac
     done
 
-    _require_github_auth
-
     echo "==> Checking VM state..."
     state=$(_vm_state)
 
@@ -366,7 +372,6 @@ _cmd_up() {
                 --cpus "$cpus" \
                 --memory "$memory" \
                 --disk "$disk" \
-                --cloud-init "$DEV_DIR/substrate.yaml" \
                 --timeout 1800
             ;;
         Stopped)
@@ -382,6 +387,17 @@ _cmd_up() {
             ;;
     esac
 
+    echo "==> Checking bootstrap prerequisites..."
+    multipass exec "$VM_NAME" -- bash -c '
+        set -euo pipefail
+        if ! command -v curl >/dev/null 2>&1 \
+            || ! command -v git >/dev/null 2>&1 \
+            || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+            sudo apt-get update --quiet
+            sudo apt-get install --assume-yes --quiet curl ca-certificates git
+        fi
+    '
+
     # Mount project if not already mounted
     echo "==> Checking project mount..."
     if ! _is_mounted; then
@@ -390,53 +406,16 @@ _cmd_up() {
         multipass mount "$PROJECT_DIR" "$VM_NAME:$VM_MOUNT"
     fi
 
-    # Set up Python venv with project packages (poetry manages the venv)
-    echo "==> Installing Python dependencies via poetry..."
-    multipass exec "$VM_NAME" -- bash -lc "
+    echo "==> Setting up the sandbox environment..."
+    multipass exec "$VM_NAME" -- bash "$VM_MOUNT/development-sandbox/bin/install-mise.sh"
+    _env_args=("PROJECT_ROOT=$VM_MOUNT")
+    _vm_exec_with_env _env_args bash -lc "
         set -euo pipefail
-        if ! command -v poetry &>/dev/null && ! test -f ~/.local/bin/poetry; then
-            if ! command -v pipx &>/dev/null; then
-                sudo apt-get install -y -q pipx
-            fi
-            pipx install 'poetry==2.*'
-            pipx ensurepath
-            export PATH=\"\$HOME/.local/bin:\$PATH\"
-        fi
         cd '$VM_MOUNT'
-        poetry install
+        mise run setup -- --group sandbox development integration agent
     "
 
-    # Install node-based tools used by the sandbox if not present
-    echo "==> Checking for node-based tools..."
-    multipass exec "$VM_NAME" -- bash -lc "
-        set -euo pipefail
-        if ! command -v node &>/dev/null; then
-            sudo snap install node --classic
-        fi
-
-        if ! command -v copilot &>/dev/null; then
-            echo '==> Installing @github/copilot...'
-            sudo npm install -g @github/copilot
-        else
-            echo '==> @github/copilot: found.'
-        fi
-
-
-        if ! command -v markdownlint-cli2 &>/dev/null; then
-            echo '==> Installing markdownlint-cli2...'
-            sudo npm install -g markdownlint-cli2
-        else
-            echo '==> markdownlint-cli2: found.'
-        fi
-
-        if ! command -v gh &>/dev/null; then
-            echo '==> Installing gh (GitHub CLI)...'
-            sudo snap install gh --classic
-        else
-            echo '==> gh: found.'
-        fi
-    "
-
+    _require_github_auth
     _vm_gh_auth_login
 
     # Trust all folders in Copilot so it never prompts for folder confirmation.
@@ -693,8 +672,6 @@ EOF
 
     TASK="${task_args[*]}"
 
-    _require_github_auth
-
     # Resolve and validate SANDBOX_MCP_CONFIG_FILE path early — no VM work yet.
     if [ -n "${SANDBOX_MCP_CONFIG_FILE:-}" ]; then
         # Resolve relative paths against the project root for consistency.
@@ -717,6 +694,7 @@ EOF
         exit 1
     fi
 
+    _require_github_auth
     _vm_gh_auth_login
 
     # All prerequisites met. Copy MCP config into the VM now.
