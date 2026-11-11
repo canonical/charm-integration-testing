@@ -30,5 +30,14 @@ overrides:
       service-mesh:
         optional: true  # coordinator.py::_on_collect_unit_status only requires workers and S3.
     constraints:
-      - 'charms(cross_model(endpoint[logging] | endpoint[grafana-source])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
+      # service_mesh.py::initialize also protects self-metrics-endpoint; metadata must follow a real CMR.
+      - >-
+        charms(cross_model(endpoint[provide-cmr-mesh])) <=
+        charms(cross_model(endpoint[logging] | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))
+      # ServiceMeshConsumer.update_service_mesh skips policy generation without service-mesh.
+      - >-
+        bool(endpoint[service-mesh]) =>
+        charms(cross_model(endpoint[logging] | endpoint[grafana-source] | endpoint[self-metrics-endpoint]))
+        <=
+        charms(cross_model(endpoint[provide-cmr-mesh]))
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
