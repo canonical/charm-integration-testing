@@ -25,6 +25,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Set up Kubernetes cloud tools
+      shell: bash
+      run: mise run setup -- --group cloud-k8s
     - name: Choose kubeconfig path
       id: paths
       env:

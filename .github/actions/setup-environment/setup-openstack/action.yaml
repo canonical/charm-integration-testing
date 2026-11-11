@@ -27,6 +27,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Set up OpenStack cloud tools
+      shell: bash
+      run: mise run setup -- --group cloud-openstack
     - name: Report file paths
       id: paths
       env:
@@ -52,7 +55,6 @@ runs:
         WORKSPACE: ${{ inputs.workspace }}
       shell: bash
       run: |
-        sudo snap install openstack
         source "${NOVARC_PATH}"
         metadata_path="${WORKSPACE}/images"
         mkdir -p "${metadata_path}"

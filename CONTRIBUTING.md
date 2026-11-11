@@ -44,6 +44,11 @@ executing them rather than relying on host tools. Groups control installation,
 not PATH isolation; installed catalogue tools are available together.
 Use setup rather than bare `mise install`, which installs the entire catalogue.
 
+The [CI setup action](.github/actions/setup-mise/action.yaml) wraps the same task
+and activates installed tools for later steps. Its [workflow callers](.github/workflows/)
+select the groups and clients they need; cloud access and Swift reporting install
+their clients independently. Mise-action caching remains disabled.
+
 Installing system packages does not initialize substrates or register clouds.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Remove a conflicting legacy `openstack` snap manually before installing
@@ -65,6 +70,11 @@ The selection is saved outside the checkout at
 Later setup runs on that machine, including jobs on persistent CI runners, use
 the saved selection. Without one, setup uses the channel in `mise.toml`. A failed
 install does not replace the previous selection.
+
+The `setup-mise` action applies a nonempty `juju-channel` input before
+installing groups. The charm-testing workflow forwards `juju_channel`;
+omitted or empty inputs preserve the saved selection or catalogue default.
+The action does not use a `JUJU_CHANNEL` environment variable.
 
 Channels are not revision pins and do not change controllers or agents; use fresh
 test controllers when trying another major version.
