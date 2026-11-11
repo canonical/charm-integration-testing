@@ -19,7 +19,7 @@ systemd service. No charm, Docker daemon, or shared Swift access is needed.
 2. Run:
 
    ```bash
-   mise run sandbox:setup-s3
+   mise run setup-s3
    ```
 
 3. The server configuration file contains one identity limited to harness buckets.
