@@ -4,6 +4,7 @@
 import operator
 from enum import Enum
 from functools import total_ordering
+from pathlib import Path
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_serializer, model_validator
@@ -167,6 +168,7 @@ class Charm(BaseModel):
     revision: int
     ubuntu_version: str
     ubuntu_arch: str
+    source_path: Path | None = None
     subordinate: bool = False
     endpoints: dict[str, CharmEndpoint]
     proxies: list[CharmEndpointProxy] = Field(default_factory=list)
@@ -186,3 +188,15 @@ class Charm(BaseModel):
 
     def __repr__(self) -> str:
         return self.name
+
+    @property
+    def source_label(self) -> str:
+        if self.source_path is not None:
+            return f"local charm {self.source_path} tested as {self.channel} revision {self.revision}"
+        return f"{self.name} revision {self.revision} ({self.channel})"
+
+    def bundle_source(self) -> dict[str, str | int]:
+        """Bundle application fields that select this charm artifact."""
+        if self.source_path is not None:
+            return {"charm": str(self.source_path)}
+        return {"charm": self.name, "channel": str(self.channel), "revision": self.revision}

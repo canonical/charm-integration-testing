@@ -21,6 +21,7 @@ from .charmhub import CharmhubClient
 from .constraints_dsl import DSLSyntaxError, DSLTypeError
 from .dsl_lowering import DSLLoweringError
 from .juju_version import JujuVersion
+from .local_charm import unpack_charm_artifact
 from .overrides import OverridesClient
 from .release_errors import (
     ArchitectureMismatchError,
@@ -82,4 +83,5 @@ __all__ = [
     "UnresolvedApplicationDiagnostic",
     "UnresolvedIntegrationDiagnostic",
     "leaf_release_errors",
+    "unpack_charm_artifact",
 ]

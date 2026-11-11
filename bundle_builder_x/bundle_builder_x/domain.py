@@ -1,6 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from pathlib import Path
+
 import z3  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,6 +72,7 @@ class DomainApplication(BaseModel):
     channel: CharmChannel | None = None
     revision: int | None = None
     base: str | None = None
+    local_charm: Path | None = None
     # charm_id -> Z3 Bool mapping variable
     charm_ids: dict[int, z3.BoolRef] = Field(default_factory=dict)
     # Dedup tracking: charm IDs already added for this application
@@ -593,6 +596,7 @@ def add_charm_to_domain(charm: Charm, domain: Domain, model_ref: ModelRef | None
     for application, domain_app in model.applications.items():
         if (
             domain_app.charm != charm.name
+            or domain_app.local_charm != charm.source_path
             or (domain_app.channel is not None and domain_app.channel != charm.channel)
             or (domain_app.revision is not None and domain_app.revision != charm.revision)
             or (domain_app.base is not None and domain_app.base != charm.ubuntu_version)
