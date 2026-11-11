@@ -122,14 +122,33 @@ environments:
   ps7-sqa-prod_charm_qa_lxd-8: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-9: *ps7-sqa-prod_charm_qa_lxd
   ps7-sqa-prod_charm_qa_lxd-10: *ps7-sqa-prod_charm_qa_lxd
-  # GitHub-hosted runner environments
-  github-runner-k8s:
+  # GITHUB-HOSTED LOCAL KUBERNETES
+  github-runner-k8s-1: &github-runner-k8s
     github-runner: github-hosted
     platform: kubernetes
     cloud-type: local-k8s
     arch: amd64
-  github-runner-lxd:
+  github-runner-k8s-2: *github-runner-k8s
+  github-runner-k8s-3: *github-runner-k8s
+  github-runner-k8s-4: *github-runner-k8s
+  github-runner-k8s-5: *github-runner-k8s
+  github-runner-k8s-6: *github-runner-k8s
+  github-runner-k8s-7: *github-runner-k8s
+  github-runner-k8s-8: *github-runner-k8s
+  github-runner-k8s-9: *github-runner-k8s
+  github-runner-k8s-10: *github-runner-k8s
+  # GITHUB-HOSTED LOCAL LXD
+  github-runner-lxd-1: &github-runner-lxd
     github-runner: github-hosted
     platform: machine
     cloud-type: local-lxd
     arch: amd64
+  github-runner-lxd-2: *github-runner-lxd
+  github-runner-lxd-3: *github-runner-lxd
+  github-runner-lxd-4: *github-runner-lxd
+  github-runner-lxd-5: *github-runner-lxd
+  github-runner-lxd-6: *github-runner-lxd
+  github-runner-lxd-7: *github-runner-lxd
+  github-runner-lxd-8: *github-runner-lxd
+  github-runner-lxd-9: *github-runner-lxd
+  github-runner-lxd-10: *github-runner-lxd

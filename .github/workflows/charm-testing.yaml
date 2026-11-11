@@ -102,7 +102,7 @@ on:
 jobs:
   determine-runner:
     name: Determine GitHub Actions runner to use for the environment
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       TEST_OBSERVER_API: ${{ inputs.test_observer_environment == 'production' && vars.PROD_TEST_OBSERVER_API || (inputs.test_observer_environment == 'staging' && vars.STG_TEST_OBSERVER_API || '') }}
       TEST_OBSERVER_TOKEN: ${{ inputs.test_observer_environment == 'production' && secrets.PROD_TEST_OBSERVER_TOKEN || (inputs.test_observer_environment == 'staging' && secrets.STG_TEST_OBSERVER_TOKEN || '') }}
