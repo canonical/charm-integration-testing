@@ -32,8 +32,12 @@ poetry run bandit \
 poetry run mypy bundle_builder_x || die 'Failed on "mypy bundle_builder_x"'
 poetry run mypy charm_integration_testing || die 'Failed on "mypy charm_integration_testing"'
 poetry run mypy --explicit-package-bases validators/* || die 'Failed on "mypy validators"'
-poetry run yamlfix --check $(find . -name '*.yaml' -o -name '*.yml') \
-    || die 'Failed on "yamlfix"; consider running: poetry run yamlfix $(find . -name '\''*.yaml'\'' -o -name '\''*.yml'\'')'
+mapfile -d '' -t yaml_files < <(find . -type d -name .mise -prune -o \
+    -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
+if ((${#yaml_files[@]})); then
+    poetry run yamlfix --check "${yaml_files[@]}" \
+        || die 'Failed on "yamlfix"; consider running: poetry run yamlfix'
+fi
 markdownlint-cli2 --config docs/.sphinx/.markdownlint.json "#docs/_build" "*.md" || die 'Failed on markdownlint-cli2'
 
 echo "Linting passed"
