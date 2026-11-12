@@ -3,8 +3,12 @@
 
 import json
 import logging
+import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -289,3 +293,93 @@ def test_logs_privacy_check_handles_malformed_nested_metadata(
     assert secret_value not in str(excinfo.value)
     assert "Detector=PrivateKey" in caplog.text
     assert "unknown file:?" in caplog.text
+
+
+def _require_pinned_trufflehog() -> None:
+    """Require the pinned scanner in CI; skip locally if it is unavailable."""
+    repo_root = Path(__file__).resolve().parents[4]
+    # tomllib needs Python 3.11 and this project supports 3.10; the pin is a single plain line.
+    match = re.search(
+        r'^"aqua:trufflesecurity/trufflehog"\s*=\s*"([^"]+)"', (repo_root / "mise.toml").read_text(), re.MULTILINE
+    )
+    assert match, "TruffleHog pin not found in mise.toml"
+    pinned = match.group(1)
+    required = os.environ.get("REQUIRE_PINNED_TRUFFLEHOG") == "1"
+    unavailable = pytest.fail if required else pytest.skip
+    if shutil.which("trufflehog") is None:
+        unavailable("trufflehog is not installed")
+    output = subprocess.run(["trufflehog", "--version"], capture_output=True, text=True, check=True, timeout=10)
+    found = (output.stdout + output.stderr).split()[-1]
+    if found != pinned:
+        unavailable(f"trufflehog {found} on PATH does not match mise.toml pin {pinned}")
+
+
+def _run_privacy_check_with_real_trufflehog(
+    log_dir: Path,
+    logger: logging.Logger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_run = subprocess.run
+
+    def run_without_verification(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        # Synthetic credentials must never be sent to any online verifier.
+        if cmd[:2] == ["trufflehog", "filesystem"]:
+            cmd = [*cmd, "--no-verification"]
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run_without_verification)
+    test_logs_privacy_check(log_dir, logger)
+
+
+def test_logs_privacy_check_real_trufflehog_ignores_benign_pagerduty_lookalikes(
+    tmp_path: Path, logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Juju text containing "pd" inside "update" must not look like a PagerDuty key (SQT-1327)."""
+    _require_pinned_trufflehog()
+    (tmp_path / "controller-configmap.txt").write_text(
+        "controller-config:\n  update-status-hook-interval: 5m\n  api-port: 17070\n"
+    )
+    (tmp_path / "db-dump.yaml").write_text(
+        "settings:\n  updated: 1.abcdefghijklmnopqrst\nstatuses:\n  updated: 3.zzzzzzzzzzzzzzzzzzzz\n"
+    )
+    (tmp_path / "db-dump.json").write_text('{"updated_refs":{},"ztrk_qwvbn_hjxcp_mdl":[]}\n')
+    (tmp_path / "debug-log.txt").write_text(
+        'running hook tool "juju-log" for target/0-update-status-1234567890123456789\n'
+    )
+
+    _run_privacy_check_with_real_trufflehog(tmp_path, logger, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("expected_detector", "line"),
+    [
+        ("PagerDutyApiKey", "pagerduty_api_key: u+{u}"),
+        ("PagerDutyApiKey", "pagerduty_token: {t}"),
+        ("Github", "token = ghp_{g}"),
+    ],
+    ids=["pagerduty-u-prefix", "pagerduty-20-char", "github-pat"],
+)
+def test_logs_privacy_check_real_trufflehog_still_detects_synthetic_credentials(
+    expected_detector: str,
+    line: str,
+    tmp_path: Path,
+    logger: logging.Logger,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _require_pinned_trufflehog()
+
+    # Fixed synthetic values keep detector regressions reproducible.
+    secret_line = line.format(
+        u="aB3dE6gH9jK2mN5pQ8",
+        t="aB3dE6gH9jK2mN5pQ8sT",
+        g="aB3dE6gH9jK2mN5pQ8sT1vW4yZ7cD0fG3iJ6",
+    )
+    (tmp_path / "config.txt").write_text(secret_line + "\n")
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            _run_privacy_check_with_real_trufflehog(tmp_path, logger, monkeypatch)
+
+    assert f"Detector={expected_detector}" in str(excinfo.value)
+    assert secret_line.split()[-1] not in str(excinfo.value) + caplog.text
