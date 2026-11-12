@@ -16,9 +16,6 @@ inputs:
   packages:
     description: Space-separated system package identifiers from mise.toml (e.g. snap:juju)
     default: ""
-  cache:
-    description: Cache Mise tool installations in GitHub Actions
-    default: "false"
 runs:
   using: composite
   steps:
@@ -31,8 +28,7 @@ runs:
       with:
         version: ${{ steps.version.outputs.version }}
         install: false
-        cache: ${{ inputs.cache }}
-        cache_save_post: ${{ inputs.cache }}
+        cache: false
     - name: Select Juju channel
       if: ${{ inputs.juju-channel != '' }}
       shell: bash
