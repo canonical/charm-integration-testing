@@ -90,9 +90,9 @@ The file contains unquoted ``KEY=value`` entries:
 ``S3_REGION`` defaults to ``us-east-1``. For shared QA storage, use a namespace
 dedicated to disposable test buckets: scheduled cleanup removes matching harness
 buckets older than four hours, regardless of which credentials created them. This
-cleanup does not reach the local SeaweedFS service. The test suite deletes its
+cleanup does not reach the local S3-compatible service. The test suite deletes its
 registered local buckets at session teardown, but an interrupted run may leave
-buckets in the VM's persistent service data. Shared-QA cleanup secrets must
+buckets in persistent service storage. Shared-QA cleanup secrets must
 explicitly set ``S3_BUCKET_NAMESPACE``; the workflow rejects missing or empty
 namespaces.
 Use a dedicated S3 project/account
