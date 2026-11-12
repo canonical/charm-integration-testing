@@ -1,0 +1,157 @@
+---
+name: Benchmark setup caches
+description: Measure fresh-runner setup with independently seeded Snap, Mise and uv
+  caches
+inputs:
+  seed:
+    description: Create this repetition's caches from a cold setup
+    default: "false"
+  profile:
+    description: Kubernetes setup or the additional OpenStack client
+    required: true
+  sample:
+    description: Independent repetition number
+    required: true
+  snap:
+    description: Restore the Snap download cache
+    default: "false"
+  mise:
+    description: Restore the installed Mise tools and binary
+    default: "false"
+  uv:
+    description: Restore the uv dependency cache
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Record fresh-runner baseline
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        date --iso-8601=ns
+        uname -a
+        lscpu | grep -E '^CPU\(s\):|^Model name:'
+        snap list
+        for path in "$HOME/.local/share/mise" "$HOME/.cache/uv" "$GITHUB_WORKSPACE/.venv"; do
+          if [[ -e "$path" ]]; then
+            echo "::error::Not a cold runner: $path already exists"
+            exit 1
+          fi
+        done
+        case "$PROFILE" in
+          kubernetes) snaps=(yq juju kubectl) ;;
+          openstack) snaps=(openstackclients) ;;
+          *) echo "::error::Unknown profile: $PROFILE"; exit 1 ;;
+        esac
+        for name in "${snaps[@]}"; do
+          if snap list "$name" >/dev/null 2>&1; then
+            echo "::error::Not a cold runner: $name is already installed"
+            exit 1
+          fi
+        done
+        sudo du -sb /var/lib/snapd/cache
+    - name: Start setup measurement
+      shell: bash
+      run: date +%s%N > "$RUNNER_TEMP/cache-benchmark-start"
+    - name: Restore Snap cache
+      id: snap-cache
+      if: ${{ inputs.snap == 'true' && inputs.seed != 'true' }}
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ${{ runner.temp }}/benchmark-snap.tar
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-snap
+        fail-on-cache-miss: true
+    - name: Extract Snap cache
+      if: ${{ inputs.snap == 'true' && inputs.seed != 'true' }}
+      shell: bash
+      run: sudo tar -xf "$RUNNER_TEMP/benchmark-snap.tar" -C /var/lib/snapd
+    - name: Restore Mise cache
+      if: ${{ inputs.mise == 'true' && inputs.seed != 'true' }}
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ~/.local/share/mise
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-mise
+        fail-on-cache-miss: true
+    - name: Restore uv cache
+      if: ${{ inputs.uv == 'true' && inputs.seed != 'true' }}
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ~/.cache/uv
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-uv
+        fail-on-cache-miss: true
+    - name: Install yq Snap
+      if: ${{ inputs.profile == 'kubernetes' }}
+      shell: bash
+      run: sudo snap install yq
+    - name: Set up integration tools and dependencies
+      if: ${{ inputs.profile == 'kubernetes' }}
+      uses: ./.github/actions/setup-mise
+      with:
+        groups: integration
+    - name: Install Kubernetes cloud tools
+      if: ${{ inputs.profile == 'kubernetes' }}
+      shell: bash
+      run: mise run setup -- --group cloud-k8s
+    - name: Install OpenStack client
+      if: ${{ inputs.profile == 'openstack' }}
+      shell: bash
+      run: sudo snap install --channel=latest/stable openstackclients
+    - name: Finish setup measurement
+      shell: bash
+      run: |
+        start="$(cat "$RUNNER_TEMP/cache-benchmark-start")"
+        end="$(date +%s%N)"
+        echo "BENCHMARK_SETUP_NS=$((end - start))"
+        echo "Setup including cache restores: $(( (end - start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
+    - name: Verify setup and record cache contents
+      shell: bash
+      env:
+        PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        snap list
+        if [[ "$PROFILE" == kubernetes ]]; then
+          mise ls --json
+          mise exec -- uv pip check --python .venv/bin/python
+          .venv/bin/python -c 'import boto3, cassandra, grpc, juju, kubernetes, temporalio, z3'
+          for tool in jq yq gh trufflehog juju-crashdump juju-k8s-crashdump; do
+            mise which "$tool"
+          done
+          juju version
+          kubectl version --client
+          du -sb "$HOME/.local/share/mise" "$HOME/.cache/uv" .venv
+        else
+          openstack --version
+        fi
+        sudo du -sb /var/lib/snapd/cache
+        sudo find /var/lib/snapd/cache -maxdepth 1 -type f -printf '%f %s\n' | sort
+    - name: Archive complete Snap cache
+      if: ${{ inputs.seed == 'true' }}
+      shell: bash
+      run: sudo tar -cf - -C /var/lib/snapd cache > "$RUNNER_TEMP/benchmark-snap.tar"
+    - name: Save complete Snap cache
+      if: ${{ inputs.seed == 'true' }}
+      uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ${{ runner.temp }}/benchmark-snap.tar
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-snap
+    - name: Save Mise cache
+      if: ${{ inputs.seed == 'true' && inputs.profile == 'kubernetes' }}
+      uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ~/.local/share/mise
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-mise
+    - name: Save uv cache
+      if: ${{ inputs.seed == 'true' && inputs.profile == 'kubernetes' }}
+      uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809
+      with:
+        path: ~/.cache/uv
+        key: sqt1316-complete-${{ github.run_id }}-${{ inputs.profile }}-${{ inputs.sample
+          }}-uv

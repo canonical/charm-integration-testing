@@ -14,6 +14,10 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      cache_benchmark:
+        description: Run the setup-only cache benchmark instead of charm tests
+        type: boolean
+        default: false
       test_observer_environment:
         description: Test Observer environment to report results to.
         required: false
@@ -100,6 +104,57 @@ on:
         options: [DEBUG, INFO, WARNING, ERROR]
         default: INFO
 jobs:
+  cache-seed:
+    if: ${{ inputs.cache_benchmark }}
+    name: Cache seed (${{ matrix.profile }}, ${{ matrix.sample }})
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        profile: [kubernetes, openstack]
+        sample: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cache-benchmark
+        with:
+          seed: "true"
+          profile: ${{ matrix.profile }}
+          sample: ${{ matrix.sample }}
+  cache-samples:
+    if: ${{ inputs.cache_benchmark }}
+    needs: cache-seed
+    name: Cache sample (${{ matrix.profile }}, ${{ matrix.strategy }}, ${{ matrix.sample }})
+    runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        profile: [kubernetes]
+        sample: [1, 2, 3]
+        strategy: [none, snap, mise, uv, snap-mise, snap-uv, mise-uv, snap-mise-uv]
+        include:
+          - {profile: openstack, strategy: none, sample: 1}
+          - {profile: openstack, strategy: none, sample: 2}
+          - {profile: openstack, strategy: none, sample: 3}
+          - {profile: openstack, strategy: snap, sample: 1}
+          - {profile: openstack, strategy: snap, sample: 2}
+          - {profile: openstack, strategy: snap, sample: 3}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/cache-benchmark
+        with:
+          profile: ${{ matrix.profile }}
+          sample: ${{ matrix.sample }}
+          snap: ${{ contains(matrix.strategy, 'snap') }}
+          mise: ${{ contains(matrix.strategy, 'mise') }}
+          uv: ${{ contains(matrix.strategy, 'uv') }}
   # NOTE: determine-runner and execute-charm-test were temporarily merged into a single
   # job because only ps7 runners are in use, and running two jobs per workflow wastes a
   # second runner slot for no benefit. To revert once more runner types are back in play,
@@ -108,6 +163,7 @@ jobs:
   # `needs: determine-runner`, and change the `steps.pick.outputs.*` references
   # throughout this job back to `needs.determine-runner.outputs.*`.
   execute-charm-test:
+    if: ${{ !inputs.cache_benchmark }}
     name: Execute integration tests against the charms
     # runs-on: ${{ fromJSON(needs.determine-runner.outputs.runner) }}  # see NOTE above
     runs-on: [self-hosted-linux-amd64-noble-private-endpoint-small]
