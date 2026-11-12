@@ -624,12 +624,8 @@ jobs:
             echo "::error::Failed to list eligible LXD instances; refusing cleanup" >&2
             exit 1
           }
-          if [[ -z "$instances" ]]; then
-            echo "No eligible LXD instances found"
-            exit 0
-          fi
           # A multi-instance lxc delete is serial and stops at the first error.
-          if ! printf '%s\n' "$instances" | xargs --delimiter='\n' --no-run-if-empty \
+          printf '%s' "$instances" | xargs --delimiter='\n' --no-run-if-empty \
             --max-args=1 --max-procs=4 bash -c '
             name=$1
             if [[ "$DRY_RUN" == "true" ]]; then
@@ -641,10 +637,7 @@ jobs:
               echo "::error::Failed deleting instance: $name" >&2
               exit 1
             fi
-          ' _; then
-            echo "::error::One or more LXD instances could not be deleted" >&2
-            exit 1
-          fi
+          ' _
       ###################################################################################
       #   _________________
       #  /   _____/\_____  \
