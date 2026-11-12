@@ -41,6 +41,8 @@ jobs:
           groups: development
       - name: Run linter
         run: mise run lint
+      - name: Run workflow script tests
+        run: uv run --no-sync --all-packages pytest scripts/tests
   charm-integration-testing-unit-tests:
     runs-on: ubuntu-latest
     steps:
