@@ -125,6 +125,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Restore snapd download cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
+        with:
+          path: ${{ runner.temp }}/snapd-download-cache.tar
+          key: snapdl-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: |
+            snapdl-${{ runner.arch }}-
+      - name: Restore snapd cache files
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/snapd-download-cache.tar" ]]; then
+            sudo tar -xf "$RUNNER_TEMP/snapd-download-cache.tar" -C /var/lib/snapd
+          else
+            echo "No previous snapd download cache"
+          fi
       - name: Pick runner
         id: pick
         uses: ./.github/actions/pick-runner
@@ -138,6 +153,17 @@ jobs:
           juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
+      - name: Archive snapd download cache
+        shell: bash
+        run: |
+          sudo mkdir -p /var/lib/snapd/cache
+          sudo tar -cf - -C /var/lib/snapd cache > "$RUNNER_TEMP/snapd-download-cache.tar"
+          du -h "$RUNNER_TEMP/snapd-download-cache.tar"
+      - name: Save snapd download cache
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
+        with:
+          path: ${{ runner.temp }}/snapd-download-cache.tar
+          key: snapdl-${{ runner.arch }}-${{ github.run_id }}
       - name: Enable Debug Session
         if: ${{ inputs.debug_sleep_after != 'none' && !cancelled() && steps.pick.outputs.debug-mode == 'ssh' }}
         shell: bash
