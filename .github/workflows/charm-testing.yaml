@@ -146,20 +146,6 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
-      - name: Restore uv dependency cache
-        id: uv-cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
-        with:
-          path: ~/.cache/uv
-          key: sqt-1316-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock',
-            'mise.lock') }}
-      - name: Restore Mise tool cache
-        id: mise-cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
-        with:
-          path: ~/.local/share/mise
-          key: sqt-1316-mise-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.mise-version',
-            'mise.toml', 'mise.lock') }}
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
@@ -167,20 +153,6 @@ jobs:
           juju-channel: ${{ inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
-      - name: Save Mise tool cache
-        if: ${{ steps.mise-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
-        with:
-          path: ~/.local/share/mise
-          key: sqt-1316-mise-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.mise-version',
-            'mise.toml', 'mise.lock') }}
-      - name: Save uv dependency cache
-        if: ${{ steps.uv-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809  # v4.2.4
-        with:
-          path: ~/.cache/uv
-          key: sqt-1316-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock',
-            'mise.lock') }}
       - name: Archive snapd download cache
         shell: bash
         run: |
