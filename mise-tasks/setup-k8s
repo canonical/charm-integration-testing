@@ -11,7 +11,8 @@ Usage: mise run setup-k8s -- [--cloud-name NAME] [--kubeconfig PATH] [--no-chaos
                             [--output FILE]
 
 Initialises Canonical Kubernetes with Concierge, writes its kubeconfig, registers it with the
-Juju client and installs or verifies Chaos Mesh. Re-running converges without data loss.
+Juju client and installs or verifies Chaos Mesh.
+This flushes the host's iptables FORWARD chain and sets its default policy to ACCEPT.
 
 --cloud-name     Juju cloud name (default: local-k8s)
 --kubeconfig     Kubeconfig destination (default: $HOME/k8s.yaml)
@@ -57,18 +58,19 @@ done
 echo "==> Preparing Canonical Kubernetes with Concierge..."
 sudo "$(command -v concierge)" prepare --config "$project_root/static/substrates/k8s.yaml" --verbose
 
-# Concierge resets the FORWARD policy only for LXD (canonical/concierge#288). Docker's DROP
-# policy on GitHub-hosted runners otherwise blocks pod egress.
-if sudo iptables -S FORWARD | grep -qx -- '-P FORWARD DROP'; then
-    echo "==> Setting the iptables FORWARD policy to ACCEPT..."
-    sudo iptables -P FORWARD ACCEPT
-fi
+# Match Concierge's LXD firewall handling until https://github.com/canonical/concierge/issues/288.
+echo "==> Flushing the host's iptables FORWARD chain and setting its policy to ACCEPT..."
+sudo iptables -F FORWARD
+sudo iptables -P FORWARD ACCEPT
 
 echo "==> Writing kubeconfig to $kubeconfig..."
 mkdir -p "$(dirname "$kubeconfig")"
-# The redirect runs as the invoking user so that they own the file.
+tmp_kubeconfig="$(mktemp "${kubeconfig}.XXXXXX")"
+trap 'rm -f -- "$tmp_kubeconfig"' EXIT
 # shellcheck disable=SC2024
-(umask 077 && sudo k8s config > "$kubeconfig")
+sudo k8s config > "$tmp_kubeconfig"
+mv -fT -- "$tmp_kubeconfig" "$kubeconfig"
+trap - EXIT
 
 if juju clouds --client --format json | jq -e --arg cloud "$cloud_name" 'has($cloud)' >/dev/null; then
     echo "==> Juju cloud $cloud_name already registered."
