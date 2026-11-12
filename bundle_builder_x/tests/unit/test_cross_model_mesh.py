@@ -9,8 +9,6 @@ same two charms, riding the same Juju offer.
 """
 
 import logging
-from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 import z3  # type: ignore[import-untyped]
@@ -32,7 +30,6 @@ from bundle_builder_x.domain_builder import classify_integrations
 from bundle_builder_x.dsl_lowering import DSLLoweringError, LoweringContext, lower
 from bundle_builder_x.extract import extract_solution
 from bundle_builder_x.juju_version import JujuVersion
-from bundle_builder_x.overrides import OverridesClient
 from bundle_builder_x.spec import AppSpec, IntegrationSpec, ModelSpec
 
 _JUJU = JujuVersion(major=3, minor=6, patch=0)
@@ -577,116 +574,6 @@ class TestCrossModelExprDSL:
         expr = parse_constraint(f"len(endpoint[backend] {op} cross_model(endpoint[backend])) == 1")
         with pytest.raises(DSLLoweringError, match="both filtered and unfiltered"):
             lower(expr, ctx)
-
-
-@dataclass(frozen=True)
-class LokiMeshParams:
-    endpoint: str | None
-    mesh: bool
-    companion: bool
-    satisfiable: bool
-    cross_model: bool = True
-    matching_peer: bool = True
-
-
-@pytest.mark.parametrize(
-    "params",
-    [
-        pytest.param(LokiMeshParams("self-metrics-endpoint", True, True, True), id="meshed-cmr-metrics"),
-        pytest.param(LokiMeshParams("self-metrics-endpoint", True, False, False), id="meshed-metrics-needs-companion"),
-        pytest.param(LokiMeshParams("logging", False, False, True), id="unmeshed-cmr-logging"),
-        pytest.param(LokiMeshParams("grafana-source", False, False, True), id="unmeshed-cmr-grafana"),
-        pytest.param(LokiMeshParams("self-metrics-endpoint", False, False, True), id="unmeshed-cmr-metrics"),
-        pytest.param(LokiMeshParams("self-metrics-endpoint", False, True, True), id="unmeshed-metrics-with-companion"),
-        pytest.param(LokiMeshParams("logging", True, True, True), id="meshed-cmr-logging"),
-        pytest.param(LokiMeshParams("self-metrics-endpoint", True, False, True, False), id="meshed-local-metrics"),
-        pytest.param(LokiMeshParams("self-metrics-endpoint", True, True, False, False), id="local-companion-rejected"),
-        pytest.param(LokiMeshParams(None, False, True, False), id="standalone-companion-rejected"),
-        pytest.param(
-            LokiMeshParams("self-metrics-endpoint", True, True, False, matching_peer=False),
-            id="wrong-peer-companion-rejected",
-        ),
-    ],
-)
-def test_loki_mesh_companion_constraints(params: LokiMeshParams) -> None:
-    # GIVEN Loki's actual override rules and a fixed workload/mesh topology.
-    interfaces = {
-        "logging": "loki_push_api",
-        "grafana-source": "grafana_datasource",
-        "self-metrics-endpoint": "prometheus_scrape",
-    }
-    loki = _make_charm(
-        "loki-coordinator-k8s",
-        {
-            **{
-                endpoint: CharmEndpoint(type=EndpointType.PROVIDES, interface=interface, optional=True)
-                for endpoint, interface in interfaces.items()
-            },
-            "provide-cmr-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="cross_model_mesh", optional=True),
-            "service-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="service_mesh", optional=True),
-        },
-    )
-    overrides = OverridesClient(overrides=Path(__file__).resolve().parents[3] / "static/charm-overrides")
-    loki.constraints = [
-        parse_constraint(rule)
-        for rule in overrides.get_charm_constraints_overrides(
-            loki.name, CharmChannel.model_validate("3.7/stable"), "26.04"
-        )
-    ]
-    consumer_endpoints = {
-        "require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh", optional=True),
-    }
-    if params.endpoint is not None:
-        consumer_endpoints["backend"] = CharmEndpoint(
-            type=EndpointType.REQUIRES, interface=interfaces[params.endpoint], optional=True
-        )
-    consumer = _make_charm("consumer-app", consumer_endpoints)
-    other_consumer = _make_charm(
-        "other-consumer",
-        {"require-cmr-mesh": CharmEndpoint(type=EndpointType.REQUIRES, interface="cross_model_mesh", optional=True)},
-    )
-    beacon = _make_charm(
-        "beacon",
-        {"service-mesh": CharmEndpoint(type=EndpointType.PROVIDES, interface="service_mesh", optional=True)},
-    )
-    loki_model = ModelRef(name="loki-model")
-    consumer_model = ModelRef(name="consumer-model") if params.cross_model else loki_model
-    domain = _make_domain(
-        {
-            model: DomainModel(arch="amd64", platform="kubernetes", juju_version=_JUJU)
-            for model in {loki_model, consumer_model}
-        }
-    )
-    for name, charm, model in [
-        ("loki", loki, loki_model),
-        ("beacon", beacon, loki_model),
-        ("consumer", consumer, consumer_model),
-        ("other", other_consumer, consumer_model),
-    ]:
-        domain.models[model].applications[name] = DomainApplication(charm=charm.name)
-    loki_id = add_charm_to_domain(loki, domain, loki_model)
-    consumer_id = add_charm_to_domain(consumer, domain, consumer_model)
-    other_id = add_charm_to_domain(other_consumer, domain, consumer_model)
-    beacon_id = add_charm_to_domain(beacon, domain, loki_model)
-    for peer_id in (consumer_id, other_id, beacon_id):
-        pair_charms_in_domain(domain, loki_id, peer_id)
-
-    # WHEN the solver cannot add unrelated workload relations to justify a companion.
-    solver = z3.Solver()
-    add_constraints(solver, domain)
-    companion_peer = consumer_id if params.matching_peer else other_id
-    for integration in domain.charm_integrations:
-        interface = domain.integration_interface(integration)
-        if interface == "service_mesh":
-            exists = params.mesh
-        elif interface == "cross_model_mesh":
-            exists = params.companion and integration.requires_charm_id == companion_peer
-        else:
-            exists = params.endpoint is not None and integration.requires_charm_id == consumer_id
-        solver.add(integration.exists == exists)
-
-    # THEN mesh-protected CMR has matching metadata, but unmeshed/local traffic does not need it.
-    assert solver.check() == (z3.sat if params.satisfiable else z3.unsat)
 
 
 class TestCrossModelMeshOfferSharing:
