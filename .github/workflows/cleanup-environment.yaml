@@ -615,8 +615,12 @@ jobs:
         shell: bash
         run: |-
           set -euo pipefail
-          instances=$("$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
+          instances=$("$LXC_BINARY" list charmqa: --format json | jq --slurp --raw-output --argjson age "$AGE_THRESHOLD" '
+            if length == 1 and (.[0] | type == "array") then
+              .[0][]
+            else
+              error("Expected a single JSON array from lxc list")
+            end |
             select(.name | test("^juju-")) |
             select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
             .name
