@@ -624,20 +624,20 @@ jobs:
             echo "::error::Failed to list eligible LXD instances; refusing cleanup" >&2
             exit 1
           }
-          # A multi-instance lxc delete is serial and stops at the first error.
-          printf '%s' "$instances" | xargs --delimiter='\n' --no-run-if-empty \
-            --max-args=1 --max-procs=4 bash -c '
-            name=$1
+          failed=0
+          while IFS= read -r name; do
+            [[ -n "$name" ]] || continue
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Dry run: would delete instance: $name"
-              exit 0
+              continue
             fi
             echo "Deleting instance: $name"
             if ! "$LXC_BINARY" delete --force "charmqa:${name}"; then
               echo "::error::Failed deleting instance: $name" >&2
-              exit 1
+              failed=1
             fi
-          ' _
+          done <<< "$instances"
+          exit "$failed"
       ###################################################################################
       #   _________________
       #  /   _____/\_____  \
