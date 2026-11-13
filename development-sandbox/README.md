@@ -25,11 +25,27 @@ Ubuntu host, run it directly:
 ```bash
 mise run setup -- --group agent
 mise run agent -- "Describe the task"
+mise run agent --interactive
+mise run agent --acp
 ```
 
-The task also accepts `--interactive` and Copilot arguments after `--`.
-It runs Copilot with unrestricted permissions (`--yolo`), including access to
-the host's files and credentials; use it only in an environment you trust.
+The task and `scripts/sandbox.sh run` share the same repository context from
+`AGENTS.md`, which references `.agents/skills/system.md`, along with the same
+skills and optional MCP configuration. Copilot CLI must be authenticated for
+ACP sessions. ACP uses Copilot CLI's normal permission behavior; it does not
+add the `--yolo` flag used by the existing sandbox run modes. Native Copilot
+session storage is retained, including when `COPILOT_HOME` is set.
+
+Run one ACP process per checkout or worktree, launched from that checkout, and
+use the same working directory for its sessions. The process inherits the
+selected checkout's Mise environment; it does not reselect tools for sessions
+opened in another checkout. ACP is a local stdio entrypoint, not a Multipass
+bridge. It has not been tested with Paseo.
+
+For autonomous and interactive `mise run agent` modes, Copilot runs with
+`--yolo`, which grants unrestricted access to files and commands available to
+the invoking user. Use those modes only in an environment you trust. Copilot
+arguments can be passed after `--`.
 
 ## Copilot CLI arguments
 
