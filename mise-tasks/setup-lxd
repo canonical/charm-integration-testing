@@ -9,8 +9,8 @@ usage() {
     cat <<'USAGE'
 Usage: mise run setup-lxd -- [--output FILE]
 
-Initialises LXD with Concierge and grants the invoking user access. An existing LXD installation
-is not refreshed. Re-running converges without data loss.
+Initialises LXD with Concierge and grants the invoking user access. Concierge may refresh an
+existing LXD snap when the task runs.
 
 --output  Append cloud-name and platform as key=value lines
 USAGE
