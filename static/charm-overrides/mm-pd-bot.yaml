@@ -1,0 +1,31 @@
+---
+# Source: https://git.launchpad.net/charm-k8s-mm-pd-bot
+#
+# The charm blocks unless external_hostname and mm_pd_bot_cfg are configured.
+overrides:
+  - configs:
+      # Test values satisfy charm validation but do not authenticate to either service.
+      external_hostname: [mm-pd-bot.test]
+      mm_pd_bot_cfg:
+        - |-
+          [PagerDuty]
+          account = test-account
+          api-token = test-token
+          private-channel = test-private
+          public-channel = test-public
+          [Prometheus]
+          max_cache_size = 100
+          [httpd]
+          listen-ip = 0.0.0.0
+          listen-port = 2160
+          magic-uuid = 00000000-0000-0000-0000-000000000000
+          ssl = False
+          [MattermostBot]
+          bot_url = http://mattermost.test
+          bot_team = test
+          bot_token = test-token
+          ssl_verify = False
+          plugins = modules
+          [nickname to email]
+          [Mattermost Aliases]
+          [PagerDuty service to Mattermost Channel]
