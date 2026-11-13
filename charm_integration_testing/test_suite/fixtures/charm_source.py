@@ -5,10 +5,10 @@ import logging
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
-from subprocess import run
 from typing import Iterator
 
 import pytest
+from juju_jubilant import JubilantBackend
 
 from bundle_builder_x import Charm
 
@@ -16,6 +16,7 @@ from bundle_builder_x import Charm
 @pytest.fixture(scope="session")
 def target_charm_source(
     target_resolved_charm: Charm,
+    juju_backend: JubilantBackend,
     logger: logging.Logger,
 ) -> Iterator[Path]:
     """Download and unpack the target revision once for tests that inspect its source."""
@@ -25,18 +26,15 @@ def target_charm_source(
         charm_archive = cache_path / "target.charm"
         source_dir = cache_path / "source"
         source_dir.mkdir()
-        run(
-            [
-                "juju",
-                "download",
-                target_resolved_charm.name,
-                "--revision",
-                str(target_resolved_charm.revision),
-                "--filepath",
-                str(charm_archive),
-                "--no-progress",
-            ],
-            check=True,
+        juju_backend.client.model(None).cli(
+            "download",
+            target_resolved_charm.name,
+            "--revision",
+            str(target_resolved_charm.revision),
+            "--filepath",
+            str(charm_archive),
+            "--no-progress",
+            include_model=False,
         )
 
         with zipfile.ZipFile(charm_archive) as archive:
