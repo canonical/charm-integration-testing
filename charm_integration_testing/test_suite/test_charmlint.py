@@ -8,7 +8,6 @@ from subprocess import run
 import pytest
 
 
-@pytest.mark.preflight
 def test_charmlint(request: pytest.FixtureRequest) -> None:
     charmlint = shutil.which("charmlint")
     if charmlint is None:

@@ -97,7 +97,7 @@ def test_enabled_scale_from_ha_is_the_direct_path_to_deployed(pytester: Pytester
     result.stdout.no_fnmatch_line("*test_teardown*PASSED*")
 
 
-def test_preflight_runs_first_and_does_not_halt_state_tests(pytester: Pytester) -> None:
+def test_unmarked_tests_run_after_state_tests(pytester: Pytester) -> None:
     pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
     pytester.makepyfile(
         textwrap.dedent(
@@ -105,9 +105,8 @@ def test_preflight_runs_first_and_does_not_halt_state_tests(pytester: Pytester) 
             import pytest
             from test_suite.scheduler.states import State
 
-            @pytest.mark.preflight
-            def test_preflight():
-                pytest.fail("simulated preflight failure")
+            def test_charmlint():
+                pass
 
             @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
             def test_build_bundle():
@@ -124,12 +123,16 @@ def test_preflight_runs_first_and_does_not_halt_state_tests(pytester: Pytester) 
         )
     )
 
-    result = pytester.runpytest("-v", "--current-state", "no_bundle", "-k", "test_deploy")
+    result = pytester.runpytest("-v", "--current-state", "no_bundle")
 
-    result.assert_outcomes(passed=3, failed=1)
-    test_lines = [line for line in result.outlines if "::test_preflight " in line or "::test_deploy " in line]
-    assert "::test_preflight FAILED" in test_lines[0]
-    assert "::test_deploy PASSED" in test_lines[-1]
+    result.assert_outcomes(passed=4)
+    test_lines = [line for line in result.outlines if "::test_" in line and " PASSED" in line]
+    assert [line.split("::")[-1].split()[0] for line in test_lines] == [
+        "test_build_bundle",
+        "test_create_model",
+        "test_deploy",
+        "test_charmlint",
+    ]
 
 
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
