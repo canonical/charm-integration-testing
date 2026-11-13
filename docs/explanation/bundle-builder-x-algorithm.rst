@@ -70,9 +70,11 @@ Domain expansion
 ~~~~~~~~~~~~~~~~
 
 When the solver returns ``unsat``, the builder decodes every tag in the unsat
-core and attempts to expand the domain for each one in the same iteration.
-Tags are processed in priority order, but all tags are acted on (not just the
-first):
+core and attempts to expand the domain for each one in priority order. For
+channel and base mismatches, this first pass prefers the current channel
+where the requirements leave a choice. If none of the tags expands the domain,
+the builder revisits channel and base mismatches with a wider search. It returns
+to the solver as soon as that search adds a candidate or a new pairing.
 
 - ``APPLICATION_EXISTS`` -- the spec references an application whose charm is
   not yet in the domain. Fetch it from Charmhub.
@@ -101,9 +103,58 @@ Candidates are sorted by charm priority and then name. Each new candidate is
 initially paired only with its parent charm; it is not eagerly paired against
 the whole domain.
 
-Pairs of ``PEER_CHANNEL_MISMATCH`` tags for the same (anchor, peer) charm
-pair are merged before processing so that track and risk constraints are
-resolved together in a single step, rather than one dimension at a time.
+Release candidate discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PEER_CHANNEL_MISMATCH`` and ``SUBORDINATE_BASE_MISMATCH`` share one discovery
+process (``CandidateDiscovery``), which looks for a different release of a charm
+that is already in the domain. The unsat core does not need to report every
+requirement in one iteration. A risk requirement may show up in one iteration,
+a track requirement in the next, and a base requirement after that.
+Discovery therefore remembers what it has
+learned for the whole build instead of handling each tag in isolation.
+
+Requirements are stored per dependency alternative (``DependencyAlternative``).
+Each alternative identifies the model, the anchor charm and endpoint, and the
+original charm whose release may need to change. Replacement releases are filed
+under that original charm, so
+they do not start the search again from nothing.
+
+- Compatible requirements are combined, and the most specific combination is
+  tried first. The individual requirements are kept as well, because the tags
+  may describe alternatives rather than one conjunction. The solver chooses
+  which candidates satisfy the constraints.
+- Conflicting requirements are never combined, and requirements learned for one
+  alternative are not applied to another.
+- Pins from the spec (channel, revision, base) are hard restrictions. A release
+  can become a candidate for an application only if it satisfies that
+  application's explicit pins. A channel or base that was only chosen as a
+  default is a preference and can be replaced.
+- The current channel is tried first. The wider search runs only when no tag in
+  the core expanded the domain. It walks the charm's other channels, current
+  track before other tracks. A requirement that fixes both track and risk stays
+  on that channel.
+- A required revision can also be looked up directly while preserving the other
+  required selectors, since it may no longer be the current release of a channel.
+- Branch channels are skipped unless the branch was requested.
+
+For example, a principal application may require Ubuntu 20.04 while the
+initially selected subordinate release supports only Ubuntu 24.04. If the
+subordinate is not pinned and no constraint requires matching tracks, discovery
+can find a release on another track that supports Ubuntu 20.04. It does not
+relax an explicit base or channel pin to do so.
+
+Either side of a mismatch can be replaced. For a peer channel mismatch the
+builder looks for a replacement peer first and falls back to replacing the
+anchor. For a subordinate base mismatch it looks for a subordinate that matches
+the principal's base first, then for a principal that matches the subordinate's.
+
+Charmhub lookups are cached for the build, including those that found no
+release. Each discovery call stops after adding one release or one new pairing,
+so the solver checks the result before the search goes any further.
+
+Expansion failures
+~~~~~~~~~~~~~~~~~~
 
 There is no hard iteration limit: valid dependency graphs may require an
 arbitrary number of expansion steps. Each solver call has a timeout. If the
