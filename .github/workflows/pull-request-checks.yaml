@@ -52,6 +52,7 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           groups: development
+          tools: aqua:mikefarah/yq
       - name: Run Charm Integration Testing Unit Tests
         run: mise run test:charm-integration-testing
   charm-testing-integration-tests:

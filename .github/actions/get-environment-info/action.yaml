@@ -14,7 +14,7 @@ outputs:
     description: Architecture string (e.g. amd64).
     value: ${{ steps.lookup.outputs.arch }}
   cloud-type:
-    description: Cloud setup type (k8s, o7k, or lxd).
+    description: Cloud setup type (k8s, o7k, lxd, local-k8s, or local-lxd).
     value: ${{ steps.lookup.outputs.cloud-type }}
   credentials-secret:
     description: Name of the GitHub Actions secret holding the cloud credentials (kubeconfig
@@ -65,6 +65,7 @@ runs:
           k8s) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"kubeconfig-secret\"] // \"\"" "${table}") ;;
           o7k) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"novarc-secret\"] // \"\"" "${table}") ;;
           lxd) credentials_secret=$(yq ".environments[\"${ENVIRONMENT_NAME}\"][\"lxd-secret\"] // \"\"" "${table}") ;;
+          local-k8s|local-lxd) credentials_secret="" ;;
           *)
             echo "::error::Unsupported cloud type '${cloud_type}' for environment '${ENVIRONMENT_NAME}'."
             exit 1

@@ -45,6 +45,19 @@ The following environment variables can be set for specific test scenarios:
 - `UBUNTU_PRO_TOKEN`: Ubuntu Pro token (required for testing canonical-livepatch-server charms)
 - `KUBECONFIG_<cloud_name>`: Path to kubeconfig for a Kubernetes cloud registered in Juju. One variable per K8s cloud, where hyphens in the cloud name are replaced with underscores (e.g. `KUBECONFIG_microk8s=/home/user/.kube/microk8s.yaml`, `KUBECONFIG_local_k8s=/home/user/.kube/local-k8s.yaml`). Replaces the former single `KUBECONFIG` variable.
 
+### GitHub-hosted environments
+
+The charm-testing workflow accepts `github-runner-k8s` and `github-runner-lxd`
+as target or neighbor environments. Both substrates run on the same ephemeral
+Ubuntu runner for cross-model tests. These environments have no shared S3
+configuration; tests requiring it cannot use the private environment's storage.
+Logs are uploaded as a GitHub Actions artifact and the workflow run is linked
+from Test Observer when reporting is enabled.
+
+Local substrate setup modifies the host firewall and may refresh snaps. Only
+configure these cloud types on disposable runners, never shared machines.
+The cleanup workflow does not support these ephemeral environments.
+
 ## Documentation
 
 Run the documentation locally from the `docs` directory:
