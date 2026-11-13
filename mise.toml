@@ -17,6 +17,7 @@ task.run_auto_install = false
 "snap:kubectl" = { channel = "1.32/stable", classic = true }
 "snap:openstackclients" = { channel = "latest/stable" }
 "snap:lxd" = { channel = "latest/stable" }
+"snap:k8s" = { channel = "1.32-classic/stable", classic = true }
 
 [tools]
 python = "3.12.12"
