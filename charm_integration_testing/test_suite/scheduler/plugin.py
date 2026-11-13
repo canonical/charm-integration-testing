@@ -27,8 +27,9 @@ How it works
    path are injected into the plan automatically (re-added from the full
    collection even if ``-k`` excluded them).
 
-5. Tests *without* the ``@pytest.mark.state`` marker are left in their
-   original relative order and appended after all scheduled tests.
+5. Tests marked ``@pytest.mark.preflight`` run first. Other tests without the
+   ``@pytest.mark.state`` marker are left in their original relative order and
+   appended after all scheduled tests.
 
 Example
 -------
@@ -116,7 +117,7 @@ _skipped_transition_item_ids: dict[StateTransition, set[int]] = {}
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the ``state`` and ``injected`` markers."""
+    """Register the scheduler's ``state``, ``injected``, and ``preflight`` markers."""
     config.addinivalue_line(
         "markers",
         (
@@ -141,6 +142,10 @@ def pytest_configure(config: pytest.Config) -> None:
             "These tests are inserted to satisfy state prerequisites and may be "
             "excluded from the run with '-m \"not injected\"'."
         ),
+    )
+    config.addinivalue_line(
+        "markers",
+        "preflight: Run before state-managed tests without changing the environment state.",
     )
 
 
@@ -562,6 +567,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from ``_all_collected``, and injects any bridging transitions needed to
     reach those destinations.
     """
+    if not items:
+        return
+
+    preflight = [item for item in _all_collected if item.get_closest_marker("preflight") is not None]
+    preflight_ids = {id(item) for item in preflight}
+
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
@@ -609,11 +620,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # ------------------------------------------------------------------
     # 2. Partition the USER-SELECTED items (post -k filter) into marked
     #    and unmarked.  These are the destinations the scheduler must reach.
+    #    Preflight tests are always included from the full collection.
     # ------------------------------------------------------------------
     selected_marked: list[tuple[pytest.Item, StateMarker]] = []
     unmarked: list[pytest.Item] = []
 
     for item in items:
+        if id(item) in preflight_ids:
+            continue
         try:
             marker = read_state_marker(item)
         except ValueError as exc:
@@ -624,7 +638,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             unmarked.append(item)
 
     if not selected_marked:
-        # Nothing state-marked in the selection; leave items untouched.
+        items[:] = preflight + unmarked
         return
 
     # ------------------------------------------------------------------
@@ -668,7 +682,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # ------------------------------------------------------------------
     # 5. Commit new order: scheduled items first, then any unmarked items.
     # ------------------------------------------------------------------
-    items[:] = ordered + unmarked
+    items[:] = preflight + ordered + unmarked
 
 
 # ---------------------------------------------------------------------------

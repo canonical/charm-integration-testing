@@ -97,6 +97,41 @@ def test_enabled_scale_from_ha_is_the_direct_path_to_deployed(pytester: Pytester
     result.stdout.no_fnmatch_line("*test_teardown*PASSED*")
 
 
+def test_preflight_runs_first_and_does_not_halt_state_tests(pytester: Pytester) -> None:
+    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
+    pytester.makepyfile(
+        textwrap.dedent(
+            """
+            import pytest
+            from test_suite.scheduler.states import State
+
+            @pytest.mark.preflight
+            def test_preflight():
+                pytest.fail("simulated preflight failure")
+
+            @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
+            def test_build_bundle():
+                pass
+
+            @pytest.mark.state(requires=State.NO_CONTROLLER, provides=State.EMPTY_MODEL)
+            def test_create_model():
+                pass
+
+            @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
+            def test_deploy():
+                pass
+            """
+        )
+    )
+
+    result = pytester.runpytest("-v", "--current-state", "no_bundle", "-k", "test_deploy")
+
+    result.assert_outcomes(passed=3, failed=1)
+    test_lines = [line for line in result.outlines if "::test_preflight " in line or "::test_deploy " in line]
+    assert "::test_preflight FAILED" in test_lines[0]
+    assert "::test_deploy PASSED" in test_lines[-1]
+
+
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
 

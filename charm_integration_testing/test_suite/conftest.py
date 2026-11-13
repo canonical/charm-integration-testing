@@ -5,9 +5,11 @@
 import json
 import logging
 import os
+import tempfile
 import warnings
+import zipfile
 from datetime import timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
@@ -702,7 +704,7 @@ def validators_path() -> Path | None:
     return file_path
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_charm(request: pytest.FixtureRequest) -> str:
     """Charmhub name of the charm under test, passed via ``--target-charm``."""
     value = request.config.getoption("--target-charm")
@@ -722,7 +724,7 @@ def neighbor_charm(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_channel(request: pytest.FixtureRequest) -> str | None:
     """Channel of the charm under test.
 
@@ -733,7 +735,7 @@ def target_channel(request: pytest.FixtureRequest) -> str | None:
     return None if value == "default" else value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_revision(request: pytest.FixtureRequest) -> int | None:
     """Revision of the charm under test.
 
@@ -744,7 +746,7 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     return None if value == "default" else int(value)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
     """Canonical charm metadata for the target revision the cycle refreshes back to.
 
@@ -873,7 +875,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_series(request: pytest.FixtureRequest) -> str | None:
     """Ubuntu base series for the charm under test.
 
@@ -884,7 +886,7 @@ def target_series(request: pytest.FixtureRequest) -> str | None:
     return None if value == "default" else value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-platform")
     if not value:
@@ -893,11 +895,53 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
     return value
+
+
+@pytest.fixture(scope="session")
+def target_charm_source(
+    target_resolved_charm: Charm,
+    logger: logging.Logger,
+) -> Iterator[Path]:
+    """Download and unpack the target revision once for tests that inspect its source."""
+    # Juju's snap cannot write to pytest's hidden /tmp paths.
+    with tempfile.TemporaryDirectory(prefix="cit-target-charm-", dir=Path.home()) as cache_dir:
+        cache_path = Path(cache_dir)
+        charm_archive = cache_path / "target.charm"
+        source_dir = cache_path / "source"
+        source_dir.mkdir()
+        run(
+            [
+                "juju",
+                "download",
+                target_resolved_charm.name,
+                "--revision",
+                str(target_resolved_charm.revision),
+                "--filepath",
+                str(charm_archive),
+                "--no-progress",
+            ],
+            check=True,
+        )
+
+        with zipfile.ZipFile(charm_archive) as archive:
+            for member in archive.infolist():
+                path = PurePosixPath(member.filename)
+                if path.is_absolute() or ".." in path.parts:
+                    raise ValueError(f"Charm archive contains an unsafe path: {member.filename!r}")
+            archive.extractall(source_dir)
+
+        logger.info(
+            "Downloaded target charm %s revision %s to %s.",
+            target_resolved_charm.name,
+            target_resolved_charm.revision,
+            source_dir,
+        )
+        yield source_dir
 
 
 @pytest.fixture(scope="session")
@@ -959,7 +1003,7 @@ def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model_ref: JujuMod
     return juju_backend.version(neighbor_model_ref)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     """Juju version resolved from the installed Juju CLI."""
     return juju_backend.cli_version()
