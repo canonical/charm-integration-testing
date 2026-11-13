@@ -707,50 +707,18 @@ EOF
         cat "$SANDBOX_MCP_CONFIG_FILE" | multipass exec "$VM_NAME" -- bash -c "cat > '$_mcp_vm_file'"
     fi
 
-    PROMPT_FILE=$(multipass exec "$VM_NAME" -- bash -c "mktemp /tmp/copilot-prompt-XXXXXX")
-    _vm_temp_files+=("$PROMPT_FILE")
+    _env_args=("PROJECT_ROOT=$VM_MOUNT")
+    [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
+    [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
+    [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_CONFIG_FILE=$_mcp_vm_file")
+    _collect_sandbox_vars _env_args
 
-    {
-        cat "$PROJECT_DIR/.agents/skills/system.md"
-        if [ -n "$TASK" ]; then
-            printf "\n\n---\n\nTask: %s\n" "$TASK"
-        fi
-    } | multipass exec "$VM_NAME" -- bash -c "cat > \"$PROMPT_FILE\""
-
-    if [ "$INTERACTIVE" = "true" ]; then
-        CONTEXT_MSG="Please read $PROMPT_FILE for project context, then await my instructions."
-        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("PROJECT_ROOT=$VM_MOUNT")
-        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
-        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
-        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
-        _collect_sandbox_vars _env_args
-        _vm_exec_with_env _env_args bash -lc "
-                cd '$VM_MOUNT'
-            _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -i \"$CONTEXT_MSG\" \"\$@\" || _ec=\$?
-            rm -f \"$PROMPT_FILE\"
-            exit \$_ec
-        " bash "${copilot_args[@]}"
-    else
-        # Build env var array, only including GH_TOKEN/GITHUB_TOKEN if they are actually set
-        _env_args=("PROJECT_ROOT=$VM_MOUNT")
-        [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
-        [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
-        [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_VM_CONFIG=$_mcp_vm_file")
-        _collect_sandbox_vars _env_args
-        _vm_exec_with_env _env_args bash -lc "
-                cd '$VM_MOUNT'
-            _mcp_extra=()
-            [ -n \"\${SANDBOX_MCP_VM_CONFIG:-}\" ] && _mcp_extra=(--additional-mcp-config \"@\${SANDBOX_MCP_VM_CONFIG}\")
-            _ec=0
-            copilot --yolo \"\${_mcp_extra[@]}\" -p \"\$(cat \"$PROMPT_FILE\")\" \"\$@\" || _ec=\$?
-            rm -f \"$PROMPT_FILE\"
-            exit \$_ec
-        " bash "${copilot_args[@]}"
-    fi
+    local agent_args=()
+    [ "$INTERACTIVE" = "false" ] || agent_args+=(--interactive)
+    [ -z "$TASK" ] || agent_args+=("$TASK")
+    agent_args+=(-- "${copilot_args[@]}")
+    # shellcheck disable=SC2016
+    _vm_exec_with_env _env_args bash -lc 'exec mise run agent -- "$@"' bash "${agent_args[@]}"
 }
 
 # ---------------------------------------------------------------------------
