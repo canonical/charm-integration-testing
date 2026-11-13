@@ -99,19 +99,19 @@ url = "https://github.com/mpalmer/action-validator/releases/download/v0.6.0/acti
 url_api = "https://api.github.com/repos/mpalmer/action-validator/releases/assets/153122329"
 
 [[tools."aqua:trufflesecurity/trufflehog"]]
-version = "3.56.0"
+version = "3.60.0"
 backend = "aqua:trufflesecurity/trufflehog"
-specifiers = ["3.56.0"]
+specifiers = ["3.60.0"]
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-arm64"]
-checksum = "sha256:117abaddeecf336ffb67ee12a5d2b49a4b2641fc90f3ae8d365147b81484efce"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.56.0/trufflehog_3.56.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/126074148"
+checksum = "sha256:be72245107ca0f06a3a41e5a8a049c114045bf17115564cd45dbc930a3c96392"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.60.0/trufflehog_3.60.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/130909602"
 
 [tools."aqua:trufflesecurity/trufflehog"."platforms.linux-x64"]
-checksum = "sha256:1fd2d0e9f2387d74187b19fbdbad9d4ec3bb905c8cbe1c6fd1cc864070655488"
-url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.56.0/trufflehog_3.56.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/126074149"
+checksum = "sha256:fddcf8f6aff1856b300c019ed5be428eed4e3880ebd2befe13ca6b0ad44a5ab8"
+url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.60.0/trufflehog_3.60.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/130909607"
 
 [[tools.go]]
 version = "1.26.0"

@@ -26,7 +26,7 @@ uv = "0.13.6"
 # PyPI tools use the Python and uv declared above; Mise installs them first.
 "aqua:jqlang/jq" = "1.8.2"
 "aqua:mikefarah/yq" = "4.54.1"
-"aqua:trufflesecurity/trufflehog" = "3.56.0"
+"aqua:trufflesecurity/trufflehog" = "3.60.0"
 "aqua:cli/cli" = "2.103.3"
 "aqua:helm/helm" = "3.21.4"
 node = "24.22.0"
