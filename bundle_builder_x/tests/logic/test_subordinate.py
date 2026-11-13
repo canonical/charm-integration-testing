@@ -22,11 +22,19 @@ Covers:
 
 import pytest
 
+from bundle_builder_x.bundle import Bundle
 from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
-from bundle_builder_x.charm import CharmEndpoint, EndpointScope, EndpointType
+from bundle_builder_x.charm import Charm, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.spec import AppSpec, ModelSpec
 
-from .conftest import JUJU_VERSION, CharmhubClientStub, build_multi_model, build_single_model, make_charm
+from .conftest import (
+    JUJU_VERSION,
+    CharmhubClientStub,
+    StrictChannelCatalog,
+    build_multi_model,
+    build_single_model,
+    make_charm,
+)
 
 
 class TestSubordinateOnMachine:
@@ -508,3 +516,173 @@ class TestSubordinateMultipleContainerEndpoints:
 
         assert "nrpe" in bundle.applications
         assert bundle.applications["nrpe"].charm.ubuntu_version == "22.04"
+
+
+class TestSubordinateRiskFallbackOnRequiredBase:
+    """The retry must pick a build that exists on the principal's base, without overriding pins.
+
+    The synthetic catalog simplifies the observed Calico base mismatch: stable has only
+    22.04/24.04 builds, while edge has a 20.04 build. It is not a historical catalog snapshot.
+    """
+
+    @staticmethod
+    def _catalog(worker_constraints: list[str] | None = None, worker_channel: str = "1.33/edge") -> CharmhubClientStub:
+        worker = make_charm(
+            "worker",
+            constraint_strs=worker_constraints,
+            endpoints={
+                "juju-info": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
+                ),
+            },
+            channel=worker_channel,
+            ubuntu_version="20.04",
+        )
+
+        def cni(channel: str, base: str, revision: int) -> Charm:
+            return make_charm(
+                "calico",
+                endpoints={
+                    "general-info": CharmEndpoint(
+                        type=EndpointType.REQUIRES,
+                        interface="juju-info",
+                        optional=False,
+                        scope=EndpointScope.CONTAINER,
+                    ),
+                },
+                channel=channel,
+                ubuntu_version=base,
+                revision=revision,
+                subordinate=True,
+            )
+
+        return StrictChannelCatalog(
+            worker,
+            cni("1.33/stable", "22.04", 120),
+            cni("1.33/stable", "24.04", 121),
+            cni("1.33/edge", "20.04", 127),
+        )
+
+    def _build(self, calico: AppSpec) -> Charm:
+        bundle = build_single_model(
+            BundleBuilder(charmhub_client=self._catalog()),
+            applications={"worker": AppSpec(charm="worker", channel="1.33/edge", base="20.04"), "calico": calico},
+            platform="machine",
+        )
+        return bundle.applications["calico"].charm
+
+    def test_unpinned_subordinate_falls_back_to_edge_build_on_required_base(self) -> None:
+        charm = self._build(AppSpec(charm="calico"))
+
+        assert (str(charm.channel), charm.ubuntu_version, charm.revision) == ("1.33/edge", "20.04", 127)
+
+    @pytest.mark.parametrize(
+        "pin",
+        [
+            AppSpec(charm="calico", channel="1.33/stable"),
+            AppSpec(charm="calico", revision=120),
+            AppSpec(charm="calico", base="22.04"),
+        ],
+        ids=["channel", "revision", "base"],
+    )
+    def test_explicitly_pinned_subordinate_is_not_moved_to_edge(self, pin: AppSpec) -> None:
+        with pytest.raises(UncompletableBundleError):
+            self._build(pin)
+
+    def test_explicit_risk_constraint_is_not_relaxed_by_the_fallback(self) -> None:
+        # An override can require equal risks (as OpenStack overrides do); the retried edge build must not satisfy it
+        builder = BundleBuilder(
+            charmhub_client=self._catalog(
+                worker_constraints=["risks(charms(endpoint[juju-info])) == risks({self})"], worker_channel="1.33/stable"
+            )
+        )
+
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(
+                builder,
+                applications={
+                    "worker": AppSpec(charm="worker", channel="1.33/stable", base="20.04"),
+                    "calico": AppSpec(charm="calico"),
+                },
+                platform="machine",
+            )
+
+
+class TestSubordinateCrossTrackDiscovery:
+    """An unpinned subordinate must be found on another track when only that track matches the principal's base.
+
+    The synthetic catalog models the SQT-1157 review counterexample: no constraint couples the tracks, and both
+    subordinate releases expose the required container-scoped endpoint.
+    """
+
+    @staticmethod
+    def _catalog() -> CharmhubClientStub:
+        worker = make_charm(
+            "worker",
+            endpoints={
+                "juju-info": CharmEndpoint(
+                    type=EndpointType.PROVIDES, interface="juju-info", optional=True, scope=EndpointScope.GLOBAL
+                ),
+            },
+            channel="latest/stable",
+            ubuntu_version="20.04",
+        )
+
+        def cni(channel: str, base: str, revision: int) -> Charm:
+            return make_charm(
+                "calico",
+                endpoints={
+                    "general-info": CharmEndpoint(
+                        type=EndpointType.REQUIRES,
+                        interface="juju-info",
+                        optional=False,
+                        scope=EndpointScope.CONTAINER,
+                    ),
+                },
+                channel=channel,
+                ubuntu_version=base,
+                revision=revision,
+                subordinate=True,
+            )
+
+        return StrictChannelCatalog(worker, cni("1/stable", "24.04", 1), cni("2/stable", "20.04", 2))
+
+    def _build(self, calico: AppSpec) -> Bundle:
+        return build_single_model(
+            BundleBuilder(charmhub_client=self._catalog()),
+            applications={"worker": AppSpec(charm="worker", channel="latest/stable", base="20.04"), "calico": calico},
+            platform="machine",
+        )
+
+    @staticmethod
+    def _assert_compatible(bundle: Bundle) -> None:
+        worker, calico = bundle.applications["worker"].charm, bundle.applications["calico"].charm
+        assert (str(calico.channel), calico.ubuntu_version, calico.revision) == ("2/stable", "20.04", 2)
+        assert worker.ubuntu_version == "20.04"
+        assert [tuple(map(str, i.endpoints)) for i in bundle.integrations] == [
+            ("calico:general-info", "worker:juju-info")
+        ]
+
+    def test_explicit_track_selects_the_compatible_release(self) -> None:
+        self._assert_compatible(self._build(AppSpec(charm="calico", channel="2/stable")))
+
+    def test_unpinned_subordinate_is_discovered_on_another_track(self) -> None:
+        self._assert_compatible(self._build(AppSpec(charm="calico")))
+
+    def test_build_does_not_reuse_candidates_from_a_previous_build(self) -> None:
+        catalog = self._catalog()
+        builder = BundleBuilder(charmhub_client=catalog)
+        applications = {
+            "worker": AppSpec(charm="worker", channel="latest/stable", base="20.04"),
+            "calico": AppSpec(charm="calico"),
+        }
+        self._assert_compatible(build_single_model(builder, applications=applications, platform="machine"))
+
+        # The next build has no compatible release. A cached candidate from the
+        # earlier catalog must not make it succeed.
+        builder.charmhub_client = StrictChannelCatalog(
+            catalog.charm_from_store("worker", ubuntu_arch="amd64"),
+            catalog.charm_from_store("calico", ubuntu_arch="amd64", charm_track="1"),
+        )
+        with pytest.raises(UncompletableBundleError):
+            build_single_model(builder, applications=applications, platform="machine")

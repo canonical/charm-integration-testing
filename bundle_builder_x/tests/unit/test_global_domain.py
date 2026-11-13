@@ -3,6 +3,8 @@
 
 """Tests for global multi-model domain behavior."""
 
+import pytest
+
 from bundle_builder_x.charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from bundle_builder_x.domain import (
     Domain,
@@ -16,6 +18,25 @@ from bundle_builder_x.domain import (
     pair_charms_in_domain,
 )
 from bundle_builder_x.juju_version import JujuVersion
+
+
+@pytest.mark.parametrize(
+    "selector,release,expected",
+    [
+        ("stable", "latest/stable", True),
+        ("latest/stable", "stable", True),
+        ("stable/br", "latest/stable/br", True),
+        ("latest/", "latest/edge", True),
+        ("stable", "latest/edge", False),
+        ("stable", "latest/stable/br", False),
+        ("stable/br", "latest/stable/other", False),
+        ("1/stable", "2/stable", False),
+    ],
+)
+def test_application_matches_channel_selectors_semantically(selector: str, release: str, expected: bool) -> None:
+    application = DomainApplication(charm="test", channel=CharmChannel.model_validate(selector))
+    charm = _make_charm("test").model_copy(update={"channel": CharmChannel.model_validate(release)})
+    assert application.matches_charm(charm) is expected
 
 
 def _make_domain(models: dict[ModelRef, DomainModel]) -> Domain:

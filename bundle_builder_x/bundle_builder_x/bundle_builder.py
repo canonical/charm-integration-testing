@@ -36,6 +36,7 @@ from .bundle_diagnostics import (
     UnresolvedIntegrationDiagnostic,
     canonicalize_diagnostics,
 )
+from .candidate_discovery import CandidateDiscovery, DependencyAlternative, ReleaseRequirements
 from .charm import Charm, CharmChannel, CharmEndpoint, EndpointScope, EndpointType
 from .charmhub import CharmhubClient
 from .constraints import add_constraints
@@ -118,10 +119,14 @@ class BundleBuilder:
         self.timeline = (timeline if timeline is not None else NullTimeline()).child("builder")
         self.optimize_timeout = optimize_timeout
         self._domain_builder = DomainBuilder(self.snapstore_client, logger=self.logger)
+        self._discovery = CandidateDiscovery(self.charmhub_client)
+        self._variant_roots: dict[int, int] = {}
 
     def build(self, spec: SpecFile) -> Solution:
         """Build bundles for all models defined in a spec simultaneously."""
         domain = self._domain_builder.build(spec)
+        self._discovery = CandidateDiscovery(self.charmhub_client)
+        self._variant_roots = {}
         z3_model = self._solve(domain)
         return extract_solution(z3_model, domain, logger=self.logger)
 
@@ -194,7 +199,7 @@ class BundleBuilder:
     def _handle_unsat_core(self, unsat_core: z3.AstVector, domain: Domain) -> None:
         raw_tags = [AssertionTag.decode(str(a)) for a in unsat_core]
         tags: list[AssertionTag] = sorted(
-            self._merge_mismatch_tags(raw_tags),
+            raw_tags,
             key=lambda a: (_EXPANSION_PRIORITY.get(a.kind, len(_EXPANSION_PRIORITY)), str(a)),
         )
         expanded = False
@@ -206,6 +211,15 @@ class BundleBuilder:
             if result.expanded:
                 self.logger.info(f"Expanded domain to handle failed assertion tag: {tag}")
                 expanded = True
+        # Exhaust preferred lookups across the core before widening any alternative.
+        if not expanded:
+            for tag in tags:
+                if isinstance(tag, PeerChannelMismatchTag):
+                    expanded = self._handle_peer_channel_mismatch(tag, domain, widen=True)
+                elif isinstance(tag, SubordinateBaseMismatchTag):
+                    expanded = self._handle_subordinate_base_mismatch(tag, domain, widen=True)
+                if expanded:
+                    break
         if not expanded:
             raise UncompletableBundleError(
                 diagnostics=self._collect_unsat_diagnostics(tags, domain, provisional_diagnostics),
@@ -322,39 +336,6 @@ class BundleBuilder:
             )
         return canonicalize_diagnostics(diagnostics)
 
-    @staticmethod
-    def _merge_mismatch_tags(tags: list[AssertionTag]) -> list[AssertionTag]:
-        """Merge PeerChannelMismatchTags for the same (anchor, endpoint) into one tag.
-
-        Different peer candidates for the same target can each carry a different
-        required dimension; merging across peers (not just per-peer dimensions)
-        ensures _handle_peer_channel_mismatch fetches one candidate satisfying all of
-        them, instead of one partially-correct candidate per peer.
-        """
-        seen: dict[tuple[int, str], int] = {}
-        merged: list[AssertionTag] = []
-        for tag in tags:
-            if isinstance(tag, PeerChannelMismatchTag):
-                key = (tag.charm.charm_id, tag.endpoint)
-                if key in seen:
-                    existing = cast(PeerChannelMismatchTag, merged[seen[key]])
-                    merged[seen[key]] = PeerChannelMismatchTag(
-                        charm=existing.charm,
-                        endpoint=existing.endpoint,
-                        peer_charm_name=existing.peer_charm_name,
-                        peer_charm_id=existing.peer_charm_id,
-                        required_track=existing.required_track or tag.required_track,
-                        required_risk=existing.required_risk or tag.required_risk,
-                        required_channel=existing.required_channel or tag.required_channel,
-                        required_revision=existing.required_revision or tag.required_revision,
-                    )
-                else:
-                    seen[key] = len(merged)
-                    merged.append(tag)
-            else:
-                merged.append(tag)
-        return merged
-
     def _handle_failed_assertion(
         self,
         tag: AssertionTag,
@@ -437,11 +418,13 @@ class BundleBuilder:
 
         elif tag.kind == Assertions.PEER_CHANNEL_MISMATCH:
             mismatch = cast(PeerChannelMismatchTag, tag)
-            return AssertionHandlingResult(expanded=self._handle_peer_channel_mismatch(mismatch, domain))
+            return AssertionHandlingResult(expanded=self._handle_peer_channel_mismatch(mismatch, domain, widen=False))
 
         elif tag.kind == Assertions.SUBORDINATE_BASE_MISMATCH:
             base_mismatch = cast(SubordinateBaseMismatchTag, tag)
-            return AssertionHandlingResult(expanded=self._handle_subordinate_base_mismatch(base_mismatch, domain))
+            return AssertionHandlingResult(
+                expanded=self._handle_subordinate_base_mismatch(base_mismatch, domain, widen=False)
+            )
 
         return AssertionHandlingResult()
 
@@ -771,173 +754,124 @@ class BundleBuilder:
             for i in domain.charm_integrations
         )
 
-    def _fetch_and_add_charm_variant(
+    def _discover_variant(
         self,
-        *,
-        charm_id: int,
-        charm_name: str,
         domain: Domain,
-        model_key: ModelRef,
-        track: str | None,
-        risk: str | None,
-        connect_to_id: int,
-        revision: int | None = None,
-        branch: str | None = None,
+        target_id: int,
+        anchor_id: int,
+        endpoint: str,
+        required: ReleaseRequirements,
+        interface: str | None = None,
+        *,
+        widen: bool,
     ) -> bool:
-        """Fetch `charm_name` on the given channel and add it to the domain for `charm_id`.
-
-        Returns whether the domain was expanded. Returns False (no-op) when no release
-        exists on that channel, rather than raising, so callers can try a fallback.
-        """
-        model_spec = domain.models[model_key]
-        try:
-            charm = self.charmhub_client.charm_from_store(
-                charm_name=charm_name,
-                ubuntu_arch=model_spec.arch,
-                juju_version=model_spec.juju_version,
-                platform=model_spec.platform,
-                charm_track=track,
-                charm_risk=risk,
-                charm_revision=revision,
-                charm_branch=branch,
+        target = domain.charms[target_id]
+        root_id = self._variant_roots.get(target_id, target_id)
+        model = domain.models[target.model]
+        applications = [app for app in model.applications.values() if root_id in app.charm_ids]
+        pins = [
+            ReleaseRequirements(
+                track=app.channel.explicit_track if app.channel else None,
+                risk=app.channel.risk or None if app.channel else None,
+                branch=app.channel.branch if app.channel else None,
+                revision=app.revision,
+                base=app.base,
             )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(f"No release found for {charm_name} on {track or '*'}/{risk or '*'}")
-            return False
-        return self._add_charm_for_charm_id(
-            charm,
-            charm_id,
-            domain,
-            model_key,
-            connect_to_id=connect_to_id,
-            connect_to_neighbors=True,
-        )
+            for app in applications
+        ] or [ReleaseRequirements()]
+        alternative = DependencyAlternative(target.model, anchor_id, endpoint, root_id)
+        counterpart_ids = {anchor_id}
+        for integration in domain.charm_integrations:
+            if interface is not None and domain.integration_interface(integration) != interface:
+                continue
+            if integration.requires_charm_id in (root_id, target_id):
+                counterpart_ids.add(integration.provides_charm_id)
+            if integration.provides_charm_id in (root_id, target_id):
+                counterpart_ids.add(integration.requires_charm_id)
+        for charm in self._discovery.candidates(alternative, model, target.spec, required, pins, widen=widen):
+            if applications and not any(app.matches_charm(charm) for app in applications):
+                continue
+            existing_ids = [root_id, *domain.charms[root_id].charms_added]
+            existing = next(
+                (i for i in existing_ids if domain.charms[i].spec == charm and domain.charms[i].model == target.model),
+                None,
+            )
+            if existing is not None:
+                connected = False
+                for counterpart_id in counterpart_ids:
+                    connected |= pair_charms_in_domain(domain, counterpart_id, existing)
+                if connected:
+                    return True
+                continue
+            before = len(domain.charms)
+            if self._add_charm_for_charm_id(
+                charm,
+                root_id,
+                domain,
+                target.model,
+                connect_to_id=anchor_id,
+            ):
+                for new_id in range(before, len(domain.charms)):
+                    self._variant_roots[new_id] = root_id
+                    for counterpart_id in counterpart_ids:
+                        pair_charms_in_domain(domain, counterpart_id, new_id)
+                return True
+        return False
 
     def _handle_peer_channel_mismatch(
         self,
         tag: PeerChannelMismatchTag,
         domain: Domain,
+        *,
+        widen: bool = True,
     ) -> bool:
-        """Expand the domain by moving one side of a peer relation onto a shared channel.
-
-        Tries moving the peer to the tag's required channel first. If no release exists
-        there, falls back to moving the owning charm onto the peer's own (already-verified)
-        channel instead - the only remaining way to satisfy the constraint when the peer
-        itself can't be moved. The peer may live in a different model when the relation is
-        cross-model (CMR), so each candidate is placed in its own owner's model.
-        """
-        owning_model = domain.charms[tag.charm.charm_id].model
-        peer_model = domain.charms[tag.peer_charm_id].model
-        peer_channel = domain.charms[tag.peer_charm_id].spec.channel
-
-        if tag.required_channel is not None:
-            resolved = CharmChannel.model_validate(tag.required_channel)
-            track: str | None = resolved.track or None
-            risk: str | None = resolved.risk or None
-            branch: str | None = resolved.branch or None
-        else:
-            track = tag.required_track or None
-            risk = tag.required_risk or None
-            branch = None
-
-        if self._fetch_and_add_charm_variant(
-            charm_id=tag.peer_charm_id,
-            charm_name=tag.peer_charm_name,
-            domain=domain,
-            model_key=peer_model,
-            track=track,
-            risk=risk,
-            revision=tag.required_revision,
-            branch=branch,
-            connect_to_id=tag.charm.charm_id,
-        ):
-            return True
-
-        return self._fetch_and_add_charm_variant(
-            charm_id=tag.charm.charm_id,
-            charm_name=tag.charm.charm_name,
-            domain=domain,
-            model_key=owning_model,
-            track=peer_channel.track,
-            risk=peer_channel.risk,
-            connect_to_id=tag.peer_charm_id,
-            branch=peer_channel.branch or None,
+        required = (
+            ReleaseRequirements.channel(CharmChannel.model_validate(tag.required_channel))
+            if tag.required_channel is not None
+            else ReleaseRequirements(track=tag.required_track, risk=tag.required_risk)
         )
+        combined = required.combine(ReleaseRequirements(revision=tag.required_revision))
+        if combined is None:
+            return False
+        if self._discover_variant(domain, tag.peer_charm_id, tag.charm.charm_id, tag.endpoint, combined, widen=widen):
+            return True
+        peer = domain.charms[tag.peer_charm_id].spec
+        # Reverse discovery changes only dimensions involved in this mismatch.
+        reverse = ReleaseRequirements(
+            track=peer.channel.explicit_track if required.track is not None else None,
+            risk=peer.channel.risk if required.risk is not None else None,
+            branch=peer.channel.branch if required.branch is not None else None,
+            revision=peer.revision if combined.revision is not None else None,
+        )
+        return self._discover_variant(domain, tag.charm.charm_id, tag.peer_charm_id, tag.endpoint, reverse, widen=widen)
 
     def _handle_subordinate_base_mismatch(
         self,
         tag: SubordinateBaseMismatchTag,
         domain: Domain,
+        *,
+        widen: bool = True,
     ) -> bool:
-        """Expand the domain by fetching charm variants to resolve a subordinate/principal base mismatch.
-
-        Attempts both directions: fetching the subordinate at the principal's base, and
-        fetching the principal at the subordinate's base.
-        """
-        # Subordinate and principal must be in the same model (container-scoped
-        # relations are cross-model-incompatible), so one model_ref covers both.
-        model_ref = domain.charms[tag.subordinate_charm_id].model
-        model = domain.models[model_ref]
-        sub_charm_spec = domain.charms[tag.subordinate_charm_id].spec
-        principal_base = tag.principal_base
-        expanded = False
-        interface = sub_charm_spec.endpoints[tag.subordinate_endpoint].interface
-
-        # Try fetching the subordinate charm at the principal's base.
-        try:
-            sub_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.subordinate_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=sub_charm_spec.channel.track or None,
-                charm_risk=sub_charm_spec.channel.risk or None,
-                charm_branch=sub_charm_spec.channel.branch or None,
-                ubuntu_version=principal_base,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                sub_charm,
-                tag.subordinate_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.principal_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for subordinate {tag.subordinate_charm_name} " f"on base {principal_base}"
-            )
-
-        # Also try fetching the principal at the subordinate's base, in case
-        # the principal has a variant that matches.
-        try:
-            principal_spec = domain.charms[tag.principal_charm_id].spec
-            principal_charm = self.charmhub_client.charm_from_store(
-                charm_name=tag.principal_charm_name,
-                ubuntu_arch=model.arch,
-                juju_version=model.juju_version,
-                platform=model.platform,
-                charm_track=principal_spec.channel.track or None,
-                charm_risk=principal_spec.channel.risk or None,
-                charm_branch=principal_spec.channel.branch or None,
-                ubuntu_version=tag.subordinate_base,
-            )
-            expanded |= self._add_charm_for_charm_id(
-                principal_charm,
-                tag.principal_charm_id,
-                domain,
-                model_ref,
-                connect_to_id=tag.subordinate_charm_id,
-                connect_to_neighbors=True,
-                connect_to_interface=interface,
-            )
-        except CharmReleaseNotFoundException:
-            self.logger.debug(
-                f"No release found for principal {tag.principal_charm_name} " f"on base {tag.subordinate_base}"
-            )
-
-        return expanded
+        interface = domain.charms[tag.subordinate_charm_id].spec.endpoints[tag.subordinate_endpoint].interface
+        if self._discover_variant(
+            domain,
+            tag.subordinate_charm_id,
+            tag.principal_charm_id,
+            tag.principal_endpoint,
+            ReleaseRequirements(base=tag.principal_base),
+            interface,
+            widen=widen,
+        ):
+            return True
+        return self._discover_variant(
+            domain,
+            tag.principal_charm_id,
+            tag.subordinate_charm_id,
+            tag.subordinate_endpoint,
+            ReleaseRequirements(base=tag.subordinate_base),
+            interface,
+            widen=widen,
+        )
 
     def _get_charm_for_application(self, application: str, domain: Domain, model_ref: ModelRef) -> Charm:
         # Get the charm matching the application constraints
@@ -1018,8 +952,6 @@ class BundleBuilder:
         model_ref: ModelRef,
         *,
         connect_to_id: int | None = None,
-        connect_to_neighbors: bool = False,
-        connect_to_interface: str | None = None,
     ) -> bool:
         parent_charm = domain.charms[charm_id]
 
@@ -1061,23 +993,7 @@ class BundleBuilder:
         )
         new_charm_id = add_charm_to_domain(charm, domain, model_ref)
 
-        # Pair direct dependencies with their parent. Replacement variants inherit
-        # same-interface neighbors because one replacement may satisfy several counterparts.
-        if connect_to_neighbors:
-            counterpart_ids = {
-                integration.provides_charm_id
-                if integration.requires_charm_id == charm_id
-                else integration.requires_charm_id
-                for integration in domain.charm_integrations
-                if charm_id in (integration.requires_charm_id, integration.provides_charm_id)
-                and (connect_to_interface is None or domain.integration_interface(integration) == connect_to_interface)
-            }
-            if connect_to_id is not None:
-                counterpart_ids.add(connect_to_id)
-            for other_id in counterpart_ids:
-                pair_charms_in_domain(domain, other_id, new_charm_id)
-        else:
-            pair_charms_in_domain(domain, connect_to_id if connect_to_id is not None else charm_id, new_charm_id)
+        pair_charms_in_domain(domain, connect_to_id if connect_to_id is not None else charm_id, new_charm_id)
 
         # Record that this charm was added for this charm_id
         parent_charm.charms_added.append(new_charm_id)
