@@ -1,0 +1,10 @@
+---
+# Concierge configuration used by `mise run setup-lxd`.
+# Juju is managed by Mise and controllers are bootstrapped by the test suite.
+# Leaving the channel unset preserves the existing LXD snap's tracking channel.
+juju:
+  disable: true
+providers:
+  lxd:
+    enable: true
+    bootstrap: false

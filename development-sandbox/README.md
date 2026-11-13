@@ -48,8 +48,9 @@ untouched. Run `scripts/sandbox.sh up` again to configure an existing sandbox.
 
 For substrate prerequisites and provisioning, follow the
 [Kubernetes](../.agents/skills/setup-k8s/SKILL.md) or
-[LXD](../.agents/skills/setup-lxd/SKILL.md) setup steps. Provisioning does not
-install or refresh packages. For Chaos Mesh on an existing cluster, follow the
+[LXD](../.agents/skills/setup-lxd/SKILL.md) setup steps. The shared provisioning
+tasks use Concierge and can also run on Ubuntu hosts outside the sandbox.
+For Chaos Mesh on an existing cluster, follow the
 [existing-cluster procedure](../.agents/skills/setup-k8s/SKILL.md#set-up-chaos-mesh-on-an-existing-cluster).
 
 To select another Juju client before provisioning, follow

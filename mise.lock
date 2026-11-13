@@ -113,6 +113,23 @@ checksum = "sha256:fddcf8f6aff1856b300c019ed5be428eed4e3880ebd2befe13ca6b0ad44a5
 url = "https://github.com/trufflesecurity/trufflehog/releases/download/v3.60.0/trufflehog_3.60.0_linux_amd64.tar.gz"
 url_api = "https://api.github.com/repos/trufflesecurity/trufflehog/releases/assets/130909607"
 
+[[tools."github:canonical/concierge"]]
+version = "1.9.0"
+backend = "github:canonical/concierge"
+specifiers = ["1.9.0"]
+
+[tools."github:canonical/concierge"."platforms.linux-arm64"]
+checksum = "sha256:dd97d9bbeaf31685dc4076e250697edc68baa314ebbcb4719a6dbad59d61553a"
+url = "https://github.com/canonical/concierge/releases/download/v1.9.0/concierge_1.9.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/canonical/concierge/releases/assets/664150134"
+provenance = "github-attestations"
+
+[tools."github:canonical/concierge"."platforms.linux-x64"]
+checksum = "sha256:0004338c4ea2d4bebc42311483c2ce1be135c107683d54f13d1da5af77d6af83"
+url = "https://github.com/canonical/concierge/releases/download/v1.9.0/concierge_1.9.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/canonical/concierge/releases/assets/664150185"
+provenance = "github-attestations"
+
 [[tools.go]]
 version = "1.26.0"
 backend = "core:go"

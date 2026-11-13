@@ -50,6 +50,12 @@ select the groups and clients they need; cloud access and Swift reporting instal
 their clients independently. Mise-action caching remains disabled.
 
 Installing system packages does not initialize substrates or register clouds.
+Run the relevant `local-k8s` or `local-lxd` setup group first, then
+`mise run setup-k8s` or `mise run setup-lxd`. These tasks use Concierge to
+install and initialize substrate snaps; they do not install Juju or other
+setup group tools.
+Both tasks flush the host's iptables `FORWARD` chain and set its default policy
+to `ACCEPT`. Run them only where this firewall change is acceptable.
 Snaps require snapd and sudo, use `/snap/bin`, and are not revision-locked.
 Remove a conflicting legacy `openstack` snap manually before installing
 `openstackclients`; the shared setup does not remove it automatically.

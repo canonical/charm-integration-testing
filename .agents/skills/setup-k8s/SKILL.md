@@ -13,15 +13,17 @@ clusters. Setup does not create chaos experiments.
 
 ## Set up Kubernetes
 
-1. Install prerequisites, then run the provisioning script:
+1. Install prerequisites, then run the provisioning task:
    ```
    cd "$PROJECT_ROOT"
    mise run setup -- --group local-k8s
-   mise run sandbox:setup-k8s
+   mise run setup-k8s
    ```
-   Mise installs the declared tools and packages. The script provisions the
-   substrate and installs Chaos Mesh. Do not run Chaos Mesh separately afterward.
-   Wait for the script to finish successfully before proceeding.
+   Mise installs the declared tools and packages. The task provisions the
+   substrate with Concierge, writes `$HOME/k8s.yaml`, registers `local-k8s`
+   and installs Chaos Mesh. Do not run Chaos Mesh separately afterward.
+   Wait for the task to finish successfully before proceeding.
+   Run `mise run setup-k8s -- --help` for other options.
 
 2. For manual charm work, bootstrap a controller and create a model only
    if needed. Check `juju controllers` and `juju models` first. When using
@@ -53,17 +55,17 @@ or verification is needed. Do not bootstrap another controller or model.
 2. Run:
    ```bash
    cd "$PROJECT_ROOT"
-   mise run sandbox:setup-chaos-mesh -- /home/ubuntu/k8s.yaml
+   mise run setup-chaos-mesh -- /home/ubuntu/k8s.yaml
    ```
-   The configuration path is optional and defaults to `/home/ubuntu/k8s.yaml`.
-3. Confirm the script exits successfully. It checks StressChaos and IOChaos
+   The configuration path is optional and defaults to `$HOME/k8s.yaml`.
+3. Confirm the task exits successfully. It checks StressChaos and IOChaos
    CRDs and waits for the controller, DNS server, and daemon rollouts.
 
 ## Versions and settings
 
-mise pins Helm and jq for the setup tasks. The sandbox base image provides
-curl and CA certificates. Canonical k8s setup still manages substrate
-provisioning and needs sudo access without a password prompt.
+mise pins Helm, jq and Concierge for the setup tasks. Concierge installs the
+k8s snap from the channel in `mise.toml` and kubectl from
+`stable`. Provisioning needs sudo access without a password prompt.
 
 Chaos Mesh uses chart 2.8.4 from https://charts.chaos-mesh.org, release and
 namespace `chaos-mesh`, runtime `containerd`, socket
