@@ -614,19 +614,34 @@ jobs:
         if: ${{ !cancelled() && steps.lxd-remote.outcome == 'success' }}
         shell: bash
         run: |-
-          "$LXC_BINARY" list charmqa: --format json | jq --raw-output --argjson age "$AGE_THRESHOLD" '
-            .[] |
+          set -euo pipefail
+          instances=$("$LXC_BINARY" list charmqa: --format json | jq --slurp --raw-output --argjson age "$AGE_THRESHOLD" '
+            if length == 1 and (.[0] | type == "array") then
+              .[0][]
+            else
+              error("Expected a single JSON array from lxc list")
+            end |
             select(.name | test("^juju-")) |
             select((now - (.created_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) > ($age * 60)) |
             .name
-          ' | while read -r name; do
+          ') || {
+            echo "::error::Failed to list eligible LXD instances; refusing cleanup" >&2
+            exit 1
+          }
+          failed=0
+          while IFS= read -r name; do
+            [[ -n "$name" ]] || continue
             if [[ "$DRY_RUN" == "true" ]]; then
               echo "Dry run: would delete instance: $name"
               continue
             fi
             echo "Deleting instance: $name"
-            "$LXC_BINARY" delete --force "charmqa:${name}"
-          done
+            if ! "$LXC_BINARY" delete --force "charmqa:${name}"; then
+              echo "::error::Failed deleting instance: $name" >&2
+              failed=1
+            fi
+          done <<< "$instances"
+          exit "$failed"
       ###################################################################################
       #   _________________
       #  /   _____/\_____  \
