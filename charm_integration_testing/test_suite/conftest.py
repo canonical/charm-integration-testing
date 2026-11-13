@@ -5,11 +5,9 @@
 import json
 import logging
 import os
-import tempfile
 import warnings
-import zipfile
 from datetime import timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from subprocess import CalledProcessError, run  # nosec
 from typing import Any, Callable, Iterator
 
@@ -97,6 +95,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
+    "test_suite.fixtures.charm_source",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
@@ -900,48 +899,6 @@ def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
     return value
-
-
-@pytest.fixture(scope="session")
-def target_charm_source(
-    target_resolved_charm: Charm,
-    logger: logging.Logger,
-) -> Iterator[Path]:
-    """Download and unpack the target revision once for tests that inspect its source."""
-    # Juju's snap cannot write to pytest's hidden /tmp paths.
-    with tempfile.TemporaryDirectory(prefix="cit-target-charm-", dir=Path.home()) as cache_dir:
-        cache_path = Path(cache_dir)
-        charm_archive = cache_path / "target.charm"
-        source_dir = cache_path / "source"
-        source_dir.mkdir()
-        run(
-            [
-                "juju",
-                "download",
-                target_resolved_charm.name,
-                "--revision",
-                str(target_resolved_charm.revision),
-                "--filepath",
-                str(charm_archive),
-                "--no-progress",
-            ],
-            check=True,
-        )
-
-        with zipfile.ZipFile(charm_archive) as archive:
-            for member in archive.infolist():
-                path = PurePosixPath(member.filename)
-                if path.is_absolute() or ".." in path.parts:
-                    raise ValueError(f"Charm archive contains an unsafe path: {member.filename!r}")
-            archive.extractall(source_dir)
-
-        logger.info(
-            "Downloaded target charm %s revision %s to %s.",
-            target_resolved_charm.name,
-            target_resolved_charm.revision,
-            source_dir,
-        )
-        yield source_dir
 
 
 @pytest.fixture(scope="session")
