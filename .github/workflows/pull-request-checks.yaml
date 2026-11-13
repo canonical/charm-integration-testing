@@ -52,10 +52,7 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           groups: development
-          tools: aqua:trufflesecurity/trufflehog
       - name: Run Charm Integration Testing Unit Tests
-        env:
-          REQUIRE_PINNED_TRUFFLEHOG: "1"
         run: mise run test:charm-integration-testing
   charm-testing-integration-tests:
     uses: ./.github/workflows/charm-testing-integration-tests.yaml
