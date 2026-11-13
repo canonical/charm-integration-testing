@@ -64,7 +64,7 @@ or verification is needed. Do not bootstrap another controller or model.
 ## Versions and settings
 
 mise pins Helm, jq and Concierge for the setup tasks. Concierge installs the
-k8s snap from the channel in `static/substrates/k8s.yaml` and kubectl from
+k8s snap from the channel in `mise.toml` and kubectl from
 `stable`. Provisioning needs sudo access without a password prompt.
 
 Chaos Mesh uses chart 2.8.4 from https://charts.chaos-mesh.org, release and
