@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Iterable
 
 from juju import JujuModelHandle
@@ -113,6 +114,9 @@ class NullJujuBackend(JujuBackend):
         trust: bool = False,
         force: bool = False,
     ) -> None:
+        raise NotImplementedError
+
+    def download_charm(self, charm: str, revision: int, destination: Path) -> None:
         raise NotImplementedError
 
     def refresh_application(

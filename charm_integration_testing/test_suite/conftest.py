@@ -202,7 +202,7 @@ def kubernetes_client_registry(cloud_kubeconfigs: dict[str, Path]) -> Kubernetes
 def juju_backend(
     kubernetes_client_registry: KubernetesClientRegistry,
     cloud_definitions: dict[str, tuple[Path, Path]],
-) -> JubilantBackend:
+) -> JujuBackend:
     return JubilantBackend(
         kubernetes_client_registry=kubernetes_client_registry,
         cloud_definitions=cloud_definitions,

@@ -447,6 +447,11 @@ class JujuClient:
         self.logger.info(f"Removing integration between {endpoint_1} and {endpoint_2}.")
         self.backend.remove_integration(model, endpoint_1, endpoint_2)
 
+    def download_charm(self, charm: str, revision: int, destination: Path) -> None:
+        """Download a specific charm revision to a local archive."""
+        self.logger.info(f"Downloading charm '{charm}' revision {revision} to '{destination}'.")
+        self.backend.download_charm(charm, revision, destination)
+
     def deploy_bundle_file(
         self,
         bundle: str,
