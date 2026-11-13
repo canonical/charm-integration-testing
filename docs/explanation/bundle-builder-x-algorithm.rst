@@ -149,7 +149,7 @@ builder looks for a replacement peer first and falls back to replacing the
 anchor. For a subordinate base mismatch it looks for a subordinate that matches
 the principal's base first, then for a principal that matches the subordinate's.
 
-Charmhub lookups are cached for the build, including those that found no
+Charmhub query results are cached for the build, including those that found no
 release. Each discovery call stops after adding one release or one new pairing,
 so the solver checks the result before the search goes any further.
 
