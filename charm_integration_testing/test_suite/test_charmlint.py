@@ -3,7 +3,7 @@
 
 import shutil
 from pathlib import Path
-from subprocess import run
+from subprocess import run  # nosec B404
 
 import pytest
 
@@ -14,4 +14,4 @@ def test_charmlint(request: pytest.FixtureRequest) -> None:
         pytest.skip("charmlint is not installed.")
 
     charm_source: Path = request.getfixturevalue("target_charm_source")
-    run([charmlint, str(charm_source)], check=True)
+    run([charmlint, str(charm_source)], check=True)  # nosec B603
