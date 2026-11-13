@@ -102,6 +102,7 @@ for group in "${groups[@]}"; do
                 aqua:mikefarah/yq
                 aqua:cli/cli
                 aqua:trufflesecurity/trufflehog
+                pypi:charmlint
                 pypi:git+https://github.com/juju/juju-crashdump.git
                 pypi:git+https://github.com/canonical/juju-k8s-crashdump.git
             )

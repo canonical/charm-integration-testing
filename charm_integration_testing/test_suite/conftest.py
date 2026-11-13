@@ -95,6 +95,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
+    "test_suite.fixtures.charm_source",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
     "test_suite.fixtures.chaos_tools",
@@ -702,7 +703,7 @@ def validators_path() -> Path | None:
     return file_path
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_charm(request: pytest.FixtureRequest) -> str:
     """Charmhub name of the charm under test, passed via ``--target-charm``."""
     value = request.config.getoption("--target-charm")
@@ -722,7 +723,7 @@ def neighbor_charm(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_channel(request: pytest.FixtureRequest) -> str | None:
     """Channel of the charm under test.
 
@@ -733,7 +734,7 @@ def target_channel(request: pytest.FixtureRequest) -> str | None:
     return None if value == "default" else value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_revision(request: pytest.FixtureRequest) -> int | None:
     """Revision of the charm under test.
 
@@ -744,7 +745,7 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     return None if value == "default" else int(value)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
     """Canonical charm metadata for the target revision the cycle refreshes back to.
 
@@ -873,7 +874,7 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_series(request: pytest.FixtureRequest) -> str | None:
     """Ubuntu base series for the charm under test.
 
@@ -884,7 +885,7 @@ def target_series(request: pytest.FixtureRequest) -> str | None:
     return None if value == "default" else value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_platform(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-platform")
     if not value:
@@ -893,7 +894,7 @@ def target_platform(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_arch(request: pytest.FixtureRequest) -> str:
     value = request.config.getoption("--target-arch")
     assert isinstance(value, str)
@@ -959,7 +960,7 @@ def neighbor_juju_version(juju_backend: JujuBackend, neighbor_model_ref: JujuMod
     return juju_backend.version(neighbor_model_ref)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def juju_cli_version(juju_backend: JujuBackend) -> JujuVersion:
     """Juju version resolved from the installed Juju CLI."""
     return juju_backend.cli_version()

@@ -3187,6 +3187,28 @@ class TestParseBundleFile:
         assert integrations == []
 
 
+class TestDownloadCharm:
+    def test_calls_client_cli_without_model(self, tmp_path: Path) -> None:
+        cli = JubilantCliStub()
+        destination = tmp_path / "postgresql.charm"
+
+        backend = JubilantBackend(client=JubilantClientStub(cli))
+        backend.download_charm("postgresql", 1217, destination)
+
+        assert cli.executions == [
+            (
+                "download",
+                "postgresql",
+                "--revision",
+                "1217",
+                "--filepath",
+                str(destination),
+                "--no-progress",
+            )
+        ]
+        assert cli.execution_options == [{"include_model": False}]
+
+
 class TestDeployBundleFile:
     def test_calls_wait_once_with_combined_predicate(self, tmp_path: Path) -> None:
         # GIVEN a bundle with apps and one integration
