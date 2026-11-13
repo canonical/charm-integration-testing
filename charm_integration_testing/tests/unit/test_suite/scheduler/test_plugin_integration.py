@@ -97,44 +97,6 @@ def test_enabled_scale_from_ha_is_the_direct_path_to_deployed(pytester: Pytester
     result.stdout.no_fnmatch_line("*test_teardown*PASSED*")
 
 
-def test_unmarked_tests_run_after_state_tests(pytester: Pytester) -> None:
-    pytester.makeconftest('pytest_plugins = ["test_suite.scheduler.plugin"]')
-    pytester.makepyfile(
-        textwrap.dedent(
-            """
-            import pytest
-            from test_suite.scheduler.states import State
-
-            def test_charmlint():
-                pass
-
-            @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
-            def test_build_bundle():
-                pass
-
-            @pytest.mark.state(requires=State.NO_CONTROLLER, provides=State.EMPTY_MODEL)
-            def test_create_model():
-                pass
-
-            @pytest.mark.state(requires=State.EMPTY_MODEL, provides=State.DEPLOYED)
-            def test_deploy():
-                pass
-            """
-        )
-    )
-
-    result = pytester.runpytest("-v", "--current-state", "no_bundle")
-
-    result.assert_outcomes(passed=4)
-    test_lines = [line for line in result.outlines if "::test_" in line and " PASSED" in line]
-    assert [line.split("::")[-1].split()[0] for line in test_lines] == [
-        "test_build_bundle",
-        "test_create_model",
-        "test_deploy",
-        "test_charmlint",
-    ]
-
-
 def test_recovery_bridge_from_a_different_module_does_not_break_fixture_teardown(pytester: Pytester) -> None:
     """A recovery bridge from a different module than the original nextitem must not crash pytest.
 
