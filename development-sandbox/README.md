@@ -43,6 +43,16 @@ inside the sandbox for other CLI arguments.
 
 Run `scripts/sandbox.sh --help` for VM lifecycle and agent options.
 
+Run a command in the VM with the same environment as an interactive sandbox shell:
+
+```bash
+mise run sandbox shell -- juju status
+```
+
+The command's arguments are passed separately and its exit status is returned.
+As with an interactive shell, Copilot-specific authentication and MCP configuration
+are not prepared by this command; `scripts/sandbox.sh run` handles those separately.
+
 ## VM setup
 
 `up` installs the stable Mise Snap, then prepares the VM toolchain from the

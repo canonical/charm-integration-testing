@@ -281,7 +281,7 @@ Usage:
                                                Create or resume the VM
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
-  scripts/sandbox.sh shell                     Open a shell inside the VM
+  scripts/sandbox.sh shell [-- COMMAND ...]     Open a shell or run a command inside the VM
   scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
   scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
   scripts/sandbox.sh --help                    Show this help
@@ -614,6 +614,10 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
+
     if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
@@ -623,9 +627,13 @@ _cmd_shell() {
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
-    _vm_exec_with_env _env_args bash -lc "
-        cd '$VM_MOUNT' && exec bash -l
-    "
+    if [ "$#" -gt 0 ]; then
+        _vm_exec_with_env _env_args bash -lc 'exec "$@"' bash "$@"
+    else
+        _vm_exec_with_env _env_args bash -lc "
+            cd '$VM_MOUNT' && exec bash -l
+        "
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -736,7 +744,8 @@ case "${1:-}" in
         _cmd_destroy
         ;;
     shell)
-        _cmd_shell
+        shift
+        _cmd_shell "$@"
         ;;
     run)
         shift
