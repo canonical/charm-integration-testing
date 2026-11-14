@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
 #MISE description="Run Copilot CLI with repository development context"
 #MISE raw_args=true
+#MISE raw=true
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: mise run agent -- [--interactive] [PROMPT...] [-- COPILOT_ARGS...]
+Usage: mise run agent [--interactive | --acp] [PROMPT...] [-- COPILOT_ARGS...]
 
-Run Copilot CLI with the repository's development context. Set
-SANDBOX_MCP_CONFIG_FILE to an optional MCP config JSON file.
+Run Copilot CLI with the repository's AGENTS.md instructions and skills.
+Set SANDBOX_MCP_CONFIG_FILE to an optional MCP config JSON file.
 EOF
 }
 
 interactive=false
+acp=false
 task_args=()
 copilot_args=()
 while (( $# )); do
     case "$1" in
         --interactive)
             interactive=true
+            shift
+            ;;
+        --acp)
+            acp=true
             shift
             ;;
         -h|--help)
@@ -45,12 +51,37 @@ while (( $# )); do
 done
 
 prompt="${task_args[*]}"
-if [[ "$interactive" == false && -z "$prompt" ]]; then
+if [[ "$acp" == true && ( "$interactive" == true || -n "$prompt" ) ]]; then
+    echo "ERROR: --acp cannot be combined with --interactive or a task prompt." >&2
+    exit 1
+fi
+for arg in "${copilot_args[@]}"; do
+    case "$arg" in
+        --acp)
+            echo "ERROR: Use the agent task's --acp option, not a forwarded Copilot argument." >&2
+            exit 1
+            ;;
+        --prompt|-p*|--prompt=*)
+            if [[ "$acp" == true ]]; then
+                echo "ERROR: --acp cannot be combined with Copilot prompt mode." >&2
+                exit 1
+            fi
+            ;;
+        --interactive|-i*|--interactive=*)
+            if [[ "$acp" == true ]]; then
+                echo "ERROR: --acp cannot be combined with Copilot interactive mode." >&2
+                exit 1
+            fi
+            ;;
+    esac
+done
+if [[ "$acp" == false && "$interactive" == false && -z "$prompt" ]]; then
     usage >&2
     exit 1
 fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$project_root"
 export PROJECT_ROOT="$project_root"
 mcp_args=()
 mcp_config="${SANDBOX_MCP_CONFIG_FILE:-}"
@@ -63,18 +94,17 @@ if [[ -n "$mcp_config" ]]; then
     mcp_args+=(--additional-mcp-config "@$mcp_config")
 fi
 
+if [[ "$acp" == true ]]; then
+    exec copilot --acp "${mcp_args[@]}" "${copilot_args[@]}"
+fi
+
 prompt_file="$(mktemp)"
 trap 'rm -f -- "$prompt_file"' EXIT
-{
-    cat "$project_root/.agents/skills/system.md"
-    if [[ -n "$prompt" ]]; then
-        printf '\n\n---\n\nTask: %s\n' "$prompt"
-    fi
-} > "$prompt_file"
+printf 'Task: %s\n' "$prompt" > "$prompt_file"
 
 if [[ "$interactive" == true ]]; then
     copilot --yolo "${mcp_args[@]}" -i \
-        "Please read $prompt_file for project context, then await my instructions." \
+        "Use the repository instructions and task context, then await my instructions. Task context: $(cat "$prompt_file")" \
         "${copilot_args[@]}"
 else
     copilot --yolo "${mcp_args[@]}" -p "$(cat "$prompt_file")" "${copilot_args[@]}"
