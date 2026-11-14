@@ -50,8 +50,9 @@ mise run sandbox shell -- juju status
 ```
 
 The command's arguments are passed separately and its exit status is returned.
-As with an interactive shell, Copilot-specific authentication and MCP configuration
-are not prepared by this command; `scripts/sandbox.sh run` handles those separately.
+Shell sessions also receive an explicitly configured `SANDBOX_VAR_COPILOT_GITHUB_TOKEN`,
+but do not request the host-token fallback for Copilot. MCP configuration is
+prepared separately by `scripts/sandbox.sh run`.
 
 ## VM setup
 

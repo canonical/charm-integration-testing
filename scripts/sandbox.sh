@@ -626,6 +626,7 @@ _cmd_shell() {
     _vm_gh_auth_login
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
+    [ -n "${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$SANDBOX_VAR_COPILOT_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
     if [ "$#" -gt 0 ]; then
         _vm_exec_with_env _env_args bash -lc 'exec "$@"' bash "$@"
