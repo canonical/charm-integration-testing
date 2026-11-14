@@ -38,25 +38,10 @@ All subsequent commands use `--repo <owner/repo>` with that confirmed value.
 
 ## Label guidance
 
-For `canonical/charm-integration-testing`, use these labels according to the
-issue evidence:
-
-- `bug`: a defect in the test pipeline that can make a run fail or report an
-  incorrect result; do not use it for an upstream charm defect alone.
-- `enhancement`: a genuinely new capability the project should support.
-  Documentation, cleanup, refactoring, and reporting-only improvements are
-  not enhancements by themselves.
-- `wontfix`: a run blocker confirmed to be outside the project's supported
-  scope. Do not infer this only from an upstream or external failure.
-- `needs clarity`: a potentially run-impacting issue lacks enough evidence to
-  establish its cause, ownership, or expected behavior. Do not guess whether
-  it should be `bug`, `enhancement`, or `wontfix`; this label can accompany one
-  of those labels when that category is already clear.
-
-Issues that do not affect run execution or correctness do not need `bug`,
-`enhancement`, or `wontfix`; use appropriate existing labels such as
-`documentation`, `question`, or `duplicate`. For other target repositories,
-follow their own label taxonomy instead of assuming these labels exist.
+For `canonical/charm-integration-testing`, use the framing and category guidance
+in the repository's [Issue categories documentation](../../../docs/how-to/issue-categories.rst).
+That document is the source of truth for the project's labels. For other target
+repositories, follow their own label taxonomy.
 
 ---
 
