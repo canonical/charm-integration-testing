@@ -122,7 +122,7 @@ _vm_exec_with_env() {
     local -n _env="$1"
     shift
     local _env_file
-    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX)
+    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX </dev/null)
     _vm_temp_files+=("$_env_file")
     printf 'export %q\n' "${_env[@]}" \
         | multipass exec "$VM_NAME" -- bash -c 'cat > "$1"' bash "$_env_file"
@@ -148,7 +148,7 @@ _vm_gh_logged_in() {
     multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
         cd '$VM_MOUNT' && gh auth status --hostname github.com
-    " &>/dev/null
+    " </dev/null &>/dev/null
 }
 
 # Resolved GitHub credentials, populated by _require_github_auth.
