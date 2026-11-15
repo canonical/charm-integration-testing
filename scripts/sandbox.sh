@@ -710,12 +710,12 @@ EOF
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
-    [ -n "$_mcp_vm_file" ] && _env_args+=("SANDBOX_MCP_CONFIG_FILE=$_mcp_vm_file")
     _collect_sandbox_vars _env_args
 
     local agent_args=()
     [ "$INTERACTIVE" = "false" ] || agent_args+=(--interactive)
     [ -z "$TASK" ] || agent_args+=("$TASK")
+    [ -z "$_mcp_vm_file" ] || copilot_args=(--additional-mcp-config "@$_mcp_vm_file" "${copilot_args[@]}")
     agent_args+=(-- "${copilot_args[@]}")
     # shellcheck disable=SC2016
     _vm_exec_with_env _env_args bash -lc 'exec mise run agent -- "$@"' bash "${agent_args[@]}"
