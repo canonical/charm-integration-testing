@@ -1,7 +1,14 @@
 local function to_token_colors(spec)
+	local font_style = spec.gui or ""
+	if font_style == "NONE" then
+		font_style = ""
+	else
+		font_style = font_style:gsub(",", " ")
+	end
+
 	return {
 		["foreground"] = spec.fg,
-		["fontStyle"] = spec.gui ~= nil and spec.gui or "",
+		["fontStyle"] = font_style,
 	}
 end
 
@@ -26,6 +33,7 @@ local function to_table(colorscheme)
 			["foreground"] = specs.Normal.fg, -- Overall foreground color. This color is only used if not overridden by a component.
 			["disabledForeground"] = specs.Normal.fg .. "80", -- Overall foreground for disabled elements. This color is only used if not overridden by a component.
 			["widget.shadow"] = specs.StatusLine.bg, -- Shadow color of widgets such as Find/Replace inside the editor.
+			["widget.border"] = specs.VertSplit.fg .. "a0", -- Border color of widgets such as Find/Replace inside the editor.
 			["selection.background"] = specs.Visual.bg, -- Background color of text selections in the workbench (for input fields or text areas, does not apply to selections within the editor and the terminal).
 			["descriptionForeground"] = specs.Normal.fg, -- Foreground color for description text providing additional information, for example for a label.
 			["errorForeground"] = specs.ErrorMsg.fg, -- Overall foreground color for error messages (this color is only used if not overridden by a component).
@@ -86,8 +94,8 @@ local function to_table(colorscheme)
 			["statusBarItem.remoteBackground"] = specs.StatusLine.bg,
 
 			-- Editor colors: https://code.visualstudio.com/api/references/theme-color#editor-colors
-			["editor.foreground"] = specs.Normal.fg, -- Editor background color.
-			["editor.background"] = specs.Normal.bg, -- Editor default foreground color.
+			["editor.foreground"] = specs.Normal.fg, -- Editor default foreground color.
+			["editor.background"] = specs.Normal.bg, -- Editor background color.
 			["editor.lineHighlightBackground"] = specs.CursorLine.bg,
 			["editor.selectionBackground"] = specs.Visual.bg,
 			-- ["editorCursor.background"] = , -- The background color of the editor cursor. Allows customizing the color of a character overlapped by a block cursor.
@@ -95,11 +103,11 @@ local function to_table(colorscheme)
 			["editorIndentGuide.activeBackground"] = specs.VertSplit.fg .. "a0",
 			["editorIndentGuide.background"] = specs.VertSplit.fg .. "50",
 			["editorLineNumber.activeForeground"] = specs.CursorLineNr.fg, -- Color of editor line numbers.
-			["editorLineNumber.foreground"] = specs.LineNr.fg, -- Color of the active editor line number.
+			["editorLineNumber.foreground"] = specs.LineNr.fg, -- Color of editor line numbers.
 			["editorRuler.foreground"] = specs.VertSplit.fg .. "a0",
 			-- Find colors depend on the current find string in the Find/Replace dialog.
 			["editor.findMatchBackground"] = specs.CurSearch.bg, -- Color of the current search match.
-			["editor.findMatchHighlightBackground"] = specs.Search.bg, -- Color of the other search matches. The color must not be opaque so as not to hide underlying decorations.
+			["editor.findMatchHighlightBackground"] = specs.Search.bg .. "80", -- Color of the other search matches. The color must not be opaque so as not to hide underlying decorations.
 			-- ["editor.findRangeHighlightBackground"] = specs., -- Color the range limiting the search (Enable 'Find in Selection' in the find widget). The color must not be opaque so as not to hide underlying decorations.
 			-- ["editor.findMatchBorder"] = specs., -- Border color of the current search match.
 			-- ["editor.findMatchHighlightBorder"] = specs., -- Border color of the other search matches.
@@ -107,9 +115,9 @@ local function to_table(colorscheme)
 			-- This ruler is located beneath the scroll bar on the right edge of the editor and gives an overview of the decorations in the editor.
 			-- ["editorOverviewRuler.background"] = , -- Background color of the editor overview ruler. Only used when the minimap is enabled and placed on the right side of the editor.
 			-- ["editorOverviewRuler.border"] = , -- Color of the overview ruler border.
-			["editorOverviewRuler.findMatchForeground"] = specs.Search.bg, -- Overview ruler marker color for find matches. The color must not be opaque so as not to hide underlying decorations.
+			["editorOverviewRuler.findMatchForeground"] = specs.Search.bg .. "80", -- Overview ruler marker color for find matches. The color must not be opaque so as not to hide underlying decorations.
 			-- ["editorOverviewRuler.rangeHighlightForeground"] = , -- Overview ruler marker color for highlighted ranges, like by the Quick Open, Symbol in File and Find features. The color must not be opaque so as not to hide underlying decorations.
-			["editorOverviewRuler.selectionHighlightForeground"] = specs.Visual.bg, -- Overview ruler marker color for selection highlights. The color must not be opaque so as not to hide underlying decorations.
+			["editorOverviewRuler.selectionHighlightForeground"] = specs.Visual.bg .. "80", -- Overview ruler marker color for selection highlights. The color must not be opaque so as not to hide underlying decorations.
 			-- ["editorOverviewRuler.wordHighlightForeground"] = , -- Overview ruler marker color for symbol highlights. The color must not be opaque so as not to hide underlying decorations.
 			-- ["editorOverviewRuler.wordHighlightStrongForeground"] = , -- Overview ruler marker color for write-access symbol highlights. The color must not be opaque so as not to hide underlying decorations.
 			["editorOverviewRuler.modifiedForeground"] = specs.DiffChange.bg, -- Overview ruler marker color for modified content.
@@ -144,9 +152,9 @@ local function to_table(colorscheme)
 
 
 			-- Diff editor colors: https://code.visualstudio.com/api/references/theme-color#diff-editor-colors
-			["diffEditor.insertedTextBackground"] = specs.DiffAdd.fg, -- Background color for text that got inserted. The color must not be opaque so as not to hide underlying decorations.
+			["diffEditor.insertedTextBackground"] = specs.DiffAdd.bg .. "80", -- Background color for text that got inserted. The color must not be opaque so as not to hide underlying decorations.
 			-- ["diffEditor.insertedTextBorder"] = specs., -- Outline color for the text that got inserted.
-			["diffEditor.removedTextBackground"] = specs.DiffDelete.fg, -- Background color for text that got removed. The color must not be opaque so as not to hide underlying decorations.
+			["diffEditor.removedTextBackground"] = specs.DiffDelete.bg .. "80", -- Background color for text that got removed. The color must not be opaque so as not to hide underlying decorations.
 			-- ["diffEditor.removedTextBorder"] = specs., -- Outline color for text that got removed.
 			-- ["diffEditor.border"] = specs., -- Border color between the two text editors.
 			-- ["diffEditor.diagonalFill"] = specs., -- Color of the diff editor's diagonal fill. The diagonal fill is used in side-by-side diff views.
@@ -348,8 +356,8 @@ local function to_table(colorscheme)
 			["terminal.ansiRed"] = term.red, -- 'Red' ANSI color in the terminal.
 			["terminal.ansiWhite"] = term.white, -- 'White' ANSI color in the terminal.
 			["terminal.ansiYellow"] = term.yellow, -- 'Yellow' ANSI color in the terminal.
-			["terminalCursor.background"] = specs.TermCursor.fg, -- The background color of the terminal cursor. Allows customizing the color of a character overlapped by a block cursor.
-			["terminalCursor.foreground"] = specs.TermCursor.bg, -- The foreground color of the terminal cursor.
+			["terminalCursor.background"] = specs.TermCursor.bg, -- The background color of the terminal cursor. Allows customizing the color of a character overlapped by a block cursor.
+			["terminalCursor.foreground"] = specs.TermCursor.fg, -- The foreground color of the terminal cursor.
 
 			-- Bracket matches:
 
@@ -815,9 +823,17 @@ local function to_table(colorscheme)
 				["scope"] = {
 					"variable.other.constant",
 					"constant",
-					"string"
+					"variable.language",
+					"support.constant"
 				},
 				["settings"] = to_token_colors(specs.Constant),
+			},
+			{
+				["name"] = "String",
+				["scope"] = {
+					"string"
+				},
+				["settings"] = to_token_colors(specs.String),
 			},
 			{
 				["name"] = "Number",
@@ -836,14 +852,16 @@ local function to_table(colorscheme)
 			{
 				["name"] = "Identifier",
 				["scope"] = {
-					"variable.other"
+					"variable.other",
+					"support.variable"
 				},
 				["settings"] = to_token_colors(specs.Identifier),
 			},
 			{
 				["name"] = "Function",
 				["scope"] = {
-					"entity.name.function"
+					"entity.name.function",
+					"support.function"
 				},
 				["settings"] = to_token_colors(specs.Function),
 			},
@@ -867,6 +885,10 @@ local function to_table(colorscheme)
 					"storage.type",
 					"storage.modifier",
 					"keyword.other.typedef",
+					"entity.name.type",
+					"entity.other.inherited-class",
+					"support.type",
+					"support.class",
 				},
 				["settings"] = to_token_colors(specs.Type),
 			},
@@ -888,8 +910,9 @@ local function to_table(colorscheme)
 				["name"] = "PropertyName",
 				["scope"] = {
 					"support.type.property-name",
+					"variable.other.property",
 				},
-				["settings"] = to_token_colors(specs.Number),
+				["settings"] = to_token_colors(specs.Identifier),
 			},
 		}
 	}

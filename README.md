@@ -1,5 +1,9 @@
 # Zenbones
 
+> This repository packages the Zenbones colorschemes for Visual Studio Code.
+> For the original Vim/Neovim themes, see
+> [zenbones.nvim](https://github.com/zenbones-theme/zenbones.nvim).
+
 A collection of Vim/Neovim colorschemes designed to highlight code using
 contrasts and font variations. Colors are tasked only for other roles such as
 diagnostics, diffs, search matches.

@@ -1,0 +1,58 @@
+name: Publish VS Code extension
+
+on:
+  push:
+    tags:
+      - 'vscode-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate package version
+        working-directory: extras/vscode
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          expected_version="${RELEASE_TAG#vscode-v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "$expected_version" != "$package_version" ]; then
+            echo "Tag version $expected_version does not match package version $package_version" >&2
+            exit 1
+          fi
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Install theme build dependencies
+        run: |
+          mkdir -p ~/.local/share/nvim/site/pack/zenbones/start
+          git clone --depth 1 https://github.com/rktjmp/lush.nvim ~/.local/share/nvim/site/pack/zenbones/start/lush.nvim
+          git clone --depth 1 https://github.com/rktjmp/shipwright.nvim ~/.local/share/nvim/site/pack/zenbones/start/shipwright.nvim
+
+      - name: Build themes
+        run: |
+          mkdir -p autoload/lightline/colorscheme colors/ lua/lualine extras
+          make
+
+      - name: Generate extension manifest
+        working-directory: extras/vscode
+        run: ./generate.sh
+
+      - name: Publish to Visual Studio Marketplace
+        working-directory: extras/vscode
+        run: npx --yes @vscode/vsce publish --no-dependencies --oidc

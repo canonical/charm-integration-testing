@@ -3,7 +3,7 @@
   "displayName": "Zenbones Themes",
   "description": "A collection of colorschemes designed to highlight code using contrasts and font variations",
   "repository": {
-    "url": "https://github.com/rpbritton/zenbones.nvim"
+    "url": "https://github.com/rpbritton/zenbones.vscode"
   },
   "publisher": "rpbritton",
   "version": "0.0.2",

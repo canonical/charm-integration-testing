@@ -1,0 +1,6 @@
+BUILD.md
+generate.sh
+.gitignore
+.gitattributes
+node_modules/
+*.vsix
