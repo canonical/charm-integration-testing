@@ -5,12 +5,13 @@ on:
   pull_request:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: NTBBloodbath/selene-action@v1.0.0
@@ -21,6 +22,8 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: panvimdoc
@@ -28,20 +31,23 @@ jobs:
         with:
           vimdoc: zenbones
           pandoc: doc/zenbones.md
-          description: "A collection of contrast-based vim/neovim colorschemes"
-          version: "Vim 8.1 / Nvim v0.8.0"
+          description: 'A collection of contrast-based vim/neovim colorschemes'
+          version: 'Vim 8.1 / Nvim v0.8.0'
           treesitter: true
       - name: Push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(build): auto-generate vimdoc"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          commit_message: 'chore(build): auto-generate vimdoc'
+          commit_user_name: 'github-actions[bot]'
+          commit_user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_author:
+            'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
 
   build:
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -63,14 +69,17 @@ jobs:
       - name: Push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(build): rebuild artifacts"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          commit_message: 'chore(build): rebuild artifacts'
+          commit_user_name: 'github-actions[bot]'
+          commit_user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_author:
+            'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
 
   format:
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -89,13 +98,17 @@ jobs:
       - name: Push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore(build): format"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          commit_message: 'chore(build): format'
+          commit_user_name: 'github-actions[bot]'
+          commit_user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_author:
+            'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
 
   release:
     if: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write
+      pull-requests: write
     needs:
       - docs
       - build
@@ -103,14 +116,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           release-type: simple
+      - uses: actions/checkout@v4
       - name: tag stable versions
         if: ${{ steps.release.outputs.release_created }}
         run: |
           git config user.name github-actions[bot]
           git config user.email github-actions[bot]@users.noreply.github.com
-          git remote add gh-token "https://${{ secrets.GITHUB_TOKEN }}@github.com/google-github-actions/release-please-action.git"
           git tag -d stable || true
           git push origin :stable || true
           git tag -a stable -m "Last Stable Release"

@@ -2,4 +2,4 @@
 
 [zenbones.nvim](https://github.com/mcchrish/zenbones.nvim)
 
-[VS Code Zenbones](https://github.com/rpbritton/zenbones.vscode)
+[VS Code Zenbones](https://github.com/rpbritton/zenbones.more)

@@ -27,7 +27,7 @@ Press F5 in VS Code.
 In the
 [Marketplace publisher management page](https://marketplace.visualstudio.com/manage),
 create a Trusted Publishing policy for the `rpbritton` publisher with repository
-owner `rpbritton`, repository `zenbones.vscode`, and workflow
+owner `rpbritton`, repository `zenbones.more`, and workflow
 `publish-vscode.yml`. Leave the environment field empty. No repository secret is
 needed. See the
 [Trusted Publishing documentation](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).
