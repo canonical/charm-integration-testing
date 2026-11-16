@@ -2,8 +2,10 @@ name: Publish VS Code extension
 
 on:
   push:
-    tags:
-      - 'vscode-v*'
+    branches:
+      - main
+    paths:
+      - extras/vscode/package.json
 
 permissions:
   contents: read
@@ -16,43 +18,58 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - name: Validate package version
-        working-directory: extras/vscode
+      - name: Check whether package version changed
+        id: version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          expected_version="${RELEASE_TAG#vscode-v}"
-          package_version="$(node -p "require('./package.json').version")"
-          if [ "$expected_version" != "$package_version" ]; then
-            echo "Tag version $expected_version does not match package version $package_version" >&2
-            exit 1
+          package_file="extras/vscode/package.json"
+          package_version="$(node -p "require('./$package_file').version")"
+          if git cat-file -e "$BEFORE_SHA:$package_file" 2>/dev/null; then
+            previous_version="$(git show "$BEFORE_SHA:$package_file" | node -e "let input=''; process.stdin.on('data', data => input += data); process.stdin.on('end', () => process.stdout.write(JSON.parse(input).version));")"
+          else
+            previous_version=""
+          fi
+          if [ "$package_version" = "$previous_version" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Package version unchanged ($package_version); skipping publish."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Package version changed from $previous_version to $package_version."
           fi
 
       - uses: rhysd/action-setup-vim@v1
+        if: steps.version.outputs.changed == 'true'
         with:
           neovim: true
           version: stable
 
       - name: Install theme build dependencies
+        if: steps.version.outputs.changed == 'true'
         run: |
           mkdir -p ~/.local/share/nvim/site/pack/zenbones/start
           git clone --depth 1 https://github.com/rktjmp/lush.nvim ~/.local/share/nvim/site/pack/zenbones/start/lush.nvim
           git clone --depth 1 https://github.com/rktjmp/shipwright.nvim ~/.local/share/nvim/site/pack/zenbones/start/shipwright.nvim
 
       - name: Build themes
+        if: steps.version.outputs.changed == 'true'
         run: |
           mkdir -p autoload/lightline/colorscheme colors/ lua/lualine extras
           make
 
       - name: Generate extension manifest
+        if: steps.version.outputs.changed == 'true'
         working-directory: extras/vscode
         run: ./generate.sh
 
       - name: Publish to Visual Studio Marketplace
+        if: steps.version.outputs.changed == 'true'
         working-directory: extras/vscode
         run: npx --yes @vscode/vsce publish --no-dependencies --oidc

@@ -32,7 +32,7 @@ owner `rpbritton`, repository `zenbones.vscode`, and workflow
 needed. See the
 [Trusted Publishing documentation](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).
 
-Bump `version` in `package.json` to a version newer than the published version,
-then push a tag named `vscode-v<version>` (for example, `vscode-v0.0.3`). The
-GitHub workflow rebuilds all themes and publishes the extension after confirming
-that the tag matches the package version.
+Bump `version` in `package.json` to a version newer than the published version
+and push the change to `main`. The GitHub workflow compares the package version
+with the previous commit and rebuilds and publishes only when the version
+changed. Other edits to `package.json` do not trigger a publish.
