@@ -1622,6 +1622,24 @@ class DeployBundlesBackendStub(NullJujuBackend):
         self.calls.append(("create_offer", model.uri, app, offer_name))
 
 
+@dataclass
+class DownloadCharmBackendStub(NullJujuBackend):
+    downloads: list[tuple[str, int, Path]] = field(default_factory=list)
+
+    def download_charm(self, charm: str, revision: int, destination: Path) -> None:
+        self.downloads.append((charm, revision, destination))
+
+
+class TestDownloadCharm:
+    def test_delegates_to_backend(self, tmp_path: Path) -> None:
+        backend = DownloadCharmBackendStub()
+        destination = tmp_path / "postgresql.charm"
+
+        _client(backend).download_charm("postgresql", 1217, destination)
+
+        assert backend.downloads == [("postgresql", 1217, destination)]
+
+
 class TestDeployBundles:
     @pytest.mark.parametrize("single", [True, False])
     @pytest.mark.parametrize("fail", [True, False])

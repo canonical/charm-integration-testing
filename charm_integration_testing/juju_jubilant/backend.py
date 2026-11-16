@@ -177,6 +177,18 @@ class JubilantBackend(JujuBackend):
     ) -> None:
         self.client.model(model).remove_relation(str(target_1), str(target_2))
 
+    def download_charm(self, charm: str, revision: int, destination: pathlib.Path) -> None:
+        self.client.model(None).cli(
+            "download",
+            charm,
+            "--revision",
+            str(revision),
+            "--filepath",
+            str(destination),
+            "--no-progress",
+            include_model=False,
+        )
+
     def remove_applications(self, model: JujuModelHandle, *applications: str) -> None:
         self.client.model(model).remove_application(*applications)
 

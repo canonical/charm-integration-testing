@@ -289,6 +289,10 @@ class JujuBackend(ABC):
     ) -> None:
         raise NotImplementedError
 
+    def download_charm(self, charm: str, revision: int, destination: Path) -> None:
+        """Download a charm revision to a local archive path."""
+        raise NotImplementedError("This backend does not support downloading charm revisions.")
+
     @abstractmethod
     def deploy_bundle_file(
         self,

@@ -116,7 +116,7 @@ _skipped_transition_item_ids: dict[StateTransition, set[int]] = {}
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the ``state`` and ``injected`` markers."""
+    """Register the scheduler's ``state`` and ``injected`` markers."""
     config.addinivalue_line(
         "markers",
         (
@@ -562,6 +562,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from ``_all_collected``, and injects any bridging transitions needed to
     reach those destinations.
     """
+    if not items:
+        return
+
     raw_state: str = config.getoption("--current-state")
     try:
         current_state = State(raw_state)
@@ -624,7 +627,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             unmarked.append(item)
 
     if not selected_marked:
-        # Nothing state-marked in the selection; leave items untouched.
+        items[:] = unmarked
         return
 
     # ------------------------------------------------------------------

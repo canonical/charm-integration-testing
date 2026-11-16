@@ -36,6 +36,7 @@ go = "1.26.0"
 "github:seaweedfs/seaweedfs" = { version = "4.48", bin = "weed" }
 
 "npm:markdownlint-cli2" = { version = "0.24.0" }
+"pypi:charmlint" = "0.3.0"
 "pypi:zizmor" = { version = "1.5.1" }
 "pypi:ruff" = { version = "0.5.7" }
 "pypi:bandit" = { version = "1.9.4", extras = "toml" }
