@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+set -euo pipefail
+
+if sudo -u workshop -H "$SDK/bin/charm-qa" exec -- \
+    python -c 'import juju, jubilant, validators.engine'; then
+    workshopctl set-health okay
+else
+    workshopctl set-health error "Charm QA dependencies are unavailable; inspect setup-project."
+fi

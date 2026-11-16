@@ -1,0 +1,9 @@
+---
+name: charm-qa
+base: ubuntu@24.04
+runtime: lxd-vm
+sdks:
+  - name: try-charm-qa
+actions:
+  tasks: charm-qa run --list
+  qa: charm-qa run "$@"
