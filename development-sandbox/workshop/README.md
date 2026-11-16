@@ -15,10 +15,14 @@ On a dedicated Ubuntu host with a configured LXD builder and Workshop's
 [prerequisites](https://github.com/canonical/workshop#installation):
 
 ```bash
-mise run setup -- --packages snap:sdkcraft snap:workshop
+mise run setup -- --group workshop
 # Commit SDK changes first: packaging deliberately ignores uncommitted files.
 mise run workshop:pack -- --try HEAD
 ```
+
+The `workshop` group installs LXD, Workshop and SDKcraft from the mise
+catalogue. It does not initialize LXD or launch a Workshop environment.
+It can refresh an existing LXD snap to the catalogue channel.
 
 The task exports a committed repository snapshot into a temporary build
 directory, so local `.env`, MCP credentials and virtualenvs never enter the

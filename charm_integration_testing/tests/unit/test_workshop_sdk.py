@@ -47,6 +47,42 @@ def sdk(tmp_path: Path) -> Path:
     return installed
 
 
+def test_workshop_setup_group_installs_only_host_packages(tmp_path: Path, environment: dict[str, str]) -> None:
+    # GIVEN a package installer that rejects tool installation and provisioning
+    calls = tmp_path / "package-arguments"
+    environment["PACKAGE_ARGUMENTS"] = str(calls)
+    write_executable(
+        Path(environment["TEST_BIN"]) / "mise",
+        """
+case "$1" in
+    config)
+        [[ "$2" == get && "$3" == --file && -f "$4" ]]
+        ;;
+    bootstrap)
+        [[ "$2" == packages && "$3" == apply ]]
+        printf '%s\\n' "$@" > "$PACKAGE_ARGUMENTS"
+        ;;
+    *) echo "Unexpected Mise operation: $*" >&2; exit 1 ;;
+esac
+""",
+    )
+    setup = SDK_SOURCE.parents[1] / "mise-tasks" / "setup"
+
+    # WHEN preparing Workshop on a host
+    subprocess.run(["bash", str(setup), "--group", "workshop"], env=environment, check=True)
+
+    # THEN only the required host snaps are requested
+    assert calls.read_text().splitlines() == [
+        "bootstrap",
+        "packages",
+        "apply",
+        "--yes",
+        "snap:lxd",
+        "snap:workshop",
+        "snap:sdkcraft",
+    ]
+
+
 @pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "builder-failure"])
 def test_pack_exports_only_the_selected_commit(tmp_path: Path, environment: dict[str, str], exit_code: int) -> None:
     # GIVEN a committed SDK alongside untracked and modified local files

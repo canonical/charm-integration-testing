@@ -30,6 +30,10 @@ Groups compose, for example `mise run setup -- --group development integration`.
 The `runtime` group installs runtime project dependencies; `development` also
 installs development extras and shared tooling, taking precedence when combined.
 
+The `workshop` group installs LXD, Workshop and SDKcraft for SDK development.
+It can refresh an existing LXD snap to the catalogue channel, but does not
+initialize LXD or launch Workshop environments.
+
 Workspace packages are installed editably in both runtime and development setup,
 so Python source edits are available without reinstalling. Rerun setup after
 changing dependencies, entry points or other package metadata.
