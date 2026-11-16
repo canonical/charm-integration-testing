@@ -62,7 +62,6 @@ local function to_table(colorscheme)
 			["checkbox.foreground"] = specs.StatusLine.fg, -- Foreground color of checkbox widget.
 			-- ["checkbox.border"] = , -- Border color of checkbox widget.
 
-
 			-- Editor Groups & Tabs: https://code.visualstudio.com/api/references/theme-color#editor-groups-tabs
 			["editorGroupHeader.tabsBackground"] = specs.StatusLineNC.bg,
 			["tab.activeForeground"] = specs.Normal.fg,
@@ -149,7 +148,6 @@ local function to_table(colorscheme)
 			["editorGutter.deletedBackground"] = specs.DiffDelete.bg, -- Editor gutter background color for lines that are deleted.
 			-- ["editorGutter.commentRangeForeground"] = , -- Editor gutter decoration color for commenting ranges.
 			-- ["editorGutter.foldingControlForeground"] = , -- Color of the folding control in the editor gutter.
-
 
 			-- Diff editor colors: https://code.visualstudio.com/api/references/theme-color#diff-editor-colors
 			["diffEditor.insertedTextBackground"] = specs.DiffAdd.bg .. "80", -- Background color for text that got inserted. The color must not be opaque so as not to hide underlying decorations.
@@ -304,7 +302,6 @@ local function to_table(colorscheme)
 			["notificationsWarningIcon.foreground"] = specs.DiagnosticWarn.fg, -- The color used for the notification warning icon.
 			["notificationsInfoIcon.foreground"] = specs.DiagnosticInfo.fg, -- The color used for the notification info icon.
 
-
 			-- -- ["badge.background"] = specs.DiagnosticInfo.fg, -- todo
 			-- ["dropdown.background"] = specs.Normal.bg, -- todo
 			-- -- ["focusBorder"] = specs.Pmenu.bg, -- todo
@@ -366,13 +363,13 @@ local function to_table(colorscheme)
 			-- ["editorBracketMatch.border"] = , -- Color for matching brackets boxes.
 
 			-- Bracket pair colorization:
-			["editorBracketHighlight.foreground1"] = term.blue, -- Foreground color of brackets (1). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.foreground2"] = term.green, -- Foreground color of brackets (2). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.foreground3"] = term.magenta, -- Foreground color of brackets (3). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.foreground4"] = term.blue, -- Foreground color of brackets (4). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.foreground5"] = term.green, -- Foreground color of brackets (5). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.foreground6"] = term.magenta, -- Foreground color of brackets (6). Requires enabling bracket pair colorization.
-			["editorBracketHighlight.unexpectedBracket.foreground"] = term.red, -- Foreground color of unexpected brackets.
+			["editorBracketHighlight.foreground1"] = specs.Delimiter.fg, -- Foreground color of brackets (1). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.foreground2"] = specs.Identifier.fg, -- Foreground color of brackets (2). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.foreground3"] = specs.Special.fg, -- Foreground color of brackets (3). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.foreground4"] = specs.Delimiter.fg, -- Foreground color of brackets (4). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.foreground5"] = specs.Identifier.fg, -- Foreground color of brackets (5). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.foreground6"] = specs.Special.fg, -- Foreground color of brackets (6). Requires enabling bracket pair colorization.
+			["editorBracketHighlight.unexpectedBracket.foreground"] = specs.DiagnosticError.fg, -- Foreground color of unexpected brackets.
 
 			-- term.black
 			-- term.blue
@@ -810,11 +807,10 @@ local function to_table(colorscheme)
 			-- -- 	}
 			-- -- }
 
-
 			{
 				["name"] = "Comment",
 				["scope"] = {
-					"comment"
+					"comment",
 				},
 				["settings"] = to_token_colors(specs.Comment),
 			},
@@ -824,28 +820,29 @@ local function to_table(colorscheme)
 					"variable.other.constant",
 					"constant",
 					"variable.language",
-					"support.constant"
+					"support.constant",
+					"string.regexp",
 				},
 				["settings"] = to_token_colors(specs.Constant),
 			},
 			{
 				["name"] = "String",
 				["scope"] = {
-					"string"
+					"string",
 				},
 				["settings"] = to_token_colors(specs.String),
 			},
 			{
 				["name"] = "Number",
 				["scope"] = {
-					"constant.numeric"
+					"constant.numeric",
 				},
 				["settings"] = to_token_colors(specs.Number),
 			},
 			{
 				["name"] = "Boolean",
 				["scope"] = {
-					"constant.language.boolean"
+					"constant.language.boolean",
 				},
 				["settings"] = to_token_colors(specs.Boolean),
 			},
@@ -853,7 +850,8 @@ local function to_table(colorscheme)
 				["name"] = "Identifier",
 				["scope"] = {
 					"variable.other",
-					"support.variable"
+					"support.variable",
+					"string.special.symbol",
 				},
 				["settings"] = to_token_colors(specs.Identifier),
 			},
@@ -861,7 +859,7 @@ local function to_table(colorscheme)
 				["name"] = "Function",
 				["scope"] = {
 					"entity.name.function",
-					"support.function"
+					"support.function",
 				},
 				["settings"] = to_token_colors(specs.Function),
 			},
@@ -896,8 +894,19 @@ local function to_table(colorscheme)
 				["name"] = "Special",
 				["scope"] = {
 					"punctuation.definition.template-expression",
+					"constant.character.escape",
+					"string.escape",
+					"string.special",
 				},
 				["settings"] = to_token_colors(specs.Special),
+			},
+			{
+				["name"] = "Delimiter",
+				["scope"] = {
+					"punctuation",
+					"tag.delimiter",
+				},
+				["settings"] = to_token_colors(specs.Delimiter),
 			},
 			{
 				["name"] = "Tag",
@@ -914,7 +923,7 @@ local function to_table(colorscheme)
 				},
 				["settings"] = to_token_colors(specs.Identifier),
 			},
-		}
+		},
 	}
 end
 
@@ -932,7 +941,7 @@ local function to_json(el)
 		local properties = {}
 		if object == true then
 			for key, value in pairs(el) do
-				table.insert(properties, "\"" .. key .. "\":" .. to_json(value))
+				table.insert(properties, '"' .. key .. '":' .. to_json(value))
 			end
 			return "{" .. table.concat(properties, ",") .. "}"
 		else
@@ -944,7 +953,7 @@ local function to_json(el)
 	elseif type(el) == "number" then
 		return tostring(el)
 	else
-		return "\"" .. tostring(el) .. "\""
+		return '"' .. tostring(el) .. '"'
 	end
 end
 
