@@ -31,10 +31,14 @@ if &background ==# 'dark'
     let g:terminal_color_14 = '#6BCACB'
     let g:terminal_color_15 = '#A8A8A8'
     highlight Normal guifg=#DDDDDD guibg=#4B4B4B guisp=NONE gui=NONE cterm=NONE
+    highlight! link ModeMsg Normal
+    highlight Added guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight Bold guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight Boolean guifg=#DDDDDD guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight BufferVisible guifg=#E5E5E5 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight BufferVisibleIndex guifg=#E5E5E5 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight BufferVisibleSign guifg=#E5E5E5 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight Changed guifg=#97BDDE guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight CocMarkdownLink guifg=#6FBDBE guibg=NONE guisp=NONE gui=underline cterm=underline
     highlight ColorColumn guifg=NONE guibg=#857556 guisp=NONE gui=NONE cterm=NONE
     highlight! link LspReferenceRead ColorColumn
@@ -43,6 +47,7 @@ if &background ==# 'dark'
     highlight Comment guifg=#719871 guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight Conceal guifg=#969696 guibg=NONE guisp=NONE gui=bold,italic cterm=bold,italic
     highlight Constant guifg=#A3A3A3 guibg=NONE guisp=NONE gui=italic cterm=italic
+    highlight! link Character Constant
     highlight! link TroubleSource Constant
     highlight! link WhichKeyValue Constant
     highlight! link helpOption Constant
@@ -51,6 +56,9 @@ if &background ==# 'dark'
     highlight CursorLine guifg=NONE guibg=#525252 guisp=NONE gui=NONE cterm=NONE
     highlight! link CocMenuSel CursorLine
     highlight! link CursorColumn CursorLine
+    highlight! link FzfLuaFzfCursorLine CursorLine
+    highlight! link SnacksPickerListCursorLine CursorLine
+    highlight! link SnacksPickerPreviewCursorLine CursorLine
     highlight CursorLineNr guifg=#DDDDDD guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Delimiter guifg=#9B9B9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link markdownLinkTextDelimiter Delimiter
@@ -95,8 +103,11 @@ if &background ==# 'dark'
     highlight! link NotifyWARNIcon DiagnosticWarn
     highlight! link NotifyWARNTitle DiagnosticWarn
     highlight DiffAdd guifg=NONE guibg=#406742 guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffAdded DiffAdd
     highlight DiffChange guifg=NONE guibg=#466177 guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffChanged DiffChange
     highlight DiffDelete guifg=NONE guibg=#82505E guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffRemoved DiffDelete
     highlight DiffText guifg=#DDDDDD guibg=#5D809B guisp=NONE gui=NONE cterm=NONE
     highlight Directory guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Error guifg=#E388A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
@@ -105,11 +116,23 @@ if &background ==# 'dark'
     highlight FlashBackdrop guifg=#8B8B8B guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight FlashLabel guifg=#DDDDDD guibg=#648BA9 guisp=NONE gui=NONE cterm=NONE
     highlight FloatBorder guifg=#989898 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FloatTitle guifg=#DDDDDD guibg=#5C5C5C guisp=NONE gui=bold cterm=bold
     highlight FoldColumn guifg=#868686 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Folded guifg=#BBBBBB guibg=#636363 guisp=NONE gui=NONE cterm=NONE
     highlight Function guifg=#DFDFC1 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link TroubleNormal Function
     highlight! link TroubleText Function
+    highlight FzfLuaBufFlagAlt guifg=#97BDDE guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaBufFlagCur guifg=#FFDF9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaBufNr guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaFzfMatch guifg=#A5A6C5 guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight FzfLuaHeaderBind guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaHeaderText guifg=#FFDF9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaLiveSym guifg=#FFDF9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaPathColNr guifg=#AEAEAE guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaPathLineNr FzfLuaPathColNr
+    highlight FzfLuaTabMarker guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaTabTitle guifg=#6FBDBE guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight GitSignsAdd guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link GitGutterAdd GitSignsAdd
     highlight GitSignsChange guifg=#97BDDE guibg=NONE guisp=NONE gui=NONE cterm=NONE
@@ -117,7 +140,9 @@ if &background ==# 'dark'
     highlight GitSignsDelete guifg=#E388A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link GitGutterDelete GitSignsDelete
     highlight IblIndent guifg=#575757 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link IndentLine IblIndent
     highlight IblScope guifg=#6F6F6F guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link IndentLineCurrent IblScope
     highlight Identifier guifg=#DDDDDD guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight IncSearch guifg=#4B4B4B guibg=#DCDCE8 guisp=NONE gui=bold cterm=bold
     highlight! link CurSearch IncSearch
@@ -128,6 +153,7 @@ if &background ==# 'dark'
     highlight! link CocCodeLens LineNr
     highlight! link LspCodeLens LineNr
     highlight! link SignColumn LineNr
+    highlight LspInlayHint guifg=#9E898C guibg=#525252 guisp=NONE gui=NONE cterm=NONE
     highlight MoreMsg guifg=#98BD99 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight! link Question MoreMsg
     highlight! link NnnNormalNC NnnNormal
@@ -136,17 +162,24 @@ if &background ==# 'dark'
     highlight! link EndOfBuffer NonText
     highlight! link Whitespace NonText
     highlight NormalFloat guifg=NONE guibg=#5C5C5C guisp=NONE gui=NONE cterm=NONE
-    highlight Number guifg=#F7E0B3 guibg=NONE guisp=NONE gui=italic cterm=italic
-    highlight! link Boolean Number
+    highlight! link SnacksPickerBorder NormalFloat
+    highlight Number guifg=#F7E0B3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link Float Number
     highlight Pmenu guifg=NONE guibg=#5C5C5C guisp=NONE gui=NONE cterm=NONE
     highlight PmenuSbar guifg=NONE guibg=#818181 guisp=NONE gui=NONE cterm=NONE
     highlight PmenuSel guifg=NONE guibg=#6F6F6F guisp=NONE gui=NONE cterm=NONE
     highlight PmenuThumb guifg=NONE guibg=#A0A0A0 guisp=NONE gui=NONE cterm=NONE
     highlight PreProc guifg=#D590A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight Removed guifg=#E388A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight RenderMarkdownCode guifg=NONE guibg=#525252 guisp=NONE gui=NONE cterm=NONE
     highlight Search guifg=#DDDDDD guibg=#8283AD guisp=NONE gui=NONE cterm=NONE
     highlight! link CocSearch Search
     highlight! link MatchParen Search
+    highlight! link QuickFixLine Search
     highlight! link Sneak Search
+    highlight SnacksIndent guifg=#575757 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight SnacksIndentScope guifg=#6F6F6F guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight SnacksPickerMatch guifg=#A5A6C5 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight SneakLabelMask guifg=#A5A6C5 guibg=#A5A6C5 guisp=NONE gui=NONE cterm=NONE
     highlight Special guifg=#BCBCD3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link WhichKeyGroup Special
@@ -159,22 +192,24 @@ if &background ==# 'dark'
     highlight! link SpellLocal SpellCap
     highlight SpellRare guifg=#D291A3 guibg=NONE guisp=NONE gui=undercurl cterm=undercurl
     highlight Statement guifg=#97BDDE guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaBufName Statement
     highlight! link WhichKey Statement
     highlight StatusLine guifg=#DDDDDD guibg=#5E5E5E guisp=NONE gui=NONE cterm=NONE
     highlight! link TabLine StatusLine
+    highlight! link WinBar StatusLine
     highlight StatusLineNC guifg=#E5E5E5 guibg=#555555 guisp=NONE gui=NONE cterm=NONE
     highlight! link TabLineFill StatusLineNC
+    highlight! link WinBarNC StatusLineNC
     highlight String guifg=#ABC4DB guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight TabLineSel guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight! link BufferCurrent TabLineSel
     highlight Title guifg=#DDDDDD guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaTitle Title
     highlight Todo guifg=NONE guibg=NONE guisp=NONE gui=bold,underline cterm=bold,underline
     highlight Type guifg=#AEAEAE guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link helpSpecial Type
     highlight! link markdownCode Type
     highlight Underlined guifg=NONE guibg=NONE guisp=NONE gui=underline cterm=underline
-    highlight VertSplit guifg=#868686 guibg=NONE guisp=NONE gui=NONE cterm=NONE
-    highlight! link WinSeparator VertSplit
     highlight Visual guifg=NONE guibg=#777777 guisp=NONE gui=NONE cterm=NONE
     highlight WarningMsg guifg=#FFDF9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link DiagnosticWarn WarningMsg
@@ -182,14 +217,13 @@ if &background ==# 'dark'
     highlight WhichKeySeparator guifg=#868686 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight WildMenu guifg=#4B4B4B guibg=#A5A6C5 guisp=NONE gui=NONE cterm=NONE
     highlight! link SneakLabel WildMenu
-    highlight diffAdded guifg=#98BD99 guibg=NONE guisp=NONE gui=NONE cterm=NONE
-    highlight diffChanged guifg=#97BDDE guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight WinSeparator guifg=#868686 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link VertSplit WinSeparator
     highlight diffFile guifg=#FFDF9B guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight diffIndexLine guifg=#FFDF9B guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight diffLine guifg=#A5A6C5 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight diffNewFile guifg=#98BD99 guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight diffOldFile guifg=#E388A3 guibg=NONE guisp=NONE gui=italic cterm=italic
-    highlight diffRemoved guifg=#E388A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight helpHyperTextEntry guifg=#AEAEAE guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight helpHyperTextJump guifg=#BBBBBB guibg=NONE guisp=NONE gui=underline cterm=underline
     highlight lCursor guifg=#4B4B4B guibg=#8E8E8E guisp=NONE gui=NONE cterm=NONE
@@ -201,9 +235,9 @@ if &background ==# 'dark'
         " no italics dark start
         " This codeblock is auto-generated by shipwright.nvim
         highlight Boolean gui=NONE cterm=NONE
+        highlight Character gui=NONE cterm=NONE
         highlight Comment gui=NONE cterm=NONE
         highlight Constant gui=NONE cterm=NONE
-        highlight Number gui=NONE cterm=NONE
         highlight SpecialKey gui=NONE cterm=NONE
         highlight String gui=NONE cterm=NONE
         highlight TroubleSource gui=NONE cterm=NONE
@@ -233,18 +267,23 @@ else
     let g:terminal_color_14 = '#006F70'
     let g:terminal_color_15 = '#777777'
     highlight Normal guifg=#555555 guibg=#E2E2E2 guisp=NONE gui=NONE cterm=NONE
+    highlight! link ModeMsg Normal
+    highlight Added guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight Bold guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight Boolean guifg=#555555 guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight BufferVisible guifg=#818181 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight BufferVisibleIndex guifg=#818181 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight BufferVisibleSign guifg=#818181 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight Changed guifg=#0084A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight CocMarkdownLink guifg=#008586 guibg=NONE guisp=NONE gui=underline cterm=underline
     highlight ColorColumn guifg=NONE guibg=#E2B8A6 guisp=NONE gui=NONE cterm=NONE
     highlight! link LspReferenceRead ColorColumn
     highlight! link LspReferenceText ColorColumn
     highlight! link LspReferenceWrite ColorColumn
     highlight Comment guifg=#628562 guibg=NONE guisp=NONE gui=italic cterm=italic
-    highlight Conceal guifg=#777777 guibg=NONE guisp=NONE gui=bold,italic cterm=bold,italic
+    highlight Conceal guifg=#868686 guibg=NONE guisp=NONE gui=bold,italic cterm=bold,italic
     highlight Constant guifg=#7C7C7C guibg=NONE guisp=NONE gui=italic cterm=italic
+    highlight! link Character Constant
     highlight! link TroubleSource Constant
     highlight! link WhichKeyValue Constant
     highlight! link helpOption Constant
@@ -253,6 +292,9 @@ else
     highlight CursorLine guifg=NONE guibg=#DADADA guisp=NONE gui=NONE cterm=NONE
     highlight! link CocMenuSel CursorLine
     highlight! link CursorColumn CursorLine
+    highlight! link FzfLuaFzfCursorLine CursorLine
+    highlight! link SnacksPickerListCursorLine CursorLine
+    highlight! link SnacksPickerPreviewCursorLine CursorLine
     highlight CursorLineNr guifg=#555555 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Delimiter guifg=#7C7C7C guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link markdownLinkTextDelimiter Delimiter
@@ -297,8 +339,11 @@ else
     highlight! link NotifyWARNIcon DiagnosticWarn
     highlight! link NotifyWARNTitle DiagnosticWarn
     highlight DiffAdd guifg=NONE guibg=#AEDEAE guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffAdded DiffAdd
     highlight DiffChange guifg=NONE guibg=#C0D5E0 guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffChanged DiffChange
     highlight DiffDelete guifg=NONE guibg=#E5CBD1 guisp=NONE gui=NONE cterm=NONE
+    highlight! link diffRemoved DiffDelete
     highlight DiffText guifg=#555555 guibg=#99B5C3 guisp=NONE gui=NONE cterm=NONE
     highlight Directory guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Error guifg=#DC5284 guibg=NONE guisp=NONE gui=NONE cterm=NONE
@@ -307,11 +352,23 @@ else
     highlight FlashBackdrop guifg=#868686 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight FlashLabel guifg=#555555 guibg=#00C9F6 guisp=NONE gui=NONE cterm=NONE
     highlight FloatBorder guifg=#6A6A6A guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FloatTitle guifg=#555555 guibg=#CFCFCF guisp=NONE gui=bold cterm=bold
     highlight FoldColumn guifg=#919191 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight Folded guifg=#4B4B4B guibg=#BBBBBB guisp=NONE gui=NONE cterm=NONE
     highlight Function guifg=#6C6B20 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link TroubleNormal Function
     highlight! link TroubleText Function
+    highlight FzfLuaBufFlagAlt guifg=#0084A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaBufFlagCur guifg=#C48562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaBufNr guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaFzfMatch guifg=#896788 guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight FzfLuaHeaderBind guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaHeaderText guifg=#C48562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaLiveSym guifg=#C48562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaPathColNr guifg=#6D4C52 guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaPathLineNr FzfLuaPathColNr
+    highlight FzfLuaTabMarker guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight FzfLuaTabTitle guifg=#008586 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight GitSignsAdd guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link GitGutterAdd GitSignsAdd
     highlight GitSignsChange guifg=#0084A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
@@ -319,7 +376,9 @@ else
     highlight GitSignsDelete guifg=#DC5284 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link GitGutterDelete GitSignsDelete
     highlight IblIndent guifg=#D4D4D4 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link IndentLine IblIndent
     highlight IblScope guifg=#ABABAB guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link IndentLineCurrent IblScope
     highlight Identifier guifg=#555555 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight IncSearch guifg=#E2E2E2 guibg=#9E779D guisp=NONE gui=bold cterm=bold
     highlight! link CurSearch IncSearch
@@ -330,6 +389,7 @@ else
     highlight! link CocCodeLens LineNr
     highlight! link LspCodeLens LineNr
     highlight! link SignColumn LineNr
+    highlight LspInlayHint guifg=#9C868A guibg=#DDDDDD guisp=NONE gui=NONE cterm=NONE
     highlight MoreMsg guifg=#628562 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight! link Question MoreMsg
     highlight! link NnnNormalNC NnnNormal
@@ -338,17 +398,24 @@ else
     highlight! link EndOfBuffer NonText
     highlight! link Whitespace NonText
     highlight NormalFloat guifg=NONE guibg=#CFCFCF guisp=NONE gui=NONE cterm=NONE
-    highlight Number guifg=#896500 guibg=NONE guisp=NONE gui=italic cterm=italic
-    highlight! link Boolean Number
+    highlight! link SnacksPickerBorder NormalFloat
+    highlight Number guifg=#896500 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link Float Number
     highlight Pmenu guifg=NONE guibg=#C9C9C9 guisp=NONE gui=NONE cterm=NONE
     highlight PmenuSbar guifg=NONE guibg=#9E9E9E guisp=NONE gui=NONE cterm=NONE
     highlight PmenuSel guifg=NONE guibg=#B0B0B0 guisp=NONE gui=NONE cterm=NONE
     highlight PmenuThumb guifg=NONE guibg=#F3F3F3 guisp=NONE gui=NONE cterm=NONE
     highlight PreProc guifg=#BE6A84 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight Removed guifg=#DC5284 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight RenderMarkdownCode guifg=NONE guibg=#DDDDDD guisp=NONE gui=NONE cterm=NONE
     highlight Search guifg=#555555 guibg=#CBB1CA guisp=NONE gui=NONE cterm=NONE
     highlight! link CocSearch Search
     highlight! link MatchParen Search
+    highlight! link QuickFixLine Search
     highlight! link Sneak Search
+    highlight SnacksIndent guifg=#D4D4D4 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight SnacksIndentScope guifg=#ABABAB guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight SnacksPickerMatch guifg=#896788 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight SneakLabelMask guifg=#896788 guibg=#896788 guisp=NONE gui=NONE cterm=NONE
     highlight Special guifg=#755F74 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link WhichKeyGroup Special
@@ -361,22 +428,24 @@ else
     highlight! link SpellLocal SpellCap
     highlight SpellRare guifg=#C66484 guibg=NONE guisp=#C48562 gui=undercurl cterm=undercurl
     highlight Statement guifg=#0084A3 guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaBufName Statement
     highlight! link WhichKey Statement
     highlight StatusLine guifg=#555555 guibg=#C4C4C4 guisp=NONE gui=NONE cterm=NONE
     highlight! link TabLine StatusLine
+    highlight! link WinBar StatusLine
     highlight StatusLineNC guifg=#818181 guibg=#D4D4D4 guisp=NONE gui=NONE cterm=NONE
     highlight! link TabLineFill StatusLineNC
+    highlight! link WinBarNC StatusLineNC
     highlight String guifg=#4A7587 guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight TabLineSel guifg=NONE guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight! link BufferCurrent TabLineSel
     highlight Title guifg=#555555 guibg=NONE guisp=NONE gui=bold cterm=bold
+    highlight! link FzfLuaTitle Title
     highlight Todo guifg=NONE guibg=NONE guisp=NONE gui=bold,underline cterm=bold,underline
     highlight Type guifg=#6D4C52 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link helpSpecial Type
     highlight! link markdownCode Type
     highlight Underlined guifg=NONE guibg=NONE guisp=NONE gui=underline cterm=underline
-    highlight VertSplit guifg=#919191 guibg=NONE guisp=NONE gui=NONE cterm=NONE
-    highlight! link WinSeparator VertSplit
     highlight Visual guifg=NONE guibg=#CCCCCC guisp=NONE gui=NONE cterm=NONE
     highlight WarningMsg guifg=#C48562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight! link DiagnosticWarn WarningMsg
@@ -384,14 +453,13 @@ else
     highlight WhichKeySeparator guifg=#919191 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight WildMenu guifg=#E2E2E2 guibg=#896788 guisp=NONE gui=NONE cterm=NONE
     highlight! link SneakLabel WildMenu
-    highlight diffAdded guifg=#628562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
-    highlight diffChanged guifg=#0084A3 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight WinSeparator guifg=#919191 guibg=NONE guisp=NONE gui=NONE cterm=NONE
+    highlight! link VertSplit WinSeparator
     highlight diffFile guifg=#C48562 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight diffIndexLine guifg=#C48562 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight diffLine guifg=#896788 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight diffNewFile guifg=#628562 guibg=NONE guisp=NONE gui=italic cterm=italic
     highlight diffOldFile guifg=#DC5284 guibg=NONE guisp=NONE gui=italic cterm=italic
-    highlight diffRemoved guifg=#DC5284 guibg=NONE guisp=NONE gui=NONE cterm=NONE
     highlight helpHyperTextEntry guifg=#6D4C52 guibg=NONE guisp=NONE gui=bold cterm=bold
     highlight helpHyperTextJump guifg=#6D6D6D guibg=NONE guisp=NONE gui=underline cterm=underline
     highlight lCursor guifg=#E2E2E2 guibg=#747474 guisp=NONE gui=NONE cterm=NONE
@@ -403,9 +471,9 @@ else
         " no italics light start
         " This codeblock is auto-generated by shipwright.nvim
         highlight Boolean gui=NONE cterm=NONE
+        highlight Character gui=NONE cterm=NONE
         highlight Comment gui=NONE cterm=NONE
         highlight Constant gui=NONE cterm=NONE
-        highlight Number gui=NONE cterm=NONE
         highlight SpecialKey gui=NONE cterm=NONE
         highlight String gui=NONE cterm=NONE
         highlight TroubleSource gui=NONE cterm=NONE

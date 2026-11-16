@@ -16,26 +16,33 @@ or try the [built-in collection](#usage).
 
 ## Requirement
 
--   Neovim v0.8.0 (use v2.0.0 for older versions) or Vim 8.1
+- Neovim v0.8.0 (use v2.0.0 for older versions) or Vim 8.1
 
 ## Recommended setup
 
--   Neovim with true colors support i.e. `set termguicolors`. Vim works but only
-    in compatibility mode.
--   Font with bold and italic
--   Terminal or GUI with bold and italic support
+- Neovim with true colors support i.e. `set termguicolors`. Vim works but only
+  in compatibility mode.
+- Font with bold and italic
+- Terminal or GUI with bold and italic support
 
 ## Installation
 
-Example installation using packer:
+Example installation using lazy.nvim:
 
 ```lua
-use {
-    "mcchrish/zenbones.nvim",
+{
+    "zenbones-theme/zenbones.nvim",
     -- Optionally install Lush. Allows for more configuration or extending the colorscheme
     -- If you don't want to install lush, make sure to set g:zenbones_compat = 1
     -- In Vim, compat mode is turned on as Lush only works in Neovim.
-    requires = "rktjmp/lush.nvim"
+    dependencies = "rktjmp/lush.nvim",
+    lazy = false,
+    priority = 1000,
+    -- you can set set configuration options here
+    -- config = function()
+    --     vim.g.zenbones_darken_comments = 45
+    --     vim.cmd.colorscheme('zenbones')
+    -- end
 }
 ```
 
@@ -87,41 +94,41 @@ See [documentations](doc/zenbones.md) or `:help zenbones.txt`.
 | ![Stark darkness](https://user-images.githubusercontent.com/7200153/133776839-4b12c3dd-233f-47d1-9740-006bf50e812a.png) | ![Default darkness](https://user-images.githubusercontent.com/7200153/133776882-26d006b4-50db-49ad-bd79-3bec327a95fc.png) | ![Warm darkness](https://user-images.githubusercontent.com/7200153/133776957-3d2949c9-51b6-4537-aca4-6ced80113b91.png) |
 
 See more [showcase](doc/showcase.md) from the other colorschemes or checkout the
-[vimcolorschemes page](https://vimcolorschemes.com/mcchrish/zenbones.nvim).
+[vimcolorschemes page](https://vimcolorschemes.com/zenbones-theme/zenbones.nvim).
 
 ## Other plugins support
 
 Aside from LSP and basic Tree-sitter support, here are some plugins that are
 currently supported.
 
--   [Git Signs](https://github.com/lewis6991/gitsigns.nvim)
--   [Git Gutter](https://github.com/airblade/vim-gitgutter)
--   [Indent Blankline](https://github.com/lukas-reineke/indent-blankline.nvim)
--   [Telescope](https://github.com/nvim-telescope/telescope.nvim)
--   [Sneak](https://github.com/justinmk/vim-sneak)
--   [Leap](https://github.com/ggandor/leap.nvim)
--   [Hop](https://github.com/phaazon/hop.nvim)
--   [Lualine](https://github.com/hoob3rt/lualine.nvim)
--   [Lightline](https://github.com/itchyny/lightline.vim)
--   [BarBar](https://github.com/romgrk/barbar.nvim)
--   [CoC](https://github.com/neoclide/coc.nvim)
--   [Cmp](https://github.com/hrsh7th/nvim-cmp)
--   [Neogit](https://github.com/TimUntersberger/neogit)
--   [WhichKey](https://github.com/folke/which-key.nvim)
--   [Trouble](https://github.com/folke/trouble.nvim)
--   [NvimTree](https://github.com/kyazdani42/nvim-tree.lua)
--   [n³](https://github.com/mcchrish/nnn.vim)
--   [Mason](https://github.com/williamboman/mason.nvim)
+- [Git Signs](https://github.com/lewis6991/gitsigns.nvim)
+- [Git Gutter](https://github.com/airblade/vim-gitgutter)
+- [Indent Blankline](https://github.com/lukas-reineke/indent-blankline.nvim)
+- [Telescope](https://github.com/nvim-telescope/telescope.nvim)
+- [Sneak](https://github.com/justinmk/vim-sneak)
+- [Hop](https://github.com/phaazon/hop.nvim)
+- [Lualine](https://github.com/hoob3rt/lualine.nvim)
+- [Lightline](https://github.com/itchyny/lightline.vim)
+- [BarBar](https://github.com/romgrk/barbar.nvim)
+- [CoC](https://github.com/neoclide/coc.nvim)
+- [Cmp](https://github.com/hrsh7th/nvim-cmp)
+- [Neogit](https://github.com/TimUntersberger/neogit)
+- [WhichKey](https://github.com/folke/which-key.nvim)
+- [Trouble](https://github.com/folke/trouble.nvim)
+- [NvimTree](https://github.com/kyazdani42/nvim-tree.lua)
+- [n³](https://github.com/mcchrish/nnn.vim)
+- [Mason](https://github.com/williamboman/mason.nvim)
+- [mini.icons](https://github.com/nvim-mini/mini.nvim/blob/main/readmes/mini-icons.md)
 
 ## Other implementations
 
--   [iTerm2](extras/iterm)
--   [Kitty](extras/kitty)
--   [Alacritty](extras/alacritty)
--   [WezTerm](extras/wezterm)
--   [Windows Terminal](extras/windows_terminal)
--   [Foot](extras/foot)
--   [Tmux](extras/tmux)
+- [iTerm2](extras/iterm)
+- [Kitty](extras/kitty)
+- [Alacritty](extras/alacritty)
+- [WezTerm](extras/wezterm)
+- [Windows Terminal](extras/windows_terminal)
+- [Foot](extras/foot)
+- [Tmux](extras/tmux)
 
 It's also possible to generate any color configuration files using shipwright,
 [this one for Kitty](lua/zenbones/shipwright/runners/kitty.lua) for example.
@@ -137,3 +144,8 @@ book called
 
 There are more similar
 [colorschemes with few colors from this collection](https://github.com/mcchrish/vim-no-color-collections).
+
+## Git mirrors
+
+- [Gitlab](https://gitlab.com/mcchris/zenbones.nvim)
+- [Codeberg](https://codeberg.org/mcchris/zenbones.nvim)

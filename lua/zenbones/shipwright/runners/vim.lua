@@ -45,12 +45,12 @@ run(
 				string.match(color, "@")
 				or string.match(color, "Noice")
 				or string.match(color, "Telescope")
-				or string.match(color, "Leap")
 				or string.match(color, "Hop")
 				or string.match(color, "Neogit")
 				or string.match(color, "NvimTree")
 				or string.match(color, "Cmp")
 				or string.match(color, "Mason")
+				or string.match(color, "Mini")
 			)
 		end, colors)
 		return {
