@@ -141,6 +141,10 @@ Integration tests live in `charm_integration_testing/test_suite/` and run agains
 live charms. Follow the [local testing guide](docs/how-to/run-and-debug-tests-locally.rst)
 to run them in the sandbox.
 
+## Issue reports
+
+For issue scope and category guidance, see [Issue categories](docs/how-to/issue-categories.rst).
+
 ## Pull requests
 
 ### Branch naming
