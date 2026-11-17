@@ -20,7 +20,7 @@ clusters. Setup does not create chaos experiments.
    mise run setup-k8s
    ```
    Mise installs the declared tools and packages. The task provisions the
-   substrate with Concierge, writes `$HOME/k8s.yaml`, registers `local-k8s`
+   substrate with Concierge, uses the kubeconfig at `$HOME/.kube/config`, registers `local-k8s`
    and installs Chaos Mesh. Do not run Chaos Mesh separately afterward.
    Wait for the task to finish successfully before proceeding.
    Run `mise run setup-k8s -- --help` for other options.
@@ -55,9 +55,9 @@ or verification is needed. Do not bootstrap another controller or model.
 2. Run:
    ```bash
    cd "$PROJECT_ROOT"
-   mise run setup-chaos-mesh -- /home/ubuntu/k8s.yaml
+   mise run setup-chaos-mesh -- "$HOME/.kube/config"
    ```
-   The configuration path is optional and defaults to `$HOME/k8s.yaml`.
+   The kubeconfig path is required.
 3. Confirm the task exits successfully. It checks StressChaos and IOChaos
    CRDs and waits for the controller, DNS server, and daemon rollouts.
 
@@ -81,6 +81,6 @@ and the namespace behind even with Helm atomic cleanup. Inspect before retrying.
 For inspection without running an experiment:
 
 ```bash
-helm status chaos-mesh --namespace chaos-mesh --kubeconfig /home/ubuntu/k8s.yaml
-sudo k8s kubectl --kubeconfig /home/ubuntu/k8s.yaml get deployments,daemonsets,pods -n chaos-mesh
+helm status chaos-mesh --namespace chaos-mesh --kubeconfig "$HOME/.kube/config"
+sudo k8s kubectl --kubeconfig "$HOME/.kube/config" get deployments,daemonsets,pods -n chaos-mesh
 ```

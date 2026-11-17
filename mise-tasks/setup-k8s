@@ -10,12 +10,12 @@ usage() {
 Usage: mise run setup-k8s -- [--cloud-name NAME] [--kubeconfig PATH] [--no-chaos-mesh]
                             [--output FILE]
 
-Initialises Canonical Kubernetes with Concierge, writes its kubeconfig, registers it with the
-Juju client and installs or verifies Chaos Mesh.
+Initialises Canonical Kubernetes with Concierge, registers it with the Juju client and installs or
+verifies Chaos Mesh. Concierge writes the kubeconfig to $HOME/.kube/config.
 This flushes the host's iptables FORWARD chain and sets its default policy to ACCEPT.
 
 --cloud-name     Juju cloud name (default: local-k8s)
---kubeconfig     Kubeconfig destination (default: $HOME/k8s.yaml)
+--kubeconfig     Also write a copy of the kubeconfig to PATH and use it (default: $HOME/.kube/config)
 --no-chaos-mesh  Skip Chaos Mesh
 --output         Append cloud-name, kubeconfig-path and platform as key=value lines
 USAGE
@@ -27,7 +27,7 @@ die() {
 }
 
 cloud_name=local-k8s
-kubeconfig="$HOME/k8s.yaml"
+kubeconfig=""
 chaos_mesh=true
 output=""
 while (( $# )); do
@@ -49,7 +49,6 @@ while (( $# )); do
 done
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-kubeconfig="$(realpath -m "$kubeconfig")"
 
 for tool in concierge juju jq mise; do
     command -v "$tool" >/dev/null || die "Missing $tool; run: mise run setup -- --group local-k8s"
@@ -68,14 +67,20 @@ echo "==> Flushing the host's iptables FORWARD chain and setting its policy to A
 sudo iptables -F FORWARD
 sudo iptables -P FORWARD ACCEPT
 
-echo "==> Writing kubeconfig to $kubeconfig..."
-mkdir -p "$(dirname "$kubeconfig")"
-tmp_kubeconfig="$(mktemp "${kubeconfig}.XXXXXX")"
-trap 'rm -f -- "$tmp_kubeconfig"' EXIT
-# shellcheck disable=SC2024
-sudo k8s config > "$tmp_kubeconfig"
-mv -fT -- "$tmp_kubeconfig" "$kubeconfig"
-trap - EXIT
+if [[ -n "$kubeconfig" ]]; then
+    kubeconfig="$(realpath -m "$kubeconfig")"
+    echo "==> Writing kubeconfig to $kubeconfig..."
+    mkdir -p "$(dirname "$kubeconfig")"
+    tmp_kubeconfig="$(mktemp "${kubeconfig}.XXXXXX")"
+    trap 'rm -f -- "$tmp_kubeconfig"' EXIT
+    # shellcheck disable=SC2024
+    sudo k8s config > "$tmp_kubeconfig"
+    mv -fT -- "$tmp_kubeconfig" "$kubeconfig"
+    trap - EXIT
+else
+    kubeconfig="$HOME/.kube/config"
+fi
+[[ -f "$kubeconfig" && -r "$kubeconfig" ]] || die "Kubeconfig is not a readable file: $kubeconfig"
 
 if juju clouds --client --format json | jq -e --arg cloud "$cloud_name" 'has($cloud)' >/dev/null; then
     echo "==> Juju cloud $cloud_name already registered."

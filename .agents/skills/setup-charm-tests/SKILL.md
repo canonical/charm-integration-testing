@@ -54,7 +54,7 @@ and, for a separate neighbor controller,
 `--neighbor-controller-bootstrap-constraints '{"root-disk":"5G"}'`.
 
 For Kubernetes sandbox tests, set
-`KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml` in the test environment.
+`KUBECONFIG_local_k8s=$HOME/.kube/config` in the test environment.
 Tests request experiments through `require_chaos_tool`, which selects a
 supporting client. Chaos Mesh CPU and memory experiments require the
 StressChaos CRD, while I/O latency requires the IOChaos CRD. If no configured
@@ -115,14 +115,14 @@ mise run setup -- --group integration
 
 ### Problem: "kubeconfig not found"
 
-If `/home/ubuntu/k8s.yaml` doesn't exist:
+If `$HOME/.kube/config` doesn't exist:
 
 ```bash
 # Re-run K8s setup
 cd "$PROJECT_ROOT" && mise run setup-k8s
 
 # Verify location
-ls -la /home/ubuntu/k8s.yaml
+ls -la "$HOME/.kube/config"
 ```
 
 ### Problem: "juju-crashdump: command not found"

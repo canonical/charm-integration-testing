@@ -17,9 +17,8 @@ Follow the `development sandbox guide
 to start the VM and open a shell. Follow its Kubernetes or LXD setup steps,
 including prerequisite installation, depending on your charms.
 
-The Kubernetes setup task registers ``local-k8s`` with Juju, writes
-``$HOME/k8s.yaml`` (``/home/ubuntu/k8s.yaml`` in the sandbox), and installs or
-verifies Chaos Mesh. LXD uses Juju's
+The Kubernetes setup task registers ``local-k8s`` with Juju, uses the
+kubeconfig at ``$HOME/.kube/config``, and installs or verifies Chaos Mesh. LXD uses Juju's
 ``localhost`` cloud. Do not bootstrap a controller manually when starting the
 suite from ``no_controller`` or ``no_bundle``; the suite handles that.
 
@@ -28,7 +27,7 @@ For the Kubernetes examples below, set:
 .. code:: bash
 
    export K8S_CLOUD_NAME=local-k8s
-   export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+   export KUBECONFIG_local_k8s=$HOME/.kube/config
    export VALIDATORS_PATH="${PWD}/validators"
 
 Information you will need

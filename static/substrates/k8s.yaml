@@ -5,6 +5,7 @@ juju:
   disable: true
 providers:
   k8s:
+    # `setup-k8s` overrides the snap channel with the pin in mise.toml.
     enable: true
     bootstrap: false
     features:
