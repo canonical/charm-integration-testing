@@ -20,8 +20,36 @@ This skill bridges the gap between:
 ## Prerequisites
 
 Use [setup-charm-tests](../setup-charm-tests/SKILL.md) to prepare the required
-substrates and logging tools. Run commands from `$PROJECT_ROOT` inside the
-sandbox. The test suite creates controllers according to `--current-state`.
+substrates and logging tools. In the Multipass sandbox, run commands from
+`$PROJECT_ROOT`. In a Charm QA Workshop, follow the section below instead.
+The test suite creates controllers according to `--current-state`.
+
+### Charm QA Workshop
+
+Keep the charm checkout as the working directory. For the examples below,
+replace `mise run TASK` with `charm-qa run TASK` and run tool commands such as
+`juju` through `charm-qa exec --`. Do not launch the Multipass sandbox.
+
+Resolve toolkit documentation and files relative to `charm-qa root`, not the
+installed skill symlink. Use absolute paths for bundles, kubeconfigs, JSON
+files and all output paths: `charm-qa run` changes to the toolkit directory.
+For example:
+
+```bash
+toolkit="$(charm-qa root)"
+workspace="$PWD"
+charm-qa run test:suite -- \
+  --help
+# When constructing the actual invocation:
+# --charm-overrides "$toolkit/static/charm-overrides"
+# --log-dir "$workspace/test-logs"
+# --junit-xml "$workspace/junit.xml"
+```
+
+The SDK does not provision a substrate. Use explicitly configured test clouds;
+do not assume that `localhost` or `local-k8s` exists. Local Kubernetes and LXD
+provisioning inside a Workshop container has not been validated. Do not run
+host-level provisioning or change firewall settings without approval.
 
 ## Quick Start
 

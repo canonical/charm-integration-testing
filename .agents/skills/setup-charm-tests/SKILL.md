@@ -12,6 +12,30 @@ available regardless of substrate.
 
 ## Setup
 
+### Charm QA Workshop
+
+If `charm-qa` is available, the SDK already prepares the toolchain and logging
+tools. Keep the charm checkout as the working directory; do not start a
+Multipass VM or run `scripts/sandbox.sh`.
+
+Inspect available test clouds with `charm-qa exec -- juju clouds --client`.
+Use only clouds and credentials explicitly provided for this test environment.
+The container example does not validate local LXD or Kubernetes provisioning;
+stop and report missing substrates rather than changing the host's firewall,
+snaps, or LXD configuration.
+
+Run tool commands through `charm-qa exec -- COMMAND` and toolkit tasks through
+`charm-qa run TASK`. Resolve toolkit documentation from `charm-qa root`, not
+the skill symlink, and pass absolute paths for workspace files and outputs.
+For Kubernetes, use the provided kubeconfig path in `KUBECONFIG_<cloud>`;
+do not assume `/home/ubuntu/k8s.yaml`. Check that the selected cluster has the
+required Chaos Mesh CRDs before requesting chaos experiments.
+
+Continue with [run-charm-tests](../run-charm-tests/SKILL.md#charm-qa-workshop).
+The remaining setup instructions on this page apply to the Multipass sandbox.
+
+### Multipass sandbox
+
 Start the VM using the [sandbox guide](../../../development-sandbox/README.md#quick-start)
 and work from `$PROJECT_ROOT` inside it. Sandbox startup prepares the toolchain;
 rerun `scripts/sandbox.sh up` on the host if tool setup failed or its configuration

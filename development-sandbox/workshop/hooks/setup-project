@@ -12,6 +12,8 @@ revision="$(cat "$SDK/revision")"
     exit 1
 }
 toolkit="$CHARM_QA_HOME/toolkits/$revision"
+skills="$CHARM_QA_HOME/current/.agents/skills"
+skill_directories=("$HOME/.agents/skills" "$HOME/.claude/skills")
 mkdir -p "$CHARM_QA_HOME/toolkits"
 
 # Editable workspace installs need writable source, not the read-only SDK mount.
@@ -23,6 +25,21 @@ if [[ ! -d "$toolkit" ]]; then
     trap - EXIT
 fi
 
+# Check both clients before changing the active revision or registering any skills.
+shopt -s nullglob
+for directory in "${skill_directories[@]}"; do
+    for source in "$toolkit/.agents/skills/"*/SKILL.md; do
+        name="$(basename "$(dirname "$source")")"
+        target="$directory/$name"
+        if [[ -e "$target" || -L "$target" ]]; then
+            if [[ ! -L "$target" || "$(readlink "$target")" != "$skills/$name" ]]; then
+                echo "Charm QA skill conflicts with $target; move it aside before retrying setup." >&2
+                exit 1
+            fi
+        fi
+    done
+done
+
 export PROJECT_ROOT="$toolkit"
 export UV_PROJECT_ENVIRONMENT="$toolkit/.venv"
 export MISE_TRUSTED_CONFIG_PATHS="$toolkit"
@@ -31,3 +48,18 @@ mise run setup -- --group development integration cloud-k8s
 
 # Keep the previous toolkit usable if installing a new revision fails.
 ln -sfnT "$toolkit" "$CHARM_QA_HOME/current"
+
+for directory in "${skill_directories[@]}"; do
+    mkdir -p "$directory"
+    for target in "$directory/"*; do
+        name="$(basename "$target")"
+        if [[ -L "$target" && "$(readlink "$target")" == "$skills/$name" \
+            && ! -f "$skills/$name/SKILL.md" ]]; then
+            rm -- "$target"
+        fi
+    done
+    for source in "$skills/"*/SKILL.md; do
+        name="$(basename "$(dirname "$source")")"
+        [[ -L "$directory/$name" ]] || ln -s "$skills/$name" "$directory/$name"
+    done
+done

@@ -1,9 +1,12 @@
 ---
 name: charm-qa
 base: ubuntu@24.04
-runtime: lxd-vm
+runtime: lxd-container
 sdks:
   - name: try-charm-qa
+  - name: copilot
+    channel: latest/stable
 actions:
-  tasks: charm-qa run --list
+  tasks: charm-qa tasks
   qa: charm-qa run "$@"
+  agent: copilot "$@"

@@ -52,4 +52,11 @@ output="$project_root/dist/workshop"
 mkdir -p "$output"
 echo "==> Packaging Charm QA from $revision (committed files only)."
 cd "$context"
-sdkcraft "$operation" --output "$output"
+sdkcraft "$operation"
+shopt -s nullglob
+artifacts=(*.sdk)
+if (( ${#artifacts[@]} == 0 )); then
+    echo "SDKcraft produced no SDK artifacts." >&2
+    exit 1
+fi
+mv -- "${artifacts[@]}" "$output/"

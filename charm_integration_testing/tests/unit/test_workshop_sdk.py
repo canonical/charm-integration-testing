@@ -43,6 +43,11 @@ def sdk(tmp_path: Path) -> Path:
     shutil.copy2(SDK_SOURCE / "environment.sh", installed / "environment.sh")
     (installed / "revision").write_text(f"{REVISION}\n")
     (installed / "toolkit" / ".agents" / "skills").mkdir(parents=True)
+    for name in ("run-charm-tests", "setup-charm-tests"):
+        skill = installed / "toolkit" / ".agents" / "skills" / name
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Test skill.\n---\n")
+    (installed / "toolkit" / ".agents" / "skills" / "system.md").write_text("Sandbox-only context\n")
     (installed / "toolkit" / "mise.toml").write_text("[tools]\n")
     return installed
 
@@ -84,7 +89,10 @@ esac
 
 
 @pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "builder-failure"])
-def test_pack_exports_only_the_selected_commit(tmp_path: Path, environment: dict[str, str], exit_code: int) -> None:
+@pytest.mark.parametrize("operation", ["pack", "try"])
+def test_pack_exports_only_the_selected_commit(
+    tmp_path: Path, environment: dict[str, str], exit_code: int, operation: str
+) -> None:
     # GIVEN a committed SDK alongside untracked and modified local files
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -123,25 +131,35 @@ def test_pack_exports_only_the_selected_commit(tmp_path: Path, environment: dict
     write_executable(
         Path(environment["TEST_BIN"]) / "sdkcraft",
         """
-[[ "$1" == try && "$2" == --output && -d "$3" ]]
+[[ "$#" == 1 && "$1" == "$BUILD_OPERATION" ]]
 [[ ! -e toolkit/.env && ! -e toolkit/.git ]]
 [[ "$(cat toolkit/mise.toml)" == 'committed catalogue' ]]
 [[ "$(cat revision)" == "$(git -C "$TEST_REPOSITORY" rev-parse HEAD)" ]]
 [[ -x hooks/setup-project && -x bin/charm-qa && -f environment.sh ]]
 printf '%s' "$PWD" > "$CONTEXT_FILE"
+if [[ "$BUILD_EXIT_CODE" == 0 ]]; then
+    printf 'artifact' > charm-qa_amd64_ubuntu@24.04.sdk
+fi
 exit "$BUILD_EXIT_CODE"
 """,
     )
     environment["TEST_REPOSITORY"] = str(repository)
     environment["BUILD_EXIT_CODE"] = str(exit_code)
+    environment["BUILD_OPERATION"] = operation
 
-    # WHEN building through SDKcraft's try operation
-    result = subprocess.run(["bash", str(task), "--try", "HEAD"], env=environment, capture_output=True, text=True)
+    # WHEN building through SDKcraft
+    arguments = ["--try"] if operation == "try" else []
+    result = subprocess.run(["bash", str(task), *arguments, "HEAD"], env=environment, capture_output=True, text=True)
 
     # THEN only committed source reached the builder and its temporary context was removed
     assert result.returncode == exit_code, result.stderr
     assert not Path(context_file.read_text()).exists()
     assert (repository / ".env").read_text() == "untracked-secret\n"
+    artifact = repository / "dist" / "workshop" / "charm-qa_amd64_ubuntu@24.04.sdk"
+    if exit_code == 0:
+        assert artifact.read_text() == "artifact"
+    else:
+        assert not artifact.exists()
 
 
 def test_setup_preserves_the_active_toolkit_on_failure(sdk: Path, environment: dict[str, str]) -> None:
@@ -183,6 +201,97 @@ def test_setup_reuses_writable_source(sdk: Path, environment: dict[str, str]) ->
     assert (toolkit / "mise.toml").read_text() == "local edits\n"
     assert (sdk / "toolkit" / "mise.toml").read_text() == "[tools]\n"
     assert toolkit.resolve().name == REVISION
+
+
+def test_setup_refreshes_only_owned_skill_links(sdk: Path, environment: dict[str, str]) -> None:
+    # GIVEN registered skills alongside unrelated user content
+    write_executable(Path(environment["TEST_BIN"]) / "mise", "exit 0")
+    home = Path(environment["HOME"])
+    directories = [home / ".agents" / "skills", home / ".claude" / "skills"]
+    hook = ["bash", str(sdk / "hooks" / "setup-project")]
+    hook_environment = {**environment, "SDK": str(sdk)}
+    subprocess.run(hook, env=hook_environment, check=True)
+    for directory in directories:
+        (directory / "user-skill").mkdir()
+        (directory / "user-skill" / "SKILL.md").write_text("User content\n")
+        (directory / "user-link").symlink_to(home / "missing-user-skill")
+        assert not (directory / "system.md").exists()
+        assert (directory / "setup-charm-tests" / "SKILL.md").is_file()
+    shutil.rmtree(sdk / "toolkit" / ".agents" / "skills" / "setup-charm-tests")
+    updated_skill = sdk / "toolkit" / ".agents" / "skills" / "run-charm-tests" / "SKILL.md"
+    updated_skill.write_text("Updated skill\n")
+    (sdk / "revision").write_text(f"{'b' * 40}\n")
+
+    # WHEN a new SDK revision removes a skill and updates another
+    subprocess.run(hook, env=hook_environment, check=True)
+    subprocess.run(hook, env=hook_environment, check=True)
+
+    # THEN owned links follow the new toolkit, while only removed owned links disappear
+    for directory in directories:
+        assert (directory / "run-charm-tests" / "SKILL.md").read_text() == "Updated skill\n"
+        assert not (directory / "setup-charm-tests").is_symlink()
+        assert (directory / "user-skill" / "SKILL.md").read_text() == "User content\n"
+        assert (directory / "user-link").is_symlink()
+
+
+@pytest.mark.parametrize("client", [".agents", ".claude"])
+@pytest.mark.parametrize("conflict", ["directory", "file", "symlink"])
+def test_setup_rejects_skill_conflicts_before_switching_toolkit(
+    sdk: Path, environment: dict[str, str], client: str, conflict: str
+) -> None:
+    # GIVEN an existing user skill that Charm QA does not own
+    home = Path(environment["HOME"])
+    previous = home / ".local" / "share" / "charm-qa" / "toolkits" / "previous"
+    previous.mkdir(parents=True)
+    current = previous.parent.parent / "current"
+    current.symlink_to(previous)
+    directory = home / client / "skills"
+    directory.mkdir(parents=True)
+    target = directory / "run-charm-tests"
+    if conflict == "directory":
+        target.mkdir()
+        (target / "SKILL.md").write_text("User skill\n")
+    elif conflict == "file":
+        target.write_text("User file\n")
+    else:
+        target.symlink_to(home / "missing-user-skill")
+    write_executable(Path(environment["TEST_BIN"]) / "mise", "exit 0")
+
+    # WHEN setup encounters the name conflict
+    result = subprocess.run(
+        ["bash", str(sdk / "hooks" / "setup-project")],
+        env={**environment, "SDK": str(sdk)},
+        capture_output=True,
+        text=True,
+    )
+
+    # THEN it reports the path without changing user content, the toolkit, or other registrations
+    assert result.returncode == 1
+    assert f"conflicts with {target}" in result.stderr
+    assert current.resolve() == previous
+    assert not (home / ".agents" / "skills" / "setup-charm-tests").exists()
+    if conflict == "directory":
+        assert (target / "SKILL.md").read_text() == "User skill\n"
+    elif conflict == "file":
+        assert target.read_text() == "User file\n"
+    else:
+        assert target.readlink() == home / "missing-user-skill"
+
+
+def test_tasks_lists_toolkit_tasks(sdk: Path, environment: dict[str, str]) -> None:
+    # GIVEN a prepared toolkit and a Mise task-listing command
+    state = Path(environment["HOME"]) / ".local" / "share" / "charm-qa"
+    state.mkdir(parents=True)
+    (state / "current").symlink_to(sdk / "toolkit")
+    write_executable(
+        Path(environment["TEST_BIN"]) / "mise",
+        """
+[[ "$1" == -C && "$2" == "$PROJECT_ROOT" && "$3" == tasks && "$4" == ls && "$5" == --name-only ]]
+""",
+    )
+
+    # WHEN listing tasks with a Mise option
+    subprocess.run([str(sdk / "bin" / "charm-qa"), "tasks", "--name-only"], env=environment, check=True)
 
 
 def test_exec_preserves_workspace_and_uses_toolkit_environment(
