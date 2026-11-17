@@ -10,6 +10,14 @@ import pytest
 
 
 def test_charmlint(request: pytest.FixtureRequest, logger: logging.Logger) -> None:
+    _run_charmlint(request, logger, strict=False)
+
+
+def test_charmlint_strict(request: pytest.FixtureRequest, logger: logging.Logger) -> None:
+    _run_charmlint(request, logger, strict=True)
+
+
+def _run_charmlint(request: pytest.FixtureRequest, logger: logging.Logger, *, strict: bool) -> None:
     charmlint = shutil.which("charmlint")
     if charmlint is None:
         pytest.skip("charmlint is not installed.")
@@ -18,7 +26,7 @@ def test_charmlint(request: pytest.FixtureRequest, logger: logging.Logger) -> No
     if charm_source is None:
         pytest.skip("Git or the target charm could not be resolved for linting.")
     result = run(  # nosec B603
-        [charmlint, str(charm_source)],
+        [charmlint, str(charm_source), *(["--strict"] if strict else [])],
         stdout=PIPE,
         stderr=STDOUT,
         text=True,
