@@ -12,6 +12,10 @@ available regardless of substrate.
 
 ## Setup
 
+Run this skill inside the prepared target environment, not from an external
+host managing it. If you are outside it or it has not been prepared, stop and
+ask the user to prepare or enter it before continuing.
+
 ### Charm QA Workshop
 
 If `charm-qa` is available, the SDK already prepares the toolchain and logging
@@ -36,10 +40,9 @@ The remaining setup instructions on this page apply to the Multipass sandbox.
 
 ### Multipass sandbox
 
-Start the VM using the [sandbox guide](../../../development-sandbox/README.md#quick-start)
-and work from `$PROJECT_ROOT` inside it. Sandbox startup prepares the toolchain;
-rerun `scripts/sandbox.sh up` on the host if tool setup failed or its configuration
-changed.
+Work from `$PROJECT_ROOT` inside the prepared sandbox VM. Sandbox startup
+prepares the toolchain; if it is missing or needs reconfiguration, stop and
+report the problem to the user.
 
 To reproduce another Juju client version, follow
 [persistent channel selection](../../../CONTRIBUTING.md#selecting-the-juju-client)
