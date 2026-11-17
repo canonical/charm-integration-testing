@@ -211,6 +211,35 @@ active/idle wait, followed by simple validation without additional restarts.
 These post-cleanup checks are outside the stress execution budget.
 Select ``-k test_live_memory_stress_moderate`` to run it.
 
+Lint the target charm's source
+-----------------------------
+
+``test_charmlint`` downloads the selected Charmhub revision to read its source
+repository and build-generated ``version`` file, then runs charmlint against
+a detached Git checkout rather than the extracted charm. This includes files
+such as unit tests, README, and charmlint configuration that may not be packed.
+Charmlint retains its default policy: errors fail; warnings do not.
+
+The archive must declare exactly one public HTTPS Git repository in
+``charmcraft.yaml`` under ``links.source`` or in legacy ``metadata.yaml`` under
+``source``. The ``version`` file must identify a clean commit hash, an exact
+tag, or a ``git describe`` value ending in ``-<count>-g<hash>``. Dirty versions
+are rejected, and branch names are never substituted for tags or commits.
+GitHub commit abbreviations are resolved through its public API so that build
+merge commits absent from normal branch history can still be fetched.
+
+Missing metadata, unavailable revisions, API errors, and checkout failures fail
+the test without falling back to the packed charm or a repository's default
+branch. The checkout must contain the target charm at its root; monorepo
+subdirectories and multiple source repositories are not supported. Source
+repositories and the GitHub API must be reachable without interactive
+authentication. Git operations disable credential helpers and checkout hooks.
+
+Run just this test with ``--current-state no_bundle -k test_charmlint`` and the
+usual target charm, revision, cloud, and endpoint options. No controller or
+model is bootstrapped for this selection. The logs record the source repository,
+packed version, resolved commit, and full charmlint output.
+
 Generate dynamic bundles
 ------------------------
 
