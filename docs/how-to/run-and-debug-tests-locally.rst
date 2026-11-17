@@ -214,13 +214,20 @@ Select ``-k test_live_memory_stress_moderate`` to run it.
 Lint the target charm's source
 -----------------------------
 
-``test_charmlint`` downloads the selected Charmhub revision to read its source
-repository and build-generated ``version`` file, then runs charmlint against
+``test_charmlint`` downloads the revision selected by bundle synthesis to read
+its source repository and build-generated ``version`` file, then runs charmlint against
 a detached Git checkout instead of the extracted charm, so source-only files
 such as unit tests are included. Charmlint retains its default policy: errors
 fail; warnings do not. A separate ``test_charmlint_strict`` case uses
 ``--strict`` and fails on warnings as well as errors. Both cases log the full
 charmlint output and share the same source checkout.
+
+Bundle synthesis is shared with ``test_build_bundle``; linting and the
+downgrade/upgrade cycle use the target release from that same solution, even
+when the solver chooses a different release from the configured default.
+When resuming beyond ``no_bundle``, the target is read from the existing
+``--target-bundle`` instead. Its revision, channel, and base must be pinned;
+the bundle is not rebuilt and defaults are not substituted.
 
 If the target revision cannot be resolved for the requested environment, both
 lint cases skip with the resolution error as the reason. Bundle building and
@@ -234,7 +241,7 @@ checkout must have the target charm at its root.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap
-a controller or model.
+a controller or model, but it does synthesize the full integration bundle.
 Select only the default case with ``-k 'test_charmlint and not strict'``, or
 only the strict case with ``-k test_charmlint_strict``.
 
