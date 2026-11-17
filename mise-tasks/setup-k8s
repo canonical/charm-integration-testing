@@ -15,7 +15,7 @@ verifies Chaos Mesh. Concierge writes the kubeconfig to $HOME/.kube/config.
 This flushes the host's iptables FORWARD chain and sets its default policy to ACCEPT.
 
 --cloud-name     Juju cloud name (default: local-k8s)
---kubeconfig     Also write a copy of the kubeconfig to PATH and use it (default: $HOME/.kube/config)
+--kubeconfig     Copy the kubeconfig to PATH and use the copy (default: use $HOME/.kube/config)
 --no-chaos-mesh  Skip Chaos Mesh
 --output         Append cloud-name, kubeconfig-path and platform as key=value lines
 USAGE
@@ -67,20 +67,17 @@ echo "==> Flushing the host's iptables FORWARD chain and setting its policy to A
 sudo iptables -F FORWARD
 sudo iptables -P FORWARD ACCEPT
 
+concierge_kubeconfig="$HOME/.kube/config"
+[[ -f "$concierge_kubeconfig" && -r "$concierge_kubeconfig" ]] \
+    || die "Concierge kubeconfig is not a readable file: $concierge_kubeconfig"
 if [[ -n "$kubeconfig" ]]; then
     kubeconfig="$(realpath -m "$kubeconfig")"
-    echo "==> Writing kubeconfig to $kubeconfig..."
+    echo "==> Copying kubeconfig to $kubeconfig..."
     mkdir -p "$(dirname "$kubeconfig")"
-    tmp_kubeconfig="$(mktemp "${kubeconfig}.XXXXXX")"
-    trap 'rm -f -- "$tmp_kubeconfig"' EXIT
-    # shellcheck disable=SC2024
-    sudo k8s config > "$tmp_kubeconfig"
-    mv -fT -- "$tmp_kubeconfig" "$kubeconfig"
-    trap - EXIT
+    install -m 0600 "$concierge_kubeconfig" "$kubeconfig"
 else
-    kubeconfig="$HOME/.kube/config"
+    kubeconfig="$concierge_kubeconfig"
 fi
-[[ -f "$kubeconfig" && -r "$kubeconfig" ]] || die "Kubeconfig is not a readable file: $kubeconfig"
 
 if juju clouds --client --format json | jq -e --arg cloud "$cloud_name" 'has($cloud)' >/dev/null; then
     echo "==> Juju cloud $cloud_name already registered."
