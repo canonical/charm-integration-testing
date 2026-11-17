@@ -2,23 +2,21 @@
 # See LICENSE file for licensing details.
 
 import logging
-import os
 import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import PIPE, STDOUT, run  # nosec B404
 from typing import Iterator
 from urllib.parse import urlsplit
 
 import pytest
-import requests
 import yaml
 from juju import JujuClient
 from pydantic import BaseModel, Field
 
 from bundle_builder_x import Charm
+from test_suite.fixtures.git import GitClient
 
 
 class _Links(BaseModel):
@@ -90,47 +88,6 @@ def _version_ref(version: str) -> str:
     return f"refs/tags/{version}"
 
 
-def _git(logger: logging.Logger, *args: str) -> str:
-    result = run(  # nosec B603, B607
-        ["git", "-c", "credential.helper=", "-c", f"core.hooksPath={os.devnull}", *args],
-        stdout=PIPE,
-        stderr=STDOUT,
-        text=True,
-        check=False,
-        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"},
-    )
-    if result.stdout:
-        logger.info("Git output:\n%s", result.stdout)
-    result.check_returncode()
-    return result.stdout.strip()
-
-
-def _github_commit(repository: str, revision: str) -> str:
-    path = urlsplit(repository).path.strip("/").removesuffix(".git")
-    response = requests.get(f"https://api.github.com/repos/{path}/commits/{revision}", timeout=30)
-    response.raise_for_status()
-    data = response.json()
-    commit = data.get("sha") if isinstance(data, dict) else None
-    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit) or not commit.startswith(revision):
-        raise ValueError("GitHub did not resolve the packed version to a matching full commit SHA.")
-    return commit
-
-
-def _checkout_source(source: _CharmSource, destination: Path, logger: logging.Logger) -> str:
-    revision = _version_ref(source.version)
-    logger.info("Checking out charm source %s at packed version %s.", source.repository, source.version)
-    if urlsplit(source.repository).hostname == "github.com" and not revision.startswith("refs/tags/"):
-        # Build versions can name PR merge commits that a normal clone cannot see.
-        commit = revision if len(revision) == 40 else _github_commit(source.repository, revision)
-        _git(logger, "init", "--quiet", str(destination))
-        _git(logger, "-C", str(destination), "fetch", "--depth=1", "--no-tags", "--", source.repository, commit)
-    else:
-        _git(logger, "clone", "--no-checkout", "--", source.repository, str(destination))
-        commit = _git(logger, "-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
-    _git(logger, "-C", str(destination), "checkout", "--detach", commit)
-    return commit
-
-
 def _verify_charm_root(source_dir: Path, expected_name: str) -> None:
     for filename in ("charmcraft.yaml", "metadata.yaml"):
         path = source_dir / filename
@@ -164,7 +121,7 @@ def target_charm_source(
 
         with zipfile.ZipFile(charm_archive) as archive:
             source = _read_source(archive)
-        commit = _checkout_source(source, source_dir, logger)
+        commit = GitClient(logger).checkout(source.repository, _version_ref(source.version), source_dir)
         _verify_charm_root(source_dir, target_resolved_charm.name)
 
         logger.info(
