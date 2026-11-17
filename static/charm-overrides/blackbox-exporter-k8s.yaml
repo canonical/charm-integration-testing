@@ -1,14 +1,20 @@
 ---
 # Source: https://github.com/canonical/blackbox-exporter-k8s-operator
-#
-# require-cmr-mesh, service-mesh (requires) and provide-cmr-mesh (provides) are already
-# optional: true upstream. They are only present on the dev track (not tracks 0.28, 1 or 2);
-# tracks predating dev do not yet have the service_mesh integration.
-#
-# provide-cmr-mesh must track self-metrics-endpoint's cross-model status; see GH-980.
+# Tracks 1/2 predate mesh; fallback covers 0.28/dev and future tracks.
+# Mesh companions follow charm.py::ServiceMeshConsumer's self-metrics-endpoint policy.
 overrides:
   - criteria:
-      - track: dev
+      - none_of:
+          - track: '1'
+          - track: '2'
+    requires:
+      require-cmr-mesh:
+        optional: true  # optional identity exchange; ServiceMeshConsumer::_send_cmr_data
+      service-mesh:
+        optional: true  # no-ops without a relation; ServiceMeshConsumer::update_service_mesh
+    provides:
+      provide-cmr-mesh:
+        optional: true  # secondary mesh hook; charm.py::_common_exit_hook reaches ActiveStatus without it
     constraints:
       - 'charms(cross_model(endpoint[self-metrics-endpoint])) == charms(cross_model(endpoint[provide-cmr-mesh]))'
       - 'len(endpoint[provide-cmr-mesh]) == len(cross_model(endpoint[provide-cmr-mesh]))'
