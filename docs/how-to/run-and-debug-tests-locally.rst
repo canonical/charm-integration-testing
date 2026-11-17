@@ -225,8 +225,8 @@ without rebuilding.
 If bundle synthesis cannot select a target release, or a pinned saved release
 is unavailable, both lint cases skip with the resolution error as the reason.
 Bundle building and deployment retain their existing failure behavior.
-Charmhub connection errors, malformed saved bundles, download failures,
-missing provenance, and checkout failures still fail linting.
+Internal solver/build errors, Charmhub connection errors, malformed saved bundles,
+download failures, missing provenance, and checkout failures still fail linting.
 
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
