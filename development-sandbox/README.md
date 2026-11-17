@@ -4,7 +4,7 @@ A Multipass VM with Copilot and development tools for charm integration testing.
 Your checkout is mounted into the VM, so edits are visible on the host.
 
 For an agent-neutral, distributable Workshop environment, see the draft
-[Charm QA Workshop SDK](workshop/README.md).
+[Charm QA Workshop SDK](../workshop/README.md).
 
 ## Quick start
 

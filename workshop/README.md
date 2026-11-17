@@ -135,9 +135,9 @@ Paseo can be composed into the same environment. Its daemon can find the
 registered skills. Daemon connectivity, authentication and provider installation
 belong to that SDK, not this one.
 
-The optional `mise run agent` development launcher is separate work in
+The optional `mise run agent` development launcher was added separately in
 [#1284 (Add a portable development agent task)](https://github.com/canonical/charm-integration-testing/pull/1284).
-It is not included in this branch or required by the SDK. It supplies
+It is included in the toolkit but is not required by the SDK. It supplies
 framework-development context, not a generic charm-project prompt, and currently
 uses `--yolo`. Keep it for trusted framework development rather than making it
 the default Workshop agent action.

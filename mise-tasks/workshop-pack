@@ -43,7 +43,7 @@ trap 'rm -rf -- "$context"' EXIT
 # Keep local credentials, virtualenvs and untracked artifacts out of the build context.
 mkdir "$context/toolkit"
 git -C "$project_root" archive "$revision" | tar -x -C "$context/toolkit"
-sdk_source="$context/toolkit/development-sandbox/workshop"
+sdk_source="$context/toolkit/workshop"
 cp "$sdk_source/sdkcraft.yaml" "$sdk_source/environment.sh" "$context/"
 cp -R "$sdk_source/hooks" "$sdk_source/bin" "$context/"
 printf '%s\n' "$revision" > "$context/revision"

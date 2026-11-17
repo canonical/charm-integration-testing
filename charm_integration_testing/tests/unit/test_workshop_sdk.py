@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-SDK_SOURCE = Path(__file__).resolve().parents[3] / "development-sandbox" / "workshop"
-PACK_TASK = SDK_SOURCE.parents[1] / "mise-tasks" / "workshop-pack"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SDK_SOURCE = PROJECT_ROOT / "workshop"
+PACK_TASK = PROJECT_ROOT / "mise-tasks" / "workshop-pack"
 REVISION = "a" * 40
 
 
@@ -71,7 +72,7 @@ case "$1" in
 esac
 """,
     )
-    setup = SDK_SOURCE.parents[1] / "mise-tasks" / "setup"
+    setup = PROJECT_ROOT / "mise-tasks" / "setup"
 
     # WHEN preparing Workshop on a host
     subprocess.run(["bash", str(setup), "--group", "workshop"], env=environment, check=True)
@@ -97,10 +98,8 @@ def test_pack_exports_only_the_selected_commit(
     repository = tmp_path / "repository"
     repository.mkdir()
     subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
-    shutil.copy2(SDK_SOURCE.parents[1] / ".gitignore", repository / ".gitignore")
-    shutil.copytree(
-        SDK_SOURCE, repository / "development-sandbox" / "workshop", ignore=shutil.ignore_patterns("__pycache__")
-    )
+    shutil.copy2(PROJECT_ROOT / ".gitignore", repository / ".gitignore")
+    shutil.copytree(SDK_SOURCE, repository / "workshop", ignore=shutil.ignore_patterns("__pycache__"))
     task = repository / "mise-tasks" / "workshop-pack"
     task.parent.mkdir()
     shutil.copy2(PACK_TASK, task)
