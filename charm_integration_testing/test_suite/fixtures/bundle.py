@@ -19,6 +19,9 @@ from bundle_builder_x import (
     Solution,
     SpecFile,
 )
+from bundle_builder_x import (
+    JujuVersion as BundleJujuVersion,
+)
 
 from ..scheduler.states import State
 
@@ -148,9 +151,13 @@ def target_resolved_charm(
     application = saved.applications[target_application]
     client: CharmhubClient = request.getfixturevalue("charmhub_client")
     arch: str = request.getfixturevalue("target_arch")
+    platform: str = request.getfixturevalue("target_platform")
+    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
     return client.charm_from_store(
         charm_name=application.charm,
         ubuntu_arch=arch,
+        platform=platform,
+        juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
         charm_track=application.channel.track,
         charm_risk=application.channel.risk,
         charm_branch=application.channel.branch or None,

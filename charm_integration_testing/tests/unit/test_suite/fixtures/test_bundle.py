@@ -72,6 +72,8 @@ class Catalog(CharmhubClient):
         charm_track=None, charm_risk=None, charm_revision=None,
         ubuntu_version=None, charm_branch=None,
     ):
+        self.last_platform = platform
+        self.last_juju_version = juju_version
         for charm in self.charms:
             if (
                 charm.name == charm_name
@@ -240,10 +242,14 @@ def test_resumed_run_uses_pinned_bundle_not_defaults(pytester: pytest.Pytester) 
     )
     pytester.makepyfile(
         """
-        def test_selected(target_resolved_charm):
+        from bundle_builder_x import JujuVersion
+
+        def test_selected(target_resolved_charm, charmhub_client):
             assert target_resolved_charm.revision == 200
             assert str(target_resolved_charm.channel) == "1/stable"
             assert target_resolved_charm.ubuntu_version == "22.04"
+            assert charmhub_client.last_platform == "machine"
+            assert charmhub_client.last_juju_version == JujuVersion.parse("3.6.29")
         """
     )
     original = bundle.read_text()
@@ -258,6 +264,8 @@ def test_resumed_run_uses_pinned_bundle_not_defaults(pytester: pytest.Pytester) 
         "existing",
         "--target-application",
         "target",
+        "--target-platform",
+        "machine",
         "--target-bundle",
         str(bundle),
         "-q",
