@@ -14,9 +14,9 @@ import pytest
 import yaml
 from juju import JujuClient
 from pydantic import BaseModel, Field
+from utils.git import GitClient
 
 from bundle_builder_x import Charm
-from test_suite.fixtures.git import GitClient
 
 
 class _Links(BaseModel):

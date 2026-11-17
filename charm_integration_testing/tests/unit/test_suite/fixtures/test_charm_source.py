@@ -11,7 +11,7 @@ from subprocess import CalledProcessError
 import pytest
 import requests
 from test_suite.fixtures import charm_source as module
-from test_suite.fixtures.git import GitClient
+from utils.git import GitClient
 
 
 @pytest.mark.parametrize(
