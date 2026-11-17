@@ -3,6 +3,7 @@
 
 import json
 import logging
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ import pytest
 import requests
 from test_suite.fixtures import charm_source as module
 from utils.git import GitClient
+
+pytest_plugins = ["pytester"]
 
 
 @pytest.mark.parametrize(
@@ -301,3 +304,107 @@ def test_checkout_accepts_build_only_charmcraft(tmp_path: Path) -> None:
 
     # WHEN verifying the source root, THEN the legacy name identifies the charm
     module._verify_charm_root(tmp_path, "example")
+
+
+@pytest.fixture
+def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> pytest.Pytester:
+    executable = pytester.path / "charmlint"
+    executable.write_text(f"#!{sys.executable}\nraise AssertionError('charmlint must not run')\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(pytester.path))
+    monkeypatch.setenv("HOME", str(pytester.path))
+    pytester.makepyfile(test_lint="from test_suite.test_charmlint import test_charmlint, test_charmlint_strict")
+    return pytester
+
+
+def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pytester) -> None:
+    # GIVEN the same unsupported-environment failure as execution 1161269
+    charmlint_pytester.makeconftest(
+        """
+        import logging
+        import pytest
+        from bundle_builder_x import AssumesMismatchError, ReleaseRequest
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("charmlint-resolution")
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            raise AssumesMismatchError(
+                request=ReleaseRequest(charm_name="ceph-radosgw", juju_version="3.6.29"),
+                unmet_requirements=("feature=unsupported-openstack",),
+                available_features=("juju",),
+            )
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            pytest.fail("Juju must not be acquired for an unresolved target")
+        """
+    )
+    charmlint_pytester.makepyfile(
+        test_bundle="""
+        def test_build_bundle(target_resolved_charm):
+            pass
+        """
+    )
+
+    # WHEN both lint cases and a deployment-dependent case request the target
+    result = charmlint_pytester.runpytest("-rs")
+
+    # THEN linting skips with the cause, while bundle setup still fails
+    result.assert_outcomes(skipped=2, errors=1)
+    result.stdout.fnmatch_lines(["*Cannot resolve target charm for linting:*unsupported-openstack*"])
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        pytest.param("resolution", "Charmhub unavailable", id="connection"),
+        pytest.param("download", "Download failed", id="download"),
+        pytest.param("provenance", "Packed charm has no version file", id="provenance"),
+    ],
+)
+def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stage: str, message: str) -> None:
+    # GIVEN an infrastructure failure, a download failure, or missing provenance
+    charmlint_pytester.makeconftest(
+        f"""
+        import logging
+        import zipfile
+        from types import SimpleNamespace
+        import pytest
+        import requests
+        from bundle_builder_x import CharmReleaseNotFoundException
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def logger():
+            return logging.getLogger("charmlint-resolution")
+
+        @pytest.fixture(scope="session")
+        def target_resolved_charm():
+            if {stage!r} == "resolution":
+                raise requests.HTTPError("Charmhub unavailable")
+            return SimpleNamespace(name="example", revision=1)
+
+        class JujuStub:
+            def download_charm(self, name, revision, destination):
+                if {stage!r} == "download":
+                    raise CharmReleaseNotFoundException("Download failed")
+                with zipfile.ZipFile(destination, "w") as archive:
+                    archive.writestr("metadata.yaml", "name: example")
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            return JujuStub()
+        """
+    )
+
+    # WHEN acquiring the source through both real test cases
+    result = charmlint_pytester.runpytest()
+
+    # THEN errors other than target resolution are not converted to skips
+    result.assert_outcomes(failed=2)
+    result.stdout.fnmatch_lines([f"*{message}*"])
+    assert "charmlint must not run" not in result.stdout.str()

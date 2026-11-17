@@ -222,6 +222,11 @@ fail; warnings do not. A separate ``test_charmlint_strict`` case uses
 ``--strict`` and fails on warnings as well as errors. Both cases log the full
 charmlint output and share the same source checkout.
 
+If the target revision cannot be resolved for the requested environment, both
+lint cases skip with the resolution error as the reason. Bundle building and
+deployment retain their existing failure behavior. Charmhub connection errors,
+download failures, missing provenance, and checkout failures still fail linting.
+
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
 test; it does not fall back to the packed charm or a default branch. The source
