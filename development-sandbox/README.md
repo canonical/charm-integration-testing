@@ -19,6 +19,18 @@ Ask Copilot to develop or test a validator, reproduce a failure, or review a PR.
 Skills such as `/setup-k8s`, `/setup-lxd`, `/develop-validator`, and `/test-validator`
 handle substrate setup and testing.
 
+The sandbox delegates Copilot execution to a reusable Mise task. On a prepared
+Ubuntu host, run it directly:
+
+```bash
+mise run setup -- --group agent
+mise run agent -- "Describe the task"
+```
+
+The task also accepts `--interactive` and Copilot arguments after `--`.
+It runs Copilot with unrestricted permissions (`--yolo`), including access to
+the host's files and credentials; use it only in an environment you trust.
+
 ## Copilot CLI arguments
 
 Pass Copilot CLI arguments after `--`, for example:
