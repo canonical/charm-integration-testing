@@ -222,6 +222,11 @@ Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
 without rebuilding.
 
+If the target revision cannot be resolved for the requested environment, both
+lint cases skip with the resolution error as the reason. Bundle building and
+deployment retain their existing failure behavior. Charmhub connection errors,
+download failures, missing provenance, and checkout failures still fail linting.
+
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
 test; it does not fall back to the packed charm or a default branch. The source
