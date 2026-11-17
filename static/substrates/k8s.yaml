@@ -5,7 +5,8 @@ juju:
   disable: true
 providers:
   k8s:
-    # `setup-k8s` overrides the snap channel with the pin in mise.toml.
+    # `setup-k8s` overrides the snap channel with the pin in mise.toml:
+    # https://github.com/canonical/concierge/issues/292.
     enable: true
     bootstrap: false
     features:
