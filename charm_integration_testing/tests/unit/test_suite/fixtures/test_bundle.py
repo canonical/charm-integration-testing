@@ -1,6 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import sys
 from pathlib import Path
 from textwrap import dedent
 from xml.etree import ElementTree
@@ -356,3 +357,78 @@ def test_failed_synthesis_is_shared_and_reported_by_build_test(pytester: pytest.
     assert failure is not None
     assert "UncompletableBundleError" in failure.get("message", "")
     assert build.find("error") is None
+
+
+@pytest.mark.parametrize("lint_before_build", [True, False], ids=["lint-first", "build-first"])
+def test_failed_synthesis_skips_only_charmlint(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, lint_before_build: bool
+) -> None:
+    # GIVEN an unsatisfiable bundle and lint/download probes that must not run
+    executable = pytester.path / "charmlint"
+    executable.write_text(f"#!{sys.executable}\nraise AssertionError('charmlint must not run')\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(pytester.path))
+    pytester.makeconftest(
+        _FIXTURES
+        + _CATALOG
+        + dedent("""
+        from test_suite.fixtures.charm_source import target_charm_source
+
+        @pytest.fixture(scope="session")
+        def juju_client():
+            pytest.fail("Juju must not be acquired for an unresolved target")
+        """)
+    )
+    lint_module = "test_00_lint" if lint_before_build else "test_02_lint"
+    pytester.makepyfile(
+        **{lint_module: "from test_suite.test_charmlint import test_charmlint, test_charmlint_strict"},
+        test_01_export="from test_suite.test_build_bundle import test_build_bundle",
+        test_03_verify="""
+        def test_only_one_attempt(bundle_builder):
+            assert bundle_builder.builds == 1
+        """,
+    )
+    junit = pytester.path / "junit.xml"
+
+    # WHEN both lint cases and the production build test request the same solution
+    result = pytester.runpytest(
+        "--target-charm",
+        "nrpe",
+        "--target-application",
+        "target",
+        "--target-endpoint",
+        "general-info",
+        "--neighbor-charm",
+        "ubuntu",
+        "--neighbor-application",
+        "neighbor",
+        "--neighbor-endpoint",
+        "juju-info",
+        "--target-revision",
+        "999",
+        "--target-platform",
+        "machine",
+        "--current-state",
+        "no_bundle",
+        "--prefix",
+        "bundle-test",
+        "--mermaid-output",
+        str(pytester.path / "bundle.mmd"),
+        f"--junitxml={junit}",
+        "-q",
+        "-rs",
+    )
+
+    # THEN only linting skips, preserving the solver reason and original build failure
+    result.assert_outcomes(passed=1, failed=1, skipped=2)
+    cases = {case.get("name"): case for case in ElementTree.parse(junit).iter("testcase")}
+    for name in ("test_charmlint", "test_charmlint_strict"):
+        skipped = cases[name].find("skipped")
+        assert skipped is not None
+        assert "Cannot resolve target charm for linting:" in skipped.get("message", "")
+        assert "Could not build a complete valid bundle:" in skipped.get("message", "")
+        assert "No matching synthetic release" in skipped.get("message", "")
+    failure = cases["test_build_bundle"].find("failure")
+    assert failure is not None
+    assert "UncompletableBundleError" in failure.get("message", "")
+    assert "charmlint must not run" not in result.stdout.str()

@@ -318,7 +318,7 @@ def charmlint_pytester(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatc
 
 
 def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pytester) -> None:
-    # GIVEN the same unsupported-environment failure as execution 1161269
+    # GIVEN a structured release-resolution failure
     charmlint_pytester.makeconftest(
         """
         import logging
@@ -362,12 +362,13 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
     ("stage", "message"),
     [
         pytest.param("resolution", "Charmhub unavailable", id="connection"),
+        pytest.param("invalid-bundle", "Invalid saved bundle", id="invalid-bundle"),
         pytest.param("download", "Download failed", id="download"),
         pytest.param("provenance", "Packed charm has no version file", id="provenance"),
     ],
 )
 def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stage: str, message: str) -> None:
-    # GIVEN an infrastructure failure, a download failure, or missing provenance
+    # GIVEN a transport, saved-bundle, download, or provenance failure
     charmlint_pytester.makeconftest(
         f"""
         import logging
@@ -386,6 +387,8 @@ def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stag
         def target_resolved_charm():
             if {stage!r} == "resolution":
                 raise requests.HTTPError("Charmhub unavailable")
+            if {stage!r} == "invalid-bundle":
+                raise ValueError("Invalid saved bundle")
             return SimpleNamespace(name="example", revision=1)
 
         class JujuStub:
