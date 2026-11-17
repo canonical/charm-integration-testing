@@ -83,8 +83,8 @@ _is_mounted() {
 # append "NAME=value" entries onto the array named by $1 (nameref) for
 # passthrough into the VM via _vm_exec_with_env.
 # Example: SANDBOX_VAR_CHARMHUB_API_URL=... -> CHARMHUB_API_URL=... in the VM.
-# Credential variables are excluded here because callers handle credential
-# mapping and fallback explicitly.
+# GITHUB_TOKEN is excluded because callers map it to both GH_TOKEN and
+# GITHUB_TOKEN and handle its fallback explicitly.
 _collect_sandbox_vars() {
     local -n _target="$1"
     local _var _name
@@ -92,7 +92,7 @@ _collect_sandbox_vars() {
         [[ "$_var" == SANDBOX_VAR_?* ]] || continue
         _name="${_var#SANDBOX_VAR_}"
         case "$_name" in
-            GITHUB_TOKEN|COPILOT_GITHUB_TOKEN) continue ;;
+            GITHUB_TOKEN) continue ;;
         esac
         _target+=("$_name=${!_var}")
     done < <(compgen -e)
@@ -122,7 +122,7 @@ _vm_exec_with_env() {
     local -n _env="$1"
     shift
     local _env_file
-    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX)
+    _env_file=$(multipass exec "$VM_NAME" -- mktemp /tmp/sandbox-env-XXXXXX </dev/null)
     _vm_temp_files+=("$_env_file")
     printf 'export %q\n' "${_env[@]}" \
         | multipass exec "$VM_NAME" -- bash -c 'cat > "$1"' bash "$_env_file"
@@ -148,7 +148,7 @@ _vm_gh_logged_in() {
     multipass exec "$VM_NAME" -- bash -lc "
         unset GH_TOKEN GITHUB_TOKEN
         cd '$VM_MOUNT' && gh auth status --hostname github.com
-    " &>/dev/null
+    " </dev/null &>/dev/null
 }
 
 # Resolved GitHub credentials, populated by _require_github_auth.
@@ -281,7 +281,7 @@ Usage:
                                                Create or resume the VM
   scripts/sandbox.sh down                      Stop the VM (preserves state)
   scripts/sandbox.sh destroy                   Delete the VM permanently
-  scripts/sandbox.sh shell                     Open a shell inside the VM
+  scripts/sandbox.sh shell [-- COMMAND ...]     Open a shell or run a command inside the VM
   scripts/sandbox.sh run 'task description' [-- COPILOT_ARGS...]
   scripts/sandbox.sh run --interactive [-- COPILOT_ARGS...]
   scripts/sandbox.sh --help                    Show this help
@@ -614,6 +614,10 @@ _cmd_destroy() {
 # Subcommand: shell
 # ---------------------------------------------------------------------------
 _cmd_shell() {
+    if [ "${1:-}" = "--" ]; then
+        shift
+    fi
+
     if ! _is_mounted; then
         echo "==> Mount '$VM_MOUNT' not found — run 'scripts/sandbox.sh up' first to mount the project."
         exit 1
@@ -623,9 +627,13 @@ _cmd_shell() {
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
-    _vm_exec_with_env _env_args bash -lc "
-        cd '$VM_MOUNT' && exec bash -l
-    "
+    if [ "$#" -gt 0 ]; then
+        _vm_exec_with_env _env_args bash -lc 'exec "$@"' bash "$@"
+    else
+        _vm_exec_with_env _env_args bash -lc "
+            cd '$VM_MOUNT' && exec bash -l
+        "
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -708,9 +716,11 @@ EOF
     fi
 
     _env_args=("PROJECT_ROOT=$VM_MOUNT")
-    [ -n "$COPILOT_TOKEN" ] && _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
     [ -n "${SANDBOX_VAR_GITHUB_TOKEN:-}" ] && _env_args+=("GH_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN" "GITHUB_TOKEN=$SANDBOX_VAR_GITHUB_TOKEN")
     _collect_sandbox_vars _env_args
+    if [ -z "${SANDBOX_VAR_COPILOT_GITHUB_TOKEN:-}" ] && [ -n "$COPILOT_TOKEN" ]; then
+        _env_args+=("COPILOT_GITHUB_TOKEN=$COPILOT_TOKEN")
+    fi
 
     local agent_args=()
     [ "$INTERACTIVE" = "false" ] || agent_args+=(--interactive)
@@ -736,7 +746,8 @@ case "${1:-}" in
         _cmd_destroy
         ;;
     shell)
-        _cmd_shell
+        shift
+        _cmd_shell "$@"
         ;;
     run)
         shift
