@@ -5,117 +5,25 @@ import logging
 from pathlib import Path
 
 import pytest
-from juju import JujuVersion
 
-from bundle_builder_x import (
-    AppSpec,
-    BundleBuilder,
-    IntegrationSpec,
-    ModelSpec,
-    SpecFile,
-)
+from bundle_builder_x import Solution
 
 from .scheduler.states import State
 
 
 @pytest.mark.state(requires=State.NO_BUNDLE, provides=State.NO_CONTROLLER)
 def test_build_bundle(
-    bundle_builder: BundleBuilder,
+    request: pytest.FixtureRequest,
     bundle_mermaid_output: Path,
     logger: logging.Logger,
-    juju_cli_version: JujuVersion,
-    target_application: str,
     target_bundle: Path,
-    target_channel: str | None,
-    target_charm: str,
     target_controller: str,
-    target_endpoint: str,
     model: str,
-    target_platform: str,
-    target_arch: str,
-    target_revision: int | None,
-    target_series: str | None,
-    neighbor_application: str,
     neighbor_bundle: Path | None,
-    neighbor_charm: str,
     neighbor_controller: str | None,
-    neighbor_endpoint: str,
     neighbor_model: str | None,
-    neighbor_platform: str,
-    neighbor_arch: str,
 ) -> None:
-    target_app_spec = AppSpec(
-        charm=target_charm,
-        channel=target_channel,
-        revision=target_revision,
-        base=target_series,
-    )
-    neighbor_app_spec = AppSpec(charm=neighbor_charm)
-
-    if neighbor_bundle is None:
-        # Single-model (non-CMR) build
-        spec = SpecFile(
-            models=[
-                ModelSpec(
-                    name=model,
-                    platform=target_platform,
-                    arch=target_arch,
-                    # TODO: Juju model isn't bootstrapped until later in the test setup,
-                    # so we can't resolve the Juju version here. We should refactor to
-                    # support the user passing in the juju version for target and neighbor.
-                    juju=str(juju_cli_version),
-                    controller=target_controller,
-                    applications={
-                        target_application: target_app_spec,
-                        neighbor_application: neighbor_app_spec,
-                    },
-                    integrations=[
-                        IntegrationSpec(
-                            application=target_application,
-                            endpoint=target_endpoint,
-                            remote_application=neighbor_application,
-                            remote_endpoint=neighbor_endpoint,
-                        ),
-                    ],
-                ),
-            ]
-        )
-    else:
-        assert neighbor_controller is not None
-        assert neighbor_model is not None
-        # Cross-model relation (CMR) build
-        spec = SpecFile(
-            models=[
-                ModelSpec(
-                    name=model,
-                    platform=target_platform,
-                    arch=target_arch,
-                    juju=str(juju_cli_version),
-                    controller=target_controller,
-                    applications={target_application: target_app_spec},
-                    integrations=[
-                        IntegrationSpec(
-                            application=target_application,
-                            endpoint=target_endpoint,
-                            remote_application=neighbor_application,
-                            remote_endpoint=neighbor_endpoint,
-                            remote_model=neighbor_model,
-                            remote_controller=neighbor_controller,
-                        ),
-                    ],
-                ),
-                ModelSpec(
-                    name=neighbor_model,
-                    platform=neighbor_platform,
-                    arch=neighbor_arch,
-                    juju=str(juju_cli_version),
-                    controller=neighbor_controller,
-                    applications={neighbor_application: neighbor_app_spec},
-                ),
-            ]
-        )
-
-    solution = bundle_builder.build(spec)
+    solution: Solution = request.getfixturevalue("bundle_solution")
 
     separator = "-" * 80
     bundles_by_model = {b.model: b for b in solution.bundles}
