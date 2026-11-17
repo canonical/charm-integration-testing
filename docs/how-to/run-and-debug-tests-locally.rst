@@ -382,15 +382,15 @@ and machine models. It finds persistent storage attached to unit 0 of the target
 application through Juju's ``storage-list`` and ``storage-get`` commands. It skips
 when the unit has no attached storage. Pod ephemeral storage is not targeted.
 
-Each storage location must be a mounted filesystem. Lookup failures, missing
+Each storage location must be a mounted file system. Lookup failures, missing
 mounts and raw block storage fail the test rather than falling back to the
-execution working directory. Locations on the same filesystem are filled once.
+execution working directory. Locations on the same file system are filled once.
 By default, a unique file allocates 98 percent of the available space reported
-by ``df`` on each filesystem. This does not guarantee 98 percent total filesystem
+by ``df`` on each file system. This does not guarantee 98 percent total file system
 usage or that the workload runs out of space. Per-charm disk fill size settings
-override the allocation size for each filesystem.
+override the allocation size for each file system.
 
-All bundle models must be active/idle before allocation. All target filesystems
+All bundle models must be active/idle before allocation. All target file systems
 are filled before the ten minute hold begins. No unhealthy status transition is
 required and validators do not run during the hold. Cleanup attempts to remove
 every test file, including partial allocations, even if another removal fails.
