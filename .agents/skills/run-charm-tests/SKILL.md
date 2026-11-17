@@ -588,7 +588,7 @@ mise run test:suite -- \
 ### Environment Variables
 
 ```bash
-export KUBECONFIG=/home/ubuntu/k8s.yaml  # For K8s controller access
+export KUBECONFIG=$HOME/.kube/config  # For K8s controller access
 export JUJU_DATA=$HOME/.local/share/juju  # Juju metadata
 export LOG_LEVEL=DEBUG
 export TEST_OUTPUT_DIR=./test-logs
@@ -717,7 +717,7 @@ juju clouds | grep local-k8s
 
 # If not found, install and configure K8s
 # (See setup-k8s skill documentation)
-mise run sandbox:setup-k8s
+mise run setup-k8s
 
 # Bootstrap a K8s controller
 juju bootstrap local-k8s k8s-ctrl --bootstrap-constraints root-disk=5G

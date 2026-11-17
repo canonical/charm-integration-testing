@@ -349,7 +349,7 @@ add the override, validate with and without it, and confirm the expected result.
      `KUBECONFIG_<cloud>` env var (hyphens become underscores), **not** from plain `KUBECONFIG`.
      For the `local-k8s` cloud used here, export the kubeconfig written by `/setup-k8s`:
      ```bash
-     export KUBECONFIG_local_k8s=/home/ubuntu/k8s.yaml
+     export KUBECONFIG_local_k8s=$HOME/.kube/config
      ```
      If this is missing, the client is silently `None`: `test_pod_deletion` fails with
      "KubernetesClient was not instantiated correctly", no snapshots are collected, and
