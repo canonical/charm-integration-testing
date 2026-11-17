@@ -68,7 +68,6 @@ from bundle_builder_x import (
     BundleBuilder,
     BundleDiagnostic,
     Charm,
-    CharmChannel,
     CharmhubClient,
     CharmReleaseNotFoundException,
     FeatureMismatchDiagnostic,
@@ -84,9 +83,6 @@ from bundle_builder_x import (
     UnresolvedIntegrationDiagnostic,
     leaf_release_errors,
 )
-from bundle_builder_x import (
-    JujuVersion as BundleJujuVersion,
-)
 from test_suite.fixtures.controller_spec import needs_same_controller_cloud_registration
 from test_suite.fixtures.juju import get_juju_client_for_registered_models
 from test_suite.remote_logging import (
@@ -97,6 +93,7 @@ from test_suite.scheduler.states import STATES_WITHOUT_EXISTING_CONTROLLER, STAT
 
 pytest_plugins = [
     "test_suite.scheduler.plugin",
+    "test_suite.fixtures.bundle",
     "test_suite.fixtures.charm_source",
     "test_suite.fixtures.controller_spec",
     "test_suite.fixtures.integration_spec",
@@ -623,7 +620,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_bundle(request: pytest.FixtureRequest) -> Path:
     """Path to the target model's bundle YAML. Defaults to ``generated-target-bundle.yaml``."""
     value = request.config.getoption("--target-bundle")
@@ -656,7 +653,7 @@ def neighbor_bundle(request: pytest.FixtureRequest, is_cmr_test: bool) -> Path |
     return ppath
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_application(request: pytest.FixtureRequest) -> str:
     """Name of the charm application under test, passed via ``--target-application``."""
     value = request.config.getoption("--target-application")
@@ -666,7 +663,7 @@ def target_application(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def target_endpoint(request: pytest.FixtureRequest) -> str:
     """Juju endpoint on the target application, passed via ``--target-endpoint``."""
     value = request.config.getoption("--target-endpoint")
@@ -676,7 +673,7 @@ def target_endpoint(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_application(request: pytest.FixtureRequest) -> str:
     """Name of the neighbor application, passed via ``--neighbor-application``."""
     value = request.config.getoption("--neighbor-application")
@@ -686,7 +683,7 @@ def neighbor_application(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_endpoint(request: pytest.FixtureRequest) -> str:
     """Juju endpoint on the neighbor application, passed via ``--neighbor-endpoint``."""
     value = request.config.getoption("--neighbor-endpoint")
@@ -716,7 +713,7 @@ def target_charm(request: pytest.FixtureRequest) -> str:
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_charm(request: pytest.FixtureRequest) -> str:
     """Charmhub name of the neighbor charm, passed via ``--neighbor-charm``."""
     value = request.config.getoption("--neighbor-charm")
@@ -748,63 +745,6 @@ def target_revision(request: pytest.FixtureRequest) -> int | None:
     return None if value == "default" else int(value)
 
 
-@pytest.fixture(scope="session")
-def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
-    """Canonical charm metadata for the target revision the cycle refreshes back to.
-
-    When the caller pins ``--target-revision``/``--target-channel`` those are used; otherwise
-    ``charm_from_store`` falls back to the charm overrides defaults, so a "latest release" run
-    still resolves a concrete revision and base. The whole downgrade/upgrade cycle is skipped
-    when the target cannot be resolved on the requested series.
-    """
-    target_charm: str = request.getfixturevalue("target_charm")
-    target_channel: str | None = request.getfixturevalue("target_channel")
-    target_revision: int | None = request.getfixturevalue("target_revision")
-    target_series: str | None = request.getfixturevalue("target_series")
-    target_arch: str = request.getfixturevalue("target_arch")
-    target_platform: str = request.getfixturevalue("target_platform")
-    juju_cli_version: JujuVersion = request.getfixturevalue("juju_cli_version")
-    bundle_juju_version = BundleJujuVersion.parse(str(juju_cli_version))
-    charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
-
-    channel = CharmChannel.model_validate(target_channel) if target_channel else None
-    channel_track = channel.track or None if channel else None
-    channel_risk = channel.risk or None if channel else None
-    channel_branch = channel.branch or None if channel else None
-
-    try:
-        return charmhub_client.charm_from_store(
-            charm_name=target_charm,
-            ubuntu_arch=target_arch,
-            charm_track=channel_track,
-            charm_risk=channel_risk,
-            charm_branch=channel_branch,
-            charm_revision=target_revision,
-            ubuntu_version=target_series,
-            platform=target_platform,
-            juju_version=bundle_juju_version,
-        )
-    except BaseMismatchError:
-        # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
-        # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.
-        pytest.skip(
-            f"Charm '{target_charm}' target does not support the requested base "
-            f"'{target_series or 'default'}'; the downgrade/upgrade refresh cycle is untestable."
-        )
-    except ReleaseUnavailableError as exc:
-        if (
-            target_revision is None
-            and target_channel is None
-            and target_series is not None
-            and exc.kind is ReleaseUnavailableKind.DEFAULT_RELEASE_NOT_FOUND
-        ):
-            pytest.skip(
-                f"Charm '{target_charm}' has no release for the requested base '{target_series}'; "
-                "the downgrade/upgrade refresh cycle is untestable."
-            )
-        raise
-
-
 @pytest.fixture
 def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     """Revision to downgrade to for the charm under test.
@@ -816,14 +756,12 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     on, and the cycle is skipped when the two are incompatible.
     """
     target_charm: str = request.getfixturevalue("target_charm")
-    target_channel: str | None = request.getfixturevalue("target_channel")
     target_arch: str = request.getfixturevalue("target_arch")
     target: Charm = request.getfixturevalue("target_resolved_charm")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
-    channel = CharmChannel.model_validate(target_channel) if target_channel else None
     target_base = target.ubuntu_version
-    resolved_channel = channel or target.channel
+    resolved_channel = target.channel
 
     def supports_target_base(revision: int) -> bool:
         try:
@@ -1024,13 +962,13 @@ def istio_mesh_extension(
     return IstioMeshExtension(juju_backend, logger, charmhub_client)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def bundle_builder(charmhub_client: CharmhubClient, logger: logging.Logger) -> BundleBuilder:
     """Builder that resolves a ``SpecFile`` into deployable Juju bundles."""
     return BundleBuilder(charmhub_client=charmhub_client, logger=logger)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> str:
     """Platform for the neighbor model in CMR tests. Falls back to --target-platform."""
     value = request.config.getoption("--neighbor-platform")
@@ -1040,7 +978,7 @@ def neighbor_platform(request: pytest.FixtureRequest, target_platform: str) -> s
     return value
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def neighbor_arch(
     request: pytest.FixtureRequest,
     target_arch: str,
