@@ -197,6 +197,55 @@ def test_checkout_fetches_ref_outside_default_branch(
     assert (destination / "tests/unit/test_charm.py").read_text() == "release-only source\n"
 
 
+def test_checkout_resolves_described_commit_from_advertised_ref(
+    repository: tuple[Path, str], tmp_path: Path, logger: logging.Logger
+) -> None:
+    # GIVEN a described commit advertised only under a merge-request ref
+    path, _ = repository
+    git = GitClient(logger)
+    default_branch = git._run("-C", str(path), "branch", "--show-current")
+    git._run("-C", str(path), "checkout", "--orphan", "merge-request")
+    (path / "tests/unit/test_charm.py").write_text("merge-request source\n")
+    git._run("-C", str(path), "add", ".")
+    git._run(
+        "-C",
+        str(path),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "Merge request",
+    )
+    commit = git._run("-C", str(path), "rev-parse", "HEAD")
+    (path / "tests/unit/test_charm.py").write_text("newer merge-request source\n")
+    git._run("-C", str(path), "add", ".")
+    git._run(
+        "-C",
+        str(path),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "Newer merge request",
+    )
+    git._run("-C", str(path), "update-ref", "refs/merge-requests/1/merge", "HEAD")
+    git._run("-C", str(path), "checkout", default_branch)
+    git._run("-C", str(path), "branch", "-D", "merge-request")
+    destination = tmp_path / "source"
+
+    # WHEN resolving a non-GitHub git-describe version with real Git
+    checked_out = git.checkout(path.as_uri(), module._version_ref(f"v1.0-2-g{commit[:7]}"), destination)
+
+    # THEN the advertised ref supplies the exact packed commit, not the default branch
+    assert checked_out == commit
+    assert (destination / "tests/unit/test_charm.py").read_text() == "merge-request source\n"
+    assert git._run("-C", str(destination), "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+
+
 def test_checkout_never_falls_back_to_branch(
     repository: tuple[Path, str], tmp_path: Path, logger: logging.Logger
 ) -> None:
