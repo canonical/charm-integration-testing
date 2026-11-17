@@ -72,9 +72,14 @@ concierge_kubeconfig="$HOME/.kube/config"
     || die "Concierge kubeconfig is not a readable file: $concierge_kubeconfig"
 if [[ -n "$kubeconfig" ]]; then
     kubeconfig="$(realpath -m "$kubeconfig")"
-    echo "==> Copying kubeconfig to $kubeconfig..."
-    mkdir -p "$(dirname "$kubeconfig")"
-    install -m 0600 "$concierge_kubeconfig" "$kubeconfig"
+    if [[ "$kubeconfig" -ef "$concierge_kubeconfig" ]]; then
+        echo "==> Kubeconfig is already at $kubeconfig."
+    else
+        echo "==> Copying kubeconfig to $kubeconfig..."
+        mkdir -p "$(dirname "$kubeconfig")"
+        # Mode is set explicitly because install, like cp, keeps an existing destination's mode otherwise.
+        install -m 0600 "$concierge_kubeconfig" "$kubeconfig"
+    fi
 else
     kubeconfig="$concierge_kubeconfig"
 fi
