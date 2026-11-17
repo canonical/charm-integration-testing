@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SDK_SOURCE = PROJECT_ROOT / "workshop"
+SDK_SOURCE = PROJECT_ROOT / "workshop-sdk"
 PACK_TASK = PROJECT_ROOT / "mise-tasks" / "workshop-pack"
 REVISION = "a" * 40
 
@@ -99,7 +99,7 @@ def test_pack_exports_only_the_selected_commit(
     repository.mkdir()
     subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
     shutil.copy2(PROJECT_ROOT / ".gitignore", repository / ".gitignore")
-    shutil.copytree(SDK_SOURCE, repository / "workshop", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(SDK_SOURCE, repository / "workshop-sdk", ignore=shutil.ignore_patterns("__pycache__"))
     task = repository / "mise-tasks" / "workshop-pack"
     task.parent.mkdir()
     shutil.copy2(PACK_TASK, task)
