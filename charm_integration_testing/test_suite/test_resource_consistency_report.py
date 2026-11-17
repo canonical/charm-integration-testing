@@ -11,10 +11,9 @@ suite.
 It reads the observations gathered by the ``track_state_resources`` fixture and
 computes discrepancies.  When any are found it raises
 :class:`~resource_tracking.ResourceDiscrepancyError`, which both fails the test
-and carries the structured discrepancies.  The ``record_failure_execution_metadata``
-fixture in ``conftest.py`` picks that exception up and normalises the
-discrepancies into execution metadata, keeping metadata formatting out of the
-test and the domain objects.
+and carries the structured discrepancies.  The ``pytest_runtest_makereport``
+hook in ``conftest.py`` converts the exception into execution metadata, keeping
+metadata formatting out of the test and the domain objects.
 """
 
 from resource_tracking import ResourceDiscrepancyError, StateResourceTracker, calculate_discrepancies

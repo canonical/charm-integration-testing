@@ -286,7 +286,9 @@ Using Execution Metadata
 Automatic Collection
 ~~~~~~~~~~~~~~~~~~~~
 
-Most metadata is collected automatically through pytest fixtures. You don't need to do anything special to get charm information, warnings, failures, or skip data.
+Most metadata is collected automatically through pytest fixtures. Failure and skip details are
+attached to each pytest report by the ``pytest_runtest_makereport`` hook, so failures and skips
+during fixture setup are recorded even when function-scoped fixtures have not run.
 
 Manual Collection
 ~~~~~~~~~~~~~~~~~
@@ -329,4 +331,5 @@ Implementation Details
 - All values are converted to strings before storage
 - Values are sorted alphabetically before serialization
 - String normalization is applied to messages to ensure consistent formatting
-- JUnit properties are written after test completion (teardown phase)
+- Fixture-collected metadata is written during teardown; failure and skip metadata is attached
+  when pytest creates each phase report, including setup reports
