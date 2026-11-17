@@ -414,10 +414,13 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
         pytest.param("invalid-bundle", "Invalid saved bundle", id="invalid-bundle"),
         pytest.param("download", "Download failed", id="download"),
         pytest.param("provenance", "Packed charm has no version file", id="provenance"),
+        pytest.param("solver-timeout", "Solver timed out", id="solver-timeout"),
+        pytest.param("optimization", "Optimization failed", id="optimization"),
+        pytest.param("mixed-diagnostics", "Solver timed out", id="mixed-diagnostics"),
     ],
 )
 def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stage: str, message: str) -> None:
-    # GIVEN a transport, saved-bundle, download, or provenance failure
+    # GIVEN a failure other than an expected target-resolution incompatibility
     charmlint_pytester.makeconftest(
         f"""
         import logging
@@ -425,7 +428,10 @@ def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stag
         from types import SimpleNamespace
         import pytest
         import requests
-        from bundle_builder_x import CharmReleaseNotFoundException
+        from bundle_builder_x import (
+            ApplicationReleaseDiagnostic, BundleBuildFailureDiagnostic,
+            BundleBuildFailureKind, CharmReleaseNotFoundException, UncompletableBundleError,
+        )
         from test_suite.fixtures.charm_source import target_charm_source
 
         @pytest.fixture(scope="session")
@@ -438,6 +444,19 @@ def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stag
                 raise requests.HTTPError("Charmhub unavailable")
             if {stage!r} == "invalid-bundle":
                 raise ValueError("Invalid saved bundle")
+            if {stage!r} in ("solver-timeout", "optimization", "mixed-diagnostics"):
+                kind = (
+                    BundleBuildFailureKind.OPTIMIZATION_UNSATISFIABLE
+                    if {stage!r} == "optimization"
+                    else BundleBuildFailureKind.SOLVER_TIMEOUT
+                )
+                diagnostics = [BundleBuildFailureDiagnostic(kind=kind, detail={message!r})]
+                if {stage!r} == "mixed-diagnostics":
+                    diagnostics.append(ApplicationReleaseDiagnostic(
+                        application="target", charm_name="example", model="model",
+                        error=CharmReleaseNotFoundException("Missing release"),
+                    ))
+                raise UncompletableBundleError(diagnostics)
             return SimpleNamespace(name="example", revision=1)
 
         class JujuStub:

@@ -16,7 +16,12 @@ from juju import JujuClient
 from pydantic import BaseModel, Field
 from utils.git import GitClient
 
-from bundle_builder_x import Charm, CharmReleaseNotFoundException, UncompletableBundleError
+from bundle_builder_x import (
+    BundleBuildFailureDiagnostic,
+    Charm,
+    CharmReleaseNotFoundException,
+    UncompletableBundleError,
+)
 
 
 class _Links(BaseModel):
@@ -110,6 +115,10 @@ def target_charm_source(
     try:
         target_resolved_charm: Charm = request.getfixturevalue("target_resolved_charm")
     except (UncompletableBundleError, CharmReleaseNotFoundException) as exc:
+        if isinstance(exc, UncompletableBundleError) and any(
+            isinstance(diagnostic, BundleBuildFailureDiagnostic) for diagnostic in exc.diagnostics
+        ):
+            raise
         pytest.skip(f"Cannot resolve target charm for linting: {exc}")
 
     juju_client: JujuClient = request.getfixturevalue("juju_client")
