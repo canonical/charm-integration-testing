@@ -16,11 +16,10 @@ from time import monotonic, sleep
 import pytest
 from chaos_client import MetaChaosClient
 from juju import JujuClient, JujuModelHandle
+from kubernetes_client import KubernetesClient
 
 from .scheduler.states import State
 
-# Global default latency target. Per-charm overrides are tracked separately.
-VOLUME_PATH = "/"
 DELAY = timedelta(milliseconds=500)
 PERCENT = 100
 LATENCY_DURATION = timedelta(minutes=10)
@@ -28,6 +27,48 @@ LATENCY_DURATION = timedelta(minutes=10)
 CHECK_INTERVAL = timedelta(seconds=10)
 # Disk I/O latency recovers on the update-status hook interval, so allow a few cycles.
 RECOVER_TIMEOUT = timedelta(minutes=15)
+
+
+def _io_latency_volume_path(
+    kubernetes_client: KubernetesClient, application: str, model: JujuModelHandle, unit: str
+) -> str | None:
+    """Return a non-root volume mount path from the unit's Juju workload container."""
+    pods = kubernetes_client.get_charm_pods(application, model.model)
+    matching_pods = [
+        pod
+        for pod in pods
+        if pod.metadata is not None
+        and (pod.metadata.annotations or {}).get("unit.juju.is/id") == unit
+        and pod.metadata.deletion_timestamp is None
+        and (pod.status is None or pod.status.phase not in {"Succeeded", "Failed"})
+    ]
+    if len(matching_pods) != 1:
+        raise RuntimeError(f"Expected one live Pod for {model.uri}/{unit}, found {len(matching_pods)}.")
+
+    pod = matching_pods[0]
+    if pod.spec is None:
+        raise RuntimeError(f"Pod spec is missing for {model.uri}/{unit}.")
+    workload_containers = [
+        container
+        for container in pod.spec.containers or []
+        if any(env.name == "JUJU_CONTAINER_NAME" and env.value == container.name for env in container.env or [])
+    ]
+    if len(workload_containers) != 1:
+        raise RuntimeError(f"Expected one Juju workload container for {model.uri}/{unit}.")
+
+    return next(
+        (
+            mount.mount_path
+            for mount in workload_containers[0].volume_mounts or []
+            if mount.mount_path is not None
+            and mount.mount_path.startswith("/")
+            and mount.mount_path != "/"
+            and mount.mount_path != "/charm"
+            and not mount.mount_path.startswith("/charm/")
+            and not mount.read_only
+        ),
+        None,
+    )
 
 
 def observe_io_latency(
@@ -61,6 +102,7 @@ def test_live_disk_io_latency(
     target_model_ref: JujuModelHandle,
     target_application: str,
     neighbor_model_ref: JujuModelHandle | None,
+    kubernetes_client: KubernetesClient | None,
 ) -> None:
     """Verify the IOChaos lifecycle: confirmed injection, no early stop, and recovery.
 
@@ -70,9 +112,17 @@ def test_live_disk_io_latency(
         # Skip before the baseline wait, not after.
         pytest.skip(f"No available chaos client supports 'io_latency' for {target_model_ref.uri}.")
 
+    if kubernetes_client is None:
+        raise RuntimeError(
+            f"No Kubernetes client is available to resolve an IOChaos volume for {target_model_ref.uri}."
+        )
+    unit = f"{target_application}/0"
+    volume_path = _io_latency_volume_path(kubernetes_client, target_application, target_model_ref, unit)
+    if volume_path is None:
+        pytest.skip(f"No mounted non-root volume is available for IOChaos on {target_model_ref.uri}/{unit}.")
+
     models = list(dict.fromkeys([target_model_ref, *([neighbor_model_ref] if neighbor_model_ref else [])]))
     juju_client.multi_model_idle_for_period(models=models, timeout=RECOVER_TIMEOUT, strict_timeout=True)
-    unit = f"{target_application}/0"
 
     observation_error: BaseException | None = None
     try:
@@ -83,7 +133,7 @@ def test_live_disk_io_latency(
         injection = require_chaos_tool.io_latency(
             model=target_model_ref,
             unit=unit,
-            volume_path=VOLUME_PATH,
+            volume_path=volume_path,
             delay=DELAY,
             percent=PERCENT,
             duration=LATENCY_DURATION,
@@ -93,7 +143,7 @@ def test_live_disk_io_latency(
         # minus the time already spent resolving constraints and awaiting confirmed injection,
         # and detect if the fault stops or is removed before then.
         remaining = injection.duration.total_seconds() - (monotonic() - injection.injected_at)
-        observe_io_latency(require_chaos_tool, target_model_ref, unit, VOLUME_PATH, max(0.0, remaining))
+        observe_io_latency(require_chaos_tool, target_model_ref, unit, volume_path, max(0.0, remaining))
     except BaseException as error:
         observation_error = error
         raise
