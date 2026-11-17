@@ -13,6 +13,7 @@ auto_install = false
 task.run_auto_install = false
 
 [bootstrap.packages]
+"snap:git-scm" = { channel = "latest/stable" }
 "snap:juju" = { channel = "3/stable" }
 "snap:kubectl" = { channel = "1.32/stable", classic = true }
 "snap:openstackclients" = { channel = "latest/stable" }
