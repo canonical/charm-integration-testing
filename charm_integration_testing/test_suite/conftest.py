@@ -8,7 +8,7 @@ import os
 import warnings
 from datetime import timedelta
 from pathlib import Path
-from subprocess import CalledProcessError, run  # nosec
+from subprocess import CalledProcessError
 from typing import Any, Callable, Iterator
 
 import pytest
@@ -54,6 +54,7 @@ from s3_storage import S3Provider, S3ProviderRegistry, S3ResourceRegistry
 from test_observer_client import TestObserverClient as TestObserverAPIClient
 from test_observer_client import TestObserverClientError
 from utils import generate_juju_name, normalize_string, normalize_string_multiline
+from utils.git import GitClient
 from utils.juju_releases import (
     fetch_stable_juju_versions,
     select_upgrade_target,
@@ -1588,18 +1589,22 @@ def record_pipeline_version_execution_metadata(
     request: pytest.FixtureRequest,
 ) -> None:
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
+    repository_path = str(request.config.rootpath)
+    git = GitClient()
 
     # Get repository commit hash
-    repository_version_command = ["git", "--no-pager", "log", "-n", "1", "--pretty=format:%h"]
-    repository_result = run(repository_version_command, capture_output=True, text=True)  # nosec B603
+    repository_result = git.run(
+        "-C", repository_path, "--no-pager", "log", "-n", "1", "--pretty=format:%h", check=False
+    )
     if repository_result.returncode == 0:
         execution_metadata("pipeline:ref", repository_result.stdout.strip())
     else:
         warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
 
     # Get repository tag if it exists
-    repository_tag_command = ["git", "describe", "--tags", "--exact-match", repository_result.stdout.strip()]
-    repository_tag_result = run(repository_tag_command, capture_output=True, text=True)  # nosec B603
+    repository_tag_result = git.run(
+        "-C", repository_path, "describe", "--tags", "--exact-match", repository_result.stdout.strip(), check=False
+    )
     if repository_tag_result.returncode == 0:
         execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
     elif "no tag exactly matches" in repository_tag_result.stderr.lower():
@@ -1609,13 +1614,14 @@ def record_pipeline_version_execution_metadata(
 
     # Get pipeline workflow hash if file exists
     if pipeline_path.exists():
-        pipeline_version_command = [
-            "git",
+        pipeline_result = git.run(
+            "-C",
+            repository_path,
             "hash-object",
             "--",
             str(pipeline_path.resolve()),
-        ]
-        pipeline_result = run(pipeline_version_command, capture_output=True, text=True)  # nosec B603
+            check=False,
+        )
         if pipeline_result.returncode == 0:
             execution_metadata("pipeline:workflow_hash", pipeline_result.stdout.strip())
         else:
