@@ -149,7 +149,7 @@ def test_multiple_volumes(failure: str | None, monkeypatch: pytest.MonkeyPatch) 
     chaos.cleanup.side_effect = cleanup
     monkeypatch.setattr("test_suite.test_live_disk_fill.sleep", lambda seconds: events.append(("hold", "")))
     if failure:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ChaosCleanupError if failure == "cleanup" else RuntimeError):
             run_disk_fill(juju, backend, chaos, MODEL, "target", None)
         juju.validate_model.assert_not_called()
     else:
