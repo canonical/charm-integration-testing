@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 from subprocess import PIPE, CalledProcessError, CompletedProcess  # nosec B404
-from subprocess import run as subprocess_run
+from subprocess import run as subprocess_run  # nosec B404
 from urllib.parse import urlsplit
 
 import requests
@@ -62,8 +62,15 @@ class GitClient:
             try:
                 commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
             except CalledProcessError:
-                self._fetch(repository, revision, destination)
-                commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+                if re.fullmatch(r"[0-9a-f]{7,39}", revision):
+                    # Servers cannot fetch abbreviated SHAs; resolve one from advertised history.
+                    self._run(
+                        "-C", str(destination), "fetch", "--no-tags", "--", repository, "+refs/*:refs/cit-source/*"
+                    )
+                    commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
+                else:
+                    self._fetch(repository, revision, destination)
+                    commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
         self._run("-C", str(destination), "checkout", "--detach", commit)
         return commit
 
