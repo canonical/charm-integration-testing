@@ -11,6 +11,7 @@ from subprocess import CalledProcessError
 import pytest
 import requests
 from test_suite.fixtures import charm_source as module
+from test_suite.fixtures.git import GitClient
 
 
 @pytest.mark.parametrize(
@@ -97,14 +98,14 @@ def test_read_source_rejects_unusable_provenance(tmp_path: Path, params: Invalid
 @pytest.fixture
 def repository(tmp_path: Path, logger: logging.Logger) -> tuple[Path, str]:
     path = tmp_path / "repository"
-    module._git(logger, "init", "--quiet", str(path))
+    git = GitClient(logger)
+    git._run("init", "--quiet", str(path))
     (path / "metadata.yaml").write_text("name: example\n")
     (path / "tests" / "unit").mkdir(parents=True)
     test = path / "tests" / "unit" / "test_charm.py"
     test.write_text("original source\n")
-    module._git(logger, "-C", str(path), "add", ".")
-    module._git(
-        logger,
+    git._run("-C", str(path), "add", ".")
+    git._run(
         "-C",
         str(path),
         "-c",
@@ -115,12 +116,20 @@ def repository(tmp_path: Path, logger: logging.Logger) -> tuple[Path, str]:
         "-qm",
         "Original",
     )
-    commit = module._git(logger, "-C", str(path), "rev-parse", "HEAD")
-    module._git(logger, "-C", str(path), "tag", "v1.0")
+    commit = git._run("-C", str(path), "rev-parse", "HEAD")
+    git._run("-C", str(path), "tag", "v1.0")
     test.write_text("newer unrelated source\n")
-    module._git(logger, "-C", str(path), "add", ".")
-    module._git(
-        logger, "-C", str(path), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "Newer"
+    git._run("-C", str(path), "add", ".")
+    git._run(
+        "-C",
+        str(path),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "Newer",
     )
     return path, commit
 
@@ -138,14 +147,54 @@ def test_checkout_uses_packed_revision(
     destination = tmp_path / "source"
 
     # WHEN checking out the packed version
-    checked_out = module._checkout_source(source, destination, logger)
+    checked_out = GitClient(logger).checkout(source.repository, module._version_ref(source.version), destination)
 
     # THEN lint input includes source-only files at the original detached commit
     assert checked_out == commit
-    assert module._git(logger, "-C", str(destination), "rev-parse", "HEAD") == commit
+    git = GitClient(logger)
+    assert git._run("-C", str(destination), "rev-parse", "HEAD") == commit
     assert (destination / "tests/unit/test_charm.py").read_text() == "original source\n"
-    assert module._git(logger, "-C", str(destination), "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+    assert git._run("-C", str(destination), "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
     module._verify_charm_root(destination, "example")
+
+
+@pytest.mark.parametrize("use_tag", [True, False], ids=["tag", "commit"])
+def test_checkout_fetches_ref_outside_default_branch(
+    repository: tuple[Path, str], use_tag: bool, tmp_path: Path, logger: logging.Logger
+) -> None:
+    # GIVEN a tag or commit outside the repository's default branch
+    path, _ = repository
+    git = GitClient(logger)
+    default_branch = git._run("-C", str(path), "branch", "--show-current")
+    git._run("-C", str(path), "checkout", "--orphan", "release-only")
+    test = path / "tests" / "unit" / "test_charm.py"
+    test.write_text("release-only source\n")
+    git._run("-C", str(path), "add", ".")
+    git._run(
+        "-C",
+        str(path),
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "Release-only",
+    )
+    release_commit = git._run("-C", str(path), "rev-parse", "HEAD")
+    revision = release_commit
+    if use_tag:
+        git._run("-C", str(path), "tag", "release-only")
+        revision = "refs/tags/release-only"
+    git._run("-C", str(path), "checkout", default_branch)
+    destination = tmp_path / "source"
+
+    # WHEN checking out the packed revision
+    checked_out = git.checkout(str(path), revision, destination)
+
+    # THEN the explicit fetch finds the commit despite it not being on the default branch
+    assert checked_out == release_commit
+    assert (destination / "tests/unit/test_charm.py").read_text() == "release-only source\n"
 
 
 def test_checkout_never_falls_back_to_branch(
@@ -153,12 +202,12 @@ def test_checkout_never_falls_back_to_branch(
 ) -> None:
     # GIVEN a version that names a branch but no tag
     path, _ = repository
-    module._git(logger, "-C", str(path), "branch", "release")
+    GitClient(logger)._run("-C", str(path), "branch", "release")
     source = module._CharmSource(str(path), "release")
 
     # WHEN checking out the version, THEN no current branch can substitute for a tag
     with pytest.raises(CalledProcessError):
-        module._checkout_source(source, tmp_path / "source", logger)
+        GitClient(logger).checkout(source.repository, module._version_ref(source.version), tmp_path / "source")
 
 
 def test_github_merge_commit_outside_cloned_history(
@@ -170,7 +219,7 @@ def test_github_merge_commit_outside_cloned_history(
     # GIVEN a GitHub version that must be resolved to a full SHA before fetching
     path, commit = repository
     repository_url = "https://github.com/example/charm.git"
-    original_git = module._git
+    original_run = GitClient._run
     api_calls: list[str] = []
     fetches: list[tuple[str, ...]] = []
 
@@ -181,18 +230,17 @@ def test_github_merge_commit_outside_cloned_history(
         response._content = json.dumps({"sha": commit}).encode()
         return response
 
-    def local_git(logger: logging.Logger, *args: str) -> str:
+    def local_git(git: GitClient, *args: str) -> str:
         if "fetch" in args:
             fetches.append(args)
-        return original_git(logger, *(str(path) if arg == repository_url else arg for arg in args))
+        return original_run(git, *(str(path) if arg == repository_url else arg for arg in args))
 
     monkeypatch.setattr(requests, "get", get_commit)
-    monkeypatch.setattr(module, "_git", local_git)
-    source = module._CharmSource(repository_url, commit[:7])
+    monkeypatch.setattr(GitClient, "_run", local_git)
     destination = tmp_path / "source"
 
     # WHEN preparing the source checkout using real Git against the local test repository
-    checked_out = module._checkout_source(source, destination, logger)
+    checked_out = GitClient(logger).checkout(repository_url, commit[:7], destination)
 
     # THEN the API resolves the abbreviation and Git fetches that full commit, not a branch
     assert api_calls == [f"https://api.github.com/repos/example/charm/commits/{commit[:7]}"]
@@ -211,7 +259,7 @@ def test_github_merge_commit_outside_cloned_history(
     ],
 )
 def test_github_resolution_failure_is_not_ignored(
-    status: int, data: dict[str, str], error: type[Exception], monkeypatch: pytest.MonkeyPatch
+    status: int, data: dict[str, str], error: type[Exception], logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # GIVEN an unresolved or inconsistent source commit
     def get_commit(url: str, *, timeout: int) -> requests.Response:
@@ -224,7 +272,7 @@ def test_github_resolution_failure_is_not_ignored(
 
     # WHEN resolving the version, THEN the failure propagates
     with pytest.raises(error):
-        module._github_commit("https://github.com/example/charm", "abcdef0")
+        GitClient(logger)._resolve_github_commit("https://github.com/example/charm", "abcdef0")
 
 
 @pytest.mark.parametrize(
