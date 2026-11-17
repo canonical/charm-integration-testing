@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 import subprocess
 from collections.abc import Collection
@@ -2828,11 +2829,19 @@ class TestJubilantBackend:
     class TestGetApplicationConfig:
         @dataclass
         class ConfigStub:
-            app: str = ""
+            args: tuple[str, ...] = ()
 
-            def config(self, app: str) -> dict[str, Any]:
-                self.app = app
-                return {"setting1": "value1", "setting2": "value2"}
+            def cli(self, *args: str) -> str:
+                self.args = args
+                return json.dumps(
+                    {
+                        "settings": {
+                            "setting1": {"type": "string", "value": "value1"},
+                            "unset": {"type": "string"},
+                            "secret": {"type": "secret", "value": "secret:abc"},
+                        }
+                    }
+                )
 
         def test(self) -> None:
             # GIVEN
@@ -2843,8 +2852,8 @@ class TestJubilantBackend:
             config = JubilantBackend(client).get_application_config(TEST_MODEL, "my-app")
 
             # THEN
-            assert stub.app == "my-app"
-            assert config == {"setting1": "value1", "setting2": "value2"}
+            assert stub.args == ("config", "--format", "json", "my-app")
+            assert config == {"setting1": "value1", "unset": None, "secret": jubilant.SecretURI("secret:abc")}
 
     class TestControllerSetup:
         @dataclass(config={"arbitrary_types_allowed": True})

@@ -782,9 +782,13 @@ class JubilantBackend(JujuBackend):
         )
 
     def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
-        # I'd rather just pass this through, but to follow the return type correctly,
-        # we'll convert to a dict.
-        return {k: v for k, v in self.client.model(model).config(application).items()}
+        settings = json.loads(self.client.model(model).cli("config", "--format", "json", application))["settings"]
+        return {
+            key: jubilant.SecretURI(option["value"])
+            if option["type"] == "secret" and "value" in option
+            else option.get("value")
+            for key, option in settings.items()
+        }
 
     def _exec(self, model: JujuModelHandle, *args: str) -> dict[str, JujuExecTask]:
         """Run juju exec with the given args and return output parsed and keyed by unit name."""

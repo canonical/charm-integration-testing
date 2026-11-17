@@ -428,6 +428,7 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
+        """Return charm config options, including unset options with value None."""
         raise NotImplementedError
 
     @abstractmethod
