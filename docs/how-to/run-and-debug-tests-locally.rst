@@ -228,6 +228,7 @@ when the solver chooses a different release from the configured default.
 When resuming beyond ``no_bundle``, the target is read from the existing
 ``--target-bundle`` instead. Its revision, channel, and base must be pinned;
 the bundle is not rebuilt and defaults are not substituted.
+The pinned release is checked against the requested platform and Juju client version.
 
 If bundle synthesis cannot select a target release, or a pinned saved release
 is unavailable, both lint cases skip with the resolution error as the reason.
