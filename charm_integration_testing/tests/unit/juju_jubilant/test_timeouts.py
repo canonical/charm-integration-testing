@@ -17,8 +17,13 @@ from juju_jubilant.client import JubilantClient
 
 
 class ExecutableClient(JubilantClient):
-    def __init__(self, executable: Path, command_timeout: timedelta = timedelta(minutes=5)) -> None:
-        super().__init__(command_timeout)
+    def __init__(
+        self,
+        executable: Path,
+        command_timeout: timedelta = timedelta(minutes=5),
+        bootstrap_timeout: timedelta = timedelta(minutes=15),
+    ) -> None:
+        super().__init__(command_timeout, bootstrap_timeout)
         self.executable = executable
 
     def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
@@ -52,7 +57,9 @@ def assert_processes_reaped(directory: Path) -> None:
 @pytest.mark.parametrize("command", ["status", "bootstrap", "deploy", "run", "exec", "ssh", "scp"])
 def test_command_timeout_kills_and_reaps_cli(sleeping_juju: Path, command: str) -> None:
     # GIVEN a Juju command that never responds within its command budget
-    client = ExecutableClient(sleeping_juju, command_timeout=timedelta(milliseconds=200))
+    client = ExecutableClient(
+        sleeping_juju, command_timeout=timedelta(milliseconds=200), bootstrap_timeout=timedelta(milliseconds=200)
+    )
 
     # WHEN the query runs
     with pytest.raises(subprocess.TimeoutExpired):
@@ -139,4 +146,19 @@ def test_explicit_timeout_respects_command_ceiling(explicit_timeout: float, expe
         with pytest.raises(subprocess.TimeoutExpired):
             client._cli("status", timeout=explicit_timeout)
 
+    assert run.call_args.kwargs["timeout"] == expected
+
+
+@pytest.mark.parametrize(("command", "expected"), [("bootstrap", 900), ("status", 300)])
+def test_bootstrap_has_longer_ceiling(command: str, expected: float) -> None:
+    # GIVEN the default client limits
+    client = JubilantClient().model(None)
+    error = subprocess.TimeoutExpired(cmd=f"juju {command}", timeout=expected)
+
+    # WHEN a command runs without an explicit timeout
+    with patch("jubilant._juju.subprocess.run", side_effect=error) as run:
+        with pytest.raises(subprocess.TimeoutExpired):
+            client._cli(command)
+
+    # THEN only bootstrap may exceed the general command ceiling
     assert run.call_args.kwargs["timeout"] == expected
