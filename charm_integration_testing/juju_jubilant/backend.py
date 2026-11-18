@@ -40,6 +40,7 @@ from juju import (
     JujuWorkloadInstance,
     warn_performance,
 )
+from juju.backend import JujuSecretNotFoundError
 from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base.validator import ValidationResult
@@ -743,11 +744,12 @@ class JubilantBackend(JujuBackend):
         )
 
     def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
-        # Call remove secret
-        self.client.model(model).cli(
-            "remove-secret",
-            name_or_id,
-        )
+        try:
+            self.client.model(model).cli("remove-secret", name_or_id)
+        except jubilant.CLIError as exc:
+            if f"ERROR secret {json.dumps(name_or_id)} not found" in exc.stderr.splitlines():
+                raise JujuSecretNotFoundError(exc.returncode, exc.cmd, exc.output, exc.stderr) from exc
+            raise
 
     def deploy_bundle_file(
         self,
@@ -794,9 +796,13 @@ class JubilantBackend(JujuBackend):
         )
 
     def get_application_config(self, model: JujuModelHandle, application: str) -> dict[str, Any]:
-        # I'd rather just pass this through, but to follow the return type correctly,
-        # we'll convert to a dict.
-        return {k: v for k, v in self.client.model(model).config(application).items()}
+        settings = json.loads(self.client.model(model).cli("config", "--format", "json", application))["settings"]
+        return {
+            key: jubilant.SecretURI(option["value"])
+            if option["type"] == "secret" and "value" in option
+            else option.get("value")
+            for key, option in settings.items()
+        }
 
     def _exec(self, model: JujuModelHandle, *args: str) -> dict[str, JujuExecTask]:
         """Run juju exec with the given args and return output parsed and keyed by unit name."""

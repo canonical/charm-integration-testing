@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import json
 import logging
 import subprocess
 from collections.abc import Collection
@@ -29,7 +30,7 @@ from juju import (
     JujuWaitTimeoutError,
     JujuWorkloadInstance,
 )
-from juju.backend import JujuBackend
+from juju.backend import JujuBackend, JujuSecretNotFoundError
 from juju.version import JujuVersion
 from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
@@ -1829,6 +1830,25 @@ class TestJubilantBackend:
             # THEN
             assert ("remove-secret", "my-secret") in client.client.executions
 
+        @pytest.mark.parametrize(
+            ("stderr", "expected_error"),
+            [
+                ('ERROR secret "my-secret" not found\n', JujuSecretNotFoundError),
+                ('ERROR model "test-model" not found\n', jubilant.CLIError),
+            ],
+        )
+        def test_error_translation(self, stderr: str, expected_error: type[Exception]) -> None:
+            # GIVEN
+            class FailingJuju(JubilantCliStub):
+                def cli(self, *args: str, **kwargs: Any) -> str:
+                    raise jubilant.CLIError(1, ["juju", *args], "", stderr)
+
+            backend = JubilantBackend(JubilantClientStub(client=FailingJuju()))
+
+            # WHEN/THEN
+            with pytest.raises(expected_error):
+                backend.remove_secret(TEST_MODEL, "my-secret")
+
     class TestDeployApplication:
         @dataclass
         class DeployStub:
@@ -2828,11 +2848,19 @@ class TestJubilantBackend:
     class TestGetApplicationConfig:
         @dataclass
         class ConfigStub:
-            app: str = ""
+            args: tuple[str, ...] = ()
 
-            def config(self, app: str) -> dict[str, Any]:
-                self.app = app
-                return {"setting1": "value1", "setting2": "value2"}
+            def cli(self, *args: str) -> str:
+                self.args = args
+                return json.dumps(
+                    {
+                        "settings": {
+                            "setting1": {"type": "string", "value": "value1"},
+                            "unset": {"type": "string"},
+                            "secret": {"type": "secret", "value": "secret:abc"},
+                        }
+                    }
+                )
 
         def test(self) -> None:
             # GIVEN
@@ -2843,8 +2871,8 @@ class TestJubilantBackend:
             config = JubilantBackend(client).get_application_config(TEST_MODEL, "my-app")
 
             # THEN
-            assert stub.app == "my-app"
-            assert config == {"setting1": "value1", "setting2": "value2"}
+            assert stub.args == ("config", "--format", "json", "my-app")
+            assert config == {"setting1": "value1", "unset": None, "secret": jubilant.SecretURI("secret:abc")}
 
     class TestControllerSetup:
         @dataclass(config={"arbitrary_types_allowed": True})
