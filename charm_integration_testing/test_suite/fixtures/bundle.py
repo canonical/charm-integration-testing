@@ -117,15 +117,23 @@ def bundle_solution(
     return bundle_builder.build(spec)
 
 
-class _PinnedApplication(BaseModel):
+class _SavedTargetApplication(BaseModel):
     charm: str
-    channel: CharmChannel
-    revision: int = Field(strict=True, ge=0)
-    base: str = Field(pattern=r"^ubuntu@\d+\.\d+$")
+    channel: CharmChannel | None = None
+    revision: int | None = Field(default=None, strict=True, ge=0)
+    base: str | None = Field(default=None, pattern=r"^ubuntu@\d+\.\d+$")
 
 
 class _SavedBundle(BaseModel):
-    applications: dict[str, _PinnedApplication]
+    applications: dict[str, object]
+
+
+@pytest.fixture(scope="session")
+def saved_target_application(target_bundle: Path, target_application: str) -> _SavedTargetApplication:
+    """Read the target's release selectors without validating unrelated applications."""
+    documents = yaml.safe_load_all(target_bundle.read_text(encoding="utf-8"))
+    saved = _SavedBundle.model_validate(next(documents, None))
+    return _SavedTargetApplication.model_validate(saved.applications[target_application])
 
 
 @pytest.fixture(scope="session")
@@ -135,7 +143,7 @@ def target_resolved_charm(
     target_controller: str,
     model: str,
 ) -> Charm:
-    """Return the target selected for this run, not a separately resolved default."""
+    """Resolve the target from the synthesized solution or saved bundle selectors."""
     if State(request.config.getoption("--current-state")) == State.NO_BUNDLE:
         solution: Solution = request.getfixturevalue("bundle_solution")
         model_key = f"{target_controller}/{model}"
@@ -144,11 +152,8 @@ def target_resolved_charm(
                 return bundle.applications[target_application].charm
         raise ValueError(f"Generated solution has no bundle for model {model_key!r}.")
 
-    # Resumed runs must retain the saved deployment plan, even if defaults have moved.
-    bundle_path: Path = request.getfixturevalue("target_bundle")
-    documents = yaml.safe_load_all(bundle_path.read_text(encoding="utf-8"))
-    saved = _SavedBundle.model_validate(next(documents, None))
-    application = saved.applications[target_application]
+    application: _SavedTargetApplication = request.getfixturevalue("saved_target_application")
+    channel = application.channel
     client: CharmhubClient = request.getfixturevalue("charmhub_client")
     arch: str = request.getfixturevalue("target_arch")
     platform: str = request.getfixturevalue("target_platform")
@@ -158,9 +163,20 @@ def target_resolved_charm(
         ubuntu_arch=arch,
         platform=platform,
         juju_version=BundleJujuVersion.parse(str(juju_cli_version)),
-        charm_track=application.channel.track,
-        charm_risk=application.channel.risk,
-        charm_branch=application.channel.branch or None,
+        charm_track=channel.track if channel is not None else None,
+        charm_risk=channel.risk if channel is not None else None,
+        charm_branch=(channel.branch or None) if channel is not None else None,
         charm_revision=application.revision,
-        ubuntu_version=application.base.removeprefix("ubuntu@"),
+        ubuntu_version=application.base.removeprefix("ubuntu@") if application.base is not None else None,
     )
+
+
+@pytest.fixture(scope="session")
+def target_resolved_charm_for_refresh(request: pytest.FixtureRequest) -> Charm:
+    """Require a recorded original revision before starting or resuming a refresh cycle."""
+    if State(request.config.getoption("--current-state")) != State.NO_BUNDLE:
+        application: _SavedTargetApplication = request.getfixturevalue("saved_target_application")
+        if application.revision is None:
+            pytest.skip("The saved bundle has no target revision to restore after downgrade.")
+    target: Charm = request.getfixturevalue("target_resolved_charm")
+    return target
