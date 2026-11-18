@@ -47,6 +47,12 @@ class _TLSSocket(TSSLSocket.TSSLSocket):  # type: ignore[misc]
             super().close()
 
 
+class _KyuubiSaslClientTransport(TSaslClientTransport):  # type: ignore[misc]
+    def open(self) -> None:
+        super().open()
+        self._trans.setTimeout(_SQL_TIMEOUT_SECONDS * 1000)
+
+
 def _quote_identifier(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
 
@@ -220,7 +226,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
         else:
             socket = TSocket.TSocket(config.host, config.port)
         socket.setTimeout(_CONNECT_TIMEOUT_SECONDS * 1000)
-        transport = TSaslClientTransport(
+        transport = _KyuubiSaslClientTransport(
             lambda: hive.get_installed_sasl(
                 host=config.host,
                 sasl_auth="PLAIN",
@@ -236,7 +242,6 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             username=config.username,
             thrift_transport=transport,
         )
-        socket.setTimeout(_SQL_TIMEOUT_SECONDS * 1000)
         if config.database == _DEFAULT_DATABASE:
             return conn
 

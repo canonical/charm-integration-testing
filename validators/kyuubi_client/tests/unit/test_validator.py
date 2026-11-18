@@ -4,6 +4,7 @@
 import sqlite3
 import ssl
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import call, patch
 
@@ -173,7 +174,7 @@ class TestPrepare:
             validator._open_connection()
 
         socket.assert_called_once_with("kyuubi.example", 10009)
-        assert socket.return_value.setTimeout.call_args_list == [call(5_000), call(180_000)]
+        assert socket.return_value.setTimeout.call_args_list == [call(5_000)]
         options = connection.call_args.kwargs
         assert options.keys() == {"database", "username", "thrift_transport"}
         assert options["database"] == "default"
@@ -287,7 +288,7 @@ class TestTLS:
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname
         assert socket.call_args.args == ("kyuubi.example", 10010)
-        assert socket.return_value.setTimeout.call_args_list == [call(5_000), call(180_000)]
+        assert socket.return_value.setTimeout.call_args_list == [call(5_000)]
         actual_transport = connection.call_args.kwargs["thrift_transport"]
         assert actual_transport.mechanism == "PLAIN"
         sasl = actual_transport.sasl_client_factory()
@@ -352,17 +353,66 @@ class TestTLS:
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname
 
-    @pytest.mark.parametrize("tls", ["False", "True"], ids=["plain", "tls"])
-    def test_real_socket_uses_short_connect_and_long_sql_timeouts(self, tls: str) -> None:
-        validator = _make_validator(databag={**VALID_DATABAG, "tls": tls, "tls-ca": "test-ca"})
+    def test_pyhive_constructor_sql_uses_long_timeout_after_bounded_open(self) -> None:
+        validator = _make_validator(
+            databag={
+                **VALID_DATABAG,
+                "uris": "jdbc:kyuubi://kyuubi.example:10009/default",
+                "database": "default",
+            }
+        )
+
+        @dataclass
+        class SocketStub:
+            timeouts: list[int] = field(default_factory=list)
+            timeout_seconds: float | None = None
+
+            def setTimeout(self, timeout_ms: int) -> None:
+                self.timeouts.append(timeout_ms)
+                self.timeout_seconds = timeout_ms / 1000
+
+            def close(self) -> None:
+                pass
+
+        socket = SocketStub()
+        success_status = SimpleNamespace(statusCode=0)
+
+        class ThriftClientStub:
+            def __init__(self) -> None:
+                self.executed_statements: list[str] = []
+
+            def OpenSession(self, request: Any) -> Any:
+                assert socket.timeout_seconds == 180
+                return SimpleNamespace(
+                    status=success_status,
+                    sessionHandle=object(),
+                    serverProtocolVersion=request.client_protocol,
+                )
+
+            def ExecuteStatement(self, request: Any) -> Any:
+                assert socket.timeout_seconds == 180
+                self.executed_statements.append(request.statement)
+                return SimpleNamespace(status=success_status, operationHandle=object())
+
+            def CloseOperation(self, _request: Any) -> Any:
+                return SimpleNamespace(status=success_status)
+
+        thrift_client = ThriftClientStub()
+
         with (
             patch("ssl.SSLContext.load_verify_locations"),
-            patch("validators.kyuubi_client.validator.hive.Connection") as connection,
+            patch("validators.kyuubi_client.validator.TSocket.TSocket", return_value=socket),
+            patch(
+                "validators.kyuubi_client.validator.TSaslClientTransport.open",
+                autospec=True,
+                side_effect=lambda _transport: None,
+            ),
+            patch("validators.kyuubi_client.validator.hive.TCLIService.Client", return_value=thrift_client),
         ):
             validator._open_connection()
 
-        transport = connection.call_args.kwargs["thrift_transport"]
-        assert transport._trans._timeout == 180
+        assert socket.timeouts == [5_000, 180_000]
+        assert thrift_client.executed_statements == ["USE `default`"]
 
     def test_tls_options_pass_real_pyhive_and_socket_argument_validation(self) -> None:
         validator = _make_validator(databag={**VALID_DATABAG, "tls": "True", "tls-ca": "test-ca"})
