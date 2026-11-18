@@ -12,7 +12,7 @@ from juju import JujuClient, JujuModelHandle
 from juju.backend import JujuSecretNotFoundError
 from juju.models import JujuApplicationInfo
 
-from .shared import NullJujuBackend
+from ..shared import NullJujuBackend
 
 MODEL = JujuModelHandle(controller="controller", model="model")
 
