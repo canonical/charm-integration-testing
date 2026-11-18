@@ -22,20 +22,19 @@ class GitClient:
         self.executable = executable
 
     def run(self, *args: str, check: bool = True) -> CompletedProcess[str]:
+        """Run Git with the caller's configuration."""
+        return self._execute(args, check=check)
+
+    def _execute(
+        self, args: tuple[str, ...], *, check: bool = True, env: dict[str, str] | None = None
+    ) -> CompletedProcess[str]:
         result = subprocess_run(  # nosec B603, B607
-            [
-                self.executable,
-                "-c",
-                "credential.helper=",
-                "-c",
-                f"core.hooksPath={os.devnull}",
-                *args,
-            ],
+            [self.executable, *args],
             stdout=PIPE,
             stderr=PIPE,
             text=True,
             check=False,
-            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"},
+            env=env,
         )
         if self.logger:
             if result.stdout:
@@ -78,7 +77,11 @@ class GitClient:
         self._run("-C", str(destination), "fetch", "--depth=1", "--no-tags", "--", repository, revision)
 
     def _run(self, *args: str) -> str:
-        return self.run(*args).stdout.strip()
+        """Run a source checkout command without using the caller's global Git config."""
+        return self._execute(
+            ("-c", "credential.helper=", "-c", f"core.hooksPath={os.devnull}", *args),
+            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"},
+        ).stdout.strip()
 
     def _resolve_github_commit(self, repository: str, revision: str) -> str:
         path = urlsplit(repository).path.strip("/").removesuffix(".git")
