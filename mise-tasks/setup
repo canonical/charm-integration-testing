@@ -173,7 +173,7 @@ if (( ${#groups[@]} + ${#tools[@]} + ${#packages[@]} == 0 )); then
     die "Specify at least one group, tool or package"
 fi
 if (( ${#dry_run[@]} )); then
-    (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
+    [[ "$skills" == false ]] && (( ${#tools[@]} == 0 && ${#packages[@]} > 0 )) ||
         die "--dry-run requires a package-only request"
 fi
 
