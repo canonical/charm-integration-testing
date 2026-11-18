@@ -17,7 +17,7 @@ from test_suite.conftest import (
     pytest_addoption, target_bundle, neighbor_bundle, bundle_mermaid_output,
     target_application, target_endpoint, neighbor_application, neighbor_endpoint,
     target_charm, neighbor_charm, target_channel, target_revision, target_series,
-    target_platform, target_arch, neighbor_platform, neighbor_arch,
+    target_platform, target_arch, neighbor_platform, neighbor_arch, target_downgrade_revision,
 )
 
 pytest_plugins = [
@@ -75,6 +75,7 @@ class Catalog(CharmhubClient):
     ):
         self.last_platform = platform
         self.last_juju_version = juju_version
+        self.last_revision = charm_revision
         for charm in self.charms:
             if (
                 charm.name == charm_name
@@ -160,7 +161,7 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
             def validate_model(self, **kwargs):
                 pass
 
-        def test_restore_bundle_release(target_resolved_charm, target_model_ref, neighbor_model_ref):
+        def test_restore_bundle_release(target_resolved_charm_for_refresh, target_model_ref, neighbor_model_ref):
             juju = JujuStub()
             module.test_upgrade_charm(
                 juju_client=juju,
@@ -168,7 +169,7 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
                 target_model_ref=target_model_ref,
                 neighbor_model_ref=neighbor_model_ref,
                 target_application="target",
-                target_resolved_charm=target_resolved_charm,
+                target_resolved_charm_for_refresh=target_resolved_charm_for_refresh,
             )
             assert juju.refreshed["revision"] == 200
             assert juju.refreshed["channel"] == "1/stable"
@@ -224,12 +225,21 @@ def test_target_uses_the_exported_solution(pytester: pytest.Pytester, cmr: bool)
         assert (pytester.path / "generated-neighbor-bundle.yaml").is_file()
 
 
-def test_resumed_run_uses_pinned_bundle_not_defaults(pytester: pytest.Pytester) -> None:
-    # GIVEN an existing multi-document bundle whose selected release is no longer the default
+@pytest.mark.parametrize(
+    ("selectors", "expected_revision", "requested_revision"),
+    [
+        pytest.param("    revision: 200\n    channel: 1/stable\n    base: ubuntu@22.04\n", 200, 200, id="pinned"),
+        pytest.param("    channel: 1/stable\n    base: ubuntu@22.04\n", 200, None, id="channel-and-base"),
+        pytest.param("", 100, None, id="charm-only"),
+    ],
+)
+def test_resumed_run_uses_saved_target_selectors(
+    pytester: pytest.Pytester, selectors: str, expected_revision: int, requested_revision: int | None
+) -> None:
+    # GIVEN a saved bundle with an unpinned neighbor and optional target selectors
     bundle = pytester.path / "saved.yaml"
     bundle.write_text(
-        "applications:\n  target:\n    charm: nrpe\n    revision: 200\n"
-        "    channel: 1/stable\n    base: ubuntu@22.04\n"
+        "applications:\n  target:\n    charm: nrpe\n" + selectors + "  neighbor:\n    charm: ubuntu\n"
         "---\napplications:\n  target:\n    offers: {}\n"
     )
     pytester.makeconftest(
@@ -242,17 +252,26 @@ def test_resumed_run_uses_pinned_bundle_not_defaults(pytester: pytest.Pytester) 
         """)
     )
     pytester.makepyfile(
-        """
+        f"""
         from bundle_builder_x import JujuVersion
 
         def test_selected(target_resolved_charm, charmhub_client):
-            assert target_resolved_charm.revision == 200
-            assert str(target_resolved_charm.channel) == "1/stable"
-            assert target_resolved_charm.ubuntu_version == "22.04"
+            assert target_resolved_charm.revision == {expected_revision}
+            assert charmhub_client.last_revision == {requested_revision!r}
             assert charmhub_client.last_platform == "machine"
             assert charmhub_client.last_juju_version == JujuVersion.parse("3.6.29")
+
+        def test_restore(target_resolved_charm_for_refresh):
+            assert target_resolved_charm_for_refresh.revision == {expected_revision}
         """
     )
+    if requested_revision is None:
+        pytester.makepyfile(
+            test_downgrade="""
+            def test_downgrade_requires_original_revision(target_downgrade_revision):
+                raise AssertionError("Downgrade must not run without an original revision")
+            """
+        )
     original = bundle.read_text()
 
     # WHEN resuming with selectors that would otherwise choose the default release
@@ -270,20 +289,29 @@ def test_resumed_run_uses_pinned_bundle_not_defaults(pytester: pytest.Pytester) 
         "--target-bundle",
         str(bundle),
         "-q",
+        "-rs",
     )
 
-    # THEN the pinned release is loaded and the saved bundle is untouched
-    result.assert_outcomes(passed=1)
+    # THEN lookup honors saved selectors, but refresh cannot guess an original revision
+    if requested_revision is None:
+        result.assert_outcomes(passed=1, skipped=2)
+        reason = "The saved bundle has no target revision to restore after downgrade."
+        result.stdout.fnmatch_lines(
+            [
+                f"SKIPPED *test_downgrade.py:*{reason}",
+                f"SKIPPED *test_resumed_run_uses_saved_target_selectors.py:*{reason}",
+            ]
+        )
+    else:
+        result.assert_outcomes(passed=2)
     assert bundle.read_text() == original
 
 
-@pytest.mark.parametrize("revision", ["", "    revision: null\n", "    revision: true\n"])
-def test_resumed_bundle_requires_a_pinned_revision(pytester: pytest.Pytester, revision: str) -> None:
-    # GIVEN an existing bundle without a usable exact revision
+@pytest.mark.parametrize("revision", ["true", "-1", "'200'"])
+def test_resumed_bundle_rejects_invalid_revision(pytester: pytest.Pytester, revision: str) -> None:
+    # GIVEN an existing bundle with a malformed explicit revision
     bundle: Path = pytester.path / "saved.yaml"
-    bundle.write_text(
-        "applications:\n  target:\n    charm: nrpe\n" + revision + "    channel: 1/stable\n    base: ubuntu@22.04\n"
-    )
+    bundle.write_text(f"applications:\n  target:\n    charm: nrpe\n    revision: {revision}\n")
     pytester.makeconftest(_FIXTURES + _CATALOG)
     pytester.makepyfile(
         """

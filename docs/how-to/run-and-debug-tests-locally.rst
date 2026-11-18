@@ -226,9 +226,11 @@ Bundle synthesis is shared with ``test_build_bundle``; linting and the
 downgrade/upgrade cycle use the target release from that same solution, even
 when the solver chooses a different release from the configured default.
 When resuming beyond ``no_bundle``, the target is read from the existing
-``--target-bundle`` instead. Its revision, channel, and base must be pinned;
-the bundle is not rebuilt and defaults are not substituted.
-The pinned release is checked against the requested platform and Juju client version.
+``--target-bundle`` instead, without rebuilding it. Charmhub resolves the
+target using any revision, channel, and base recorded in its entry, plus the
+requested platform and Juju client version. Without a recorded revision,
+linting can use a different release from the one already deployed. The
+downgrade/upgrade cycle skips rather than risk restoring the wrong revision.
 
 If bundle synthesis cannot select a target release, or a pinned saved release
 is unavailable, both lint cases skip with the resolution error as the reason.

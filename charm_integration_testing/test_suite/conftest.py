@@ -753,9 +753,9 @@ def target_downgrade_revision(request: pytest.FixtureRequest) -> int:
     the selected revision is validated against the base the target is deployed
     on, and the cycle is skipped when the two are incompatible.
     """
-    target_charm: str = request.getfixturevalue("target_charm")
+    target: Charm = request.getfixturevalue("target_resolved_charm_for_refresh")
+    target_charm = target.name
     target_arch: str = request.getfixturevalue("target_arch")
-    target: Charm = request.getfixturevalue("target_resolved_charm")
     charmhub_client: CharmhubClient = request.getfixturevalue("charmhub_client")
 
     target_base = target.ubuntu_version
