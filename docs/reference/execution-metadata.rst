@@ -25,6 +25,7 @@ The ``normalize_string()`` function applies these transformations:
 - **Container names**: ``container=katib-controller`` → ``container=<CONTAINER>``
 - **Hook failure app/endpoint**: ``hook failed: "install" for app:endpoint`` → ``hook failed: "install" for <APP>:<ENDPOINT>``
 - **Relation version errors**: ``versions not found for apps: app-name`` → ``versions not found for apps: <APP>``
+- **Juju CharmHub refresh errors**: Bundle deployment errors omit the charm or bundle name and resolution context before the refresh request, so the endpoint and failure reason survive truncation (for example, ``ERROR cannot deploy bundle: Post "https://api.charmhub.io/vXXX/charms/refresh": EOF``).
 - **Kubernetes service accounts**: ``system:serviceaccount:namespace:sa-name`` → ``system:serviceaccount:<NAMESPACE>:<SA>``
 - **Forbidden secret errors**: ``secrets "t0jekcfse9ecf9rtmgeg-1" is forbidden`` → ``secrets "<SECRET>" is forbidden``; ``in the namespace "ns"`` → ``in the namespace "<NAMESPACE>"``
 - **Kubernetes cluster DNS names**: ``service.namespace.svc.cluster.local`` → ``<SERVICE>.<NAMESPACE>.svc.cluster.local``

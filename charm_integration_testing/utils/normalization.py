@@ -367,6 +367,18 @@ def _normalize_relation_version_apps(text: str) -> str:
     return re.sub(r"(versions not found for apps:) [a-z0-9-]+", r"\1 <APP>", text)
 
 
+def _normalize_charmhub_refresh_errors(text: str) -> str:
+    """Keep the refresh failure reason within the metadata length limit."""
+    return re.sub(
+        r'^(ERROR cannot deploy bundle: )cannot resolve charm or bundle "[^"\r\n]+": '
+        r"resolving with preferred channel: (?:attempt count exceeded: )?"
+        r'(?=Post "https://api\.charmhub\.io/v\d+/charms/refresh": )',
+        r"\1",
+        text,
+        flags=re.MULTILINE,
+    )
+
+
 def _truncate_string(text: str, max_length: int) -> str:
     """Truncate a string to a maximum length.
 
@@ -400,6 +412,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     - Normalizes container names
     - Normalizes hook failure app/endpoint names
     - Normalizes relation version app names
+    - Removes charm names and redundant context from Juju CharmHub refresh errors
     - Normalizes Kubernetes cluster DNS names (svc.cluster.local)
     - Replaces all numeric sequences (except technical terms like k8s, s3)
     - Truncates to maximum length
@@ -424,6 +437,7 @@ def normalize_string(message: Any, max_length: int = 150) -> str:
     text = _normalize_container_names(text)
     text = _normalize_hook_failure_apps(text)
     text = _normalize_relation_version_apps(text)
+    text = _normalize_charmhub_refresh_errors(text)
     text = _normalize_k8s_cluster_urls(text)
     text = _normalize_numeric_sequences(text)
     text = _truncate_string(text, max_length)
