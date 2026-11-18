@@ -96,10 +96,7 @@ for group in "${groups[@]}"; do
             ;;
         integration)
             [[ "$project" == dev ]] || project=main
-            packages+=(
-                snap:git-scm
-                snap:juju
-            )
+            packages+=(snap:juju)
             tools+=(
                 aqua:jqlang/jq
                 aqua:mikefarah/yq
