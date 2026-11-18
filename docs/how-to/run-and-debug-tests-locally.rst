@@ -378,18 +378,27 @@ Disk fill recovery
 ------------------
 
 ``test_live_disk_fill`` uses the shared native disk fill client on Kubernetes
-and machine models. It allocates 98 percent of the available space reported by
-``df`` in the execution working directory, using a unique file per test. This
-is not a guarantee of 98 percent total file system usage or of filling the
-application's data volume. Per-charm resource settings are not consumed yet.
+and machine models. It finds persistent storage attached to unit 0 of the target
+application through Juju's ``storage-list`` and ``storage-get`` commands. It skips
+when the unit has no attached storage. Pod ephemeral storage is not targeted.
 
-All bundle models must be active/idle before allocation. The file remains for
-ten minutes; no unhealthy status transition is required. Cleanup removes the
-file, then all bundle models must recover to active/idle within fifteen minutes
-without a test-driven restart. Available deep validators run on all applications
-in both target and neighbor models. Missing validators leave functional coverage
-unverified. Allocation, file checks, cleanup, recovery and validation errors fail
-the test.
+Each storage location must be a mounted file system. Lookup failures, missing
+mounts and raw block storage fail the test rather than falling back to the
+execution working directory. Locations on the same file system are filled once.
+By default, a unique file allocates 98 percent of the available space reported
+by ``df`` on each file system. This does not guarantee 98 percent total file system
+usage or that the workload runs out of space. Per-charm disk fill size settings
+override the allocation size for each file system.
+
+All bundle models must be active/idle before allocation. All target file systems
+are filled before the ten minute hold begins. No unhealthy status transition is
+required and validators do not run during the hold. Cleanup attempts to remove
+every test file, including partial allocations, even if another removal fails.
+After cleanup succeeds, all bundle models must recover to active/idle within
+fifteen minutes without a test-driven restart. Available deep validators run on
+all applications in both target and neighbor models. Missing validators leave
+functional coverage unverified. Allocation, file checks, cleanup, recovery and
+validation errors fail the test.
 
 Cross-model relations
 ---------------------
