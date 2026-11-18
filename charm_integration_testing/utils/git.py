@@ -16,9 +16,9 @@ import requests
 class GitClient:
     def __init__(self, logger: logging.Logger | None = None) -> None:
         self.logger = logger
-        executable = shutil.which("git") or shutil.which("git-scm")
+        executable = shutil.which("git")
         if executable is None:
-            raise FileNotFoundError("Git is required; run `mise run setup -- --group integration` to install it.")
+            raise FileNotFoundError("Git is required. Install Git and ensure `git` is on PATH.")
         self.executable = executable
 
     def run(self, *args: str, check: bool = True) -> CompletedProcess[str]:
