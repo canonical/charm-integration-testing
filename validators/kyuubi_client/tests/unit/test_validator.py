@@ -104,9 +104,10 @@ class TestPrepare:
         validator = _make_validator()
         conn = ConnStub()
 
-        with patch.object(validator, "_open_connection", return_value=conn):
+        with patch.object(validator, "_open_connection", return_value=conn) as open_connection:
             state = validator.prepare()
 
+        open_connection.assert_called_once_with(initialize_database=True)
         table = f"`{validator._canary_table_prefix()}{state.id:020d}`"
         assert isinstance(state, PersistenceState)
         assert state.ref == 1
@@ -166,13 +167,47 @@ class TestPrepare:
             validator._open_connection()
 
         socket.assert_called_once_with("kyuubi.example", 10009)
-        socket.return_value.setTimeout.assert_called_once_with(5000)
+        socket.return_value.setTimeout.assert_called_once_with(180_000)
         options = connection.call_args.kwargs
         assert options.keys() == {"database", "username", "thrift_transport"}
-        assert options["database"] == "test_db"
+        assert options["database"] == "default"
         assert options["username"] == "canary-user"
         sasl = options["thrift_transport"].sasl_client_factory()
         assert sasl.start("PLAIN") == (True, "PLAIN", b"\x00canary-user\x00canary-password")
+
+    @pytest.mark.parametrize(
+        ("initialize_database", "expected_queries"),
+        [
+            (True, ["CREATE DATABASE IF NOT EXISTS `sample``db`", "USE `sample``db`"]),
+            (False, ["USE `sample``db`"]),
+        ],
+        ids=["prepare-initializes-requested-database", "checkpoint-and-cleanup-do-not-recreate-database"],
+    )
+    def test_selects_requested_database(self, initialize_database: bool, expected_queries: list[str]) -> None:
+        validator = _make_validator(
+            databag={**VALID_DATABAG, "uris": "jdbc:kyuubi://kyuubi.example:10009", "database": "sample`db"}
+        )
+        conn = ConnStub()
+
+        with patch("validators.kyuubi_client.validator.hive.Connection", return_value=conn):
+            assert validator._open_connection(initialize_database=initialize_database) is conn
+
+        assert conn.cursor_stub.executed_queries == expected_queries
+        assert not conn.closed
+
+    def test_closes_connection_when_database_initialization_fails(self) -> None:
+        validator = _make_validator()
+        conn = ConnStub()
+
+        with (
+            patch("validators.kyuubi_client.validator.hive.Connection", return_value=conn),
+            patch.object(conn.cursor_stub, "execute", side_effect=RuntimeError("database creation denied")) as execute,
+            pytest.raises(RuntimeError, match="database creation denied"),
+        ):
+            validator._open_connection(initialize_database=True)
+
+        execute.assert_called_once_with("CREATE DATABASE IF NOT EXISTS `test_db`")
+        assert conn.closed
 
     @pytest.mark.parametrize(
         ("username", "password"),
@@ -246,7 +281,7 @@ class TestTLS:
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname
         assert socket.call_args.args == ("kyuubi.example", 10010)
-        socket.return_value.setTimeout.assert_called_once_with(5000)
+        socket.return_value.setTimeout.assert_called_once_with(180_000)
         actual_transport = connection.call_args.kwargs["thrift_transport"]
         assert actual_transport.mechanism == "PLAIN"
         sasl = actual_transport.sasl_client_factory()
@@ -255,7 +290,7 @@ class TestTLS:
         assert mechanism == "PLAIN"
         assert response == b"\x00canary-user\x00canary-password"
         assert connection.call_args.kwargs.keys() == {"database", "username", "thrift_transport"}
-        assert connection.call_args.kwargs["database"] == "test_db"
+        assert connection.call_args.kwargs["database"] == "default"
 
     @pytest.mark.parametrize("tls_ca", [None, "", " "], ids=["absent", "empty", "blank"])
     def test_rejects_missing_ca_before_connecting(self, tls_ca: str | None) -> None:
@@ -321,7 +356,7 @@ class TestTLS:
             validator._open_connection()
 
         transport = connection.call_args.kwargs["thrift_transport"]
-        assert transport._trans._timeout == 5
+        assert transport._trans._timeout == 180
 
     def test_tls_options_pass_real_pyhive_and_socket_argument_validation(self) -> None:
         validator = _make_validator(databag={**VALID_DATABAG, "tls": "True", "tls-ca": "test-ca"})

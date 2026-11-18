@@ -174,10 +174,14 @@ rejected; external LDAP credential provisioning is not supported.
 
 When ``tls`` is ``True``, the validator requires ``tls-ca`` (resolved from
 ``secret-tls`` when present) and verifies both the certificate chain and endpoint
-hostname. Canary operations also require a working storage backend and permission
-to create, read, insert into, and drop tables.
+hostname. Canary operations require a working storage backend and permission
+to create, read, insert into, and drop tables. Preparation connects through
+``default`` and initializes the requested schema if needed, using the relation
+credentials. All canary data stays in the requested schema. Checkpoint and
+cleanup do not recreate or remove the schema.
 
-Both plain and TLS transports use a five-second connection and socket I/O timeout.
+Both plain and TLS transports use a three-minute connection and socket I/O
+timeout to accommodate cold Spark engine startup.
 Checkpoint validation requires exactly one token-bearing row for every reference
 from 1 through the expected reference, rejecting duplicate or out-of-range references
 before writing another row.
