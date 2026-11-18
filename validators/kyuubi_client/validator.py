@@ -24,7 +24,10 @@ _CANARY_TABLE_PREFIX = "validator_canary_"
 _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _MAX_CHECKPOINT_REF = (1 << 63) - 1
 _DEFAULT_PORT = 10009
-_SOCKET_TIMEOUT_SECONDS = 5
+# The first SQL statement can wait for a cold Spark engine (over two minutes in CI).
+_CONNECT_TIMEOUT_SECONDS = 5
+_SQL_TIMEOUT_SECONDS = 180
+_DEFAULT_DATABASE = "default"
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,12 @@ class _TLSSocket(TSSLSocket.TSSLSocket):  # type: ignore[misc]
         # Thrift's SSL socket cannot close an unopened socket after a failed handshake.
         if self.handle is not None:
             super().close()
+
+
+class _KyuubiSaslClientTransport(TSaslClientTransport):  # type: ignore[misc]
+    def open(self) -> None:
+        super().open()
+        self._trans.setTimeout(_SQL_TIMEOUT_SECONDS * 1000)
 
 
 def _quote_identifier(name: str) -> str:
@@ -62,7 +71,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
         token = uuid.uuid4().hex
         table = _quote_identifier(table_name)
 
-        conn = self._open_connection()
+        conn = self._open_connection(initialize_database=True)
         try:
             with conn.cursor() as cur:
                 cur.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - generated, quoted identifier
@@ -188,7 +197,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             raise _IncompleteConnectionConfig("Cannot connect to Kyuubi: endpoint URI has no host.")
 
         uri_database = urllib.parse.unquote(parsed.path.strip("/"))
-        database = data.get("database") or uri_database or "default"
+        database = data.get("database") or uri_database or _DEFAULT_DATABASE
         if uri_database and data.get("database") and uri_database != data["database"]:
             raise _IncompleteConnectionConfig("Kyuubi URI database does not match the relation 'database' field.")
 
@@ -209,15 +218,15 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
 
         return _ConnectionConfig(host, port, database, username, password, tls_ca)
 
-    def _open_connection(self) -> "hive.Connection":
+    def _open_connection(self, *, initialize_database: bool = False) -> "hive.Connection":
         config = self._connection_config()
         if config.tls_ca is not None:
             context = ssl.create_default_context(cadata=config.tls_ca)
             socket = _TLSSocket(config.host, config.port, ssl_context=context)
         else:
             socket = TSocket.TSocket(config.host, config.port)
-        socket.setTimeout(_SOCKET_TIMEOUT_SECONDS * 1000)
-        transport = TSaslClientTransport(
+        socket.setTimeout(_CONNECT_TIMEOUT_SECONDS * 1000)
+        transport = _KyuubiSaslClientTransport(
             lambda: hive.get_installed_sasl(
                 host=config.host,
                 sasl_auth="PLAIN",
@@ -227,11 +236,25 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             "PLAIN",
             socket,
         )
-        return hive.Connection(
-            database=config.database,
+        # PyHive issues USE during construction, before we can create the requested schema.
+        conn = hive.Connection(
+            database=_DEFAULT_DATABASE,
             username=config.username,
             thrift_transport=transport,
         )
+        if config.database == _DEFAULT_DATABASE:
+            return conn
+
+        try:
+            database = _quote_identifier(config.database)
+            with conn.cursor() as cur:
+                if initialize_database:
+                    cur.execute(f"CREATE DATABASE IF NOT EXISTS {database}")  # nosec B608 - quoted identifier
+                cur.execute(f"USE {database}")  # nosec B608 - quoted identifier
+        except Exception:
+            conn.close()
+            raise
+        return conn
 
     def _canary_table_prefix(self) -> str:
         scope = f"{self.charm.model.uuid}:{self.relation_id}:{self.charm.model.unit.name}"
