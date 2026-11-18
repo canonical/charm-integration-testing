@@ -48,7 +48,7 @@ from .domain import (
 )
 from .domain_builder import DomainBuilder
 from .extract import extract_solution
-from .release_errors import CharmReleaseNotFoundException
+from .release_errors import AssumesMismatchError, CharmReleaseNotFoundException, leaf_release_errors
 from .snapstore import SnapstoreClient
 from .spec import SpecFile
 from .timing import NullTimeline, Timeline
@@ -95,6 +95,23 @@ class UncompletableBundleError(ValueError):
             raise ValueError("UncompletableBundleError requires at least one diagnostic")
         reason = "; ".join(diagnostic.description for diagnostic in self.diagnostics)
         super().__init__(f"Could not build a complete valid bundle: {reason}")
+
+    @property
+    def unsupported_charms(self) -> tuple[str, ...]:
+        """Charms requested by the spec that their overrides mark as unsupported by Charm QA."""
+        return tuple(
+            sorted(
+                {
+                    diagnostic.charm_name
+                    for diagnostic in self.diagnostics
+                    if isinstance(diagnostic, ApplicationReleaseDiagnostic)
+                    and all(
+                        isinstance(leaf, AssumesMismatchError) and leaf.is_unsupported_by_testing
+                        for leaf in leaf_release_errors(diagnostic.error)
+                    )
+                }
+            )
+        )
 
 
 class BundleBuilder:

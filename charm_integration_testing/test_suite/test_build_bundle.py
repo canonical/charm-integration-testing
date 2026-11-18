@@ -13,6 +13,7 @@ from bundle_builder_x import (
     IntegrationSpec,
     ModelSpec,
     SpecFile,
+    UncompletableBundleError,
 )
 
 from .scheduler.states import State
@@ -115,7 +116,12 @@ def test_build_bundle(
             ]
         )
 
-    solution = bundle_builder.build(spec)
+    try:
+        solution = bundle_builder.build(spec)
+    except UncompletableBundleError as exc:
+        if exc.unsupported_charms:
+            pytest.skip(f"Charm(s) marked unsupported by Charm QA: {', '.join(exc.unsupported_charms)}.")
+        raise
 
     separator = "-" * 80
     bundles_by_model = {b.model: b for b in solution.bundles}

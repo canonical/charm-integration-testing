@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+# Charm overrides mark charms that Charm QA cannot test with assumes features such as "unsupported-openstack".
+UNSUPPORTED_FEATURE_REQUIREMENT_PREFIX = "feature=unsupported-"
+
 
 class ReleaseUnavailableKind(str, Enum):
     """Stable classifications for release lookup failures."""
@@ -86,6 +89,13 @@ class AssumesMismatchError(CharmReleaseNotFoundException):
             f"{list(self.unmet_requirements)!r} for Juju {request.juju_version!r} and "
             f"available features {list(self.available_features)!r}",
             request=request,
+        )
+
+    @property
+    def is_unsupported_by_testing(self) -> bool:
+        """Whether every unmet requirement is an ``unsupported-*`` sentinel set by the charm overrides."""
+        return bool(self.unmet_requirements) and all(
+            requirement.startswith(UNSUPPORTED_FEATURE_REQUIREMENT_PREFIX) for requirement in self.unmet_requirements
         )
 
 

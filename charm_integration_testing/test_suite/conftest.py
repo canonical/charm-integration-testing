@@ -783,6 +783,12 @@ def target_resolved_charm(request: pytest.FixtureRequest) -> Charm:
             platform=target_platform,
             juju_version=bundle_juju_version,
         )
+    except AssumesMismatchError as exc:
+        if exc.is_unsupported_by_testing:
+            pytest.skip(
+                f"Charm '{target_charm}' is marked unsupported by Charm QA ({', '.join(exc.unmet_requirements)})."
+            )
+        raise
     except BaseMismatchError:
         # The target itself cannot be resolved on the requested series (e.g. a stale --target-series
         # after a Charmhub base change), so the whole downgrade/upgrade cycle is untestable.

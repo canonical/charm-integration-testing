@@ -755,6 +755,8 @@ class TestCharmhubClient:
             assert isinstance(diagnostic, ApplicationReleaseDiagnostic)
             assert diagnostic.charm_name == "aodh"
             assert isinstance(diagnostic.error, AssumesMismatchError)
+            assert diagnostic.error.is_unsupported_by_testing
+            assert exc_info.value.unsupported_charms == ("aodh",)
 
     # ---------------------------------------------------------------------------
     # TestChannelSupportsUbuntuVersion

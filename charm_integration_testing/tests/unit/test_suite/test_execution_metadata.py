@@ -79,6 +79,22 @@ def test_assumes_metadata_emits_one_atomic_value_per_requirement() -> None:
     }
 
 
+def test_assumes_mismatch_is_unsupported_only_when_all_requirements_are_sentinels() -> None:
+    request = ReleaseRequest(charm_name="aodh", architecture="amd64", platform="machine", juju_version="3.5.0")
+
+    sentinel_only = AssumesMismatchError(
+        request=request, unmet_requirements=("feature=unsupported-openstack",), available_features=("juju",)
+    )
+    mixed = AssumesMismatchError(
+        request=request,
+        unmet_requirements=("feature=unsupported-openstack", "juju>=3.6.0"),
+        available_features=("juju",),
+    )
+
+    assert sentinel_only.is_unsupported_by_testing
+    assert not mixed.is_unsupported_by_testing
+
+
 def test_aggregate_release_metadata_flattens_and_deduplicates_children() -> None:
     child = ReleaseUnavailableError(
         kind=ReleaseUnavailableKind.CHANNEL_NOT_FOUND,
