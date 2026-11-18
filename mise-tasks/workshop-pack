@@ -45,7 +45,7 @@ mkdir "$context/toolkit"
 git -C "$project_root" archive "$revision" | tar -x -C "$context/toolkit"
 sdk_source="$context/toolkit/workshop-sdk"
 cp "$sdk_source/sdkcraft.yaml" "$sdk_source/environment.sh" "$context/"
-cp -R "$sdk_source/hooks" "$sdk_source/bin" "$context/"
+cp -R "$sdk_source/hooks" "$context/"
 printf '%s\n' "$revision" > "$context/revision"
 
 output="$project_root/dist/workshop"

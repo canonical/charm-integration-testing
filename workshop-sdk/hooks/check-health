@@ -3,8 +3,8 @@
 # See LICENSE file for licensing details.
 set -euo pipefail
 
-if sudo -u workshop -H "$SDK/bin/charm-qa" exec -- \
-    python -c 'import juju, jubilant, validators.engine'; then
+if sudo -iu workshop bash -c \
+    'mise -C "$CHARM_QA_ROOT" exec -- uv run --no-sync --all-packages python -c "import juju, jubilant, validators.engine"'; then
     workshopctl set-health okay
 else
     workshopctl set-health error "Charm QA dependencies are unavailable; inspect setup-project."

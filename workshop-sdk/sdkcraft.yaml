@@ -32,6 +32,10 @@ plugs:
     interface: mount
     workshop-target: /home/workshop/.config/charm-integration-testing
     mode: 0o700
+  skills:
+    interface: mount
+    workshop-target: /home/workshop/.local/share/charm-integration-testing/skills
+    mode: 0o700
 parts:
   toolkit:
     plugin: nil
@@ -41,11 +45,6 @@ parts:
       cp -R "$CRAFT_PART_SRC/." "$CRAFT_PART_INSTALL/toolkit/"
       install -m 0644 "$CRAFT_PROJECT_DIR/revision" "$CRAFT_PART_INSTALL/revision"
       craftctl set version="$(cut -c1-12 "$CRAFT_PROJECT_DIR/revision")"
-  command:
-    plugin: dump
-    source: bin
-    organize:
-      charm-qa: bin/charm-qa
   environment:
     plugin: dump
     source: environment.sh

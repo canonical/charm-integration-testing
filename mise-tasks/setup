@@ -10,7 +10,7 @@ usage() {
 Usage: mise run setup -- [--group GROUP ...] [--tools TOOL ...] [--packages PACKAGE ...]
                         [--no-packages] [--dry-run]
 
-Groups: runtime, development, workflow, integration, cleanup, sandbox, workshop, agent, local-k8s,
+Groups: runtime, development, workflow, integration, cleanup, sandbox, workshop, agent, skills, local-k8s,
         local-lxd, local-s3, cloud-k8s, cloud-openstack, cloud-lxd
 Tools and packages must be named exactly as declared in mise.toml.
 Groups include their tools, packages and project dependencies where applicable.
@@ -31,6 +31,7 @@ no_packages=false
 explicit_packages=false
 dry_run=()
 project=none
+skills=false
 while (( $# )); do
     case "$1" in
         --group|--tools|--packages)
@@ -90,6 +91,9 @@ for group in "${groups[@]}"; do
                 npm:@github/copilot
                 aqua:cli/cli
             )
+            ;;
+        skills)
+            skills=true
             ;;
         sandbox)
             tools+=(go)
@@ -175,6 +179,9 @@ fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+if [[ "$skills" == true ]]; then
+    bash "$project_root/mise-tasks/setup-skills" --check
+fi
 for tool in "${tools[@]}"; do
     [[ "$tool" =~ ^[A-Za-z0-9:@+._/-]+$ ]] || die "Invalid catalogue tool name: $tool"
     mise config get --file "$project_root/mise.toml" "tools.\"$tool\"" >/dev/null ||
@@ -227,4 +234,7 @@ if [[ "$project" != none ]]; then
                 --no-default-groups --all-extras --group dev --locked
             ;;
     esac
+fi
+if [[ "$skills" == true ]]; then
+    bash "$project_root/mise-tasks/setup-skills"
 fi

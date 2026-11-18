@@ -20,36 +20,28 @@ This skill bridges the gap between:
 ## Prerequisites
 
 Use [setup-charm-tests](../setup-charm-tests/SKILL.md) to prepare the required
-substrates and logging tools. In the Multipass sandbox, run commands from
-`$PROJECT_ROOT`. In a Charm QA Workshop, follow the section below instead.
-The test suite creates controllers according to `--current-state`.
+substrates and logging tools. Run inside the prepared target environment,
+not from an external host managing it. The test suite creates controllers
+according to `--current-state`.
 
-### Charm QA Workshop
-
-Keep the charm checkout as the working directory. For the examples below,
-replace `mise run TASK` with `charm-qa run TASK` and run tool commands such as
-`juju` through `charm-qa exec --`. Do not launch the Multipass sandbox.
-
-Resolve toolkit documentation and files relative to `charm-qa root`, not the
-installed skill symlink. Use absolute paths for bundles, kubeconfigs, JSON
-files and all output paths: `charm-qa run` changes to the toolkit directory.
-For example:
+`CHARM_QA_ROOT` identifies the toolkit checkout, which may differ from the
+charm checkout. If it is unset, ask the user to select the toolkit before
+continuing. Save the workspace path before running the examples:
 
 ```bash
-toolkit="$(charm-qa root)"
-workspace="$PWD"
-charm-qa run test:suite -- \
-  --help
-# When constructing the actual invocation:
-# --charm-overrides "$toolkit/static/charm-overrides"
-# --log-dir "$workspace/test-logs"
-# --junit-xml "$workspace/junit.xml"
+workspace="$(pwd -P)"
+mise -C "$CHARM_QA_ROOT" run test:suite -- --help
 ```
 
-The SDK does not provision a substrate. Use explicitly configured test clouds;
-do not assume that `localhost` or `local-k8s` exists. Local Kubernetes and LXD
-provisioning inside a Workshop container has not been validated. Do not run
-host-level provisioning or change firewall settings without approval.
+For the examples below, run tasks with `mise -C "$CHARM_QA_ROOT" run` and
+tools with `mise -C "$CHARM_QA_ROOT" exec --`. Resolve toolkit documentation
+from `$CHARM_QA_ROOT`, not the installed skill symlink. Replace relative
+bundle, kubeconfig and output paths with absolute workspace paths such as
+`"$workspace/test-logs"`; tasks run from the toolkit, not the charm checkout.
+
+Use only clouds and credentials provided for this environment. Do not assume
+that `localhost` or `local-k8s` exists, or provision local substrates without
+authorization.
 
 ## Quick Start
 
@@ -792,7 +784,7 @@ juju ssh -m target/mymodel 0 "sudo grep -i relation /var/log/juju/unit*.log"
 1. **Start Simple**: Begin with single-cloud tests before CMR
 2. **Narrow Scope**: Run individual test modules before full suite
 3. **Preserve Models**: Use `--current-state` to skip teardown for debugging
-4. **Sandbox lifecycle**: Follow the [sandbox guide](../../../development-sandbox/README.md#quick-start); obtain approval before destroying an existing VM.
+4. **Environment boundary**: Work inside the prepared target environment; do not manage its VM or container from an external host.
 5. **Check Prerequisites**: Verify LXD/K8s available before running with `/setup-lxd` or `/setup-k8s`
 6. **Capture Output**: Logs are automatically collected into the log directory specified by `--log-dir`
 

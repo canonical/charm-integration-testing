@@ -22,6 +22,10 @@ Ask Copilot to develop or test a validator, reproduce a failure, or review a PR.
 Skills such as `/setup-k8s`, `/setup-lxd`, `/develop-validator`, and `/test-validator`
 handle substrate setup and testing.
 
+Sandbox setup registers skills inside the VM through the shared `skills` setup
+group and supplies `CHARM_QA_ROOT` to VM sessions. It does not register skills
+in the external host's home directory.
+
 The sandbox delegates Copilot execution to a reusable Mise task. On a prepared
 Ubuntu host, run it directly:
 

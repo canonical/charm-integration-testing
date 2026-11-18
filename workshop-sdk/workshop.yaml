@@ -7,6 +7,6 @@ sdks:
   - name: copilot
     channel: latest/stable
 actions:
-  tasks: charm-qa tasks
-  qa: charm-qa run "$@"
+  tasks: mise -C "$CHARM_QA_ROOT" tasks ls
+  qa: mise -C "$CHARM_QA_ROOT" run "$@"
   agent: copilot "$@"

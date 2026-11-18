@@ -12,6 +12,10 @@ locked = true
 auto_install = false
 task.run_auto_install = false
 
+[env]
+CHARM_QA_ROOT = "{{config_root}}"
+PROJECT_ROOT = "{{config_root}}"
+
 [bootstrap.packages]
 "snap:sdkcraft" = { channel = "latest/stable", classic = true }
 "snap:workshop" = { channel = "latest/stable", classic = true }

@@ -11,4 +11,4 @@ if ! /usr/bin/snap list mise >/dev/null 2>&1; then
     /usr/bin/snap install mise --classic --channel=stable
 fi
 
-ln -sfn "$SDK/bin/charm-qa" /usr/local/bin/charm-qa
+ln -sfn "$SDK/environment.sh" /etc/profile.d/charm-qa.sh
