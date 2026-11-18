@@ -25,7 +25,8 @@ _MAX_CANARY_IDENTIFIER = (1 << 63) - 1
 _MAX_CHECKPOINT_REF = (1 << 63) - 1
 _DEFAULT_PORT = 10009
 # The first SQL statement can wait for a cold Spark engine (over two minutes in CI).
-_SOCKET_TIMEOUT_SECONDS = 180
+_CONNECT_TIMEOUT_SECONDS = 5
+_SQL_TIMEOUT_SECONDS = 180
 _DEFAULT_DATABASE = "default"
 
 
@@ -218,7 +219,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             socket = _TLSSocket(config.host, config.port, ssl_context=context)
         else:
             socket = TSocket.TSocket(config.host, config.port)
-        socket.setTimeout(_SOCKET_TIMEOUT_SECONDS * 1000)
+        socket.setTimeout(_CONNECT_TIMEOUT_SECONDS * 1000)
         transport = TSaslClientTransport(
             lambda: hive.get_installed_sasl(
                 host=config.host,
@@ -235,6 +236,7 @@ class KyuubiClientPersistenceValidator(BasePersistenceValidator):
             username=config.username,
             thrift_transport=transport,
         )
+        socket.setTimeout(_SQL_TIMEOUT_SECONDS * 1000)
         if config.database == _DEFAULT_DATABASE:
             return conn
 

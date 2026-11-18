@@ -5,7 +5,7 @@ import sqlite3
 import ssl
 from dataclasses import dataclass, field
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import ops
 import pytest
@@ -164,10 +164,16 @@ class TestPrepare:
             patch("validators.kyuubi_client.validator.TSocket.TSocket") as socket,
             patch("validators.kyuubi_client.validator.hive.Connection") as connection,
         ):
+
+            def create_connection(**kwargs: Any) -> ConnStub:
+                assert socket.return_value.setTimeout.call_args_list == [call(5_000)]
+                return ConnStub()
+
+            connection.side_effect = create_connection
             validator._open_connection()
 
         socket.assert_called_once_with("kyuubi.example", 10009)
-        socket.return_value.setTimeout.assert_called_once_with(180_000)
+        assert socket.return_value.setTimeout.call_args_list == [call(5_000), call(180_000)]
         options = connection.call_args.kwargs
         assert options.keys() == {"database", "username", "thrift_transport"}
         assert options["database"] == "default"
@@ -281,7 +287,7 @@ class TestTLS:
         assert context.verify_mode == ssl.CERT_REQUIRED
         assert context.check_hostname
         assert socket.call_args.args == ("kyuubi.example", 10010)
-        socket.return_value.setTimeout.assert_called_once_with(180_000)
+        assert socket.return_value.setTimeout.call_args_list == [call(5_000), call(180_000)]
         actual_transport = connection.call_args.kwargs["thrift_transport"]
         assert actual_transport.mechanism == "PLAIN"
         sasl = actual_transport.sasl_client_factory()
@@ -347,7 +353,7 @@ class TestTLS:
         assert context.check_hostname
 
     @pytest.mark.parametrize("tls", ["False", "True"], ids=["plain", "tls"])
-    def test_real_socket_has_bounded_connect_and_io_timeout(self, tls: str) -> None:
+    def test_real_socket_uses_short_connect_and_long_sql_timeouts(self, tls: str) -> None:
         validator = _make_validator(databag={**VALID_DATABAG, "tls": tls, "tls-ca": "test-ca"})
         with (
             patch("ssl.SSLContext.load_verify_locations"),
