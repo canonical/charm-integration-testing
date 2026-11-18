@@ -222,8 +222,8 @@ Fresh runs share the synthesized target release across bundle export, lint,
 and refresh tests. Resumed runs resolve from the existing ``--target-bundle``
 without rebuilding.
 
-If bundle synthesis cannot select a target release, or a pinned saved release
-is unavailable, both lint cases skip with the resolution error as the reason.
+If bundle synthesis or a saved bundle lookup cannot resolve the target release,
+both lint cases skip with the resolution error as the reason.
 Bundle building and deployment retain their existing failure behavior.
 Internal solver/build errors, Charmhub connection errors, malformed saved bundles,
 download failures, missing provenance, and checkout failures still fail linting.
