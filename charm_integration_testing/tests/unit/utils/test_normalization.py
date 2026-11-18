@@ -972,6 +972,41 @@ class TestNormalizeStringMultiline:
 
     test_cases = [
         Params(
+            label="charmhub_refresh_eof_groups_charm_names",
+            input=(
+                'ERROR cannot deploy bundle: cannot resolve charm or bundle "postgresql-k8s": '
+                "resolving with preferred channel: attempt count exceeded: "
+                'Post "https://api.charmhub.io/v2/charms/refresh": EOF\n'
+                'ERROR cannot deploy bundle: cannot resolve charm or bundle "data-integrator": '
+                "resolving with preferred channel: attempt count exceeded: "
+                'Post "https://api.charmhub.io/v2/charms/refresh": EOF'
+            ),
+            expected_lines=['ERROR cannot deploy bundle: Post "https://api.charmhub.io/vXXX/charms/refresh": EOF'] * 2,
+        ),
+        Params(
+            label="charmhub_refresh_connection_refused_keeps_transport_error",
+            input=(
+                'ERROR cannot deploy bundle: cannot resolve charm or bundle "superset-k8s": '
+                'resolving with preferred channel: Post "https://api.charmhub.io/v2/charms/refresh": '
+                "dial tcp 185.125.188.58:443: connect: connection refused"
+            ),
+            expected_lines=[
+                'ERROR cannot deploy bundle: Post "https://api.charmhub.io/vXXX/charms/refresh": '
+                "dial tcp <IP>:XXX: connect: connection refused"
+            ],
+        ),
+        Params(
+            label="unrelated_charm_resolution_error_keeps_name",
+            input=(
+                'ERROR cannot deploy bundle: cannot resolve charm or bundle "superset-k8s": '
+                "resolving with preferred channel: charm not found"
+            ),
+            expected_lines=[
+                'ERROR cannot deploy bundle: cannot resolve charm or bundle "superset-k8s": '
+                "resolving with preferred channel: charm not found"
+            ],
+        ),
+        Params(
             label="multiple_lines_with_ips_uuids_and_length_limit",
             input="""line 1\nConnecting to 10.152.183.123\nabcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd nnnnn\nERROR: Session ID: 123e4567-e89b-12d3-a456-426614174000\nline 5""",
             expected_lines=[
