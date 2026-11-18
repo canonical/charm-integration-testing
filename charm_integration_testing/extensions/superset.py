@@ -5,6 +5,7 @@ import logging
 import secrets
 
 from juju import JujuBackend, JujuExtension, JujuModelHandle
+from juju.backend import JujuSecretNotFoundError
 
 _SIGNING_SECRET_CONFIG = "signing-keys-secret-id"  # nosec B105
 
@@ -36,10 +37,16 @@ class SupersetSigningSecretExtension(JujuExtension):
 
         application = missing[0]
         self.logger.info("Provisioning a signing secret for %s in %s.", application, model.uri)
+        secret_name = f"charmqa-superset-{application}-signing"
+        # The config is still unset, so discard any incomplete provisioning from a prior attempt.
+        try:
+            self.juju.remove_secret(model, secret_name)
+        except JujuSecretNotFoundError:
+            pass
         secret_id = self.juju.add_secret(
             model,
-            f"charmqa-{application}-signing-{secrets.token_hex(4)}",
+            secret_name,
             {"secret-key": secrets.token_urlsafe(48), "async-queries-jwt": secrets.token_urlsafe(48)},
         )
-        self.juju.grant_secret(model, secret_id, application)
-        self.juju.configure_application(model, application, {_SIGNING_SECRET_CONFIG: secret_id})
+        self.juju.grant_secret(model, secret_name, application)
+        self.juju.configure_application(model, application, {_SIGNING_SECRET_CONFIG: f"secret:{secret_id}"})

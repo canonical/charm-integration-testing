@@ -30,7 +30,7 @@ from juju import (
     JujuWaitTimeoutError,
     JujuWorkloadInstance,
 )
-from juju.backend import JujuBackend
+from juju.backend import JujuBackend, JujuSecretNotFoundError
 from juju.version import JujuVersion
 from juju_cmd import JujuCmdBackend
 from juju_jubilant.backend import JubilantBackend, TransientModelUnavailabilityError
@@ -1829,6 +1829,25 @@ class TestJubilantBackend:
 
             # THEN
             assert ("remove-secret", "my-secret") in client.client.executions
+
+        @pytest.mark.parametrize(
+            ("stderr", "expected_error"),
+            [
+                ('ERROR secret "my-secret" not found\n', JujuSecretNotFoundError),
+                ('ERROR model "test-model" not found\n', jubilant.CLIError),
+            ],
+        )
+        def test_error_translation(self, stderr: str, expected_error: type[Exception]) -> None:
+            # GIVEN
+            class FailingJuju(JubilantCliStub):
+                def cli(self, *args: str, **kwargs: Any) -> str:
+                    raise jubilant.CLIError(1, ["juju", *args], "", stderr)
+
+            backend = JubilantBackend(JubilantClientStub(client=FailingJuju()))
+
+            # WHEN/THEN
+            with pytest.raises(expected_error):
+                backend.remove_secret(TEST_MODEL, "my-secret")
 
     class TestDeployApplication:
         @dataclass

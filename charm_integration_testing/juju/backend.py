@@ -8,6 +8,7 @@ from dataclasses import field
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from subprocess import CalledProcessError  # nosec B404 (exception type only)
 from typing import Any, ParamSpec, TypeVar
 
 from pydantic.dataclasses import dataclass
@@ -31,6 +32,10 @@ _R = TypeVar("_R")
 
 class JujuRestartNotSupportedError(NotImplementedError):
     """The backend or placement does not support restarting a follower; no restart was attempted."""
+
+
+class JujuSecretNotFoundError(CalledProcessError):
+    """The requested Juju secret does not exist; preserve CLI failure handling for callers."""
 
 
 class JujuPerformanceWarning(UserWarning):
@@ -404,6 +409,7 @@ class JujuBackend(ABC):
 
     @abstractmethod
     def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
+        """Remove a secret, raising JujuSecretNotFoundError if it does not exist."""
         raise NotImplementedError
 
     @abstractmethod

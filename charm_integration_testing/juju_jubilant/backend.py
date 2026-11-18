@@ -40,6 +40,7 @@ from juju import (
     JujuWorkloadInstance,
     warn_performance,
 )
+from juju.backend import JujuSecretNotFoundError
 from kubernetes_client import KubernetesClient, KubernetesClientRegistry
 
 from validators.base.validator import ValidationResult
@@ -731,11 +732,12 @@ class JubilantBackend(JujuBackend):
         )
 
     def remove_secret(self, model: JujuModelHandle, name_or_id: str) -> None:
-        # Call remove secret
-        self.client.model(model).cli(
-            "remove-secret",
-            name_or_id,
-        )
+        try:
+            self.client.model(model).cli("remove-secret", name_or_id)
+        except jubilant.CLIError as exc:
+            if f"ERROR secret {json.dumps(name_or_id)} not found" in exc.stderr.splitlines():
+                raise JujuSecretNotFoundError(exc.returncode, exc.cmd, exc.output, exc.stderr) from exc
+            raise
 
     def deploy_bundle_file(
         self,
