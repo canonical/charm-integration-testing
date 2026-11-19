@@ -142,26 +142,22 @@ jobs:
         uses: ./.github/actions/get-environment-info
         with:
           environment_name: ${{ inputs.neighbor_environment }}
-      - name: Select temporary Juju channel override
-        id: juju_channel
+      # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
+      - name: Override Juju 4/stable for Kubernetes controllers
+        id: juju_channel_override
+        if: >-
+          ${{ inputs.juju_channel == '4/stable' &&
+              (steps.target_env_info.outputs.platform == 'kubernetes' ||
+               (!inputs.same_controller && steps.neighbor_env_info.outputs.platform == 'kubernetes')) }}
         shell: bash
-        env:
-          REQUESTED_CHANNEL: ${{ inputs.juju_channel }}
-          TARGET_PLATFORM: ${{ steps.target_env_info.outputs.platform }}
-          NEIGHBOR_PLATFORM: ${{ steps.neighbor_env_info.outputs.platform }}
-          SAME_CONTROLLER: ${{ inputs.same_controller }}
         run: |
-          # Remove when 4.1/stable is published and 4/stable serves it (#1309).
-          if [[ "$REQUESTED_CHANNEL" == 4/stable &&
-                ( "$TARGET_PLATFORM" == kubernetes ||
-                  ( "$NEIGHBOR_PLATFORM" == kubernetes && "$SAME_CONTROLLER" == false ) ) ]]; then
-            echo 'override=4.1/edge' >> "$GITHUB_OUTPUT"
-          fi
+          echo 'channel=4.1/edge' >> "$GITHUB_OUTPUT"
+          printf '### Juju channel override\n\nRequested `4/stable`; using `4.1/edge`.\n' >> "$GITHUB_STEP_SUMMARY"
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
           groups: integration
-          juju-channel: ${{ steps.juju_channel.outputs.override || inputs.juju_channel }}
+          juju-channel: ${{ steps.juju_channel_override.outputs.channel || inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
@@ -194,7 +190,6 @@ jobs:
           charm_endpoint: ${{ inputs.charm_endpoint }}
           execution_id: ${{ inputs.execution_id }}
           juju_channel: ${{ inputs.juju_channel }}
-          juju_channel_override: ${{ steps.juju_channel.outputs.override }}
           neighbor: ${{ inputs.neighbor }}
           neighbor_endpoint: ${{ inputs.neighbor_endpoint }}
           revision: ${{ inputs.revision }}
@@ -217,9 +212,6 @@ jobs:
           echo "| \`charm_endpoint\` | \`${charm_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`execution_id\` | \`${execution_id}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`juju_channel\` | \`${juju_channel}\` |" >> $GITHUB_STEP_SUMMARY
-          if [[ -n "$juju_channel_override" ]]; then
-            echo "| Juju channel used for setup | \`${juju_channel_override}\` |" >> "$GITHUB_STEP_SUMMARY"
-          fi
           echo "| \`neighbor\` | \`${neighbor}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`neighbor_endpoint\` | \`${neighbor_endpoint}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| \`revision\` | \`${revision}\` |" >> $GITHUB_STEP_SUMMARY
