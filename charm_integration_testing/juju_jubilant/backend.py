@@ -874,8 +874,10 @@ class JubilantBackend(JujuBackend):
             stderr=task_result.results.stderr,
         )
 
-    @staticmethod
-    def _ssh_options(juju: jubilant.Juju, *, recursive: bool = False) -> tuple[str, ...]:
+    def _ssh_options(
+        self, model: JujuModelHandle, *, recursive: bool = False, timeout: float | None = None
+    ) -> tuple[str, ...]:
+        juju = self.client.model(model, timeout=timeout)
         if juju.show_model().type != "kubernetes":
             return ("--", "-r") if recursive else ()
         # Preserve Kubernetes exec/copy: https://github.com/juju/juju/issues/23899
@@ -885,8 +887,7 @@ class JubilantBackend(JujuBackend):
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        juju = self.client.model(model)
-        options = self._ssh_options(juju, recursive=True)
+        options = self._ssh_options(model, recursive=True)
 
         # The Juju snap can only access files under $HOME.  Stage any source
         # that lives outside the home directory into a temporary directory
@@ -900,17 +901,17 @@ class JubilantBackend(JujuBackend):
                     shutil.copytree(source_path, staged, ignore=_skip_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
-                juju.cli("scp", *options, str(staged), destination)
+                self.client.model(model).cli("scp", *options, str(staged), destination)
             return
 
-        juju.cli("scp", *options, source, destination)
+        self.client.model(model).cli("scp", *options, source, destination)
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
         """Run SSH, optionally bounding the entire process and returning its output."""
-        juju = self.client.model(model, timeout=timeout)
-        options = self._ssh_options(juju)
+        options = self._ssh_options(model, timeout=timeout)
+        juju = self.client.model(model)
         if timeout is None:
             juju.cli("ssh", *options, application, command)
             return None

@@ -4009,8 +4009,9 @@ SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner
 
 
 class MachineSshBackend(JubilantBackend):
-    @staticmethod
-    def _ssh_options(juju: jubilant.Juju, *, recursive: bool = False) -> tuple[str, ...]:
+    def _ssh_options(
+        self, model: JujuModelHandle, *, recursive: bool = False, timeout: float | None = None
+    ) -> tuple[str, ...]:
         return ()
 
 
