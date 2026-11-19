@@ -29,6 +29,10 @@ pytest_plugins = [
 @pytest.fixture(scope="session")
 def logger():
     return logging.getLogger("bundle-resolution")
+
+@pytest.fixture(scope="session")
+def git_client():
+    return object()
 """
 
 _CATALOG = """

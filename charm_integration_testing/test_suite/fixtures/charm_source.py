@@ -110,8 +110,11 @@ def _verify_charm_root(source_dir: Path, expected_name: str) -> None:
 def target_charm_source(
     request: pytest.FixtureRequest,
     logger: logging.Logger,
+    git_client: GitClient | None,
 ) -> Iterator[Path]:
     """Check out the source revision recorded in the target charm's packed version file."""
+    if git_client is None:
+        pytest.skip("Git is not installed.")
     try:
         target_resolved_charm: Charm = request.getfixturevalue("target_resolved_charm")
     except (UncompletableBundleError, CharmReleaseNotFoundException) as exc:
@@ -135,7 +138,7 @@ def target_charm_source(
 
         with zipfile.ZipFile(charm_archive) as archive:
             source = _read_source(archive)
-        commit = GitClient(logger).checkout(source.repository, _version_ref(source.version), source_dir)
+        commit = git_client.checkout(source.repository, _version_ref(source.version), source_dir)
         _verify_charm_root(source_dir, target_resolved_charm.name)
 
         logger.info(

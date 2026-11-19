@@ -380,6 +380,10 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
             return logging.getLogger("charmlint-resolution")
 
         @pytest.fixture(scope="session")
+        def git_client():
+            return object()
+
+        @pytest.fixture(scope="session")
         def target_resolved_charm():
             raise AssumesMismatchError(
                 request=ReleaseRequest(charm_name="ceph-radosgw", juju_version="3.6.29"),
@@ -414,6 +418,7 @@ def test_unresolvable_target_skips_only_charmlint(charmlint_pytester: pytest.Pyt
         pytest.param("invalid-bundle", "Invalid saved bundle", id="invalid-bundle"),
         pytest.param("download", "Download failed", id="download"),
         pytest.param("provenance", "Packed charm has no version file", id="provenance"),
+        pytest.param("checkout", "Checkout failed", id="checkout"),
         pytest.param("solver-timeout", "Solver timed out", id="solver-timeout"),
         pytest.param("optimization", "Optimization failed", id="optimization"),
         pytest.param("mixed-diagnostics", "Solver timed out", id="mixed-diagnostics"),
@@ -437,6 +442,13 @@ def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stag
         @pytest.fixture(scope="session")
         def logger():
             return logging.getLogger("charmlint-resolution")
+
+        @pytest.fixture(scope="session")
+        def git_client():
+            class GitStub:
+                def checkout(self, *args):
+                    raise RuntimeError("Checkout failed")
+            return GitStub()
 
         @pytest.fixture(scope="session")
         def target_resolved_charm():
@@ -464,7 +476,9 @@ def test_source_errors_remain_failures(charmlint_pytester: pytest.Pytester, stag
                 if {stage!r} == "download":
                     raise CharmReleaseNotFoundException("Download failed")
                 with zipfile.ZipFile(destination, "w") as archive:
-                    archive.writestr("metadata.yaml", "name: example")
+                    archive.writestr("metadata.yaml", "name: example\\nsource: https://example.com/repo")
+                    if {stage!r} == "checkout":
+                        archive.writestr("version", "abcdef0")
 
         @pytest.fixture(scope="session")
         def juju_client():
