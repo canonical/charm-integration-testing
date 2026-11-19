@@ -150,9 +150,7 @@ jobs:
               (steps.target_env_info.outputs.platform == 'kubernetes' ||
                (!inputs.same_controller && steps.neighbor_env_info.outputs.platform == 'kubernetes')) }}
         shell: bash
-        run: |
-          echo 'channel=4.1/edge' >> "$GITHUB_OUTPUT"
-          printf '### Juju channel override\n\nRequested `4/stable`; using `4.1/edge`.\n' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'channel=4.1/edge' >> "$GITHUB_OUTPUT"
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
