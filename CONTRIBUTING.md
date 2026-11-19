@@ -78,9 +78,11 @@ the saved selection. Without one, setup uses the channel in `mise.toml`. A faile
 install does not replace the previous selection.
 
 The `setup-mise` action applies a nonempty `juju-channel` input before
-installing groups. The charm-testing workflow forwards `juju_channel`;
-omitted or empty inputs preserve the saved selection or catalogue default.
-The action does not use a `JUJU_CHANNEL` environment variable.
+installing groups. The charm-testing workflow forwards `juju_channel`, except
+that it temporarily uses `4.1/edge` for `4/stable` when bootstrapping a Kubernetes
+controller ([#1309](https://github.com/canonical/charm-integration-testing/issues/1309)).
+Omitted or empty inputs preserve the saved selection or catalogue default. The
+action does not use a `JUJU_CHANNEL` environment variable.
 
 Channels are not revision pins and do not change controllers or agents; use fresh
 test controllers when trying another major version.
