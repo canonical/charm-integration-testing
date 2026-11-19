@@ -241,7 +241,9 @@ download failures, missing provenance, and checkout failures still fail linting.
 The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
 test; it does not fall back to the packed charm or a default branch. The source
-checkout must have the target charm at its root.
+checkout must have the target charm at its root. Non-GitHub revisions are
+fetched directly first; only unresolved abbreviated revisions require scanning
+advertised refs, with blob filtering where supported by the Git server.
 The lint test skips if Git is not installed; source download and checkout errors
 otherwise fail the test.
 

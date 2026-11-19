@@ -57,19 +57,26 @@ class GitClient:
             self._fetch(repository, revision, destination)
             commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
         else:
-            self._run("clone", "--no-checkout", "--", repository, str(destination))
+            self._run("init", "--quiet", str(destination))
             try:
-                commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
+                self._fetch(repository, revision, destination)
+                commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
             except CalledProcessError:
                 if re.fullmatch(r"[0-9a-f]{7,39}", revision):
-                    # Servers cannot fetch abbreviated SHAs; resolve one from advertised history.
+                    # Abbreviated SHAs are not fetchable as refs; filter out blobs while scanning advertised history.
                     self._run(
-                        "-C", str(destination), "fetch", "--no-tags", "--", repository, "+refs/*:refs/cit-source/*"
+                        "-C",
+                        str(destination),
+                        "fetch",
+                        "--filter=blob:none",
+                        "--no-tags",
+                        "--",
+                        repository,
+                        "+refs/*:refs/cit-source/*",
                     )
                     commit = self._run("-C", str(destination), "rev-parse", "--verify", f"{revision}^{{commit}}")
                 else:
-                    self._fetch(repository, revision, destination)
-                    commit = self._run("-C", str(destination), "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+                    raise
         self._run("-C", str(destination), "checkout", "--detach", commit)
         return commit
 
@@ -85,7 +92,11 @@ class GitClient:
 
     def _resolve_github_commit(self, repository: str, revision: str) -> str:
         path = urlsplit(repository).path.strip("/").removesuffix(".git")
-        response = requests.get(f"https://api.github.com/repos/{path}/commits/{revision}", timeout=30)
+        response = requests.get(
+            f"https://api.github.com/repos/{path}/commits/{revision}",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "charm-integration-testing"},
+            timeout=30,
+        )
         response.raise_for_status()
         data = response.json()
         commit = data.get("sha") if isinstance(data, dict) else None
