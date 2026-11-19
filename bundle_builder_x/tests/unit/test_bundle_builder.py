@@ -24,7 +24,7 @@ from bundle_builder_x.assertion_tags import (
     PeerChannelMismatchTag,
     SubordinateBaseMismatchTag,
 )
-from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError
+from bundle_builder_x.bundle_builder import BundleBuilder, UncompletableBundleError, UnsatisfiableBundleError
 from bundle_builder_x.bundle_diagnostics import (
     ApplicationReleaseDiagnostic,
     BundleBuildFailureDiagnostic,
@@ -1413,9 +1413,11 @@ class TestCollectUnsatDiagnostics:
         domain = _domain_for_unresolved_diagnostics()
         unhandled = CharmRankBoundedTag(charm=CharmPayload(charm_name="mysql-router", charm_id=0))
 
-        result = BundleBuilder._collect_unsat_diagnostics([unhandled], domain)
+        with pytest.raises(UncompletableBundleError) as exc_info:
+            BundleBuilder._collect_unsat_diagnostics([unhandled], domain)
 
-        assert result == (
+        assert not isinstance(exc_info.value, UnsatisfiableBundleError)
+        assert exc_info.value.diagnostics == (
             BundleBuildFailureDiagnostic(
                 kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
                 detail="Cannot expand the domain to handle failed assertion tags",

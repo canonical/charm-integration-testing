@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 
 from .bundle import Application, ApplicationEndpoint, Bundle, CrossModelIntegration, Integration, Solution
-from .bundle_builder import BundleBuilder, UncompletableBundleError
+from .bundle_builder import BundleBuilder, UncompletableBundleError, UnsatisfiableBundleError
 from .bundle_diagnostics import (
     ApplicationReleaseDiagnostic,
     BundleBuildFailureDiagnostic,
@@ -81,5 +81,6 @@ __all__ = [
     "UnfulfilledEndpointDiagnostic",
     "UnresolvedApplicationDiagnostic",
     "UnresolvedIntegrationDiagnostic",
+    "UnsatisfiableBundleError",
     "leaf_release_errors",
 ]

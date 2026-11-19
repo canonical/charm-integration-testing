@@ -97,6 +97,10 @@ class UncompletableBundleError(ValueError):
         super().__init__(f"Could not build a complete valid bundle: {reason}")
 
 
+class UnsatisfiableBundleError(UncompletableBundleError):
+    """The requested bundle cannot satisfy its constraints."""
+
+
 class BundleBuilder:
     charmhub_client: CharmhubClient
     snapstore_client: SnapstoreClient
@@ -221,7 +225,7 @@ class BundleBuilder:
                 if expanded:
                     break
         if not expanded:
-            raise UncompletableBundleError(
+            raise UnsatisfiableBundleError(
                 diagnostics=self._collect_unsat_diagnostics(tags, domain, provisional_diagnostics),
             )
 
@@ -328,11 +332,13 @@ class BundleBuilder:
                     )
                     diagnostics.append(UnresolvedIntegrationDiagnostic(endpoints=endpoints))
         if not diagnostics:
-            diagnostics.append(
-                BundleBuildFailureDiagnostic(
-                    kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
-                    detail="Cannot expand the domain to handle failed assertion tags",
-                )
+            raise UncompletableBundleError(
+                diagnostics=(
+                    BundleBuildFailureDiagnostic(
+                        kind=BundleBuildFailureKind.UNEXPANDABLE_ASSERTIONS,
+                        detail="Cannot expand the domain to handle failed assertion tags",
+                    ),
+                ),
             )
         return canonicalize_diagnostics(diagnostics)
 

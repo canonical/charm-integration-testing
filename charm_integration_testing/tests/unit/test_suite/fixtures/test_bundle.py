@@ -597,10 +597,10 @@ def test_failed_synthesis_is_shared_and_reported_by_build_test(pytester: pytest.
     pytester.makepyfile(
         test_00_selection="""
         import pytest
-        from bundle_builder_x import UncompletableBundleError
+        from bundle_builder_x import UnsatisfiableBundleError
 
         def test_target_cannot_resolve(request):
-            with pytest.raises(UncompletableBundleError):
+            with pytest.raises(UnsatisfiableBundleError):
                 request.getfixturevalue("target_resolved_charm")
         """,
         test_01_export="from test_suite.test_build_bundle import test_build_bundle",
@@ -644,7 +644,7 @@ def test_failed_synthesis_is_shared_and_reported_by_build_test(pytester: pytest.
     build = next(case for case in ElementTree.parse(junit).iter("testcase") if case.get("name") == "test_build_bundle")
     failure = build.find("failure")
     assert failure is not None
-    assert "UncompletableBundleError" in failure.get("message", "")
+    assert "UnsatisfiableBundleError" in failure.get("message", "")
     assert build.find("error") is None
 
 
@@ -719,5 +719,5 @@ def test_failed_synthesis_skips_only_charmlint(
         assert "No matching synthetic release" in skipped.get("message", "")
     failure = cases["test_build_bundle"].find("failure")
     assert failure is not None
-    assert "UncompletableBundleError" in failure.get("message", "")
+    assert "UnsatisfiableBundleError" in failure.get("message", "")
     assert "charmlint must not run" not in result.stdout.str()
