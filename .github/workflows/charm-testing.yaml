@@ -131,31 +131,12 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           neighbor_environment: ${{ inputs.neighbor_environment }}
-      - name: Get target environment info
-        id: target_env_info
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.target_environment }}
-      - name: Get neighbor environment info
-        id: neighbor_env_info
-        if: ${{ inputs.neighbor_environment != '' }}
-        uses: ./.github/actions/get-environment-info
-        with:
-          environment_name: ${{ inputs.neighbor_environment }}
-      # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
-      - name: Override Juju 4/stable for Kubernetes controllers
-        id: juju_channel_override
-        if: >-
-          ${{ inputs.juju_channel == '4/stable' &&
-              (steps.target_env_info.outputs.platform == 'kubernetes' ||
-               (!inputs.same_controller && steps.neighbor_env_info.outputs.platform == 'kubernetes')) }}
-        shell: bash
-        run: echo 'channel=4.1/edge' >> "$GITHUB_OUTPUT"
       - name: Set up project tools
         uses: ./.github/actions/setup-mise
         with:
           groups: integration
-          juju-channel: ${{ steps.juju_channel_override.outputs.channel || inputs.juju_channel }}
+          # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
+          juju-channel: ${{ inputs.juju_channel == '4/stable' && '4.1/edge' || inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
@@ -178,6 +159,17 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           sudo swapon --show
+      - name: Get target environment info
+        id: target_env_info
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.target_environment }}
+      - name: Get neighbor environment info
+        id: neighbor_env_info
+        if: ${{ inputs.neighbor_environment != '' }}
+        uses: ./.github/actions/get-environment-info
+        with:
+          environment_name: ${{ inputs.neighbor_environment }}
       - name: Log job inputs
         shell: bash
         env:
