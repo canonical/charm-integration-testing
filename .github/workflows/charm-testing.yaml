@@ -135,7 +135,8 @@ jobs:
         uses: ./.github/actions/setup-mise
         with:
           groups: integration
-          juju-channel: ${{ inputs.juju_channel }}
+          # Remove once 4/stable serves stable 4.1: https://github.com/canonical/charm-integration-testing/issues/1309
+          juju-channel: ${{ inputs.juju_channel == '4/stable' && '4.1/edge' || inputs.juju_channel }}
         env:
           HTTPS_PROXY: ${{ steps.pick.outputs.pip-proxy }}
       - name: Enable Debug Session
