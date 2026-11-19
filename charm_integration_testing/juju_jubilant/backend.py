@@ -880,7 +880,11 @@ class JubilantBackend(JujuBackend):
         #
         # Furthermore, machine charms need to specify -r if source is a directory
         #   we'll always specify -r to be safe
-        options = () if self.is_k8s_model(model) else ("--", "-r")
+        options: tuple[str, ...]
+        if self.is_k8s_model(model):
+            options = ("--direct",) if self.cli_version() >= JujuVersion(4, 1) else ()
+        else:
+            options = ("--", "-r")
 
         # The Juju snap can only access files under $HOME.  Stage any source
         # that lives outside the home directory into a temporary directory
@@ -904,10 +908,12 @@ class JubilantBackend(JujuBackend):
     ) -> str | None:
         """Run SSH, optionally bounding the entire process and returning its output."""
         juju = self.client.model(model)
+        # Juju 4.1 defaults to a controller SSH proxy instead of Kubernetes exec.
+        options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
         if timeout is None:
-            juju.ssh(target=application, command=command)
+            juju.cli("ssh", *options, application, command)
             return None
-        stdout, _ = juju._cli("ssh", application, command, timeout=timeout)
+        stdout, _ = juju._cli("ssh", *options, application, command, timeout=timeout)
         return stdout
 
     def unit_ip(self, model: JujuModelHandle, unit: str) -> str:

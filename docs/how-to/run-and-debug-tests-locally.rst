@@ -71,6 +71,11 @@ The following environment variables are optional and only needed when testing sp
 ``VALIDATORS_PATH``:
   Path to a local directory containing the validator packages (each a sub-directory with its own ``pyproject.toml``). When set, the test framework will ``scp`` the directory to each unit under test, install the validators in a virtualenv, and run them after each validation phase. If not provided, validator injection is skipped. For example, ``${PWD}/validators``.
 
+For Kubernetes models, the framework uses ``juju ssh --direct`` and
+``juju scp --direct`` with Juju 4.1+ clients to preserve Kubernetes exec/copy
+access without requiring a connection to the controller's SSH server on port
+17022. Older clients and machine models retain their existing behavior.
+
 S3 storage
 ~~~~~~~~~~
 

@@ -1926,17 +1926,37 @@ class TestJubilantBackend:
         class ScpStub:
             args: list[str] = field(default_factory=list)
             model: Any = None
+            version_str: str = "4.0.16"
 
             def show_model(self) -> Any:
                 return self.model
 
+            def version(self) -> str:
+                return self.version_str
+
             def cli(self, *args: str) -> None:
                 self.args = list(args)
 
-        def test_k8s_model(self, tmp_path: Path) -> None:
+        @dataclass(frozen=True)
+        class Params:
+            version: str
+            model_type: str
+            options: tuple[str, ...]
+
+        @pytest.mark.parametrize(
+            "params",
+            [
+                Params("3.6.29", "kubernetes", ()),
+                Params("4.0.16", "kubernetes", ()),
+                Params("4.1-beta3-048d091", "kubernetes", ("--direct",)),
+                Params("4.2.0", "kubernetes", ("--direct",)),
+                Params("4.1-beta3-048d091", "machine", ("--", "-r")),
+            ],
+        )
+        def test_transport(self, tmp_path: Path, params: Params) -> None:
             # GIVEN
-            stub = self.ScpStub()
-            stub.model = self.ModelStub(type="kubernetes")
+            stub = self.ScpStub(version_str=params.version)
+            stub.model = self.ModelStub(type=params.model_type)
             client = JubilantClientStub(client=stub)
             source = tmp_path / "a"
             source.write_text("")
@@ -1946,7 +1966,7 @@ class TestJubilantBackend:
                 JubilantBackend(client).scp(TEST_MODEL, source=str(source), destination="b")
 
             # THEN
-            assert stub.args == ["scp", str(source), "b"]
+            assert stub.args == ["scp", *params.options, str(source), "b"]
 
         def test_non_k8s_model_specifies_recursive(self, tmp_path: Path) -> None:
             # GIVEN
@@ -1971,7 +1991,7 @@ class TestJubilantBackend:
             source_file.parent.mkdir()
             source_file.write_text("# content")
 
-            stub = self.ScpStub()
+            stub = self.ScpStub(version_str="4.1-beta3")
             stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
@@ -1980,7 +2000,7 @@ class TestJubilantBackend:
                 JubilantBackend(client).scp(TEST_MODEL, source=str(source_file), destination="unit/0:/tmp/")
 
             # THEN scp was called with a staged copy inside home_dir with the same filename
-            assert stub.args[0] == "scp"
+            assert stub.args[:2] == ["scp", "--direct"]
             staged_source = Path(stub.args[-2])
             assert staged_source.is_relative_to(home_dir)
             assert staged_source.name == source_file.name
@@ -1993,7 +2013,7 @@ class TestJubilantBackend:
             source_dir.mkdir(parents=True)
             (source_dir / "file.py").write_text("# content")
 
-            stub = self.ScpStub()
+            stub = self.ScpStub(version_str="4.1-beta3")
             stub.model = self.ModelStub(type="kubernetes")
             client = JubilantClientStub(client=stub)
 
@@ -2002,7 +2022,7 @@ class TestJubilantBackend:
                 JubilantBackend(client).scp(TEST_MODEL, source=str(source_dir), destination="unit/0:/tmp/")
 
             # THEN scp was called with a staged copy inside home_dir with the same directory name
-            assert stub.args[0] == "scp"
+            assert stub.args[:2] == ["scp", "--direct"]
             staged_source = Path(stub.args[-2])
             assert staged_source.is_relative_to(home_dir)
             assert staged_source.name == source_dir.name
@@ -2012,22 +2032,58 @@ class TestJubilantBackend:
         class SshStub:
             target: str = ""
             command: str = ""
+            version_str: str = "4.0.16"
+            model_type: str = "kubernetes"
+            options: tuple[str, ...] = ()
+            timeout: float | None = None
 
-            def ssh(self, target: str, command: str) -> None:
-                self.target = target
-                self.command = command
+            def show_model(self) -> ModelInfoStub:
+                return ModelInfoStub(type=self.model_type, cloud="test-cloud")
 
-        def test(self) -> None:
+            def version(self) -> str:
+                return self.version_str
+
+            def cli(self, *args: str) -> None:
+                assert args[0] == "ssh"
+                self.options = tuple(args[1:-2])
+                self.target, self.command = args[-2:]
+
+            def _cli(self, *args: str, timeout: float) -> tuple[str, str]:
+                self.cli(*args)
+                self.timeout = timeout
+                return "output", ""
+
+        @dataclass(frozen=True)
+        class Params:
+            version: str
+            model_type: str
+            options: tuple[str, ...]
+
+        @pytest.mark.parametrize(
+            "params",
+            [
+                Params("3.6.29", "kubernetes", ()),
+                Params("4.0.16", "kubernetes", ()),
+                Params("4.1-beta3-048d091", "kubernetes", ("--direct",)),
+                Params("4.2.0", "kubernetes", ("--direct",)),
+                Params("4.1-beta3-048d091", "machine", ()),
+            ],
+        )
+        @pytest.mark.parametrize("timeout", [None, 7.5])
+        def test_transport(self, params: Params, timeout: float | None) -> None:
             # GIVEN
-            stub = self.SshStub()
+            stub = self.SshStub(version_str=params.version, model_type=params.model_type)
             client = JubilantClientStub(client=stub)
 
             # WHEN
-            JubilantBackend(client).ssh(TEST_MODEL, application="my-app", command="ls -l")
+            result = JubilantBackend(client).ssh(TEST_MODEL, application="my-app", command="ls -l", timeout=timeout)
 
             # THEN
             assert stub.target == "my-app"
             assert stub.command == "ls -l"
+            assert stub.options == params.options
+            assert stub.timeout == timeout
+            assert result == ("output" if timeout is not None else None)
 
     class TestExecUnit:
         @staticmethod
@@ -3952,6 +4008,11 @@ def test_ssh_timeout_before_reboot_fails() -> None:
 SSH_MODEL = JujuModelHandle(controller="controller", model="model", owner="owner")
 
 
+class MachineSshBackend(JubilantBackend):
+    def is_k8s_model(self, model: JujuModelHandle) -> bool:
+        return False
+
+
 @pytest.mark.parametrize(
     ("requested_timeout", "command_timeout", "expected_timeout"),
     [(7.5, 300, 7.5), (600, 300, 300), (600, 2, 2)],
@@ -3972,7 +4033,7 @@ def test_ssh_bounds_process_and_preserves_model(
         return subprocess.CompletedProcess(args, 0, stdout="boot-id\n", stderr="")
 
     monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
-    backend = JubilantBackend(JubilantClient(command_timeout=timedelta(seconds=command_timeout)))
+    backend = MachineSshBackend(JubilantClient(command_timeout=timedelta(seconds=command_timeout)))
     result = backend.ssh(SSH_MODEL, "1", "cat /proc/sys/kernel/random/boot_id", timeout=requested_timeout)
     assert result == "boot-id\n"
 
@@ -3988,7 +4049,7 @@ def test_ssh_preserves_errors(monkeypatch: pytest.MonkeyPatch, timed_out: bool) 
 
     monkeypatch.setattr("juju_jubilant.backend.subprocess.run", run)
     with pytest.raises(subprocess.TimeoutExpired if timed_out else jubilant.CLIError):
-        JubilantBackend().ssh(SSH_MODEL, "1", "command", timeout=1)
+        MachineSshBackend().ssh(SSH_MODEL, "1", "command", timeout=1)
 
 
 @pytest.mark.parametrize("change", ["none", "membership", "leader", "no-leader"])
