@@ -874,17 +874,19 @@ class JubilantBackend(JujuBackend):
             stderr=task_result.results.stderr,
         )
 
+    @staticmethod
+    def _ssh_options(juju: jubilant.Juju, *, recursive: bool = False) -> tuple[str, ...]:
+        if juju.show_model().type != "kubernetes":
+            return ("--", "-r") if recursive else ()
+        # Preserve Kubernetes exec/copy: https://github.com/juju/juju/issues/23899
+        version = JujuVersion.parse(str(juju.version()).strip())
+        return ("--direct",) if version >= JujuVersion(4, 1) else ()
+
     def scp(self, model: JujuModelHandle, source: str, destination: str) -> None:
         # Jubilant scp doesn't work for directories
         # https://github.com/canonical/jubilant/issues/266
-        #
-        # Furthermore, machine charms need to specify -r if source is a directory
-        #   we'll always specify -r to be safe
-        options: tuple[str, ...]
-        if self.is_k8s_model(model):
-            options = ("--direct",) if self.cli_version() >= JujuVersion(4, 1) else ()
-        else:
-            options = ("--", "-r")
+        juju = self.client.model(model)
+        options = self._ssh_options(juju, recursive=True)
 
         # The Juju snap can only access files under $HOME.  Stage any source
         # that lives outside the home directory into a temporary directory
@@ -898,18 +900,17 @@ class JubilantBackend(JujuBackend):
                     shutil.copytree(source_path, staged, ignore=_skip_unreadable)
                 else:
                     shutil.copy2(source_path, staged)
-                self.client.model(model).cli("scp", *options, str(staged), destination)
+                juju.cli("scp", *options, str(staged), destination)
             return
 
-        self.client.model(model).cli("scp", *options, source, destination)
+        juju.cli("scp", *options, source, destination)
 
     def ssh(
         self, model: JujuModelHandle, application: str, command: str, *, timeout: float | None = None
     ) -> str | None:
         """Run SSH, optionally bounding the entire process and returning its output."""
-        juju = self.client.model(model)
-        # Juju 4.1 defaults to a controller SSH proxy instead of Kubernetes exec.
-        options = ("--direct",) if self.is_k8s_model(model) and self.cli_version() >= JujuVersion(4, 1) else ()
+        juju = self.client.model(model, timeout=timeout)
+        options = self._ssh_options(juju)
         if timeout is None:
             juju.cli("ssh", *options, application, command)
             return None

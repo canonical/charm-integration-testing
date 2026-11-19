@@ -21,8 +21,8 @@ class ExecutableClient(JubilantClient):
         super().__init__(command_timeout)
         self.executable = executable
 
-    def model(self, model: JujuModelHandle | None) -> jubilant.Juju:
-        client = super().model(model)
+    def model(self, model: JujuModelHandle | None, *, timeout: float | None = None) -> jubilant.Juju:
+        client = super().model(model, timeout=timeout)
         client.cli_binary = str(self.executable)
         return client
 
@@ -71,6 +71,20 @@ def test_unit_queries_use_bounded_transport(sleeping_juju: Path) -> None:
         backend.num_units(JujuModelHandle(controller="controller", model="model"), "application")
 
     # THEN the timed-out CLI is not left running
+    assert_processes_reaped(sleeping_juju.parent)
+
+
+def test_ssh_timeout_bounds_transport_discovery(sleeping_juju: Path) -> None:
+    # GIVEN model discovery that blocks longer than the requested SSH limit
+    backend = JubilantBackend(ExecutableClient(sleeping_juju))
+    start = time.monotonic()
+
+    # WHEN SSH discovers the transport, THEN the caller's shorter limit applies
+    with pytest.raises(subprocess.TimeoutExpired) as error:
+        backend.ssh(JujuModelHandle(controller="controller", model="model"), "0", "true", timeout=0.2)
+
+    assert error.value.timeout == 0.2
+    assert time.monotonic() - start < 2
     assert_processes_reaped(sleeping_juju.parent)
 
 
