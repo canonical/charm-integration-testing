@@ -266,7 +266,7 @@ def _validate_auth_fields(source_data: dict[str, Any]) -> tuple[ValidationCheck,
 
 def _grafana_request(
     method: str, path: str, body: dict[str, Any] | None = None, headers: dict[str, str] | None = None
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[int, object]:
     """Issue an HTTP request against Grafana's local API; return (status, decoded_json_body)."""
     data = json.dumps(body).encode() if body is not None else None
     req = Request(f"{_GRAFANA_BASE_URL}{path}", data=data, method=method)  # nosec B310 - fixed local URL
@@ -378,6 +378,14 @@ def _register_datasource(
             "",
         )
 
+    if not isinstance(payload, dict):
+        return (
+            ValidationCheck(
+                name="register_datasource", passed=False, message="Registration response must be a JSON object."
+            ),
+            "",
+        )
+
     uid = payload.get("datasource", {}).get("uid") or payload.get("uid", "")
     if not uid:
         return (
@@ -399,7 +407,7 @@ def _datasource_health_check(uid: str, admin_headers: dict[str, str]) -> Validat
     except Exception as exc:
         return ValidationCheck(name="datasource_health", passed=False, message=f"Health check failed: {exc}")
 
-    reported_status = str(payload.get("status", "")).upper()
+    reported_status = str(payload.get("status", "")).upper() if isinstance(payload, dict) else ""
     if status != 200 or reported_status != "OK":
         return ValidationCheck(
             name="datasource_health",

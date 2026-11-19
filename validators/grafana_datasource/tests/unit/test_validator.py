@@ -5,7 +5,7 @@ import base64
 import json
 from dataclasses import dataclass
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import ops
 import pytest
@@ -247,6 +247,30 @@ class TestGrafanaDatasourceValidatorSimple:
 
 
 class TestGrafanaDatasourceValidatorDeep:
+    @pytest.mark.parametrize(
+        "extra_fields",
+        [
+            pytest.param(["invalid"], id="json-array"),
+            pytest.param("invalid", id="json-string"),
+        ],
+    )
+    def test_deep_rejects_non_object_extra_fields_before_requests(self, extra_fields: object) -> None:
+        # GIVEN malformed Alertmanager metadata.
+        validator = _make_validator(
+            {
+                "grafana_source_data": _source_data(type="alertmanager", extra_fields=extra_fields),
+                "grafana_source_app_host": "http://alertmanager.cos:9093",
+            }
+        )
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN metadata validation fails before any Grafana requests or canary creation.
+        assert result.status == "FAIL"
+        assert not next(c for c in result.checks if c.name == "auth").passed
+        mock_request.assert_not_called()
+
     def test_deep_registers_queries_health_and_cleans_up_datasource(self) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
@@ -307,12 +331,16 @@ class TestGrafanaDatasourceValidatorDeep:
 
         # THEN Grafana proxies the status check and the canary is removed.
         assert result.status == "PASS"
-        assert mock_request.call_args_list[2].args == (
-            "GET",
-            f"/api/datasources/proxy/uid/canary-uid-123{params.status_path}",
+        mock_request.assert_has_calls(
+            [
+                call(
+                    "GET",
+                    f"/api/datasources/proxy/uid/canary-uid-123{params.status_path}",
+                    headers=admin_headers,
+                ),
+                call("DELETE", "/api/datasources/uid/canary-uid-123", headers=admin_headers),
+            ]
         )
-        assert mock_request.call_args_list[2].kwargs["headers"] == admin_headers
-        assert mock_request.call_args_list[3].args == ("DELETE", "/api/datasources/uid/canary-uid-123")
         health_check = next(c for c in result.checks if c.name == "datasource_health")
         assert "0.31.1" in health_check.message
         assert "private-config" not in health_check.message
@@ -320,7 +348,14 @@ class TestGrafanaDatasourceValidatorDeep:
     @pytest.mark.parametrize(
         "params",
         [
-            pytest.param(AlertmanagerResponseParams(502, {"message": "Bad Gateway"}), id="upstream-unreachable"),
+            pytest.param(
+                AlertmanagerResponseParams(
+                    502, {"message": "private-config", "config": {"original": "private-config"}}
+                ),
+                id="upstream-unreachable",
+            ),
+            pytest.param(AlertmanagerResponseParams(401, {"message": "private-config"}), id="unauthorized"),
+            pytest.param(AlertmanagerResponseParams(403, {"message": "private-config"}), id="forbidden"),
             pytest.param(AlertmanagerResponseParams(200, {"status": "OK"}), id="not-alertmanager-status"),
             pytest.param(AlertmanagerResponseParams(200, {"versionInfo": {"version": ""}}), id="missing-version"),
             pytest.param(AlertmanagerResponseParams(200, []), id="json-array"),
@@ -352,7 +387,10 @@ class TestGrafanaDatasourceValidatorDeep:
 
         # THEN an unsuccessful proxy check fails validation without leaking the canary.
         assert result.status == "FAIL"
-        assert not next(c for c in result.checks if c.name == "datasource_health").passed
+        health_check = next(c for c in result.checks if c.name == "datasource_health")
+        assert not health_check.passed
+        assert f"HTTP {params.status}" in health_check.message
+        assert "private-config" not in result.model_dump_json()
         assert next(c for c in result.checks if c.name == "cleanup_datasource").passed
 
     def test_deep_cleans_up_when_alertmanager_proxy_request_raises(self) -> None:
@@ -393,13 +431,34 @@ class TestGrafanaDatasourceValidatorDeep:
         assert not register_check.passed
         assert not any(c.name == "datasource_health" for c in result.checks)
 
-    def test_deep_still_cleans_up_when_datasource_health_check_fails(self) -> None:
+    def test_deep_fails_when_registration_is_not_a_json_object(self) -> None:
+        # GIVEN a non-object response from Grafana's registration API.
+        validator = _make_validator(VALID_DATABAG)
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = [(200, {"database": "ok"}), (200, [])]
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN registration fails without attempting a health check.
+        assert result.status == "FAIL"
+        assert not next(c for c in result.checks if c.name == "register_datasource").passed
+        assert not any(c.name == "datasource_health" for c in result.checks)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({"status": "ERROR", "message": "datasource unreachable"}, id="datasource-error"),
+            pytest.param([], id="json-array"),
+        ],
+    )
+    def test_deep_still_cleans_up_when_datasource_health_check_fails(self, payload: object) -> None:
         validator = _make_validator(VALID_DATABAG)
         with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
             mock_request.side_effect = [
                 (200, {"database": "ok"}),
                 (200, {"uid": "canary-uid-123"}),
-                (200, {"status": "ERROR", "message": "datasource unreachable"}),
+                (200, payload),
                 (200, {"message": "Datasource deleted"}),
             ]
             result = validator.validate(level="deep")
