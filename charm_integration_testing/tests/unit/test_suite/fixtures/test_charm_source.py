@@ -201,7 +201,7 @@ def test_checkout_fetches_ref_outside_default_branch(
 
 
 def test_checkout_resolves_described_commit_from_advertised_ref(
-    repository: tuple[Path, str], tmp_path: Path, logger: logging.Logger
+    repository: tuple[Path, str], tmp_path: Path, logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # GIVEN a described commit advertised only under a merge-request ref
     path, _ = repository
@@ -241,12 +241,22 @@ def test_checkout_resolves_described_commit_from_advertised_ref(
     destination = tmp_path / "source"
 
     # WHEN resolving a non-GitHub git-describe version with real Git
+    operations: list[tuple[str, ...]] = []
+    original_run = GitClient._run
+
+    def record_git(git_client: GitClient, *args: str) -> str:
+        operations.append(args)
+        return original_run(git_client, *args)
+
+    monkeypatch.setattr(GitClient, "_run", record_git)
     checked_out = git.checkout(path.as_uri(), module._version_ref(f"v1.0-2-g{commit[:7]}"), destination)
 
     # THEN the advertised ref supplies the exact packed commit, not the default branch
     assert checked_out == commit
     assert (destination / "tests/unit/test_charm.py").read_text() == "merge-request source\n"
     assert git._run("-C", str(destination), "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+    assert not any(args[0] == "clone" for args in operations)
+    assert any("--filter=blob:none" in args for args in operations)
 
 
 def test_checkout_never_falls_back_to_branch(
@@ -272,11 +282,11 @@ def test_github_merge_commit_outside_cloned_history(
     path, commit = repository
     repository_url = "https://github.com/example/charm.git"
     original_run = GitClient._run
-    api_calls: list[str] = []
+    api_calls: list[tuple[str, dict[str, str]]] = []
     fetches: list[tuple[str, ...]] = []
 
-    def get_commit(url: str, *, timeout: int) -> requests.Response:
-        api_calls.append(url)
+    def get_commit(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
+        api_calls.append((url, headers))
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps({"sha": commit}).encode()
@@ -295,7 +305,12 @@ def test_github_merge_commit_outside_cloned_history(
     checked_out = GitClient(logger).checkout(repository_url, commit[:7], destination)
 
     # THEN the API resolves the abbreviation and Git fetches that full commit, not a branch
-    assert api_calls == [f"https://api.github.com/repos/example/charm/commits/{commit[:7]}"]
+    assert api_calls == [
+        (
+            f"https://api.github.com/repos/example/charm/commits/{commit[:7]}",
+            {"Accept": "application/vnd.github+json", "User-Agent": "charm-integration-testing"},
+        )
+    ]
     assert len(fetches) == 1
     assert fetches[0][-2:] == (repository_url, commit)
     assert checked_out == commit
@@ -314,7 +329,8 @@ def test_github_resolution_failure_is_not_ignored(
     status: int, data: dict[str, str], error: type[Exception], logger: logging.Logger, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # GIVEN an unresolved or inconsistent source commit
-    def get_commit(url: str, *, timeout: int) -> requests.Response:
+    def get_commit(url: str, *, headers: dict[str, str], timeout: int) -> requests.Response:
+        assert headers == {"Accept": "application/vnd.github+json", "User-Agent": "charm-integration-testing"}
         response = requests.Response()
         response.status_code = status
         response._content = json.dumps(data).encode()
