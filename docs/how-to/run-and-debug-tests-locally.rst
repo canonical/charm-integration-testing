@@ -226,6 +226,8 @@ The archive must declare one public HTTPS source repository and a clean commit,
 tag, or ``git describe`` version. Missing or unavailable provenance fails the
 test; it does not fall back to the packed charm or a default branch. The source
 checkout must have the target charm at its root.
+The lint test skips if Git is not installed; source download and checkout errors
+otherwise fail the test.
 
 Run both with ``--current-state no_bundle -k test_charmlint`` and the usual target
 charm, revision, cloud, and endpoint options. This selection does not bootstrap
