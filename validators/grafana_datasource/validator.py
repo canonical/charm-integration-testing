@@ -386,13 +386,16 @@ def _register_datasource(
             "",
         )
 
-    uid = payload.get("datasource", {}).get("uid") or payload.get("uid", "")
-    if not uid:
+    datasource = payload.get("datasource")
+    uid = datasource.get("uid") if isinstance(datasource, dict) else None
+    if not isinstance(uid, str) or not uid:
+        uid = payload.get("uid")
+    if not isinstance(uid, str) or not uid:
         return (
             ValidationCheck(
                 name="register_datasource",
                 passed=False,
-                message=f"Registration response did not include a 'uid': {payload}",
+                message=f"Registration response did not include a non-empty string 'uid': {payload}",
             ),
             "",
         )

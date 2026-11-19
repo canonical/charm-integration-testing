@@ -58,6 +58,12 @@ class AlertmanagerResponseParams:
     payload: object
 
 
+@dataclass(frozen=True)
+class RegistrationResponseParams:
+    payload: dict[str, object]
+    uid: str | None
+
+
 def _make_validator(
     app_databag: dict[str, str],
     endpoint: str = "grafana-source",
@@ -444,6 +450,55 @@ class TestGrafanaDatasourceValidatorDeep:
         assert result.status == "FAIL"
         assert not next(c for c in result.checks if c.name == "register_datasource").passed
         assert not any(c.name == "datasource_health" for c in result.checks)
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param(RegistrationResponseParams({"datasource": None}, None), id="nested-null"),
+            pytest.param(RegistrationResponseParams({"datasource": []}, None), id="nested-array"),
+            pytest.param(RegistrationResponseParams({"datasource": "invalid"}, None), id="nested-string"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": {"uid": "nested-uid"}, "uid": "fallback-uid"}, "nested-uid"),
+                id="nested-uid-takes-precedence",
+            ),
+            pytest.param(RegistrationResponseParams({"uid": "fallback-uid"}, "fallback-uid"), id="top-level-uid"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": None, "uid": "fallback-uid"}, "fallback-uid"),
+                id="nested-null-with-fallback",
+            ),
+            pytest.param(RegistrationResponseParams({"datasource": {"uid": 123}}, None), id="non-string-nested-uid"),
+            pytest.param(RegistrationResponseParams({"uid": 123}, None), id="non-string-top-level-uid"),
+            pytest.param(
+                RegistrationResponseParams({"datasource": {"uid": 123}, "uid": "fallback-uid"}, "fallback-uid"),
+                id="non-string-nested-uid-with-fallback",
+            ),
+        ],
+    )
+    def test_deep_validates_registration_uid_and_fallback(self, params: RegistrationResponseParams) -> None:
+        # GIVEN a registration response with a nested or top-level UID.
+        validator = _make_validator(VALID_DATABAG)
+        responses: list[tuple[int, object]] = [(200, {"database": "ok"}), (200, params.payload)]
+        if params.uid is not None:
+            responses.extend([(200, {"status": "OK"}), (200, {"message": "Datasource deleted"})])
+        with patch("validators.grafana_datasource.validator._grafana_request") as mock_request:
+            mock_request.side_effect = responses
+
+            # WHEN deep validation runs.
+            result = validator.validate(level="deep")
+
+        # THEN only a usable UID permits health validation and canary cleanup.
+        if params.uid is None:
+            assert result.status == "FAIL"
+            assert not next(c for c in result.checks if c.name == "register_datasource").passed
+            assert not any(c.name in {"datasource_health", "cleanup_datasource"} for c in result.checks)
+        else:
+            assert result.status == "PASS"
+            mock_request.assert_has_calls(
+                [
+                    call("GET", f"/api/datasources/uid/{params.uid}/health", headers={}),
+                    call("DELETE", f"/api/datasources/uid/{params.uid}", headers={}),
+                ]
+            )
 
     @pytest.mark.parametrize(
         "payload",
