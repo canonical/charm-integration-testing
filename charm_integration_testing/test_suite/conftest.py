@@ -1613,16 +1613,16 @@ def record_pipeline_version_execution_metadata(
         warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
 
     # Get repository tag if it exists
-    repository_tag_result = git_client.run(
-        "-C", repository_path, "describe", "--tags", "--exact-match", repository_result.stdout.strip(), check=False
-    )
-    if repository_tag_result.returncode == 0:
-        execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
-    elif "no tag exactly matches" in repository_tag_result.stderr.lower():
-        warnings.warn("No tag exists in git repo pointing to this commit.")
-    else:
-        warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
-
+    if repository_result.returncode == 0:
+        repository_tag_result = git_client.run(
+            "-C", repository_path, "describe", "--tags", "--exact-match", repository_result.stdout.strip(), check=False
+        )
+        if repository_tag_result.returncode == 0:
+            execution_metadata("pipeline:tag", repository_tag_result.stdout.strip())
+        elif "no tag exactly matches" in repository_tag_result.stderr.lower():
+            warnings.warn("No tag exists in git repo pointing to this commit.")
+        else:
+            warnings.warn(f"Failed to get git tag: {repository_tag_result.stderr.strip()}")
     # Get pipeline workflow hash if file exists
     if pipeline_path.exists():
         pipeline_result = git_client.run(
