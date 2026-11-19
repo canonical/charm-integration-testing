@@ -98,7 +98,7 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
     )
     pytester.makepyfile(
         """
-        from test_suite.test_charmlint import test_charmlint
+        from test_suite.test_charmlint import test_charmlint, test_charmlint_strict
 
         def test_unrelated():
             pass
@@ -107,5 +107,5 @@ def test_missing_git_skips_lint_without_skipping_other_tests(
 
     result = pytester.runpytest("-rs")
 
-    result.assert_outcomes(passed=1, skipped=1)
+    result.assert_outcomes(passed=1, skipped=2)
     result.stdout.fnmatch_lines(["*Git is not installed*"])
