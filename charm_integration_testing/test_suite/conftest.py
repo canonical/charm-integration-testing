@@ -1581,17 +1581,28 @@ def record_juju_execution_metadata(
             execution_metadata("juju:version", str(juju_client.version(handle)))
 
 
+@pytest.fixture(scope="session")
+def git_client(logger: logging.Logger) -> GitClient | None:
+    try:
+        return GitClient(logger)
+    except FileNotFoundError:
+        return None
+
+
 @pytest.fixture
 def record_pipeline_version_execution_metadata(
     execution_metadata: Callable[[str, str | int], None],
     request: pytest.FixtureRequest,
+    git_client: GitClient | None,
 ) -> None:
+    if git_client is None:
+        warnings.warn("Git is not installed; pipeline version metadata is unavailable.")
+        return
     pipeline_path: Path = Path(request.config.rootpath) / ".github" / "workflows" / "charm-testing.yaml"
     repository_path = str(request.config.rootpath)
-    git = GitClient()
 
     # Get repository commit hash
-    repository_result = git.run(
+    repository_result = git_client.run(
         "-C", repository_path, "--no-pager", "log", "-n", "1", "--pretty=format:%h", check=False
     )
     if repository_result.returncode == 0:
@@ -1600,7 +1611,7 @@ def record_pipeline_version_execution_metadata(
         warnings.warn(f"Failed to get git commit hash: {repository_result.stderr.strip()}")
 
     # Get repository tag if it exists
-    repository_tag_result = git.run(
+    repository_tag_result = git_client.run(
         "-C", repository_path, "describe", "--tags", "--exact-match", repository_result.stdout.strip(), check=False
     )
     if repository_tag_result.returncode == 0:
@@ -1612,7 +1623,7 @@ def record_pipeline_version_execution_metadata(
 
     # Get pipeline workflow hash if file exists
     if pipeline_path.exists():
-        pipeline_result = git.run(
+        pipeline_result = git_client.run(
             "-C",
             repository_path,
             "hash-object",
